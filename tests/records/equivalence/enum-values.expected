@@ -1,0 +1,9 @@
+Named{x: 3, y: 4}
+Pair(3, 4)
+Empty
+Store(Named{x: 3, y: 4})
+2980
+2019
+1
+Envelope(pair: [3, s], state: Some(Node(value: 7)), mode: B)
+None Some(nil)

@@ -1,0 +1,192 @@
+let certificate = import:Std.Crypto.Pki.Certificate;
+let der = import:Std.Crypto.Pki.Der;
+let hex = import:Std.Encoding.Hex;
+let int64s = import:Std.Core.Int64;
+let public_keys = import:Std.Crypto.Pki.PublicKeyInfo;
+let test = import:Std.Test;
+let transparency = import:Std.Crypto.Pki.Transparency;
+let utf8 = import:Std.Encoding.Utf8;
+let vectors = import:CtVectors;
+let verifiers = import:TestVerifiers;
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+
+// RFC 6962 against real SCTs of the letsencrypt.org certificate (recorded 2026-11-17) and a generated RSA log
+// (support/ct-vectors.nra, scripts/crypto-vectors/gen-pki-ct.py).
+let TransparencyTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let verifier = func -> verifiers.Table {
+        let keys: string[list] = new;
+        let values: string[list] = new;
+        for (let i = 0; i < vectors.signatures.length; i += 2) {
+            keys.append(vectors.signatures[i]);
+            values.append(vectors.signatures[i + 1]);
+        }
+        return new verifiers.Table(keys, values);
+    };
+
+    let code_of = func(e: Error) -> string {
+        match (e) {
+            Error.Custom(detail) => {
+                return detail.code();
+            },
+            _ => {
+                return "not custom";
+            },
+        }
+        return "";
+    };
+
+    let number = func(text: string) -> int64 => test.assert_ok(int64s.parse(text));
+
+    export let test_real_scts_rebuild_and_verify = func {
+        last leaf = test.assert_ok(certificate.parse(decode(vectors.real[0])));
+        last issuer = test.assert_ok(certificate.parse(decode(vectors.real[1])));
+        last scts = test.assert_ok(transparency.scts_of(leaf));
+        last rows = vectors.real_scts;
+        test.assert_equal_int32(rows.length / 8, scts.length);
+        let v = verifier();
+        for (let i = 0; i < scts.length; i++) {
+            last s = scts[i];
+            last r = i * 8;
+            test.assert_equal_string(rows[r], hex.encode(s.log_id));
+            test.assert_equal_string(rows[r + 1], s.timestamp.to_string());
+            test.assert_equal_string(rows[r + 2], s.hash_algorithm.to_string());
+            test.assert_equal_string(rows[r + 3], s.signature_algorithm.to_string());
+            test.assert_equal_string(rows[r + 4], hex.encode(s.signature));
+            test.assert_equal_string(rows[r + 5], hex.encode(s.extensions));
+            last data = test.assert_ok(transparency.signed_data(s, transparency.EntryType.PrecertEntry, leaf,
+                Optional<certificate.Certificate>.Some(issuer)));
+            test.assert_equal_string(rows[r + 6], hex.encode(data));
+            last key = test.assert_ok(public_keys.parse_der(decode(rows[r + 7])));
+            let _ = test.assert_ok(transparency.verify_sct(s, transparency.EntryType.PrecertEntry, leaf,
+                Optional<certificate.Certificate>.Some(issuer), key, v));
+            // The wrong entry type rebuilds other data, which the log never signed.
+            test.assert_equal_string("ct.unsupported", code_of(test.assert_err(transparency.verify_sct(s,
+                transparency.EntryType.X509Entry, leaf, Optional<certificate.Certificate>.None, key, v))));
+            // The other log's key: the log ID does not match.
+            last other = test.assert_ok(public_keys.parse_der(decode(rows[(r + 8) % rows.length + 7])));
+            test.assert_equal_string("ct.log_id", code_of(test.assert_err(transparency.verify_sct(s,
+                transparency.EntryType.PrecertEntry, leaf, Optional<certificate.Certificate>.Some(issuer), other, v))));
+        }
+    };
+
+    export let test_generated_log_scts = func {
+        last g = vectors.generated;
+        last key = test.assert_ok(public_keys.parse_der(decode(g[0])));
+        let v = verifier();
+        // The TLS-extension list form, for the material leaf (x509_entry).
+        last list = test.assert_ok(transparency.parse_list(decode(g[1])));
+        test.assert_equal_int32(2, list.length);
+        last leaf = test.assert_ok(certificate.parse(decode(g[2])));
+        for (let s in list) {
+            let _ = test.assert_ok(transparency.verify_sct(s, transparency.EntryType.X509Entry, leaf,
+                Optional<certificate.Certificate>.None, key, v));
+        }
+        test.assert_equal_string("010203", hex.encode(list[1].extensions));
+        // The embedded SCT of a certificate made from its precertificate.
+        last ca = test.assert_ok(certificate.parse(decode(g[3])));
+        last final = test.assert_ok(certificate.parse(decode(g[4])));
+        test.assert_equal_string(g[5], hex.encode(test.assert_ok(transparency.precert_tbs(final))));
+        last embedded = test.assert_ok(transparency.scts_of(final));
+        test.assert_equal_int32(1, embedded.length);
+        let _ = test.assert_ok(transparency.verify_sct(embedded[0], transparency.EntryType.PrecertEntry, final,
+            Optional<certificate.Certificate>.Some(ca), key, v));
+        // A certificate without the extension has no SCTs; its precertificate TBS is its TBS.
+        test.assert_equal_int32(0, test.assert_ok(transparency.scts_of(leaf)).length);
+        test.assert_equal_string(hex.encode(leaf.tbs_bytes), hex.encode(test.assert_ok(transparency.precert_tbs(leaf))));
+        // A changed signature byte no longer verifies (the table has no entry for it).
+        let bytes = decode(g[1]);
+        bytes[bytes.length - 1] = bytes[bytes.length - 1] ^ 1;
+        last altered = test.assert_ok(transparency.parse_list(bytes));
+        let _ = test.assert_err(transparency.verify_sct(altered[1], transparency.EntryType.X509Entry, leaf,
+            Optional<certificate.Certificate>.None, key, v));
+    };
+
+    export let test_list_rejections = func {
+        last good = decode(vectors.generated[1]);
+        let _ = test.assert_err(transparency.parse_list(new));
+        let _ = test.assert_err(transparency.parse_list(new([0, 0])));
+        let _ = test.assert_err(transparency.parse_list(der.copy_range(good, 0, good.length - 1)));
+        let longer = der.copy_range(good, 0, good.length);
+        longer.append(0);
+        let _ = test.assert_err(transparency.parse_list(longer));
+        // Version 1 is not defined.
+        let v2 = der.copy_range(good, 0, good.length);
+        v2[4] = 1;
+        test.assert_equal_string("ct.version", code_of(test.assert_err(transparency.parse_list(v2))));
+    };
+
+    export let test_merkle_proofs = func {
+        last leaves = vectors.leaves;
+        // The leaves rebuilt from the SCTs equal the generator's.
+        last g = vectors.generated;
+        last list = test.assert_ok(transparency.parse_list(decode(g[1])));
+        last leaf = test.assert_ok(certificate.parse(decode(g[2])));
+        test.assert_equal_string(leaves[0], hex.encode(test.assert_ok(transparency.leaf_input(list[0],
+            transparency.EntryType.X509Entry, leaf, Optional<certificate.Certificate>.None))));
+        last ca = test.assert_ok(certificate.parse(decode(g[3])));
+        last final = test.assert_ok(certificate.parse(decode(g[4])));
+        last embedded = test.assert_ok(transparency.scts_of(final));
+        test.assert_equal_string(leaves[2], hex.encode(test.assert_ok(transparency.leaf_input(embedded[0],
+            transparency.EntryType.PrecertEntry, final, Optional<certificate.Certificate>.Some(ca)))));
+        last rows = vectors.proofs;
+        for (let i = 0; i < rows.length; i += 6) {
+            let proof: uint8[list][list] = new;
+            last text = rows[i + 4];
+            let start = 0;
+            for (let k = 0; k <= text.byte_length; k++) {
+                if (k == text.byte_length || text.byte_at(k) == 44) {
+                    if (k > start) {
+                        proof.append(decode(text.slice(start, k)));
+                    }
+                    start = k + 1;
+                }
+            }
+            if (rows[i] == "inclusion") {
+                last hash = decode(rows[i + 3]);
+                test.assert_equal_string(rows[i + 3], hex.encode(transparency.leaf_hash(decode(leaves[number(rows[i + 1]) as int]))));
+                let _ = test.assert_ok(transparency.verify_inclusion(hash, number(rows[i + 1]), number(rows[i + 2]), proof,
+                    decode(rows[i + 5])));
+                if (proof.length > 0) {
+                    let bad = der.copy_range(proof[0], 0, proof[0].length);
+                    bad[0] = bad[0] ^ 1;
+                    proof[0] = bad;
+                    test.assert_equal_string("ct.proof", code_of(test.assert_err(transparency.verify_inclusion(hash,
+                        number(rows[i + 1]), number(rows[i + 2]), proof, decode(rows[i + 5])))));
+                }
+            } else {
+                let _ = test.assert_ok(transparency.verify_consistency(number(rows[i + 1]), number(rows[i + 2]),
+                    decode(rows[i + 3]), decode(rows[i + 5]), proof));
+                if (proof.length > 0) {
+                    proof.remove_at(proof.length - 1);
+                    test.assert_equal_string("ct.proof", code_of(test.assert_err(transparency.verify_consistency(
+                        number(rows[i + 1]), number(rows[i + 2]), decode(rows[i + 3]), decode(rows[i + 5]), proof))));
+                }
+            }
+        }
+        test.assert_equal_string("ct.range", code_of(test.assert_err(transparency.verify_inclusion(new, 0, 3000000000, new,
+            new))));
+    };
+
+    export let test_signed_tree_head = func {
+        // The vector keeps ' for each double quote and < > for the braces.
+        last cell = vectors.sth[0];
+        let bytes: uint8[list] = new;
+        for (let b in utf8.encode(cell)) {
+            bytes.append(b == 39 ? 34 : (b == 60 ? 123 : (b == 62 ? 125 : b)));
+        }
+        last sth = test.assert_ok(transparency.parse_sth_json(utf8.decode_lossy(bytes)));
+        test.assert_equal_string(vectors.sth[1], sth.tree_size.to_string());
+        test.assert_equal_string(vectors.sth[2], hex.encode(sth.root_hash));
+        last key = test.assert_ok(public_keys.parse_der(decode(vectors.generated[0])));
+        let _ = test.assert_ok(transparency.verify_sth(sth, key, verifier()));
+        // The root of the 7 leaves is the STH's.
+        last proofs = vectors.proofs;
+        test.assert_equal_string(vectors.sth[2], proofs[proofs.length - 1]);
+        let _ = test.assert_err(transparency.parse_sth_json("[1]"));
+        let _ = test.assert_err(transparency.parse_sth_json("{\"tree_size\": 1}"));
+    };
+);

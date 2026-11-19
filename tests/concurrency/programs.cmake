@@ -131,7 +131,11 @@ foreach(name IN LISTS fixtures)
     must("${name}" assemble "${name}.nvra" -o "${name}.reassembled.nvr")
     same_bytes("${name}: assembly round trip" "${name}.nvr" "${name}.reassembled.nvr")
     file(READ "${TEST_DIR}/${name}.nvra" assembly)
-    if(NOT assembly MATCHES "\nnvr 1\\.5 profile 1\n" OR NOT assembly MATCHES "exit scheduler scope-enter" OR
+    # A task image is 1.5, or 1.7 when a function returns several result words (a tuple, or an
+    # ExitCode, which every program's main returns), or 1.9 when it holds a concat-text state operation:
+    # since the 0.3.0 modernization the standard library builds its messages with string chains
+    # (Std.Core.Error.message and io_text), which every program that reports an error links.
+    if(NOT assembly MATCHES "\nnvr 1\\.[579] profile 1\n" OR NOT assembly MATCHES "exit scheduler scope-enter" OR
        NOT assembly MATCHES "exit scheduler spawn" OR NOT assembly MATCHES "transferable-layouts \\[")
         message(FATAL_ERROR "${name}: the assembly does not show a 1.5 task image")
     endif()

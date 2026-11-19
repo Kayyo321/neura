@@ -1,0 +1,8 @@
+error[E0242]: mismatched or unclosed template element
+ --> $DIR/template-optional-end.nra:1:25
+  |
+1 | let view = html() { <ul><li>One<li>Two</ul> };
+  |                         ^^^^ close '<li>' with '</li>'
+  |                                ---- the template reached this point first
+
+For more information about this error, try `neura explain E0242`.

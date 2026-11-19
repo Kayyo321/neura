@@ -1,0 +1,20 @@
+// test-options: --gpu=off
+// status: 134
+// stderr: invalid state: OPRF exchange was consumed
+let oprf = import:Std.Crypto.Advanced.Oprf;
+let program = import:Std.Program;
+let test = import:Std.Test;
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let nonce: uint8[list] = new([1]);
+        for (let i = 1; i < 32; i++) {
+            nonce.append(0);
+        }
+        last client = new oprf.Client(oprf.Mode.Base, new);
+        last state = test.assert_ok(client.blind_with(new, new, nonce));
+        state.discard();
+        let _ = state.finalize(new, new);
+        return program.ExitCode.Ok;
+    };
+);

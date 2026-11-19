@@ -22,6 +22,23 @@ let check = func(words: string[], limit: int) -> Parse {
 };
 ```
 
+### Propagation with `?`
+
+Propagation is explicit, and never implicit ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Matching030.md), implemented, proposed). `operand?` takes a `Std.Core.Result<T>`, evaluated once: `Ok(v)` gives `v`, and `Err(e)` returns `Err(e)`, the same error value, from the innermost enclosing function or lambda, as an ordinary `return`: task scopes are joined and regions released first. That function's result type is a `Result`, written or given by a lambda's expected type, and never inferred from a body that contains `?` ([E0497](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0497.md)). `?` applies only to a `Result` ([E0496](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0496.md)); convert an `Optional` with `to_result(error)` first. A trap stays a trap.
+
+A `?` is decided by the token after it: one that can begin an expression makes it the conditional operator's, so every conditional keeps its meaning, `.` is [E0232](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0232.md), and anything else makes it propagation. `r?.name` is [optional access](CoreLanguage#optional-access-and-coalescing); read a member of the success value with `(r?).name`, and subtract with `(r?) - 1`.
+
+<!-- example: check -->
+```neura
+let.promote _ = import:Std.Core.Result;
+
+let parse_pair = func(left: string, right: string) -> Result<int> {
+    let a = int32.parse(left)?;
+    let b = int32.parse(right)?;
+    return Result<int>.Ok(a + b);
+};
+```
+
 **Runtime failures trap.** Integer overflow, a zero divisor, an out-of-range conversion ([Numbers](Numbers)), a negative index, a list modified during for-each, a failed console write, and a failed test assertion are program traps with documented reason codes. An index at or past a collection's length, a read of an uninitialized field or global, use of a destroyed object, and exhausted run limits are faults that NVM detects. Both end the run immediately with a diagnostic that names the source location when the image has a source map ([NVM](NVM)). A trap cannot be caught, and no cleanup runs after it.
 
 The process status names the trap's class with the shell convention for a process that a signal ended, 128 plus the Linux signal number, and the matching [`Std.Program.ExitCode`](Modules#program-entry) variant:
@@ -29,9 +46,9 @@ The process status names the trap's class with the shell convention for a proces
 | Trap | Status | `ExitCode` variant |
 | --- | --- | --- |
 | Integer overflow, a zero divisor, `MIN / -1`, an out-of-range conversion (reason 1) | 136 | `ArithmeticError` |
-| A negative index (reason 2), an index at or past the length, a read of an uninitialized slot, field, or global, an invalid handle, a nil class reference, or the frame depth limit | 139 | `SegmentationFault` |
-| An explicit message trap or failed assertion (reason 3), a list modified during for-each (reason 5), or a failed class cast | 134 | `Abort` |
-| Invalid dispatch (reason 4), a malformed graph, text, or host completion, or an invalid task operation | 132 | `IllegalInstruction` |
+| A negative index (reason 2), an index at or past the length, a read of an uninitialized slot, field, or global, an invalid handle, a nil class reference, the frame depth limit, the stack limit of regions, an access to storage a region released, or the class hook nesting limit | 139 | `SegmentationFault` |
+| An explicit message trap or failed assertion (reason 3), a list modified during for-each (reason 5), a failed class cast, or class hook recursion | 134 | `Abort` |
+| Invalid dispatch (reason 4), a malformed graph, text, or host completion, an invalid task operation, an invalid region operation, or an invalid class hook operation | 132 | `IllegalInstruction` |
 | The heap or handle limit, or the task, queued-message, or pending-request limit | 137 | `OutOfMemory` |
 | The step limit | 152 | `CpuTimeExceeded` |
 | A deadlock: every task is parked and nothing can wake one | 134 | `Abort` |

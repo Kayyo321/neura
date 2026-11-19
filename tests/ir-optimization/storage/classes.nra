@@ -1,0 +1,25 @@
+// One declaration of each kind of storage that a program names
+// (docs/design/Representation030.md, "Storage, owner and transfer facts").
+let Classes = module (
+    export let counter: int = 0;
+    export let table: int[] = [1, 2];
+
+    export let Holder = class (
+        export let size: int;
+        export let items: int[];
+        export let alias: &int;
+        export static let shared: int = 7;
+
+        export let init = func(first: &int) {
+            instance.alias = first;
+            instance.items = [1];
+        };
+    );
+
+    export let sample = func(values: int[], count: int, view: &int, pair: [int[], int]) -> int {
+        let total: int = count;
+        let cells: int[] = [1];
+        let alias: &int = total;
+        return total;
+    };
+);

@@ -1,0 +1,13 @@
+// test-options: --gpu=off
+// status: 134
+// run-options: --gpu=off
+// stderr: explicit program failure \(trap reason 3\): unsupported: Std.Crypto.Core.Secret.lock is not implemented in Neura 0.3.0 \(the runtime has no locked-buffer adapter for arbitrary Neura values
+let.promote _ = import:Std.Crypto.Core.Secret;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        new Secret<uint8[list]>(new([1]), zero_bytes).lock();
+        return program.ExitCode.Ok;
+    };
+);

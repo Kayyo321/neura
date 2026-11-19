@@ -1,0 +1,5 @@
+// Floats do not conform to Ordered, since their companions have no total
+// compare (docs/design/Records030.md, Primitive conformance).
+let.promote _ = import:Std.Core.Arithmetic;
+let first = func<T: Ordered<T>>(a: T, b: T) -> T => a;
+let x = first(1.5, 2.5);

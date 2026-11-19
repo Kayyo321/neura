@@ -39,12 +39,15 @@ export let Semaphore = module (
         /// the semaphore was created with traps.
         export let release = func {
             match (returned.try_send(true)) {
-                channels.TrySendOutcome.Sent => { },
+                channels.TrySendOutcome.Sent => {},
                 _ => {
                     trap_with_message("invalid state: released more permits than were created");
                 },
             }
         };
+
+        /// @brief Names the semaphore.
+        export let.override to_string = func -> string => "Semaphore";
     );
 
     /// @brief A semaphore with `permits` permits, all free. A negative count traps.

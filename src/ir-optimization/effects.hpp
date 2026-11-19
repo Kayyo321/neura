@@ -1,8 +1,11 @@
 #pragma once
 
 #include "neura-ir/ir.hpp"
+#include "neura-ir/module_dispatch.hpp"
+#include "neura-ir/purity.hpp"
 
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <utility>
@@ -53,29 +56,7 @@ struct Effects {
     bool operator==(const Effects&) const = default;
 };
 
-// Calls on module receivers. A module function is reached by a virtual call
-// whose receiver names the module (`console.print_line`) or is the enclosing
-// module's own receiver; the converter resolves it for the concrete module
-// (Backend.md). The target is the same in every run when the receiver names
-// the module, or when it is a module receiver and no module derives from
-// that module.
-class ModuleDispatch {
-public:
-    explicit ModuleDispatch(const IrProgram& program);
-
-    // The module a virtual call's receiver is in every run, or no_symbol.
-    SymbolId module(const IrNode& call) const;
-    // The function with a body that a virtual call reaches in every run, or
-    // no_symbol when it depends on the run or cannot be resolved.
-    SymbolId target(const IrNode& call) const;
-    // True when another module derives from `module`.
-    bool derived(SymbolId module) const { return derived_.contains(module); }
-
-private:
-    const IrProgram& program_;
-    std::set<SymbolId> derived_;
-    std::map<std::pair<SymbolId, std::string>, std::vector<SymbolId>> members_;
-};
+using neura::ModuleDispatch;
 
 // Effect summaries for one program. A function's summary covers what a call
 // of it may do, without its own locals: the union of its body's effects and
@@ -87,6 +68,10 @@ private:
 class EffectAnalysis {
 public:
     explicit EffectAnalysis(const IrProgram& program);
+    // With the purity analysis of the same program, which a pass that already
+    // has one shares. The call facts of every function come from it
+    // (PurityAnalysis::Summary::optimizer), not from a second computation.
+    EffectAnalysis(const IrProgram& program, const PurityAnalysis& purity);
 
     // The effects of evaluating `node` and everything below it, including
     // the lazily evaluated parts of short-circuit operations and every arm.
@@ -101,12 +86,15 @@ public:
     const ModuleDispatch& dispatch() const { return dispatch_; }
 
 private:
+    void build();
     void add(const IrNode& node, Effects& effects) const;
     // A function that a call reaches in every run: a direct call's target,
     // or a module call's fixed target.
     SymbolId callee(const IrNode& node) const;
 
     const IrProgram& program_;
+    std::unique_ptr<PurityAnalysis> owned_;
+    const PurityAnalysis& purity_;
     ModuleDispatch dispatch_;
     std::map<SymbolId, Effects> functions_;
     std::map<SymbolId, std::set<SymbolId>> calls_;

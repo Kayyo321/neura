@@ -1,0 +1,9 @@
+error[E0201]: expected ';'
+ --> $DIR/base.nra:3:15
+  |
+3 | let P = record: Base (x: int);
+  |               ^ the initializer ends after the name 'record'
+  |
+  = help: a record has no base class
+
+For more information about this error, try `neura explain E0201`.

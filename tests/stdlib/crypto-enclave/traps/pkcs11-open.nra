@@ -1,0 +1,12 @@
+// test-options: --gpu=off
+// status: 134
+// stderr: unsupported: Std.Crypto.Enclave.Pkcs11.open is not implemented in Neura 0.3.0
+let program = import:Std.Program;
+let provider = import:Std.Crypto.Enclave.Pkcs11;
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = provider.open("", "");
+        return program.ExitCode.Ok;
+    };
+);

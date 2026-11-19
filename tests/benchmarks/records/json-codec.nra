@@ -1,0 +1,50 @@
+// sizes: 100 200
+// scaling: 2.2
+// A derived JSON codec round trip (docs/design/Records030.md, Gate and
+// acceptance): n records encoded to text and decoded back.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let json = import:Std.Encoding.Json;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+
+let Mode = enum (Fast, Slow);
+let User = record (id: int64, name: string, mode: Mode, note: Optional<string>);
+let UserJson = derive json.Codec<User> {
+    field User.name: "display";
+};
+
+let JsonCodec = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let n = result.value_or<int>(int32s.parse(args[0]), 0);
+        let matched = 0;
+        for (let i = 0; i < n; i++) {
+            last note = i % 3 == 0 ? Optional<string>.None : Optional<string>.Some("n" + i.to_string());
+            last user = new User(i as int64, "user", i % 2 == 0 ? Mode.Fast : Mode.Slow, note);
+            match (UserJson.encode(user)) {
+                Result.Ok(text) => {
+                    match (UserJson.decode(text)) {
+                        Result.Ok(back) => {
+                            if (back === user) {
+                                matched++;
+                            }
+                        },
+                        Result.Err(_) => {
+                            return program.ExitCode.Failure;
+                        },
+                    }
+                },
+                Result.Err(_) => {
+                    return program.ExitCode.Failure;
+                },
+            }
+        }
+        if (matched != n) {
+            return program.ExitCode.Failure;
+        }
+        console.print_line("ok");
+        return program.ExitCode.Ok;
+    };
+);

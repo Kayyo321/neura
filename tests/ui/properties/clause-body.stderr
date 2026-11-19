@@ -1,0 +1,9 @@
+error[E0573]: invalid interface property
+ --> $DIR/clause-body.nra:4:16
+  |
+4 |         | get: "x";
+  |                ^^^ a property clause in an interface has no body
+  |
+  = help: write the clause as '| get;', and the body in the class that implements the interface
+
+For more information about this error, try `neura explain E0573`.

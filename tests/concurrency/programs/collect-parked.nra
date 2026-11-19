@@ -21,7 +21,7 @@ let send_note = func(out: channels.Sender<string>, id: int) -> void {
 let churn = func(rounds: int) -> int {
     let kept = 0;
     for (let round: int = 0; round < rounds; round++) {
-        let garbage: string[list] = [];
+        let garbage: string[list] = new;
         for (let i: int = 0; i < 20; i++) {
             garbage.append("garbage " + round.to_string() + " " + i.to_string());
         }
@@ -31,7 +31,7 @@ let churn = func(rounds: int) -> int {
 };
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let [out, incoming, closer] = channels.open<string>(0);
         let [stock, stocked, stock_closer] = channels.open<string>(Buffered);
         for (let id: int = 1000; id < 1000 + Buffered; id++) {

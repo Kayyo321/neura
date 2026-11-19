@@ -1,0 +1,3 @@
+// typeof needs an operand (docs/design/Expressions030.md, typeof, edge case
+// 23): `typeof()` is E0267 at the closing parenthesis.
+let t = typeof();

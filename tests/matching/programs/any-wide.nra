@@ -1,0 +1,238 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    #NoInline
+    let unpack = func(value: any) -> int => match.is (value) {
+        number: int32 => number,
+        _ => -100000,
+    };
+
+    #NoInline
+    let sum = func(
+        v00: any,
+        v01: any,
+        v02: any,
+        v03: any,
+        v04: any,
+        v05: any,
+        v06: any,
+        v07: any,
+        v08: any,
+        v09: any,
+        v10: any,
+        v11: any,
+        v12: any,
+        v13: any,
+        v14: any,
+        v15: any,
+        v16: any,
+        v17: any,
+        v18: any,
+        v19: any,
+        v20: any,
+        v21: any,
+        v22: any,
+        v23: any,
+        v24: any,
+        v25: any,
+        v26: any,
+        v27: any,
+        v28: any,
+        v29: any,
+        v30: any,
+        v31: any,
+        v32: any,
+        v33: any,
+        v34: any,
+        v35: any,
+        v36: any,
+        v37: any,
+        v38: any,
+        v39: any,
+        v40: any,
+        v41: any,
+        v42: any,
+        v43: any,
+        v44: any,
+        v45: any,
+        v46: any,
+        v47: any,
+        v48: any,
+        v49: any,
+        v50: any,
+        v51: any,
+        v52: any,
+        v53: any,
+        v54: any,
+        v55: any,
+        v56: any,
+        v57: any,
+        v58: any,
+        v59: any,
+        v60: any,
+        v61: any,
+        v62: any,
+        v63: any,
+        v64: any,
+        v65: any,
+        v66: any,
+        v67: any,
+        v68: any,
+        v69: any
+    ) -> int {
+        let total = 0;
+        total = total + unpack(v00);
+        total = total + unpack(v01);
+        total = total + unpack(v02);
+        total = total + unpack(v03);
+        total = total + unpack(v04);
+        total = total + unpack(v05);
+        total = total + unpack(v06);
+        total = total + unpack(v07);
+        total = total + unpack(v08);
+        total = total + unpack(v09);
+        total = total + unpack(v10);
+        total = total + unpack(v11);
+        total = total + unpack(v12);
+        total = total + unpack(v13);
+        total = total + unpack(v14);
+        total = total + unpack(v15);
+        total = total + unpack(v16);
+        total = total + unpack(v17);
+        total = total + unpack(v18);
+        total = total + unpack(v19);
+        total = total + unpack(v20);
+        total = total + unpack(v21);
+        total = total + unpack(v22);
+        total = total + unpack(v23);
+        total = total + unpack(v24);
+        total = total + unpack(v25);
+        total = total + unpack(v26);
+        total = total + unpack(v27);
+        total = total + unpack(v28);
+        total = total + unpack(v29);
+        total = total + unpack(v30);
+        total = total + unpack(v31);
+        total = total + unpack(v32);
+        total = total + unpack(v33);
+        total = total + unpack(v34);
+        total = total + unpack(v35);
+        total = total + unpack(v36);
+        total = total + unpack(v37);
+        total = total + unpack(v38);
+        total = total + unpack(v39);
+        total = total + unpack(v40);
+        total = total + unpack(v41);
+        total = total + unpack(v42);
+        total = total + unpack(v43);
+        total = total + unpack(v44);
+        total = total + unpack(v45);
+        total = total + unpack(v46);
+        total = total + unpack(v47);
+        total = total + unpack(v48);
+        total = total + unpack(v49);
+        total = total + unpack(v50);
+        total = total + unpack(v51);
+        total = total + unpack(v52);
+        total = total + unpack(v53);
+        total = total + unpack(v54);
+        total = total + unpack(v55);
+        total = total + unpack(v56);
+        total = total + unpack(v57);
+        total = total + unpack(v58);
+        total = total + unpack(v59);
+        total = total + unpack(v60);
+        total = total + unpack(v61);
+        total = total + unpack(v62);
+        total = total + unpack(v63);
+        total = total + unpack(v64);
+        total = total + unpack(v65);
+        total = total + unpack(v66);
+        total = total + unpack(v67);
+        total = total + unpack(v68);
+        total = total + unpack(v69);
+        return total;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let result = sum(
+            1 as int32,
+            2 as int32,
+            3 as int32,
+            4 as int32,
+            5 as int32,
+            6 as int32,
+            7 as int32,
+            8 as int32,
+            9 as int32,
+            10 as int32,
+            11 as int32,
+            12 as int32,
+            13 as int32,
+            14 as int32,
+            15 as int32,
+            16 as int32,
+            17 as int32,
+            18 as int32,
+            19 as int32,
+            20 as int32,
+            21 as int32,
+            22 as int32,
+            23 as int32,
+            24 as int32,
+            25 as int32,
+            26 as int32,
+            27 as int32,
+            28 as int32,
+            29 as int32,
+            30 as int32,
+            31 as int32,
+            32 as int32,
+            33 as int32,
+            34 as int32,
+            35 as int32,
+            36 as int32,
+            37 as int32,
+            38 as int32,
+            39 as int32,
+            40 as int32,
+            41 as int32,
+            42 as int32,
+            43 as int32,
+            44 as int32,
+            45 as int32,
+            46 as int32,
+            47 as int32,
+            48 as int32,
+            49 as int32,
+            50 as int32,
+            51 as int32,
+            52 as int32,
+            53 as int32,
+            54 as int32,
+            55 as int32,
+            56 as int32,
+            57 as int32,
+            58 as int32,
+            59 as int32,
+            60 as int32,
+            61 as int32,
+            62 as int32,
+            63 as int32,
+            64 as int32,
+            65 as int32,
+            66 as int32,
+            67 as int32,
+            68 as int32,
+            69 as int32,
+            70 as int32
+        );
+        if (result != 2485) {
+            console.println("wide mismatch {}", result);
+            return program.ExitCode.Failure;
+        }
+        console.print_line("wide 2485 ok");
+        return program.ExitCode.Ok;
+    };
+);

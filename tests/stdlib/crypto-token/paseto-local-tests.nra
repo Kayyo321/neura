@@ -1,0 +1,60 @@
+// test-options: --gpu=off --max-steps 200000000 --deny-entropy
+let hex = import:Std.Encoding.Hex;
+let paseto = import:Std.Crypto.Token.Paseto;
+let secret_key = import:Std.Crypto.Core.SecretKey;
+let test = import:Std.Test;
+let vectors = import:PasetoVectors;
+
+let PasetoLocalTests = module (
+    let bytes = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let cipher = func(key_hex: string) -> paseto.Local =>
+        new paseto.Local(new secret_key.SecretKey<paseto.Local>(bytes(key_hex)));
+
+    export let test_official_local_known_answers = func {
+        last rows = vectors.local;
+        for (let i = 0; i < rows.length; i += 7) {
+            last local = cipher(rows[i + 1]);
+            last nonce = bytes(rows[i + 2]);
+            last payload = bytes(rows[i + 3]);
+            last footer = bytes(rows[i + 4]);
+            last assertion = bytes(rows[i + 5]);
+            last token = rows[i + 6];
+            test.assert_equal_string(token, local.encrypt_with_nonce(payload, nonce, footer, assertion));
+            last opened = test.assert_ok(local.decrypt(token, assertion));
+            test.assert_equal_string(rows[i + 3], hex.encode(opened.payload()));
+            test.assert_equal_string(rows[i + 4], hex.encode(opened.footer()));
+        }
+    };
+
+    export let test_official_wrong_purpose_version_tag_and_padding = func {
+        last rows = vectors.reject;
+        for (let i = 0; i < rows.length; i += 5) {
+            if (rows[i + 1] == "local") {
+                let _ = test.assert_err(cipher(rows[i + 2]).decrypt(rows[i + 4], bytes(rows[i + 3])));
+            }
+        }
+    };
+
+    export let test_footer_and_assertion_are_authenticated = func {
+        last rows = vectors.local;
+        last local = cipher(rows[1]);
+        last token = rows[6];
+        let _ = test.assert_err(local.decrypt(token + ".YQ", new));
+        let _ = test.assert_err(local.decrypt(token + ".", new));
+        let _ = test.assert_err(local.decrypt(token, new([0])));
+        let _ = test.assert_err(local.encrypt(bytes(rows[3]), new, new));
+    };
+
+    export let test_empty_payload_and_value_semantics = func {
+        last rows = vectors.local;
+        last local = cipher(rows[1]);
+        last token = local.encrypt_with_nonce(new, bytes(rows[2]), new, new);
+        last result = test.assert_ok(local.decrypt(token, new));
+        last empty = new paseto.OpenedToken(new, new);
+        test.assert(result.equals(empty));
+        test.assert(result.hash_code() == empty.hash_code());
+        test.assert_equal_string("Paseto.OpenedToken(<redacted>)", result.to_string());
+        test.assert_equal_string("Paseto.Local(<redacted>)", local.to_string());
+    };
+);

@@ -75,7 +75,9 @@ fs::path& library_root();
 IrProgram lower_files(std::vector<fs::path> files, std::vector<fs::path> roots = {});
 IrProgram lower_fixture(const Environment& environment, std::string_view file_name);
 std::vector<fs::path> fixture_files(const Environment& environment);
+// Every example source outside an example project (a directory with neura.toml).
 std::vector<fs::path> example_files(const Environment& environment);
+bool in_example_project(const Environment& environment, const fs::path& file);
 
 // Finds a function or binding by its qualified name, such as
 // "ControlFlow.skip_loop". Fails unless exactly one symbol matches.

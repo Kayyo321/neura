@@ -1,0 +1,259 @@
+let lookup = import:Std.Core.Internal.UnicodeLookup;
+let data = import:Std.Core.Internal.UnicodeProperties;
+
+/// @brief The code point functions behind Std.Core.Character. Every function is total over uint32: a value
+/// above 0x10FFFF has the properties of an unassigned code point unless a function documents a trap.
+///
+/// Categories are ordinals of Character.GeneralCategory: 0 Lu, 1 Ll, 2 Lt, 3 Lm, 4 Lo, 5 Mn, 6 Mc, 7 Me,
+/// 8 Nd, 9 Nl, 10 No, 11 Pc, 12 Pd, 13 Ps, 14 Pe, 15 Pi, 16 Pf, 17 Po, 18 Sm, 19 Sc, 20 Sk, 21 So, 22 Zs,
+/// 23 Zl, 24 Zp, 25 Cc, 26 Cf, 27 Cs, 28 Co, 29 Cn. Bidi classes are ordinals of Character.BidiClass, 23 being
+/// Undefined.
+export let UnicodeCharacter = module (
+    /// @brief U+10FFFF.
+    export const MaxCodePoint: uint32 = 1114111;
+    /// @brief The ordinal of Unassigned (Cn).
+    export const Unassigned: int = 29;
+    /// @brief The ordinal of Format (Cf).
+    const Format: int = 26;
+    /// @brief The ordinal of Undefined in Character.BidiClass.
+    export const UndefinedBidi: int = 23;
+    /// @brief The bias of the case deltas.
+    const DeltaBias: int64 = 8388608;
+
+    /// @brief The General_Category ordinal.
+    #[Pure, ThreadSafe]
+    export let category = func(code_point: uint32) -> int =>
+        code_point > MaxCodePoint ? Unassigned : lookup.range_value(data.Category, code_point);
+
+    /// @brief The Bidi_Class ordinal, with the UCD default for unassigned code points; Undefined above
+    /// 0x10FFFF.
+    #[Pure, ThreadSafe]
+    export let bidi_class = func(code_point: uint32) -> int =>
+        code_point > MaxCodePoint ? UndefinedBidi : lookup.range_value(data.Bidi, code_point);
+
+    /// @brief The Bidi_Class ordinal of a defined code point, Undefined otherwise (Java's getDirectionality).
+    #[Pure, ThreadSafe]
+    export let directionality = func(code_point: uint32) -> int =>
+        category(code_point) == Unassigned ? UndefinedBidi : lookup.range_value(data.Bidi, code_point);
+
+    /// @brief Membership in a boundary table; false above 0x10FFFF.
+    #[Pure, ThreadSafe]
+    export let has = func(table: string, code_point: uint32) -> bool =>
+        code_point <= MaxCodePoint && lookup.contains(table, code_point);
+
+    /// @brief General category Lu, Ll, Lt, Lm, or Lo.
+    #[Pure, ThreadSafe]
+    export let is_letter = func(code_point: uint32) -> bool => category(code_point) <= 4;
+
+    /// @brief General category Nd.
+    #[Pure, ThreadSafe]
+    export let is_digit = func(code_point: uint32) -> bool => category(code_point) == 8;
+
+    /// @brief A letter or a decimal digit.
+    #[Pure, ThreadSafe]
+    export let is_letter_or_digit = func(code_point: uint32) -> bool {
+        last c = category(code_point);
+        return c <= 4 || c == 8;
+    };
+
+    /// @brief General category Zs, Zl, or Zp.
+    #[Pure, ThreadSafe]
+    export let is_space_char = func(code_point: uint32) -> bool {
+        last c = category(code_point);
+        return c >= 22 && c <= 24;
+    };
+
+    /// @brief Java's white space: a space character other than U+00A0, U+2007, and U+202F, or one of U+0009
+    /// through U+000D and U+001C through U+001F.
+    #[Pure, ThreadSafe]
+    export let is_whitespace = func(code_point: uint32) -> bool {
+        if (code_point < 128) {
+            return code_point == 32 || (code_point >= 9 && code_point <= 13) || (code_point >= 28 && code_point <= 31);
+        }
+        if (code_point == 160 || code_point == 8199 || code_point == 8239) {
+            return false;
+        }
+        return is_space_char(code_point);
+    };
+
+    /// @brief U+0000 through U+001F and U+007F through U+009F.
+    #[Pure, ThreadSafe]
+    export let is_iso_control = func(code_point: uint32) -> bool =>
+        code_point <= 31 || (code_point >= 127 && code_point <= 159);
+
+    /// @brief Java's identifier-ignorable set: U+0000 through U+0008, U+000E through U+001B, U+007F through
+    /// U+009F, and general category Cf.
+    #[Pure, ThreadSafe]
+    export let is_identifier_ignorable = func(code_point: uint32) -> bool {
+        if (code_point <= 8 || (code_point >= 14 && code_point <= 27) || (code_point >= 127 && code_point <= 159)) {
+            return true;
+        }
+        return category(code_point) == Format;
+    };
+
+    /// @brief ID_Start and U+2E2F VERTICAL TILDE (Java's profile of UAX #31).
+    #[Pure, ThreadSafe]
+    export let is_identifier_start = func(code_point: uint32) -> bool =>
+        code_point == 11823 || has(data.IdStart, code_point);
+
+    /// @brief ID_Continue, U+2E2F, and the identifier-ignorable set (Java's profile of UAX #31).
+    #[Pure, ThreadSafe]
+    export let is_identifier_part = func(code_point: uint32) -> bool =>
+        code_point == 11823 || has(data.IdContinue, code_point) || is_identifier_ignorable(code_point);
+
+    /// @brief Java's isJavaIdentifierStart: a letter, category Nl, Sc, or Pc.
+    #[Pure, ThreadSafe]
+    export let is_java_identifier_start = func(code_point: uint32) -> bool {
+        last c = category(code_point);
+        return c <= 4 || c == 9 || c == 19 || c == 11;
+    };
+
+    /// @brief Java's isJavaIdentifierPart: a letter, category Sc, Pc, Nd, Nl, Mc, or Mn, or the
+    /// identifier-ignorable set.
+    #[Pure, ThreadSafe]
+    export let is_java_identifier_part = func(code_point: uint32) -> bool {
+        last c = category(code_point);
+        return c <= 4 || c == 19 || c == 11 || c == 8 || c == 9 || c == 6 || c == 5 ||
+            is_identifier_ignorable(code_point);
+    };
+
+    /// @brief The index into NumericIntegers plus one, or 0 when the code point has no Numeric_Value.
+    #[Pure, ThreadSafe]
+    export let numeric_index = func(code_point: uint32) -> int =>
+        code_point > MaxCodePoint ? 0 : lookup.range_value(data.Numeric, code_point);
+
+    /// @brief The value 10 through 35 of a Latin letter in ASCII or fullwidth form, or -1.
+    #[Pure, ThreadSafe]
+    export let latin_letter_value = func(code_point: uint32) -> int {
+        if (code_point >= 65 && code_point <= 90) {
+            return (code_point - 55) as int;
+        }
+        if (code_point >= 97 && code_point <= 122) {
+            return (code_point - 87) as int;
+        }
+        if (code_point >= 65313 && code_point <= 65338) {
+            return (code_point - 65303) as int;
+        }
+        return if (code_point >= 65345 && code_point <= 65370) -> (code_point - 65335) as int else -> -1;
+    };
+
+    /// @brief Java's getNumericValue over the Unicode Numeric_Value property: 10 through 35 for Latin letters,
+    /// the value when it is an integer from 0 through 2^31 - 1, -2 for another value, and -1 for none.
+    #[Pure, ThreadSafe]
+    export let numeric_value = func(code_point: uint32) -> int {
+        last letter = latin_letter_value(code_point);
+        if (letter >= 0) {
+            return letter;
+        }
+        last index = numeric_index(code_point);
+        if (index == 0) {
+            return -1;
+        }
+        return (lookup.word(data.NumericIntegers, (index - 1) * 6, 6) as int64 - 2) as int;
+    };
+
+    /// @brief The Numeric_Value text of the entry, such as "5", "1/2", or "-1/2".
+    #[Pure, ThreadSafe]
+    export let numeric_text = func(index: int) -> string {
+        last texts = data.NumericTexts;
+        let start = 0;
+        let field = 1;
+        for (let i in 0 .. texts.byte_length) {
+            if (texts.byte_at(i) == 59) {
+                if (field == index) {
+                    return texts.slice(start, i);
+                }
+                field += 1;
+                start = i + 1;
+            }
+        }
+        return texts.slice(start, texts.byte_length);
+    };
+
+    /// @brief Java's digit: the decimal digit value of an Nd code point or the value of a Latin letter, when
+    /// below the radix; otherwise -1. The radix must be 2 through 36.
+    #[Pure, ThreadSafe]
+    export let digit = func(code_point: uint32, radix: int) -> int {
+        check_radix(radix);
+        let value = latin_letter_value(code_point);
+        if (value < 0 && category(code_point) == 8) {
+            value = numeric_value(code_point);
+        }
+        return value >= 0 && value < radix ? value : -1;
+    };
+
+    /// @brief The lowercase ASCII digit of a value below the radix.
+    #[Pure, ThreadSafe]
+    export let for_digit = func(value: int, radix: int) -> uint32 {
+        check_radix(radix);
+        if (value < 0 || value >= radix) {
+            trap_with_message("invalid argument: digit out of range");
+        }
+        return value < 10 ? (value + 48) as uint32 : (value + 87) as uint32;
+    };
+
+    /// @brief The simple case mapping selected by `which`: 0 uppercase, 1 lowercase, 2 titlecase. Code points
+    /// without a mapping, and values above 0x10FFFF, map to themselves.
+    #[Pure, ThreadSafe]
+    export let simple_case = func(code_point: uint32, which: int) -> uint32 {
+        if (code_point > MaxCodePoint) {
+            return code_point;
+        }
+        last index = lookup.range_value(data.Case, code_point);
+        if (index == 0) {
+            return code_point;
+        }
+        last delta = lookup.word(data.CaseDeltas, index * 12 + which * 4, 4) as int64 - DeltaBias;
+        return (code_point as int64 + delta) as uint32;
+    };
+
+    /// @brief At most 0x10FFFF and not a surrogate.
+    #[Pure, ThreadSafe]
+    export let is_scalar = func(code_point: uint32) -> bool =>
+        code_point <= MaxCodePoint && (code_point < 55296 || code_point > 57343);
+
+    /// @brief Traps with "invalid argument: not a Unicode scalar value" unless the value is a scalar value.
+    #[Pure, ThreadSafe]
+    export let check_scalar = func(code_point: uint32) {
+        if (not is_scalar(code_point)) {
+            trap_with_message("invalid argument: not a Unicode scalar value");
+        }
+    };
+
+    /// @brief The UTF-8 bytes of a scalar value. Traps as check_scalar.
+    #[Pure, ThreadSafe]
+    export let utf8 = func(code_point: uint32) -> uint8[list] {
+        check_scalar(code_point);
+        last bytes: uint8[list] = new;
+        if (code_point < 128) {
+            bytes.append(code_point as uint8);
+        } else if (code_point < 2048) {
+            bytes.append((192 | (code_point >> 6)) as uint8);
+            bytes.append((128 | (code_point & 63)) as uint8);
+        } else if (code_point < 65536) {
+            bytes.append((224 | (code_point >> 12)) as uint8);
+            bytes.append((128 | ((code_point >> 6) & 63)) as uint8);
+            bytes.append((128 | (code_point & 63)) as uint8);
+        } else {
+            bytes.append((240 | (code_point >> 18)) as uint8);
+            bytes.append((128 | ((code_point >> 12) & 63)) as uint8);
+            bytes.append((128 | ((code_point >> 6) & 63)) as uint8);
+            bytes.append((128 | (code_point & 63)) as uint8);
+        }
+        return bytes;
+    };
+
+    /// @brief The one-character string of a scalar value. Traps as check_scalar.
+    #[Pure, ThreadSafe]
+    export let text = func(code_point: uint32) -> string {
+        let [valid, result] = string.from_utf8(utf8(code_point));
+        return result;
+    };
+
+    /// @brief Traps with "invalid argument: radix outside 2 through 36" unless 2 <= radix <= 36.
+    let check_radix = func(radix: int) {
+        if (radix < 2 || radix > 36) {
+            trap_with_message("invalid argument: radix outside 2 through 36");
+        }
+    };
+);

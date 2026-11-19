@@ -32,7 +32,7 @@ let price_owner = func(requests: channels.Receiver<Request>) {
                 }
             },
             _ => {
-                return;  // Closed or cancelled: stop serving.
+                return; // Closed or cancelled: stop serving.
             },
         }
     }
@@ -91,7 +91,7 @@ let count_visit = func(visits: guards.Guarded<maps.HashMap<string, int>>, page: 
 };
 
 export let Main = module:program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         // State owned by a task.
         const [requests, incoming, requests_closer] = channels.open<Request>(8);
         scope {
@@ -102,7 +102,7 @@ export let Main = module:program.Entry (
             last cake = spawn price_of(requests, "cake");
             last unknown = spawn price_of(requests, "soup");
             console.print_line("tea " + tea.join().to_string() + ", cake " + cake.join().to_string() +
-                               ", soup " + unknown.join().to_string());
+                ", soup " + unknown.join().to_string());
             requests_closer.close();
         }
 

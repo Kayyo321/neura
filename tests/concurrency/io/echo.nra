@@ -14,7 +14,7 @@ let result = import:Std.Core.Result;
 let streams = import:Std.Net.TcpStream;
 
 let bytes_of = func(text: string) -> uint8[list] {
-    let out: uint8[list] = [];
+    let out: uint8[list] = new;
     let i = 0;
     while (i < text.byte_length) {
         out.append(text.byte_at(i));
@@ -80,7 +80,7 @@ let serve = func(ports: channels.Sender<int>, served: channels.Sender<int>) {
 let ask = func(stream: streams.TcpStream, line: string) -> string {
     let sent = stream.write(bytes_of(line));
     // Half-close is not offered, so read exactly what was sent.
-    let reply: uint8[list] = [];
+    let reply: uint8[list] = new;
     let wanted = line.byte_length;
     while (reply.length < wanted) {
         match (stream.read(64)) {
@@ -143,7 +143,7 @@ let collect = func(label: string, replies: channels.Receiver<string>, served: ch
 };
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let ports0 = channels.open<int>(1);
         let ports1 = channels.open<int>(1);
         let served0 = channels.open<int>(1);

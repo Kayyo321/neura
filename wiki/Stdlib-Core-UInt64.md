@@ -31,66 +31,74 @@ The following public declarations are taken from the module source; each links t
   Returns the larger of the two operands. Tagged `#Pure`, `#ThreadSafe`.
 - **UInt64** · [`export let clamp = func(v: uint64, low: uint64, high: uint64) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L36)
   Traps with "invalid argument: low exceeds high". Tagged `#Pure`, `#ThreadSafe`.
-- **UInt64** · [`export let compare = func(a: uint64, b: uint64) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L51)
+- **UInt64** · [`export let compare = func(a: uint64, b: uint64) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L48)
   The natural order; usable as a comparator. Tagged `#Pure`, `#ThreadSafe`.
-- **UInt64** · [`export let pow = func(base: uint64, exponent: int) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L66)
+- **UInt64** · [`export let pow = func(base: uint64, exponent: int) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L60)
   Square-and-multiply with checked multiplication (an overflow traps with reason 1). The factor is squared only while exponent bits remain, so each intermediate divides the result. A negative exponent traps; pow(0, 0) is 1. Tagged `#Pure`, `#ThreadSafe`.
-- **UInt64** · [`export let gcd = func(a: uint64, b: uint64) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L87)
+- **UInt64** · [`export let gcd = func(a: uint64, b: uint64) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L81)
   Euclid's algorithm. gcd(0, 0) is 0. Tagged `#Pure`, `#ThreadSafe`.
-- **UInt64** · [`export let checked_add = func(a: uint64, b: uint64) -> Optional<uint64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L100)
+- **UInt64** · [`export let checked_add = func(a: uint64, b: uint64) -> Optional<uint64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L94)
   None where the operator would trap. Each test runs before the operation, so nothing overflows. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **UInt64** · [`export let checked_sub = func(a: uint64, b: uint64) -> Optional<uint64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L109)
+- **UInt64** · [`export let checked_sub = func(a: uint64, b: uint64) -> Optional<uint64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L100)
   Returns the difference in Some, or None when it falls outside the type's range. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **UInt64** · [`export let checked_mul = func(a: uint64, b: uint64) -> Optional<uint64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L118)
+- **UInt64** · [`export let checked_mul = func(a: uint64, b: uint64) -> Optional<uint64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L106)
   Returns the product in Some, or None when it falls outside the type's range. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **UInt64** · [`export let checked_div = func(a: uint64, b: uint64) -> Optional<uint64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L127)
+- **UInt64** · [`export let checked_div = func(a: uint64, b: uint64) -> Optional<uint64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L112)
   Returns the quotient in Some, or None when the divisor is zero. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **UInt64** · [`export let checked_rem = func(a: uint64, b: uint64) -> Optional<uint64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L136)
+- **UInt64** · [`export let checked_rem = func(a: uint64, b: uint64) -> Optional<uint64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L118)
   Returns the remainder in Some, or None when the divisor is zero. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **UInt64** · [`export let wrapping_add = func(a: uint64, b: uint64) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L146)
+- **UInt64** · [`export let wrapping_add = func(a: uint64, b: uint64) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L125)
   The result modulo 2^64 (section 7.2). `room` is Max - a, which cannot underflow; when b exceeds it, b - room - 1 is the wrapped sum. Tagged `#Pure`, `#ThreadSafe`.
-- **UInt64** · [`export let wrapping_sub = func(a: uint64, b: uint64) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L156)
+- **UInt64** · [`export let wrapping_sub = func(a: uint64, b: uint64) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L132)
   When a < b, b - a is between 1 and Max, so Max - (b - a) + 1 fits. Tagged `#Pure`, `#ThreadSafe`.
-- **UInt64** · [`export let wrapping_mul = func(a: uint64, b: uint64) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L167)
+- **UInt64** · [`export let wrapping_mul = func(a: uint64, b: uint64) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L140)
   Low and high 32-bit halves: every partial product has two factors below 2^32, the cross products are masked to 32 bits before they are added (their sum is below 2^33), and the shift discards the bits above 64. Tagged `#Pure`, `#ThreadSafe`.
-- **UInt64** · [`export let wrapping_neg = func(a: uint64) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L178)
+- **UInt64** · [`export let wrapping_neg = func(a: uint64) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L151)
   Negates modulo two raised to the type's bit width. Tagged `#Pure`, `#ThreadSafe`.
-- **UInt64** · [`export let saturating_add = func(a: uint64, b: uint64) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L182)
+- **UInt64** · [`export let saturating_add = func(a: uint64, b: uint64) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L155)
   Clamp to Min or Max instead of overflowing. Tagged `#Pure`, `#ThreadSafe`.
-- **UInt64** · [`export let saturating_sub = func(a: uint64, b: uint64) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L191)
+- **UInt64** · [`export let saturating_sub = func(a: uint64, b: uint64) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L161)
   Subtracts and clamps an out-of-range result to the nearest representable bound. Tagged `#Pure`, `#ThreadSafe`.
-- **UInt64** · [`export let saturating_mul = func(a: uint64, b: uint64) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L200)
+- **UInt64** · [`export let saturating_mul = func(a: uint64, b: uint64) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L167)
   Multiplies and clamps an out-of-range result to the nearest representable bound. Tagged `#Pure`, `#ThreadSafe`.
-- **UInt64** · [`export let floor_div = func(a: uint64, b: uint64) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L210)
+- **UInt64** · [`export let floor_div = func(a: uint64, b: uint64) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L174)
   For unsigned operands these are the ordinary quotient and remainder. A zero divisor traps (reason 1). Tagged `#Pure`, `#ThreadSafe`.
-- **UInt64** · [`export let floor_mod = func(a: uint64, b: uint64) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L214)
+- **UInt64** · [`export let floor_mod = func(a: uint64, b: uint64) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L178)
   Returns the unsigned remainder. A zero divisor traps. Tagged `#Pure`, `#ThreadSafe`.
-- **UInt64** · [`export let count_ones = func(v: uint64) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L219)
+- **UInt64** · [`export let count_ones = func(v: uint64) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L183)
   Bit counts over Bits bits by masks and shifts. Each step adds neighbouring fields whose sums fit in the wider field, so nothing overflows. Tagged `#Pure`, `#ThreadSafe`.
-- **UInt64** · [`export let leading_zeros = func(v: uint64) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L233)
+- **UInt64** · [`export let leading_zeros = func(v: uint64) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L197)
   A binary search for the highest set bit: a left shift only discards bits already known to be zero. Tagged `#Pure`, `#ThreadSafe`.
-- **UInt64** · [`export let trailing_zeros = func(v: uint64) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L268)
+- **UInt64** · [`export let trailing_zeros = func(v: uint64) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L232)
   Counts zero bits from the least significant end. Zero returns the full bit width. Tagged `#Pure`, `#ThreadSafe`.
-- **UInt64** · [`export let rotate_left = func(v: uint64, n: int) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L304)
+- **UInt64** · [`export let rotate_left = func(v: uint64, n: int) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L268)
   `n` is reduced to 0 through Bits - 1 first. A rotation by 0 returns `v`; otherwise both shift counts are between 1 and Bits - 1. Tagged `#Pure`, `#ThreadSafe`.
-- **UInt64** · [`export let rotate_right = func(v: uint64, n: int) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L314)
+- **UInt64** · [`export let rotate_right = func(v: uint64, n: int) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L275)
   Rotates the bits right, reducing the distance modulo the bit width. Tagged `#Pure`, `#ThreadSafe`.
-- **UInt64** · [`export let to_unsigned = func(v: uint64) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L324)
+- **UInt64** · [`export let to_unsigned = func(v: uint64) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L282)
   The identity: every integer module has both conversions. Tagged `#Pure`, `#ThreadSafe`.
-- **UInt64** · [`export let to_signed = func(v: uint64) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L328)
+- **UInt64** · [`export let to_signed = func(v: uint64) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L286)
   The same-width signed type with the same bit pattern (section 7.2). Tagged `#Pure`, `#ThreadSafe`.
-- **UInt64** · [`export let hash = func(v: uint64) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L339)
+- **UInt64** · [`export let hash = func(v: uint64) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L297)
   Section 5.2: the two's complement pattern as a uint32; the 64-bit types fold the high half into the low half. Tagged `#Pure`, `#ThreadSafe`.
-- **UInt64** · [`export let to_string = func(v: uint64) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L343)
+- **UInt64** · [`export let to_string = func(v: uint64) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L301)
   Decimal, with `-` for negative values (section 5.2). Tagged `#Pure`, `#ThreadSafe`.
-- **UInt64** · [`export let to_string_radix = func(v: uint64, radix: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L348)
+- **UInt64** · [`export let to_string_radix = func(v: uint64, radix: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L306)
   Lowercase digits. A radix outside 2 through 36 traps. The neura.integer.format_u64 kernel writes the digits. Tagged `#Pure`, `#ThreadSafe`.
-- **UInt64** · [`export let format = func(v: uint64, radix: int, min_width: int, pad: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L354)
+- **UInt64** · [`export let format = func(v: uint64, radix: int, min_width: int, pad: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L312)
   to_string_radix, left-padded with copies of `pad` to `min_width` characters, sign included. A `0` pad goes after the sign. `pad` must be one scalar value. Tagged `#Pure`, `#ThreadSafe`.
-- **UInt64** · [`export let parse = func(text: string) -> Result<uint64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L360)
+- **UInt64** · [`export let parse = func(text: string) -> Result<uint64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L318)
   Parses a base-10 integer, returning an error for invalid text or a value outside the type's range. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **UInt64** · [`export let parse_radix = func(text: string, radix: int) -> Result<uint64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L370)
+- **UInt64** · [`export let parse_radix = func(text: string, radix: int) -> Result<uint64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L328)
   An optional `+` or `-`, then one or more digits of the radix in either case. Syntax errors are reported first (Empty, UnexpectedEnd at the end, InvalidCharacter at the offending byte); a well-formed value outside the type fails with OutOfRange at offset 0. A `-` is accepted only for zero. A radix outside 2 through 36 traps. The neura.integer.parse_u64 kernel parses the text. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
+- **UInt64** · [`export let zero = func() -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L344)
+  The additive identity, 0 (Std.Core.Arithmetic.Additive). Tagged `#Pure`, `#ThreadSafe`. Since 0.3.0.
+- **UInt64** · [`export let add = func(left: uint64, right: uint64) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L348)
+  The sum `left + right`, at the type's width; traps (reason 1) on overflow. Tagged `#Pure`, `#ThreadSafe`. Since 0.3.0.
+- **UInt64** · [`export let one = func() -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L352)
+  The multiplicative identity, 1 (Std.Core.Arithmetic.Multiplicative). Tagged `#Pure`, `#ThreadSafe`. Since 0.3.0.
+- **UInt64** · [`export let multiply = func(left: uint64, right: uint64) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int64.nra#L356)
+  The product `left * right`, at the type's width; traps (reason 1) on overflow. Tagged `#Pure`, `#ThreadSafe`. Since 0.3.0.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

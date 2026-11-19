@@ -1,0 +1,32 @@
+// Fresh arrays and the scope that owns each: the function, a block, a loop
+// iteration, and the arms of a branch.
+let Owners = module (
+    let make = func(k: int) -> int[] {
+        return [k];
+    };
+
+    export let shape = func(count: int) -> int {
+        let top: int[] = [1];
+        {
+            let in_block: int[] = [2];
+            {
+                let deeper: int[] = [3];
+            }
+        }
+        let after: int = count;
+        while (count > 0) {
+            let per_pass: int[] = [4];
+            count -= 1;
+        }
+        if (count == 0) {
+            let in_then: int[] = [5];
+        } else {
+            let in_else: int[] = [6];
+        }
+        let ranged = {
+            0 .. 3
+        };
+        let by_call: int[] = make(7);
+        return top[0];
+    };
+);

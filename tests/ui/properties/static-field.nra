@@ -1,0 +1,8 @@
+// A static field is not an instance field (edge case 68).
+let Named = interface (
+    let name: string;
+        | get;
+);
+let Shared = class implements Named (
+    export static let name: string = "s";
+);

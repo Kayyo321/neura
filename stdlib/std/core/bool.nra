@@ -5,7 +5,7 @@ let.promote _ = import:Std.Core.Result;
 /// @brief Companion functions for bool (Stdlib.md section 7.4).
 /// @see [Std.Core.Bool](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-Bool)
 #Since("0.1.0")
-export let Bool = module (
+export let Bool = module implements Ordered<bool>, Parseable<bool> (
     /// @brief 1 for true, 0 for false.
     #[Inline, Pure, ThreadSafe]
     export let to_int = func(v: bool) -> int => v ? 1 : 0;
@@ -20,10 +20,7 @@ export let Bool = module (
         if (a == b) {
             return Ordering.Equal;
         }
-        if (b) {
-            return Ordering.Less;
-        }
-        return Ordering.Greater;
+        return if (b) -> Ordering.Less else -> Ordering.Greater;
     };
 
     /// @brief 1231 for true and 1237 for false (section 5.2).
@@ -33,10 +30,7 @@ export let Bool = module (
     /// @brief Returns the lowercase text `true` or `false`.
     #[Pure, ThreadSafe]
     export let to_string = func(v: bool) -> string {
-        if (v) {
-            return "true";
-        }
-        return "false";
+        return if (v) -> "true" else -> "false";
     };
 
     /// @brief Accepts exactly `true` and `false`.

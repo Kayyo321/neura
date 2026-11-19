@@ -1,0 +1,9 @@
+error[E0474]: 'int32' does not implement Closeable
+  --> $DIR/using-int.nra:11:16
+   |
+11 |     using (x = 1) { }
+   |                ^ this has type 'int32'
+   |
+   = help: bind an object whose class implements Std.Io.Closeable.Closeable
+
+For more information about this error, try `neura explain E0474`.

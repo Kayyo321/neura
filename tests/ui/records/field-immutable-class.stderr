@@ -1,0 +1,9 @@
+error[E0571]: field 'm' has type 'Money', which a record cannot hold
+ --> $DIR/field-immutable-class.nra:7:20
+  |
+7 | let P = record (m: Money);
+  |                    ^^^^^ 'Money' is a class that is not a record, whose fields need not be immutable values
+  |
+  = help: declare 'Money' as a record, so that a record can hold it
+
+For more information about this error, try `neura explain E0571`.

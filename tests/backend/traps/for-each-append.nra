@@ -7,7 +7,7 @@ let program = import:Std.Program;
 // before the next element is visited.
 let Grow = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
-        let queue: string[list] = ["first", "second"];
+        let queue: string[list] = new(["first", "second"]);
         let seen: int32 = 0;
         for (let item in queue) {
             console.print_line("visit " + item);

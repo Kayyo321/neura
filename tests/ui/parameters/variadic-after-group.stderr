@@ -1,0 +1,7 @@
+error[E0207]: a variadic parameter must be last
+ --> $DIR/variadic-after-group.nra:4:42
+  |
+4 | let items = func(a: int, items: ...string, b, c: int) -> int {
+  |                                          ^
+
+For more information about this error, try `neura explain E0207`.

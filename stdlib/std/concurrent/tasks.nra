@@ -20,11 +20,11 @@ export let Tasks = module (
     /// them; nothing is cancelled.
     export let all = func<T>(calls: (func() -> T)[list]) -> T[list] {
         scope {
-            last pending: task_handles.Task<T>[list] = [];
+            last pending: task_handles.Task<T>[list] = new;
             for (let call: func() -> T in calls) {
                 pending.append(spawn call());
             }
-            last values: T[list] = [];
+            last values: T[list] = new;
             for (let task: task_handles.Task<T> in pending) {
                 values.append(task.join());
             }
@@ -40,7 +40,7 @@ export let Tasks = module (
         last count = calls.length;
         let [done, completions, closer] = channels.open<int>(count);
         scope (group) {
-            last pending: task_handles.Task<result.Result<T>>[list] = [];
+            last pending: task_handles.Task<result.Result<T>>[list] = new;
             for (let call: func() -> result.Result<T> in calls) {
                 pending.append(spawn run_indexed<T>(call, pending.length, done));
             }
@@ -54,7 +54,7 @@ export let Tasks = module (
                                 group.cancel();
                                 return result.Result<T[list]>.Err(failure);
                             },
-                            _ => { },
+                            _ => {},
                         }
                     },
                     _ => {
@@ -64,10 +64,12 @@ export let Tasks = module (
                     },
                 }
             }
-            last values: T[list] = [];
+            last values: T[list] = new;
             for (let task: task_handles.Task<result.Result<T>> in pending) {
                 match (task.join()) {
-                    result.Result.Ok(value) => { values.append(value); },
+                    result.Result.Ok(value) => {
+                        values.append(value);
+                    },
                     result.Result.Err(failure) => {
                         return result.Result<T[list]>.Err(failure);
                     },
@@ -88,7 +90,7 @@ export let Tasks = module (
         }
         let [done, completions, closer] = channels.open<int>(count);
         scope (group) {
-            last pending: task_handles.Task<result.Result<T>>[list] = [];
+            last pending: task_handles.Task<result.Result<T>>[list] = new;
             for (let call: func() -> result.Result<T> in calls) {
                 pending.append(spawn run_indexed<T>(call, pending.length, done));
             }
@@ -120,7 +122,7 @@ export let Tasks = module (
 
     // Runs a call and then reports its index on the channel, which has room for every call.
     let run_indexed = func<T>(call: func() -> result.Result<T>, index: int, done: channels.Sender<int>)
-            -> result.Result<T> {
+        -> result.Result<T> {
         last outcome = call();
         done.send(index);
         return outcome;

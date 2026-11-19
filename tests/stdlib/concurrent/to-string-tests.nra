@@ -1,0 +1,28 @@
+let atomic = import:Std.Concurrent.AtomicInt64;
+let channels = import:Std.Concurrent.Channel;
+let guarded = import:Std.Concurrent.Guarded;
+let parallel = import:Std.Concurrent.Parallel;
+let semaphore = import:Std.Concurrent.Semaphore;
+let test = import:Std.Test;
+
+let ToStringTests = module (
+    export let test_atomic_shows_its_value = func() -> void {
+        last value = atomic.create(5);
+        value.add(2);
+        test.assert_equal_string("AtomicInt64(7)", value.to_string());
+    };
+
+    export let test_channel_ends_and_handles_have_names = func() -> void {
+        const [sender, receiver, closer] = channels.open<int>(1);
+        test.assert_equal_string("Sender", sender.to_string());
+        test.assert_equal_string("Receiver", receiver.to_string());
+        test.assert_equal_string("Closer", closer.to_string());
+        test.assert_equal_string("Semaphore", semaphore.create(1).to_string());
+        test.assert_equal_string("Guarded", guarded.create<int>(new func() -> int => 1).to_string());
+    };
+
+    export let test_item_limits_shows_both_bounds = func() -> void {
+        last a = parallel.limits(1000, 64);
+        test.assert_equal_string("ItemLimits(1000 steps, 64 heap cells)", a.to_string());
+    };
+);

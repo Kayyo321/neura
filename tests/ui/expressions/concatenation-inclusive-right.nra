@@ -1,0 +1,7 @@
+// docs/design/Expressions030.md, `..=` as a statement: `..=` in the right
+// side is E0263 at that operator.
+let append = func(text: string) -> string {
+    let result = text;
+    result ..= "a" ..= "b";
+    return result;
+};

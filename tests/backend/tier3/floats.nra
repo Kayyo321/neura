@@ -304,8 +304,8 @@ let Tier3Floats = module:program.Entry (
     // it grows (its first append among them). The lists are read only after
     // the loop.
     let appends = func(rounds: int32) {
-        let grown: float64[list] = [];
-        let grown_single: float32[list] = [];
+        let grown: float64[list] = new;
+        let grown_single: float32[list] = new;
         for (let round = 0; round < rounds; round = round + 1) {
             for (let k = 0; k < wide_bits.length; k = k + 1) {
                 let a = float64.from_bits(wide_bits[k]);
@@ -331,7 +331,7 @@ let Tier3Floats = module:program.Entry (
         let elements: float64[] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         let singles: float32[] = [0.0 as float32, 0.0 as float32, 0.0 as float32, 0.0 as float32];
         let listed = lists.filled<float64>(rounds * 4, 0.0);
-        let grown: float64[list] = [];
+        let grown: float64[list] = new;
         let box = new Box();
         for (let i = 0; i < rounds * 4; i = i + 1) {
             let a = float64.from_bits(wide_bits[i % 4]);

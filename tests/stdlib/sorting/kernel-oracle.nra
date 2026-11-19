@@ -21,7 +21,7 @@ let SortingKernelOracle = module (
     let lengths: int[] = [0, 1, 2, 15, 16, 17, 31, 32, 33, 64, 100, 257];
 
     let check_int64 = func(items: int64[list]) {
-        let expected: int64[list] = [];
+        let expected: int64[list] = new;
         for (let item in items) {
             expected.append(item);
         }
@@ -36,7 +36,7 @@ let SortingKernelOracle = module (
     };
 
     let check_uint64 = func(items: uint64[list]) {
-        let expected: uint64[list] = [];
+        let expected: uint64[list] = new;
         for (let item in items) {
             expected.append(item);
         }
@@ -51,7 +51,7 @@ let SortingKernelOracle = module (
     };
 
     let check_float64 = func(items: float64[list]) {
-        let expected: float64[list] = [];
+        let expected: float64[list] = new;
         for (let item in items) {
             expected.append(item);
         }
@@ -66,7 +66,7 @@ let SortingKernelOracle = module (
     };
 
     let check_int32 = func(items: int32[list]) {
-        let expected: int32[list] = [];
+        let expected: int32[list] = new;
         for (let item in items) {
             expected.append(item);
         }
@@ -81,7 +81,7 @@ let SortingKernelOracle = module (
     };
 
     let check_uint32 = func(items: uint32[list]) {
-        let expected: uint32[list] = [];
+        let expected: uint32[list] = new;
         for (let item in items) {
             expected.append(item);
         }
@@ -107,8 +107,8 @@ let SortingKernelOracle = module (
 
     export let test_edge_corpus = func {
         for (let length in lengths) {
-            let [ascending, descending]: [int64[list], int64[list]] = [], [];
-            let [repeated, unsigned]: [int64[list], uint64[list]] = [], [];
+            let [ascending, descending]: [int64[list], int64[list]] = new, new;
+            let [repeated, unsigned]: [int64[list], uint64[list]] = new, new;
             for (let i = 0; i < length; i++) {
                 ascending.append(i as int64);
                 descending.append((length - i) as int64);
@@ -120,11 +120,11 @@ let SortingKernelOracle = module (
             check_int64(repeated);
             check_uint64(unsigned);
         }
-        check_int64([9223372036854775807, -9223372036854775808, 0, -1, 1, -9223372036854775808]);
-        check_uint64([18446744073709551615, 0, 9223372036854775808, 9223372036854775807, 1]);
-        check_int32([2147483647, -2147483648, 0, -1, 1, 2147483647]);
-        check_uint32([4294967295, 0, 2147483648, 2147483647, 1]);
-        let floats: float64[list] = [];
+        check_int64(new([9223372036854775807, -9223372036854775808, 0, -1, 1, -9223372036854775808]));
+        check_uint64(new([18446744073709551615, 0, 9223372036854775808, 9223372036854775807, 1]));
+        check_int32(new([2147483647, -2147483648, 0, -1, 1, 2147483647]));
+        check_uint32(new([4294967295, 0, 2147483648, 2147483647, 1]));
+        let floats: float64[list] = new;
         for (let bits in float_edges) {
             floats.append(float64.from_bits(bits));
         }
@@ -137,9 +137,9 @@ let SortingKernelOracle = module (
             let length = source.next_int_below(300);
             // A small range gives long runs of duplicates; the full range gives few.
             let narrow = round % 2 == 0;
-            let [signed, unsigned]: [int64[list], uint64[list]] = [], [];
-            let [floats, small]: [float64[list], int32[list]] = [], [];
-            let small_unsigned: uint32[list] = [];
+            let [signed, unsigned]: [int64[list], uint64[list]] = new, new;
+            let [floats, small]: [float64[list], int32[list]] = new, new;
+            let small_unsigned: uint32[list] = new;
             for (let i = 0; i < length; i++) {
                 let word = source.next_uint64();
                 if (narrow) {

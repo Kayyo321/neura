@@ -19,9 +19,22 @@ namespace {
 
 constexpr std::uint32_t none = nvr::absent;
 
+// The slots a call's result fills: the result slot, then one more per extra
+// result word of a multi-word callee (NVR 1.7).
+std::uint32_t result_slot_count(const nvr::Image& image, const nvr::Exit& exit) {
+    return exit.kind == nvr::ExitKind::Call
+               ? 1U + static_cast<std::uint32_t>(image.functions[exit.target].more_results.size())
+               : 1U;
+}
+
+// Whether `exit` is a state operation that runs inside a region or program
+// as an inline operation. A storage region operation never does (NVR 1.7):
+// a function program runs it as a helper, through the reference state, and
+// a region ends there.
 bool internal_exit(const nvr::Exit& exit) {
     return exit.kind == nvr::ExitKind::Continue ||
-           (exit.kind == nvr::ExitKind::State && inline_state_operation(exit));
+           (exit.kind == nvr::ExitKind::State && inline_state_operation(exit) &&
+            !nvr::is_region_operation(exit.operation) && !nvr::is_hook_operation(exit.operation));
 }
 
 // --- Region optimization (tier2.hpp, "Optimization") ---------------------
@@ -142,8 +155,8 @@ unsigned result_bits(const lift::Instruction& in, unsigned a, unsigned b) {
 
 class Optimizer {
 public:
-    Optimizer(Region& region, std::vector<std::uint8_t> slot_widths)
-        : region_(region), slot_widths_(std::move(slot_widths)) {}
+    Optimizer(const nvr::Image& image, Region& region, std::vector<std::uint8_t> slot_widths)
+        : image_(image), region_(region), slot_widths_(std::move(slot_widths)) {}
 
     void run() {
         for (const auto& [reg, value] : region_.immediates) immediate_values_[reg] = value;
@@ -165,6 +178,7 @@ public:
     }
 
 private:
+    const nvr::Image& image_;
     std::size_t size() const { return region_.code.size(); }
     bool is_slot(std::uint32_t reg) const { return reg < region_.slots.size(); }
 
@@ -223,7 +237,13 @@ private:
             for (unsigned i = 0; i < op.width; ++i) use(region_.operands[op.other + i]);
             break;
         case Code::Return:
-            if (op.a != none) use(op.a);
+            // One register per result word (NVR 1.7): operands[other, other +
+            // width); a single word is also `a`.
+            if (op.width > 1) {
+                for (unsigned i = 0; i < op.width; ++i) use(region_.operands[op.other + i]);
+            } else if (op.a != none) {
+                use(op.a);
+            }
             break;
         case Code::Dispatch:
             use(op.a);
@@ -250,6 +270,21 @@ private:
             return std::nullopt;
         default:
             return std::nullopt;
+        }
+    }
+
+    // The registers an op writes: the definition, and for a call of a function
+    // with several result words (NVR 1.7) the consecutive slots after the
+    // result slot, which the callee's return writes too.
+    template <typename F>
+    void each_definition(const Op& op, F&& define) const {
+        const auto first = definition(op);
+        if (!first) return;
+        define(*first);
+        if (op.code != Code::Call) return;
+        const auto& more = image_.functions[op.a].more_results;
+        for (std::uint32_t word = 1; word <= more.size(); ++word) {
+            if (*first + word < region_.register_count) define(*first + word);
         }
     }
 
@@ -331,6 +366,11 @@ private:
             const auto& op = region_.code[pc];
             if (!deleted_.contains(pc)) {
                 if (const auto dst = definition(op)) out[*dst] = width_of(op, widths_[pc]);
+                if (op.code == Code::Call) {
+                    each_definition(op, [&](std::uint32_t reg) {
+                        if (reg != *definition(op)) out[reg] = 64;
+                    });
+                }
             }
             for (const auto next : successors(pc)) {
                 if (next >= size()) continue;
@@ -448,7 +488,7 @@ private:
             auto out = *facts[pc];
             const auto& op = region_.code[pc];
             if (!deleted_.contains(pc)) {
-                if (const auto dst = definition(op)) out.erase(*dst);
+                each_definition(op, [&](std::uint32_t reg) { out.erase(reg); });
             }
             if (op.code == Code::Branch && !deleted_.contains(pc)) {
                 auto when_true = out;
@@ -515,8 +555,9 @@ private:
         // nothing between the comparison and the branch writes them.
         for (auto pc = compare + 1; pc < branch; ++pc) {
             if (deleted_.contains(pc)) continue;
-            const auto dst = definition(region_.code[pc]);
-            if (dst && (*dst == op.a || *dst == op.b)) return;
+            bool written = false;
+            each_definition(region_.code[pc], [&](std::uint32_t reg) { written = written || reg == op.a || reg == op.b; });
+            if (written) return;
         }
         // An unsigned comparison compares whole registers: both must fit
         // its width for the facts to be about `width`-bit values.
@@ -596,7 +637,7 @@ private:
                     clear = false;
                 }
                 each_use(op, [&](std::uint32_t& reg) { clear = clear && reg != slot; });
-                if (const auto dst = definition(op); dst && *dst == slot) clear = false;
+                each_definition(op, [&](std::uint32_t reg) { clear = clear && reg != slot; });
             }
             if (!clear) continue;
             auto& lift = region_.code[def->second];
@@ -654,6 +695,15 @@ public:
         : image_(image), function_(image.functions[function]), blocks_(blocks), forms_(forms), program_(program),
           checkable_(checkable) {
         region_.function = function;
+        const auto uses = [&](nvr::StateOp operation) {
+            return std::ranges::any_of(function_.blocks, [&](const nvr::Block& block) {
+                return std::ranges::any_of(block.exits, [&](const nvr::Exit& exit) {
+                    return exit.kind == nvr::ExitKind::State && exit.operation == operation;
+                });
+            });
+        };
+        opens_hook_ = uses(nvr::StateOp::HookEnter);
+        region_.enters_region = opens_hook_ || uses(nvr::StateOp::EnterRegion);
         region_.entry = blocks.front();
         region_.blocks = blocks;
         region_.program = program;
@@ -696,7 +746,11 @@ public:
         }
         // NEURA_TIER2_NO_OPTIMIZE=1 keeps the program as compiled, to
         // compare against the optimized one when debugging.
-        if (!std::getenv("NEURA_TIER2_NO_OPTIMIZE")) Optimizer(region_, std::move(widths)).run();
+#ifdef NEURA_WASM_RUNTIME
+        Optimizer(image_, region_, std::move(widths)).run();
+#else
+        if (!std::getenv("NEURA_TIER2_NO_OPTIMIZE")) Optimizer(image_, region_, std::move(widths)).run();
+#endif
         return std::make_shared<const Region>(std::move(region_));
     }
 
@@ -728,6 +782,13 @@ private:
     bool takes(std::uint32_t local, const nvr::Exit& exit) const {
         if (stub(local)) return false;
         if (exit.arguments.size() > max_count) return false;
+        // Class hook events and their frame returns run at tier 1.
+        if (exit.kind == nvr::ExitKind::State && nvr::is_hook_operation(exit.operation)) return false;
+        if (exit.kind == nvr::ExitKind::Return && opens_hook_) return false;
+        // Storage regions (NVR 1.7): a region operation is not internal, so a
+        // function program runs it as a helper (the reference state keeps the
+        // task's regions beside its frames), and its Return releases what the
+        // frame left open (tier2_steps.inc, run_program).
         if (internal_exit(exit)) return true;
         if (!program_ || checkable_) return false;
         return exit.kind == nvr::ExitKind::Call || exit.kind == nvr::ExitKind::Return ||
@@ -817,7 +878,9 @@ private:
             for (const auto& assignment : exit.assignments) set[assignment.slot] = 1;
             if ((exit.kind == nvr::ExitKind::State || exit.kind == nvr::ExitKind::Call) &&
                 exit.result_slot != none) {
-                set[exit.result_slot] = 1;
+                for (std::uint32_t word = 0; word < result_slot_count(image_, exit); ++word) {
+                    if (exit.result_slot + word < set.size()) set[exit.result_slot + word] = 1;
+                }
             }
         };
         for (auto& entry : region_.entries) {
@@ -952,7 +1015,9 @@ private:
                     }
                     if ((exit.kind == nvr::ExitKind::Call || exit.kind == nvr::ExitKind::State) &&
                         exit.result_slot < count) {
-                        set(v, exit.result_slot);
+                        for (std::uint32_t word = 0; word < result_slot_count(image_, exit); ++word) {
+                            if (exit.result_slot + word < count) set(v, exit.result_slot + word);
+                        }
                     }
                     add(exit.resume, v);
                     if (exit.kind == nvr::ExitKind::Host) add(exit.error_resume, v);
@@ -1149,16 +1214,18 @@ private:
 
     // The register of constant `index` masked to `width` bits. A scalar
     // constant's value is its payload, little-endian, as the executor
-    // reads it (Execution::State::start): it becomes an immediate. A text
-    // or bytes constant is a handle the run assigns: it is loaded from the
-    // run's constants at entry.
+    // reads it (Execution::State::start): it becomes an immediate. Text,
+    // bytes and static objects use handles the run assigns and load the
+    // materialized value from the run's constants at entry.
     std::uint32_t constant_register(std::uint32_t index, unsigned width) {
         const auto key = std::make_pair(index, std::min(width, 64U));
         if (const auto it = constant_registers_.find(key); it != constant_registers_.end()) return it->second;
         const auto reg = temporary();
         const auto& constant = image_.constants[index];
-        const auto kind = image_.types[constant.type].kind;
-        if (kind != nvr::TypeKind::Text && kind != nvr::TypeKind::Bytes && constant.payload.size() <= 8) {
+        const auto& type = image_.types[constant.type];
+        const bool materialized = type.kind == nvr::TypeKind::Text || type.kind == nvr::TypeKind::Bytes ||
+                                  nvr::is_static_object_constant(type, constant);
+        if (!materialized && constant.payload.size() <= 8) {
             std::uint64_t bits = 0;
             for (std::size_t b = 0; b < constant.payload.size(); ++b) {
                 bits |= std::uint64_t{constant.payload[b]} << (8 * b);
@@ -1530,6 +1597,13 @@ private:
             op.code = Code::Return;
             op.block = image_block;
             op.a = arguments.empty() ? none : arguments.front();
+            if (arguments.size() > 1) {
+                // A function with several result words (NVR 1.7): one
+                // register per word, in operands[other, other + width).
+                op.other = static_cast<std::uint32_t>(region_.operands.size());
+                op.width = width_of_count(arguments.size());
+                region_.operands.insert(region_.operands.end(), arguments.begin(), arguments.end());
+            }
             emit(op);
             return;
         }
@@ -1569,6 +1643,7 @@ private:
     // A function program (Region::program), compiled for the region check.
     bool program_ = false;
     bool checkable_ = false;
+    bool opens_hook_ = false;
     std::map<std::uint32_t, std::uint32_t> local_;
     Region region_;
     std::map<std::uint32_t, std::uint32_t> slot_registers_;
@@ -1582,6 +1657,7 @@ private:
 } // namespace
 
 bool inline_state_operation(const nvr::Exit& exit) {
+    if (nvr::extended_reference_state(exit)) return false;
     switch (exit.operation) {
     case nvr::StateOp::ReadTag:
     case nvr::StateOp::ReadField:
@@ -1592,6 +1668,8 @@ bool inline_state_operation(const nvr::Exit& exit) {
     case nvr::StateOp::ReadElement:
     case nvr::StateOp::WriteElement:
     case nvr::StateOp::ReadVersion:
+    case nvr::StateOp::ReadComponent:
+    case nvr::StateOp::WriteComponent:
     case nvr::StateOp::TextEqual:
     case nvr::StateOp::ClassIs:
     case nvr::StateOp::ClassCast:
@@ -1767,8 +1845,12 @@ std::string describe(const Region& region) {
             out << " function " << op.a << " block " << op.block << " resume at " << op.target;
             break;
         case Code::Return:
-            out << " " << (op.a == none ? std::string("nothing") : "r" + std::to_string(op.a)) << " block "
-                << op.block;
+            if (op.width > 1) {
+                for (unsigned i = 0; i < op.width; ++i) out << " r" << region.operands[op.other + i];
+            } else {
+                out << " " << (op.a == none ? std::string("nothing") : "r" + std::to_string(op.a));
+            }
+            out << " block " << op.block;
             break;
         case Code::Dispatch: out << " r" << op.a << " table " << op.index << " block " << op.block; break;
         case Code::Helper:
@@ -1854,7 +1936,9 @@ TierCache::RegionResolution TierCache::region(std::uint32_t function, std::uint3
         retired_regions_.push_back(std::move(found.region));
         found.region = std::move(formation.region);
         ++statistics_.refreshed;
+#ifndef NEURA_WASM_RUNTIME
         if (std::getenv("NEURA_TIER_DUMP")) std::fputs(tier2::describe(*found.region).c_str(), stderr);
+#endif
         return {found.region.get(), true, found.refresh_at};
     }
     if (formation.pending && arrivals < patience) {
@@ -1867,7 +1951,9 @@ TierCache::RegionResolution TierCache::region(std::uint32_t function, std::uint3
     found.state = RegionEntry::State::Settled;
     found.refresh_at = formation.pending ? arrivals * 4 : 0;
     found.region = std::move(formation.region);
+#ifndef NEURA_WASM_RUNTIME
     if (found.region && std::getenv("NEURA_TIER_DUMP")) std::fputs(tier2::describe(*found.region).c_str(), stderr);
+#endif
     if (found.region) {
         ++statistics_.regions;
         statistics_.region_blocks += found.region->blocks.size();
@@ -1905,11 +1991,22 @@ void TierCache::add_region_events(const RegionCounts& counts,
 }
 
 TierCache::RegionResolution TierCache::program(std::uint32_t function, std::uint64_t arrivals) {
+    // With deferred proofs a program is checked again at arrivals that grow
+    // by an eighth, and formed again only when an idle proof has settled one
+    // of the function's blocks since it was formed.
+    const auto next_check = [](std::uint64_t at) { return at + std::max<std::uint64_t>(at / 8, 16); };
+    std::uint64_t settled_before = 0;
     {
         const std::lock_guard lock(mutex_);
         auto& found = programs_[function];
         if (found.state == RegionEntry::State::Settled &&
             (found.refresh_at == 0 || arrivals < found.refresh_at || found.refreshing)) {
+            return {found.region.get(), true, found.refresh_at};
+        }
+        settled_before = settled_proofs_[function];
+        if (found.state == RegionEntry::State::Settled && options_.defer_proofs &&
+            settled_before == found.formed_after) {
+            found.refresh_at = next_check(arrivals);
             return {found.region.get(), true, found.refresh_at};
         }
         if (found.state == RegionEntry::State::Forming) return {nullptr, false, std::max<std::uint64_t>(arrivals * 2, 2)};
@@ -1971,15 +2068,23 @@ TierCache::RegionResolution TierCache::program(std::uint32_t function, std::uint
         // refresh again later while blocks are still pending.
         found.refreshing = false;
         ++found.refreshes;
-        found.refresh_at = formation.pending && found.refreshes < 4 ? arrivals * 4 : 0;
+        found.formed_after = settled_before;
+        found.refresh_at = !formation.pending           ? 0
+                           : options_.defer_proofs     ? next_check(arrivals)
+                           : found.refreshes < 4       ? arrivals * 4
+                                                       : 0;
         if (!formation.region) return {found.region.get(), true, found.refresh_at};
         auto region = std::const_pointer_cast<tier2::Region>(formation.region);
         region->program_id = next_program_id_++;
+#ifndef NEURA_WASM_RUNTIME
         make_dispatch_records(*region);
+#endif
         retired_regions_.push_back(std::move(found.region));
         found.region = std::move(region);
         ++statistics_.refreshed;
+#ifndef NEURA_WASM_RUNTIME
         if (std::getenv("NEURA_TIER_DUMP")) std::fputs(tier2::describe(*found.region).c_str(), stderr);
+#endif
         return {found.region.get(), true, found.refresh_at};
     }
     if (!formation.region && formation.pending && arrivals < patience) {
@@ -1992,22 +2097,28 @@ TierCache::RegionResolution TierCache::program(std::uint32_t function, std::uint
         ++statistics_.program_rejections[formation.reason];
         return {nullptr, true, 0};
     }
-    found.refresh_at = formation.pending ? arrivals * 4 : 0;
+    found.formed_after = settled_before;
+    found.refresh_at = !formation.pending ? 0 : options_.defer_proofs ? next_check(arrivals) : arrivals * 4;
     // The cache numbers its programs; a run keeps one register image per
     // number (tier2_steps.inc).
     auto region = std::const_pointer_cast<tier2::Region>(formation.region);
     region->program_id = next_program_id_++;
+#ifndef NEURA_WASM_RUNTIME
     make_dispatch_records(*region);
+#endif
     found.region = std::move(region);
     ++statistics_.programs;
     statistics_.program_blocks += found.region->blocks.size();
     statistics_.program_stubs += found.region->stubs;
     statistics_.program_entries += found.region->entries.size();
     statistics_.checks_eliminated += found.region->eliminated_checks;
+#ifndef NEURA_WASM_RUNTIME
     if (std::getenv("NEURA_TIER_DUMP")) std::fputs(tier2::describe(*found.region).c_str(), stderr);
+#endif
     return {found.region.get(), true, found.refresh_at};
 }
 
+#ifndef NEURA_WASM_RUNTIME
 const jit::Program* TierCache::native(const tier2::Region& region) {
     const std::lock_guard lock(mutex_);
     const auto [it, inserted] = native_.try_emplace(&region);
@@ -2031,5 +2142,6 @@ void TierCache::note_jit(jit::Mode mode, const jit::Availability& availability) 
     statistics_.jit_mode = jit::mode_name(mode);
     if (!availability.enabled) statistics_.jit_off = availability.reason;
 }
+#endif
 
 } // namespace neura::nvm

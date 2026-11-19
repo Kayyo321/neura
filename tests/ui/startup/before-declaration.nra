@@ -1,0 +1,6 @@
+// Case 74: a block cannot read a global written below it.
+static scope {
+    let early: int32 = current;
+}
+
+let current: int32 = 1;

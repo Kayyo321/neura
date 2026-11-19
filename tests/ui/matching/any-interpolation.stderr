@@ -1,0 +1,10 @@
+error[E0493]: operation is not defined for any
+ --> $DIR/any-interpolation.nra:4:41
+  |
+4 | let read = func(v: any) -> string => $"{v}";
+  |                                         ^ formatting is not defined for any
+  |
+  = note: an any is not formatted; match it first
+  = help: match the value first, with 'match.is'
+
+For more information about this error, try `neura explain E0493`.

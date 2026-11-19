@@ -12,7 +12,7 @@ export let FunctionDescriptor = module (
         /// @brief The result layout, or None for a void function.
         last result: Optional<MemoryLayout>;
         /// @brief The argument layouts.
-        last arguments: MemoryLayout[list] = [];
+        last arguments: MemoryLayout[list] = new;
 
         /// @brief Use of or of_void.
         export let init = func(result_layout: Optional<MemoryLayout>, argument_layouts: MemoryLayout[list]) {
@@ -30,7 +30,7 @@ export let FunctionDescriptor = module (
         /// @brief A copy of the argument layouts.
         #Pure
         export let argument_layouts = func -> MemoryLayout[list] {
-            last copy: MemoryLayout[list] = [];
+            last copy: MemoryLayout[list] = new;
             for (let layout in arguments) {
                 copy.append(layout);
             }
@@ -47,12 +47,12 @@ export let FunctionDescriptor = module (
         };
 
         /// @brief Descriptors with the same layouts are equal.
-        #Pure
+        /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is FunctionDescriptor)) {
+            if (other is not that: FunctionDescriptor) {
                 return false;
             }
-            return to_string() == (other as FunctionDescriptor).to_string();
+            return to_string() == that.to_string();
         };
 
         /// @brief Hashes the text form.
@@ -66,7 +66,7 @@ export let FunctionDescriptor = module (
             for (let layout in arguments) {
                 text = text + layout.to_string();
             }
-            return text + ")" + match (result) {
+            return text .. ")" .. match (result) {
                 Optional.Some(layout) => layout.to_string(),
                 Optional.None => "v",
             };
@@ -92,7 +92,7 @@ export let FunctionDescriptor = module (
 
     /// @brief The layouts of an array as a list.
     let listed = func(layouts: MemoryLayout[]) -> MemoryLayout[list] {
-        last list: MemoryLayout[list] = [];
+        last list: MemoryLayout[list] = new;
         for (let layout in layouts) {
             list.append(layout);
         }

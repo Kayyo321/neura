@@ -1,0 +1,2 @@
+// An unknown name (edge case 87).
+let text = nameof(missing);

@@ -1,0 +1,10 @@
+error[E0574]: invalid virtual accessor
+ --> $DIR/virtual-in-interface.nra:4:15
+  |
+4 |         | get.virtual;
+  |               ^^^^^^^ '.virtual' has no meaning in an interface
+  |
+  = note: every property of an interface is reached through the receiver's class
+  = help: write the clause as '| get;'
+
+For more information about this error, try `neura explain E0574`.

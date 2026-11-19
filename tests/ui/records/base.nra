@@ -1,0 +1,3 @@
+// A record has no base class (edge case 9).
+let Base = class ();
+let P = record: Base (x: int);

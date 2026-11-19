@@ -1,0 +1,9 @@
+error[E0477]: a generator's parameter cannot have type '&int32'
+ --> $DIR/generator-reference-parameter.nra:2:31
+  |
+2 | let numbers = iterator(count: &int) -> int {
+  |                               ^^^^ this storage belongs to the frame that calls the generator, which a 'yield' outlives
+  |
+  = help: use a list, which the generator's state can hold
+
+For more information about this error, try `neura explain E0477`.

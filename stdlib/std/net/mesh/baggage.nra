@@ -1,0 +1,361 @@
+let errors = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let headers = import:Std.Net.Http.Headers;
+let.promote _ = import:Std.Core.Optional;
+let percent = import:Std.Net.Core.PercentEncoding;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let utf8 = import:Std.Encoding.Utf8;
+
+/// @brief The W3C `baggage` header: application key/value pairs with optional properties.
+///
+/// Follows `baggage/HTTP_HEADER_FORMAT.md` of w3c/baggage (main branch, fetched 2026-11-17). A list-member is
+/// `key OWS "=" OWS value` followed by `;`-separated properties, each `key` or `key=value`; keys are RFC 7230
+/// tokens and spaces or tabs around keys, values and members are ignored. The text is split at the first `=`, so a
+/// value may itself contain `=`. Values are percent-decoded; a decoded byte sequence that is not UTF-8 is replaced
+/// with U+FFFD as the spec requires. On output every byte outside `baggage-octet`, and `%`, is percent-encoded with
+/// uppercase hex. Parsing accepts at most 180 list-members (the ABNF's bound); empty members, as left by combining
+/// several `baggage` fields, are skipped. A malformed member fails the whole parse (the spec leaves this to the
+/// implementation). `to_header` applies the propagation limits: it keeps whole members from the left while the
+/// result holds at most 64 members and 8192 bytes, and never emits a partial member. A `Baggage` is immutable;
+/// `set` and `remove` return a new one.
+/// @see [Std.Net.Mesh.Baggage](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Mesh-Baggage)
+#Since("0.3.0")
+export let Baggage = module (
+    /// @brief The most list-members `to_header` emits.
+    export const MaxMembers: int = 64;
+    /// @brief The most bytes `to_header` emits.
+    export const MaxBytes: int = 8192;
+    /// @brief The most list-members `parse` accepts (`0*179` repetitions after the first).
+    export const MaxParsedMembers: int = 180;
+
+    /// @brief One property of a list-member: a key with an optional decoded value.
+    #[Final, Immutable]
+    export let Property = class (
+        /// @brief The property key, a token.
+        export last key: string;
+        /// @brief The decoded value, absent for a key-only property.
+        export last value: Optional<string>;
+
+        /// @brief A property. A key that is not a token traps with "invalid argument: key".
+        export let init = func(name: string, decoded: Optional<string>) {
+            if (not headers.is_token(name)) {
+                trap_with_message("invalid argument: key");
+            }
+            key = name;
+            value = decoded;
+        };
+
+        /// @brief The encoded form, `key` or `key=value`.
+        #NoDiscard
+        export let to_header = func -> string => match (value) {
+            Optional.Some(text) => key .. "=" .. encode(text),
+            Optional.None => key,
+        };
+
+        /// @brief Equal when the key and value are.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: Property) {
+                return false;
+            }
+            return to_header() == that.to_header();
+        };
+
+        /// @brief The hash of the encoded form.
+        export let.override hash_code = func -> uint32 => strings.hash(to_header());
+
+        /// @brief The encoded form.
+        export let.override to_string = func -> string => to_header();
+    );
+
+    /// @brief One list-member: key, decoded value, and properties in order.
+    #Final
+    export let Entry = class (
+        /// @brief The key, a token.
+        export last key: string;
+        /// @brief The decoded value.
+        export last value: string;
+        /// @brief The properties in order.
+        last props: Property[list];
+
+        /// @brief An entry (the property list is copied). A key that is not a token traps with "invalid argument:
+        /// key".
+        export let init = func(name: string, decoded: string, properties: Property[list]) {
+            if (not headers.is_token(name)) {
+                trap_with_message("invalid argument: key");
+            }
+            key = name;
+            value = decoded;
+            props = new;
+            for (let p in properties) {
+                props.append(p);
+            }
+        };
+
+        /// @brief The number of properties.
+        #NoDiscard
+        export let property_count = func -> int => props.length;
+
+        /// @brief The property at `index`.
+        #NoDiscard
+        export let property_at = func(index: int) -> Property => props[index];
+
+        /// @brief The encoded member, `key=value;prop;prop=value`, without spaces.
+        #NoDiscard
+        export let to_header = func -> string {
+            let text = key .. "=" .. encode(value);
+            for (let p in props) {
+                text ..= ";" .. p.to_header();
+            }
+            return text;
+        };
+
+        /// @brief Equal when the encoded members are.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: Entry) {
+                return false;
+            }
+            return to_header() == that.to_header();
+        };
+
+        /// @brief The hash of the encoded member.
+        export let.override hash_code = func -> uint32 => strings.hash(to_header());
+
+        /// @brief The encoded member.
+        export let.override to_string = func -> string => to_header();
+    );
+
+    /// @brief The list-members of one baggage, in order; duplicate keys are kept as received.
+    #Final
+    export let Baggage = class (
+        /// @brief The members.
+        last members: Entry[list];
+
+        /// @brief A baggage over `entries` (copied).
+        export let init = func(entries: Entry[list]) {
+            members = new;
+            for (let e in entries) {
+                members.append(e);
+            }
+        };
+
+        /// @brief The number of list-members.
+        #NoDiscard
+        export let size = func -> int => members.length;
+
+        /// @brief Whether there are no list-members.
+        #NoDiscard
+        export let is_empty = func -> bool => members.length == 0;
+
+        /// @brief The member at `index`.
+        #NoDiscard
+        export let entry_at = func(index: int) -> Entry => members[index];
+
+        /// @brief The value of the first member named `key`.
+        #NoDiscard
+        export let get = func(key: string) -> Optional<string> {
+            for (let e in members) {
+                if (e.key == key) {
+                    return Optional<string>.Some(e.value);
+                }
+            }
+            return Optional<string>.None;
+        };
+
+        /// @brief A baggage where `key` has `value` and no properties: the first member named `key` is replaced in
+        /// place and later ones removed, or the member is appended. A key that is not a token traps with "invalid
+        /// argument: key".
+        #NoDiscard
+        export let set = func(key: string, value: string) -> Baggage {
+            last entry = new Entry(key, value, new);
+            last out: Entry[list] = new;
+            let placed = false;
+            for (let e in members) {
+                if (e.key != key) {
+                    out.append(e);
+                } else if (not placed) {
+                    out.append(entry);
+                    placed = true;
+                }
+            }
+            if (not placed) {
+                out.append(entry);
+            }
+            return new Baggage(out);
+        };
+
+        /// @brief A baggage without the members named `key`.
+        #NoDiscard
+        export let remove = func(key: string) -> Baggage {
+            last out: Entry[list] = new;
+            for (let e in members) {
+                if (e.key != key) {
+                    out.append(e);
+                }
+            }
+            return new Baggage(out);
+        };
+
+        /// @brief The header value within the propagation limits: whole members from the left while the result
+        /// holds at most 64 members and 8192 bytes; members are joined by "," without spaces.
+        #NoDiscard
+        export let to_header = func -> string {
+            let text = "";
+            let count = 0;
+            for (let e in members) {
+                last member = e.to_header();
+                last added = (count > 0 ? 1 : 0) + member.byte_length;
+                if (count == MaxMembers || text.byte_length + added > MaxBytes) {
+                    break;
+                }
+                text ..= (count > 0 ? "," : "") .. member;
+                count++;
+            }
+            return text;
+        };
+
+        /// @brief Equal when every member and the order are.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: Baggage) {
+                return false;
+            }
+            if (members.length != that.members.length) {
+                return false;
+            }
+            for (let i = 0; i < members.length; i++) {
+                return false unless members[i].equals(that.members[i]);
+            }
+            return true;
+        };
+
+        /// @brief Combines the member hashes.
+        export let.override hash_code = func -> uint32 {
+            let hash: uint32 = 17;
+            for (let e in members) {
+                hash = hashing.combine(hash, e.hash_code());
+            }
+            return hash;
+        };
+
+        /// @brief Text such as "Baggage(3 members)".
+        export let.override to_string = func -> string => "Baggage(" .. members.length.to_string() .. " members)";
+    );
+
+    /// @brief A baggage with no members.
+    #NoDiscard
+    export let empty = func -> Baggage => new Baggage(new);
+
+    /// @brief Parses a combined `baggage` value by the rules described for the module.
+    #NoDiscard
+    export let parse = func(text: string) -> Result<Baggage> {
+        last entries: Entry[list] = new;
+        let start = 0;
+        while (start <= text.byte_length) {
+            let end = start;
+            while (end < text.byte_length && text.byte_at(end) != 44) {
+                end++;
+            }
+            last member = trim_ows(text.slice(start, end));
+            if (member.byte_length > 0) {
+                if (entries.length == MaxParsedMembers) {
+                    return fail(start, "more than 180 list-members");
+                }
+                last parts = strings.split(member, ";");
+                last first = parts[0];
+                last eq = strings.index_of(first, "=");
+                if (eq < 0) {
+                    return fail(start, "a list-member has no '='");
+                }
+                last key = trim_ows(first.slice(0, eq));
+                return fail(start, "the key '" .. key .. "' is not a token") unless headers.is_token(key);
+                let value = "";
+                match (decode(trim_ows(first.slice(eq + 1, first.byte_length)))) {
+                    Optional.Some(text) => {
+                        value = text;
+                    },
+                    Optional.None => {
+                        return fail(start, "the value of '" .. key .. "' is not baggage-octets or percent-encoding");
+                    },
+                }
+                last props: Property[list] = new;
+                for (let i = 1; i < parts.length; i++) {
+                    last prop = parts[i];
+                    last peq = strings.index_of(prop, "=");
+                    last pkey = trim_ows(peq < 0 ? prop : prop.slice(0, peq));
+                    return fail(start, "a property key of '" .. key .. "' is not a token") unless headers.is_token(pkey);
+                    if (peq < 0) {
+                        props.append(new Property(pkey, Optional<string>.None));
+                    } else {
+                        last pvalue = decode(trim_ows(prop.slice(peq + 1, prop.byte_length)));
+                        match (pvalue) {
+                            Optional.Some(text) => {
+                                props.append(new Property(pkey, pvalue));
+                            },
+                            Optional.None => {
+                                return fail(start, "a property value of '" .. key .. "' is invalid");
+                            },
+                        }
+                    }
+                }
+                entries.append(new Entry(key, value, props));
+            }
+            start = end + 1;
+        }
+        return Result<Baggage>.Ok(new Baggage(entries));
+    };
+
+    /// @brief Whether `b` is a baggage-octet: 0x21, 0x23-0x2B, 0x2D-0x3A, 0x3C-0x5B, 0x5D-0x7E.
+    #NoDiscard
+    export let is_baggage_octet = func(b: uint8) -> bool =>
+        b == 33 || (b >= 35 && b <= 43) || (b >= 45 && b <= 58) || (b >= 60 && b <= 91) || (b >= 93 && b <= 126);
+
+    /// @brief `value` with every byte of its UTF-8 form outside `baggage-octet`, and `%`, percent-encoded.
+    #NoDiscard
+    export let encode = func(value: string) -> string {
+        last out: uint8[list] = new;
+        for (let b in utf8.encode(value)) {
+            if (is_baggage_octet(b) && b != 37) {
+                out.append(b);
+            } else {
+                out.append(37);
+                out.append(upper_hex(b / 16));
+                out.append(upper_hex(b % 16));
+            }
+        }
+        return strings.from_bytes_lossy(out);
+    };
+
+    /// @brief The decoded value, or None when a byte is not a baggage-octet or a `%` is not a full triplet.
+    /// Decoded bytes that are not UTF-8 become U+FFFD.
+    #NoDiscard
+    export let decode = func(text: string) -> Optional<string> {
+        for (let i = 0; i < text.byte_length; i++) {
+            return Optional<string>.None unless is_baggage_octet(text.byte_at(i));
+        }
+        return match (percent.decode_bytes(text)) {
+            Result.Ok(bytes) => Optional<string>.Some(utf8.decode_lossy(bytes)),
+            Result.Err(e) => Optional<string>.None,
+        };
+    };
+
+    /// @brief The ASCII code of an uppercase hex digit for 0 to 15.
+    let upper_hex = func(value: uint8) -> uint8 => value < 10 ? value + 48 : value + 55;
+
+    /// @brief `text` without leading and trailing spaces and tabs.
+    let trim_ows = func(text: string) -> string {
+        let start = 0;
+        let end = text.byte_length;
+        while (start < end && text.byte_at(start) == 32 or 9) {
+            start++;
+        }
+        while (end > start && text.byte_at(end - 1) == 32 or 9) {
+            end--;
+        }
+        return text.slice(start, end);
+    };
+
+    /// @brief A parse error at `offset`.
+    let fail = func(offset: int, text: string) -> Result<Baggage> =>
+        Result<Baggage>.Err(errors.Error.Parse { kind: errors.ParseErrorKind.Syntax, offset: offset,
+            message: "baggage: " .. text });
+);

@@ -11,7 +11,7 @@ export let ByteBuffer = module (
     #[Final, NotThreadSafe]
     export let ByteBuffer = class (
         /// @brief Stores all bytes written since construction or the last clear.
-        let data: uint8[list] = [];
+        let data: uint8[list] = new;
 
         /// @brief The current number of bytes. Read-only.
         #Since("0.2.0")
@@ -30,18 +30,17 @@ export let ByteBuffer = module (
 
         /// @brief Discards all accumulated bytes.
         export let clear = func {
-            last empty: uint8[list] = [];
+            last empty: uint8[list] = new;
             data = empty;
         };
 
         /// @brief Only the current byte sequence participates. Readers hold their own copies and do not affect
         /// the buffer's equality or hash.
-        #Pure
+        /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is ByteBuffer)) {
+            if (other is not buffer: ByteBuffer) {
                 return false;
             }
-            last buffer = other as ByteBuffer;
             return data === buffer.data;
         };
 
@@ -58,7 +57,7 @@ export let ByteBuffer = module (
         export let reader = func -> func(int) -> Result<uint8[list]> {
             last snapshot = to_list();
             last position = cell.of<int>(0);
-            return func(max: int) -> Result<uint8[list]> {
+            return new func(max: int) -> Result<uint8[list]> {
                 bytes.check_maximum(max);
                 last start = position.value;
                 let end = snapshot.length;

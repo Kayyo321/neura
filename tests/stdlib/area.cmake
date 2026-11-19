@@ -44,9 +44,22 @@ function(neura prefix directory)
     set("${prefix}_stderr" "${stderr}" PARENT_SCOPE)
 endfunction()
 
-# Test files.
+# Test files. A long area may be split into several CTest entries (see
+# NEURA_STDLIB_SPLIT_FILES in CMakeLists.txt): ONLY_FILE runs that one test
+# file and nothing else; SKIP_FILES (names without .nra, separated by commas) leaves
+# those files to their own entries.
 file(GLOB test_files "${area_dir}/*.nra")
 list(SORT test_files)
+if(DEFINED ONLY_FILE)
+    set(test_files "${area_dir}/${ONLY_FILE}.nra")
+    if(NOT EXISTS "${test_files}")
+        message(FATAL_ERROR "${AREA}: no test file ${ONLY_FILE}.nra")
+    endif()
+endif()
+string(REPLACE "," ";" SKIP_FILES "${SKIP_FILES}")
+foreach(skipped IN LISTS SKIP_FILES)
+    list(REMOVE_ITEM test_files "${area_dir}/${skipped}.nra")
+endforeach()
 foreach(file IN LISTS test_files)
     get_filename_component(name "${file}" NAME_WE)
     file(STRINGS "${file}" test_options_line REGEX "^// test-options: ")
@@ -61,8 +74,8 @@ foreach(file IN LISTS test_files)
     neura(second "${TEST_DIR}" test --stats ${test_options} ${support} "${file}")
     file(STRINGS "${file}" host_dependent REGEX "^// host-dependent-counts: [^ ]")
     if(host_dependent)
-        string(REGEX REPLACE " \\(steps [0-9]+, peak heap cells [0-9]+\\)" "" first_compared "${first_stdout}")
-        string(REGEX REPLACE " \\(steps [0-9]+, peak heap cells [0-9]+\\)" "" second_compared "${second_stdout}")
+        string(REGEX REPLACE " \\(steps [0-9]+, peak heap cells [0-9]+(, peak stack cells [0-9]+)?\\)" "" first_compared "${first_stdout}")
+        string(REGEX REPLACE " \\(steps [0-9]+, peak heap cells [0-9]+(, peak stack cells [0-9]+)?\\)" "" second_compared "${second_stdout}")
     else()
         set(first_compared "${first_stdout}")
         set(second_compared "${second_stdout}")
@@ -71,7 +84,7 @@ foreach(file IN LISTS test_files)
         message(FATAL_ERROR "${AREA}/${name}: a second run differed\n${first_stdout}\n${second_stdout}")
     endif()
     neura(plain "${TEST_DIR}" test --no-optimize ${test_options} ${support} "${file}")
-    string(REGEX REPLACE " \\(steps [0-9]+, peak heap cells [0-9]+\\)" "" expected "${first_stdout}")
+    string(REGEX REPLACE " \\(steps [0-9]+, peak heap cells [0-9]+(, peak stack cells [0-9]+)?\\)" "" expected "${first_stdout}")
     if(NOT plain_status STREQUAL "0" OR NOT plain_stdout STREQUAL expected)
         message(FATAL_ERROR "${AREA}/${name}: unoptimized results differ (status ${plain_status})\n"
                             "${expected}\n${plain_stdout}${plain_stderr}")
@@ -160,6 +173,9 @@ function(check_programs kind default_status)
     endforeach()
 endfunction()
 
+if(DEFINED ONLY_FILE)
+    return()
+endif()
 check_programs(programs 0)
 # A trap's status depends on its class (nvm::exit_status), so each trap
 # program states it.

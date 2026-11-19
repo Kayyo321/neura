@@ -1,0 +1,3 @@
+// An extension function is not a bound method (edge case 65).
+let.extensions words = import:App.Words;
+let m = "a".shout;

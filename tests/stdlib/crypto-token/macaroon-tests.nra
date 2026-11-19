@@ -1,0 +1,120 @@
+// test-options: --gpu=off --max-steps 200000000 --deny-entropy
+let base64 = import:Std.Encoding.Base64;
+let hex = import:Std.Encoding.Hex;
+let macaroons = import:Std.Crypto.Token.Macaroon;
+let test = import:Std.Test;
+let vectors = import:MacaroonVectors;
+
+let MacaroonTests = module (
+    let bytes = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let format = func(version: string) -> macaroons.WireFormat =>
+        version == "1" ? macaroons.WireFormat.V1 : macaroons.WireFormat.V2;
+
+    let checker = func(first: string, second: string, third: string) -> func(uint8[list]) -> bool {
+        return new func(predicate: uint8[list]) -> bool {
+            last text = hex.encode(predicate);
+            return text == first || text == second || text == third;
+        };
+    };
+
+    export let test_libmacaroons_binary_vectors = func {
+        last rows = vectors.first;
+        for (let i = 0; i < rows.length; i += 7) {
+            last token = test.assert_ok(macaroons.parse(rows[i + 6]));
+            last wire_format = format(rows[i + 1]);
+            test.assert_equal_string(rows[i + 6], token.serialize(wire_format));
+            last raw = token.serialize_binary(wire_format);
+            test.assert_equal_string(rows[i + 6], base64.encode_url_unpadded(raw));
+            test.assert(token.equals(test.assert_ok(macaroons.parse_binary(raw))));
+            last accepted = token.verify(bytes(rows[i + 3]), new, checker(rows[i + 4], rows[i + 5], ""));
+            test.assert(accepted == (rows[i + 2] == "authorized"));
+        }
+    };
+
+    export let test_reference_third_party_caveats_and_binding = func {
+        last rows = vectors.third;
+        for (let i = 0; i < rows.length; i += 14) {
+            last ver = format(rows[i]);
+            last location = bytes(rows[i + 1]);
+            last id = bytes(rows[i + 2]);
+            last key = bytes(rows[i + 3]);
+            last predicate = bytes(rows[i + 4]);
+            last party_location = bytes(rows[i + 5]);
+            last party_id = bytes(rows[i + 6]);
+            last party_key = bytes(rows[i + 7]);
+            last party_predicate = bytes(rows[i + 8]);
+            last nonce = bytes(rows[i + 9]);
+            last initial = macaroons.create(location, key, id);
+            test.assert_equal_string(rows[i + 10], initial.serialize(ver));
+            test.assert_equal_int32(0, initial.caveat_count());
+            last narrowed = initial.add_first_party(predicate);
+            let _ = test.assert_err(narrowed.add_third_party(party_location, party_id, party_key));
+            last root = narrowed.add_third_party_with_nonce(party_location, party_id, party_key, nonce);
+            test.assert_equal_string(rows[i + 11], root.serialize(ver));
+            test.assert_equal_string(rows[i + 1], hex.encode(root.location()));
+            test.assert_equal_string(rows[i + 2], hex.encode(root.identifier()));
+            test.assert_equal_string(rows[i + 4], hex.encode(root.caveat_identifier(0)));
+            test.assert_equal_string(rows[i + 5], hex.encode(root.caveat_location(1)));
+            test.assert(!root.needs_discharge(0) && root.needs_discharge(1));
+            test.assert_equal_int32(2, root.caveat_count());
+            test.assert_equal_string("Macaroon(<redacted>)", root.to_string());
+            last again = test.assert_ok(macaroons.parse(root.serialize(ver)));
+            test.assert(again.equals(root) && again.hash_code() == root.hash_code());
+
+            last unbound = macaroons.create(party_location, party_key, party_id).add_first_party(party_predicate);
+            test.assert_equal_string(rows[i + 12], unbound.serialize(ver));
+            last bound = root.bind(unbound);
+            test.assert_equal_string(rows[i + 13], bound.serialize(ver));
+            last accept = checker(rows[i + 4], rows[i + 8], "");
+            test.assert(root.verify(key, new([bound]), accept));
+            test.assert(again.verify(key, new([test.assert_ok(macaroons.parse(rows[i + 13]))]), accept));
+            test.assert(!root.verify(key, new, accept));
+            test.assert(!root.verify(key, new([unbound]), accept));
+            test.assert(!root.verify(key, new([bound, bound]), accept));
+            test.assert(!root.verify(key, new([initial.bind(unbound)]), accept));
+            last wrong = macaroons.create(party_location, new([1]), party_id).add_first_party(party_predicate);
+            test.assert(!root.verify(key, new([root.bind(wrong)]), accept));
+            test.assert(!root.verify(key, new([bound]), checker(rows[i + 4], "", "")));
+        }
+    };
+
+    export let test_nested_discharges_bind_to_final_root = func {
+        last rows = vectors.third;
+        last nested = vectors.nested;
+        for (let i = 0; i < nested.length; i += 5) {
+            last row = i / 5 * 14;
+            last root = test.assert_ok(macaroons.parse(rows[row + 11]));
+            last middle = test.assert_ok(macaroons.parse(nested[i + 1]));
+            last leaf = test.assert_ok(macaroons.parse(nested[i + 2]));
+            last key = bytes(rows[row + 3]);
+            last accept = checker(rows[row + 4], rows[row + 8], nested[i + 3]);
+            test.assert(root.verify(key, new([middle, leaf]), accept));
+            test.assert(!root.verify(key, new([middle]), accept));
+            test.assert(!root.verify(key, new([leaf]), accept));
+            last cyclic = test.assert_ok(macaroons.parse(nested[i + 4]));
+            test.assert(!root.verify(key, new([cyclic]), accept));
+        }
+    };
+
+    export let test_tampered_wire_and_order_fail_before_callbacks = func {
+        last broken = vectors.malformed;
+        last rows = vectors.third;
+        let calls: int[list] = new([0]);
+        last accepts = new func(predicate: uint8[list]) -> bool {
+            calls[0]++;
+            return true;
+        };
+        for (let i = 0; i < broken.length; i += 4) {
+            if (broken[i + 2] == "parse") {
+                let _ = test.assert_err(macaroons.parse(broken[i + 3]));
+            } else {
+                last row = broken[i] == "1" ? 0 : 14;
+                last altered = test.assert_ok(macaroons.parse(broken[i + 3]));
+                last discharge = test.assert_ok(macaroons.parse(rows[row + 13]));
+                test.assert(!altered.verify(bytes(rows[row + 3]), new([discharge]), accepts));
+                test.assert_equal_int32(0, calls[0]);
+            }
+        }
+    };
+);

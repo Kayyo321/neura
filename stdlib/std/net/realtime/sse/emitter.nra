@@ -1,0 +1,199 @@
+let errors = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let sse_event = import:Std.Net.Realtime.Sse.SseEvent;
+let.promote _ = import:Std.Net.Realtime.Sse.SseEvent;
+let strings = import:Std.Text.Strings;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief Writes `text/event-stream` text (WHATWG HTML section 9.2.5), plain or typed.
+///
+/// An event is written as an optional `event:` line (omitted for the type `message`), an optional `id:` line,
+/// an optional `retry:` line, one `data:` line per line of the data, and a blank line. Data is split at CRLF,
+/// LF and CR, so any text survives the parser's line splitting, and each line is written after `data: `, so a
+/// leading space survives too. An event type or identifier containing CR or LF, an identifier containing
+/// U+0000, and a negative reconnection time are rejected with a Custom error of code `sse.emit`, because the
+/// parser could not read them back. Lines end with LF.
+/// @see [Std.Net.Realtime.Sse.Emitter](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-Sse-Emitter)
+#Since("0.3.0")
+export let Emitter = module (
+    /// @brief The error code of an event that cannot be written.
+    export const ErrorCode: string = "sse.emit";
+    /// @brief The media type of an event stream.
+    export const ContentType: string = "text/event-stream";
+
+    /// @brief The text of one event. The identifier is written only when it is not empty; use `format_fields`
+    /// to send an empty `id` line that resets the client's cursor.
+    #NoDiscard
+    export let format = func(event: SseEvent) -> Result<string> {
+        last id = event.id.byte_length == 0 ? Optional<string>.None : Optional<string>.Some(event.id);
+        return format_fields(event.event_type, event.data, id, event.retry);
+    };
+
+    /// @brief The text of one event from its parts. An empty type or `message` writes no `event:` line; `id`
+    /// `Some("")` writes a bare `id` line, which resets the last event ID.
+    #NoDiscard
+    export let format_fields = func(event_type: string, data: string, id: Optional<string>, retry: Optional<int64>)
+        -> Result<string> {
+        if (has_line_break(event_type)) {
+            return fail("the event type contains a line break");
+        }
+        let text = "";
+        if (event_type.byte_length > 0 && event_type != sse_event.DefaultType) {
+            text = "event: " .. event_type .. "\n";
+        }
+        match (id) {
+            Optional.Some(value) => {
+                if (has_line_break(value) || has_nul(value)) {
+                    return fail("the event id contains a line break or U+0000");
+                }
+                text = value.byte_length == 0 ? text .. "id\n" : text .. "id: " .. value .. "\n";
+            },
+            Optional.None => {},
+        }
+        match (retry) {
+            Optional.Some(millis) => {
+                if (millis < 0) {
+                    return fail("the reconnection time is negative");
+                }
+                text ..= "retry: " .. millis.to_string() .. "\n";
+            },
+            Optional.None => {},
+        }
+        for (let piece in split_lines(data)) {
+            text ..= "data: " .. piece .. "\n";
+        }
+        return Result<string>.Ok(text .. "\n");
+    };
+
+    /// @brief Comment lines, ignored by the parser: each line of the text after `: `.
+    #NoDiscard
+    export let comment = func(text: string) -> string {
+        let out = "";
+        for (let piece in split_lines(text)) {
+            out ..= ": " .. piece .. "\n";
+        }
+        return out;
+    };
+
+    /// @brief A keep-alive: a single empty comment line.
+    #NoDiscard
+    export let keep_alive = func -> string => ":\n";
+
+    /// @brief A block that only sets the client's reconnection time; it dispatches no event. A negative time
+    /// fails.
+    #NoDiscard
+    export let retry_only = func(millis: int64) -> Result<string> {
+        return if (millis < 0) -> fail("the reconnection time is negative")
+            else -> Result<string>.Ok("retry: " .. millis.to_string() .. "\n\n");
+    };
+
+    /// @brief Writes events to a byte sink, such as the write method of a stream or a response body.
+    #[Final, NotThreadSafe]
+    export let EventWriter = class (
+        /// @brief Receives the UTF-8 bytes of each block.
+        last sink: func(uint8[list]) -> Result<Unit>;
+
+        /// @brief Writes through the sink.
+        export let init = func(target: func(uint8[list]) -> Result<Unit>) {
+            sink = target;
+        };
+
+        /// @brief Writes one event, or fails without writing when it cannot be formatted.
+        #NoDiscard
+        export let send = func(event: SseEvent) -> Result<Unit> {
+            return match (format(event)) {
+                Result.Ok(text) => sink(strings.to_bytes(text)),
+                Result.Err(e) => Result<Unit>.Err(e),
+            };
+        };
+
+        /// @brief Writes a block of `data` lines with the default type and no identifier.
+        #NoDiscard
+        export let send_data = func(data: string) -> Result<Unit> => send(sse_event.message(data));
+
+        /// @brief Writes a comment.
+        #NoDiscard
+        export let send_comment = func(text: string) -> Result<Unit> => sink(strings.to_bytes(comment(text)));
+
+        /// @brief Writes a keep-alive comment.
+        #NoDiscard
+        export let send_keep_alive = func -> Result<Unit> => sink(strings.to_bytes(keep_alive()));
+
+        /// @brief `EventWriter`.
+        export let.override to_string = func -> string => "EventWriter";
+    );
+
+    /// @brief Writes values of `T` as events through an encoder, for typed streams such as model tokens.
+    #[Final, NotThreadSafe]
+    export let TypedEventWriter = class<T> (
+        /// @brief The underlying writer.
+        last writer: EventWriter;
+        /// @brief Turns a value into its event.
+        last encode: func(T) -> Result<SseEvent>;
+
+        /// @brief Writes through `target`, encoding each value with `encoder`.
+        export let init = func(target: EventWriter, encoder: func(T) -> Result<SseEvent>) {
+            writer = target;
+            encode = encoder;
+        };
+
+        /// @brief Encodes and writes one value; an encoder error is returned and nothing is written.
+        #NoDiscard
+        export let send = func(value: T) -> Result<Unit> {
+            return match (encode(value)) {
+                Result.Ok(event) => writer.send(event),
+                Result.Err(e) => Result<Unit>.Err(e),
+            };
+        };
+
+        /// @brief `TypedEventWriter`.
+        export let.override to_string = func -> string => "TypedEventWriter";
+    );
+
+    /// @brief The lines of the text split at CRLF, LF and CR; the empty text is one empty line.
+    #[NoDiscard, Pure]
+    export let split_lines = func(text: string) -> string[list] {
+        last pieces: string[list] = new;
+        last length = text.byte_length;
+        let start = 0;
+        let i = 0;
+        while (i < length) {
+            last b = text.byte_at(i);
+            if (b == 13 || b == 10) {
+                pieces.append(text.slice(start, i));
+                if (b == 13 && i + 1 < length && text.byte_at(i + 1) == 10) {
+                    i = i + 1;
+                }
+                start = i + 1;
+            }
+            i = i + 1;
+        }
+        pieces.append(text.slice(start, length));
+        return pieces;
+    };
+
+    /// @brief Whether the text contains CR or LF.
+    let has_line_break = func(text: string) -> bool {
+        for (let i = 0; i < text.byte_length; i++) {
+            last b = text.byte_at(i);
+            if (b == 13 || b == 10) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    /// @brief Whether the text contains U+0000.
+    let has_nul = func(text: string) -> bool {
+        for (let i = 0; i < text.byte_length; i++) {
+            if (text.byte_at(i) == 0) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    /// @brief An emitter failure.
+    let fail = func(message: string) -> Result<string> => Result<string>.Err(errors.custom(ErrorCode, message));
+);

@@ -1,0 +1,9 @@
+error[E0202]: expected '{' after 'new with(...)'
+ --> $DIR/no-braces-end.nra:4:26
+  |
+4 | let copy = new with(user)
+  |                          ^ expected '{' before the end of the file
+  |
+  = help: a copy lists its replacements in braces, which may be empty: 'new with(source) { }'
+
+For more information about this error, try `neura explain E0202`.

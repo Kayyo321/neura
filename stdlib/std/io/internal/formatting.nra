@@ -28,6 +28,10 @@ export let Formatting = module (
         export let precision: int = -1;
         /// @brief The presentation byte, or zero for the default.
         export let presentation: uint8 = 0;
+
+        /// @brief Names the specification with its width and precision.
+        export let.override to_string = func -> string =>
+            "Spec(width " .. width.to_string() .. ", precision " .. precision.to_string() .. ")";
     );
 
     /// @brief Parses a UTF-8 pattern and tracks argument indexing and the first error.
@@ -35,8 +39,6 @@ export let Formatting = module (
     let Cursor = class (
         /// @brief The UTF-8 format pattern.
         last pattern: string;
-        /// @brief The packed values available to replacement fields.
-        last values: Argument[];
         /// @brief The current UTF-8 byte offset in the pattern.
         let position: int = 0;
         /// @brief The next index for an automatically numbered field.
@@ -51,13 +53,12 @@ export let Formatting = module (
         let issue_kind: errors.ParseErrorKind = errors.ParseErrorKind.Syntax;
 
         /// @brief Starts parsing at the beginning of the pattern with the given argument pack.
-        export let init = func(source: string, arguments: Argument[]) {
+        export let init = func(source: string) {
             pattern = source;
-            values = arguments;
         };
 
         /// @brief Renders the pattern or returns its first parse or formatting error.
-        export let render = func -> Result<string> {
+        export let render = func(values: Argument[]) -> Result<string> {
             last output = string_builder.create();
             let literal_start = 0;
             while (position < pattern.byte_length) {
@@ -72,7 +73,7 @@ export let Formatting = module (
                     output.append(pattern.slice(position, position + 1));
                     position += 1;
                 } else if (b == 123) {
-                    last field = replacement();
+                    last field = replacement(values);
                     if (issue != "") {
                         return Result<string>.Err(errors.Error.Parse {
                             kind: issue_kind, offset: issue_offset, message: issue
@@ -92,19 +93,19 @@ export let Formatting = module (
         };
 
         /// @brief Parses one replacement field and renders its selected argument.
-        let replacement = func -> string {
+        let replacement = func(values: Argument[]) -> string {
             if (position == pattern.byte_length) {
                 fail(errors.ParseErrorKind.UnexpectedEnd, "unclosed replacement field");
                 return "";
             }
-            last index = read_index();
+            last index = read_index(values.length);
             if (issue != "") {
                 return "";
             }
             last spec: Spec = new;
             if (peek() == 58) {
                 position += 1;
-                read_spec(spec);
+                read_spec(spec, values);
             }
             if (issue != "") {
                 return "";
@@ -123,7 +124,7 @@ export let Formatting = module (
         };
 
         /// @brief Reads an argument index and rejects mixing automatic and manual indexing.
-        let read_index = func -> int {
+        let read_index = func(count: int) -> int {
             last start = position;
             let mode = 1;
             let index = next_auto;
@@ -142,7 +143,7 @@ export let Formatting = module (
             if (issue == "") {
                 if (index_mode != 0 && index_mode != mode) {
                     fail_at(errors.ParseErrorKind.Syntax, start, "cannot mix automatic and explicit argument indexes");
-                } else if (index >= values.length) {
+                } else if (index >= count) {
                     fail_at(errors.ParseErrorKind.OutOfRange, start, "format argument index out of range");
                 } else if (mode == 1) {
                     next_auto += 1;
@@ -153,7 +154,7 @@ export let Formatting = module (
         };
 
         /// @brief Parses fill, alignment, sign, width, precision, and presentation options.
-        let read_spec = func(spec: Spec) {
+        let read_spec = func(spec: Spec, values: Argument[]) {
             // A single Unicode scalar followed by an alignment character is
             // the fill. Otherwise an alignment character can appear alone.
             let b = peek();
@@ -187,7 +188,7 @@ export let Formatting = module (
             if (is_digit(peek())) {
                 spec.width = read_number();
             } else if (peek() == 123) {
-                spec.width = read_dynamic();
+                spec.width = read_dynamic(values);
             }
             if (issue != "") {
                 return;
@@ -197,14 +198,14 @@ export let Formatting = module (
                 if (is_digit(peek())) {
                     spec.precision = read_number();
                 } else if (peek() == 123) {
-                    spec.precision = read_dynamic();
+                    spec.precision = read_dynamic(values);
                 } else {
                     fail(errors.ParseErrorKind.Syntax, "expected a precision");
                 }
             }
             b = peek();
             if (issue == "" && b != 125 && position < pattern.byte_length) {
-                if (!is_presentation(b)) {
+                if (not is_presentation(b)) {
                     fail(errors.ParseErrorKind.Syntax, "unsupported format presentation");
                     return;
                 }
@@ -214,10 +215,10 @@ export let Formatting = module (
         };
 
         /// @brief Reads a nested field as a nonnegative integer width or precision.
-        let read_dynamic = func -> int {
+        let read_dynamic = func(values: Argument[]) -> int {
             position += 1;
             last start = position;
-            last index = read_index();
+            last index = read_index(values.length);
             if (issue != "") {
                 return 0;
             }
@@ -263,10 +264,7 @@ export let Formatting = module (
 
         /// @brief Returns the next byte or zero at the end of the pattern.
         let peek = func -> uint8 {
-            if (position >= pattern.byte_length) {
-                return 0;
-            }
-            return pattern.byte_at(position);
+            return if (position >= pattern.byte_length) -> 0 else -> pattern.byte_at(position);
         };
 
         /// @brief Records an error at the current pattern offset.
@@ -320,10 +318,7 @@ export let Formatting = module (
             if (spec.presentation != 0 && spec.presentation != 115) {
                 return invalid_spec();
             }
-            if (flag) {
-                return render_text("true", spec);
-            }
-            return render_text("false", spec);
+            return if (flag) -> render_text("true", spec) else -> render_text("false", spec);
         };
 
         /// @brief Separates the signed integer's magnitude and sign without overflowing at the minimum value.
@@ -352,7 +347,7 @@ export let Formatting = module (
                 output.append_scalar(magnitude as uint32);
                 return pad(output.to_string(), "", false, spec);
             }
-            if (presentation != 0 && !is_integer_presentation(presentation)) {
+            if (presentation != 0 && not is_integer_presentation(presentation)) {
                 return invalid_spec();
             }
             let radix = 10;
@@ -386,7 +381,7 @@ export let Formatting = module (
             last presentation = spec.presentation;
             last hexadecimal = presentation == 97 || presentation == 65;
             if (presentation != 0 && presentation != 102 && presentation != 70 && presentation != 101 &&
-                presentation != 69 && presentation != 103 && presentation != 71 && !hexadecimal) {
+                presentation != 69 && presentation != 103 && presentation != 71 && not hexadecimal) {
                 return invalid_spec();
             }
             let digits = spec.precision;
@@ -397,9 +392,9 @@ export let Formatting = module (
             let body = original;
             last negative = body.byte_at(0) == 45;
             last special = body == "Infinity" || body == "-Infinity" || body == "NaN";
-            if (hexadecimal && !special) {
+            if (hexadecimal && not special) {
                 body = hex_float(n, digits, spec.alternate);
-            } else if (!special) {
+            } else if (not special) {
                 if (digits < 0) {
                     digits = 6;
                 }
@@ -414,7 +409,7 @@ export let Formatting = module (
                     body = finish_float(body, spec.alternate);
                 }
             }
-            if (negative && (!hexadecimal || special)) {
+            if (negative && (not hexadecimal || special)) {
                 body = body.slice(1, body.byte_length);
             }
             if (special && presentation != 0) {
@@ -434,15 +429,19 @@ export let Formatting = module (
             fail(errors.ParseErrorKind.Syntax, "format specification is invalid for the argument type");
             return "";
         };
+
+        /// @brief Names the cursor and its position in the pattern.
+        export let.override to_string = func -> string =>
+            "Cursor(" .. position.to_string() .. "/" .. pattern.byte_length.to_string() .. ")";
     );
 
     /// @brief Formats a prebuilt argument array and reports pattern failures with byte offsets.
     export let try_vformat = func(pattern: string, args: Argument[]) -> Result<string> {
-        if (!strings.contains(pattern, "{") && !strings.contains(pattern, "}")) {
+        if (not strings.contains(pattern, "{") && not strings.contains(pattern, "}")) {
             return Result<string>.Ok(pattern);
         }
-        last cursor: Cursor = new(pattern, args);
-        return cursor.render();
+        last cursor: Cursor = new(pattern);
+        return cursor.render(args);
     };
 
     /// @brief Recognizes an ASCII decimal digit.
@@ -465,10 +464,7 @@ export let Formatting = module (
 
     /// @brief Returns an object's text representation, or `nil` for a nil reference.
     let object_text = func(value: class) -> string {
-        if (value == nil) {
-            return "nil";
-        }
-        return value.to_string();
+        return if (value == nil) -> "nil" else -> value.to_string();
     };
 
     /// @brief Returns the UTF-8 boundary after at most count scalars.
@@ -505,7 +501,7 @@ export let Formatting = module (
             } else if (b == 13) {
                 escape = "\\r";
             } else if (b < 32 || b == 127) {
-                escape = "\\u{" + unsigned.to_string_radix(b as uint64, 16) + "}";
+                escape = "\\u{" .. unsigned.to_string_radix(b as uint64, 16) .. "}";
             }
             if (escape != "") {
                 output.append(text.slice(start, end));
@@ -527,10 +523,7 @@ export let Formatting = module (
         if (sign == 43) {
             return "+";
         }
-        if (sign == 32) {
-            return " ";
-        }
-        return "";
+        return if (sign == 32) -> " " else -> "";
     };
 
     /// @brief Pads by scalar width, inserting implicit numeric zeros after the sign and radix prefix.
@@ -599,7 +592,7 @@ export let Formatting = module (
         }
         last point = alternate || digits != "" ? "." : "";
         last sign = exponent >= 0 ? "+" : "";
-        return leading.to_string() + point + digits + "p" + sign + exponent.to_string();
+        return leading.to_string() .. point .. digits .. "p" .. sign .. exponent.to_string();
     };
 
     /// @brief Pick fixed or scientific form using the rounded exponent. Rearranging the already-rounded
@@ -614,7 +607,7 @@ export let Formatting = module (
         last exponent = parse_exponent(scientific, marker + 1);
         let mantissa = scientific.slice(0, marker);
         if (exponent < -4 || exponent >= digits) {
-            if (!alternate) {
+            if (not alternate) {
                 mantissa = trim_fraction(mantissa);
             }
             return mantissa + scientific.slice(marker, scientific.byte_length);
@@ -631,13 +624,13 @@ export let Formatting = module (
         last point = exponent + 1;
         let fixed = "";
         if (point <= 0) {
-            fixed = "0." + strings.repeat("0", -point) + significant;
+            fixed = "0." .. strings.repeat("0", -point) .. significant;
         } else if (point < digits) {
-            fixed = significant.slice(0, point) + "." + significant.slice(point, digits);
+            fixed = significant.slice(0, point) .. "." .. significant.slice(point, digits);
         } else {
             fixed = significant;
         }
-        if (!alternate) {
+        if (not alternate) {
             fixed = trim_fraction(fixed);
         }
         return sign + fixed;
@@ -655,10 +648,7 @@ export let Formatting = module (
             value = value * 10 + (text.byte_at(i) - 48) as int;
             i += 1;
         }
-        if (negative) {
-            return -value;
-        }
-        return value;
+        return if (negative) -> -value else -> value;
     };
 
     /// @brief Removes trailing fractional zeros and a trailing decimal point.
@@ -681,13 +671,10 @@ export let Formatting = module (
     let finish_float = func(body: string, alternate: bool) -> string {
         last marker = strings.index_of(body, "e");
         if (marker < 0) {
-            if (alternate && !strings.contains(body, ".")) {
-                return body + ".";
-            }
-            return body;
+            return if (alternate && not strings.contains(body, ".")) -> body .. "." else -> body;
         }
         let mantissa = body.slice(0, marker);
-        if (alternate && !strings.contains(mantissa, ".")) {
+        if (alternate && not strings.contains(mantissa, ".")) {
             mantissa += ".";
         }
         let exponent = parse_exponent(body, marker + 1);
@@ -698,8 +685,8 @@ export let Formatting = module (
         }
         let digits = exponent.to_string();
         if (exponent < 10) {
-            digits = "0" + digits;
+            digits = "0" .. digits;
         }
-        return mantissa + "e" + sign + digits;
+        return mantissa .. "e" .. sign .. digits;
     };
 );

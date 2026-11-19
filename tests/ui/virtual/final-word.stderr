@@ -1,0 +1,9 @@
+error[E0202]: expected 'virtual' or 'override' after '.'
+ --> $DIR/final-word.nra:4:15
+  |
+4 |         | get.final: label;
+  |               ^^^^^ expected 'virtual' or 'override', found 'final'
+  |
+  = help: an accessor clause is '| get:', '| get.virtual:' or '| get.override:'
+
+For more information about this error, try `neura explain E0202`.

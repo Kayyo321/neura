@@ -20,7 +20,10 @@ export let Channel = module (
     #Final
     export let State = class (
         /// @brief Creates an identity that open has yet to register. Use open.
-        export let init = func { };
+        export let init = func {};
+
+        /// @brief Names the channel identity.
+        export let.override to_string = func -> string => "State";
     );
 
     /// @brief The sending end of a channel of T.
@@ -42,10 +45,7 @@ export let Channel = module (
             if (code == 0) {
                 return TrySendOutcome.Sent;
             }
-            if (code == 1) {
-                return TrySendOutcome.Closed;
-            }
-            return TrySendOutcome.Full;
+            return if (code == 1) -> TrySendOutcome.Closed else -> TrySendOutcome.Full;
         };
 
         /// @brief What a select waits on for this end. Used by the select statement.
@@ -58,11 +58,11 @@ export let Channel = module (
             if (code == 0) {
                 return SendOutcome.Sent;
             }
-            if (code == 1) {
-                return SendOutcome.Closed;
-            }
-            return SendOutcome.Cancelled;
+            return if (code == 1) -> SendOutcome.Closed else -> SendOutcome.Cancelled;
         };
+
+        /// @brief Names the sending end.
+        export let.override to_string = func -> string => "Sender";
     );
 
     /// @brief The receiving end of a channel of T.
@@ -85,10 +85,7 @@ export let Channel = module (
             if (code == 0) {
                 return TryReceived<T>.Value(take<T>());
             }
-            if (code == 1) {
-                return TryReceived<T>.Closed;
-            }
-            return TryReceived<T>.Empty;
+            return if (code == 1) -> TryReceived<T>.Closed else -> TryReceived<T>.Empty;
         };
 
         /// @brief What a select waits on for this end. Used by the select statement.
@@ -101,11 +98,11 @@ export let Channel = module (
             if (code == 0) {
                 return Received<T>.Value(take<T>());
             }
-            if (code == 1) {
-                return Received<T>.Closed;
-            }
-            return Received<T>.Cancelled;
+            return if (code == 1) -> Received<T>.Closed else -> Received<T>.Cancelled;
         };
+
+        /// @brief Names the receiving end.
+        export let.override to_string = func -> string => "Receiver";
     );
 
     /// @brief Closes a channel. A coordinator keeps the closer, so a task that only sends or receives cannot.
@@ -124,6 +121,9 @@ export let Channel = module (
         export let close = func {
             raw_close(state);
         };
+
+        /// @brief Names the closing end.
+        export let.override to_string = func -> string => "Closer";
     );
 
     /// @brief Opens a channel that buffers `capacity` values of the transferable type T. Capacity 0 is a

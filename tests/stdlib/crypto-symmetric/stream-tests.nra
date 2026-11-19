@@ -1,0 +1,123 @@
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.AeadCipher;
+let.promote _ = import:Std.Crypto.SymmetricKey;
+let aes_gcm = import:Std.Crypto.Symmetric.AesGcm;
+let aes_gcm_siv = import:Std.Crypto.Symmetric.AesGcmSiv;
+let chacha20_poly1305 = import:Std.Crypto.Symmetric.ChaCha20Poly1305;
+let hex = import:Std.Encoding.Hex;
+let int32s = import:Std.Core.Int32;
+let online = import:Std.Crypto.Symmetric.OnlineCipher;
+let results = import:Std.Core.Result;
+let test = import:Std.Test;
+let vectors = import:StreamVectors;
+let xchacha20_poly1305 = import:Std.Crypto.Symmetric.XChaCha20Poly1305;
+
+// STREAM against an independent Python reference over cryptography's AEADs (no standard vectors exist;
+// support/stream-vectors.nra, scripts/crypto-vectors/gen-stream.py), and its rejection of changed, reordered,
+// dropped, appended and truncated segments.
+let StreamTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    // Splits at ':' keeping empty parts.
+    let split = func(text: string, count: int) -> uint8[list][list] {
+        let parts: uint8[list][list] = new;
+        let start = 0;
+        for (let i = 0; i <= text.byte_length; i++) {
+            if (i == text.byte_length || text.byte_at(i) == 58) {
+                parts.append(decode(text.slice(start, i)));
+                start = i + 1;
+            }
+        }
+        test.assert_equal_int32(count, parts.length);
+        return parts;
+    };
+
+    let joined = func(parts: uint8[list][list]) -> uint8[list] {
+        let out: uint8[list] = new;
+        for (let part in parts) {
+            for (let b in part) {
+                out.append(b);
+            }
+        }
+        return out;
+    };
+
+    let check = func<K>(cipher: AeadCipher<K, uint8[list], uint8[list]>, prefix: uint8[list], data: uint8[list],
+            plaintexts: uint8[list][list], expected: uint8[list][list]) {
+        let encryptor = new online.StreamEncryptor<K>(cipher, prefix, data);
+        for (let i = 0; i < plaintexts.length; i++) {
+            last sealed = encryptor.seal_segment(plaintexts[i], i == plaintexts.length - 1);
+            test.assert_equal_string(hex.encode(expected[i]), hex.encode(sealed));
+        }
+        test.assert(encryptor.is_ended());
+        last whole = hex.encode(joined(plaintexts));
+        test.assert_equal_string(whole, hex.encode(test.assert_ok(online.open_segments<K>(cipher, prefix, data, expected))));
+        // Truncated: drop the final segment.
+        if (expected.length > 1) {
+            let shorter: uint8[list][list] = new;
+            for (let i = 0; i + 1 < expected.length; i++) {
+                shorter.append(expected[i]);
+            }
+            let _ = test.assert_err(online.open_segments<K>(cipher, prefix, data, shorter));
+            // Reordered: swap the first two.
+            let swapped: uint8[list][list] = new([expected[1], expected[0]]);
+            for (let i = 2; i < expected.length; i++) {
+                swapped.append(expected[i]);
+            }
+            let _ = test.assert_err(online.open_segments<K>(cipher, prefix, data, swapped));
+        }
+        // Appended: the final segment again.
+        let longer: uint8[list][list] = new;
+        for (let segment in expected) {
+            longer.append(segment);
+        }
+        longer.append(expected[expected.length - 1]);
+        let _ = test.assert_err(online.open_segments<K>(cipher, prefix, data, longer));
+        // Changed associated data.
+        let _ = test.assert_err(online.open_segments<K>(cipher, prefix, new([255]), expected));
+        // A decryptor that has failed stays failed.
+        let decryptor = new online.StreamDecryptor<K>(cipher, prefix, data);
+        let _ = test.assert_err(decryptor.open_segment(new([1, 2, 3]), false));
+        let _ = test.assert_err(decryptor.open_segment(expected[0], expected.length == 1));
+        let _ = test.assert_err(decryptor.finish());
+    };
+
+    export let test_reference_streams = func {
+        last rows = vectors.streams;
+        for (let i = 0; i < rows.length; i += 7) {
+            last key = decode(rows[i + 1]);
+            last prefix = decode(rows[i + 2]);
+            last data = decode(rows[i + 3]);
+            last count = test.assert_ok(int32s.parse(rows[i + 4]));
+            last plaintexts = split(rows[i + 5], count);
+            last sealed = split(rows[i + 6], count);
+            if (rows[i] == "aes-gcm") {
+                check<SymmetricKey<aes_gcm.AesGcm>>(new aes_gcm.AesGcm(key), prefix, data, plaintexts, sealed);
+            } else if (rows[i] == "aes-gcm-siv") {
+                check<SymmetricKey<aes_gcm_siv.AesGcmSiv>>(new aes_gcm_siv.AesGcmSiv(key), prefix, data, plaintexts, sealed);
+            } else if (rows[i] == "chacha20-poly1305") {
+                check<SymmetricKey<chacha20_poly1305.ChaCha20Poly1305>>(new chacha20_poly1305.ChaCha20Poly1305(key), prefix,
+                    data, plaintexts, sealed);
+            } else {
+                check<SymmetricKey<xchacha20_poly1305.XChaCha20Poly1305>>(new xchacha20_poly1305.XChaCha20Poly1305(key),
+                    prefix, data, plaintexts, sealed);
+            }
+        }
+    };
+
+    export let test_seal_segments_round_trip = func {
+        let cipher = new chacha20_poly1305.ChaCha20Poly1305(decode("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"));
+        last prefix: uint8[list] = new([1, 2, 3, 4, 5, 6, 7]);
+        let message: uint8[list] = new;
+        for (let i = 0; i < 100; i++) {
+            message.append(i as uint8);
+        }
+        last segments = online.seal_segments<SymmetricKey<chacha20_poly1305.ChaCha20Poly1305>>(cipher, prefix, new, message, 32);
+        test.assert_equal_int32(4, segments.length);
+        test.assert_equal_int32(20, segments[3].length);
+        last opened = test.assert_ok(online.open_segments<SymmetricKey<chacha20_poly1305.ChaCha20Poly1305>>(cipher, prefix, new, segments));
+        test.assert_equal_string(hex.encode(message), hex.encode(opened));
+        last empty = online.seal_segments<SymmetricKey<chacha20_poly1305.ChaCha20Poly1305>>(cipher, prefix, new, new, 32);
+        test.assert_equal_int32(1, empty.length);
+    };
+);

@@ -35,8 +35,8 @@ The following public declarations are taken from the module source; each links t
   Wraps around midnight in either direction. Tagged `#Pure`.
 - **LocalTime.LocalTime** · [`export let compare_to = func(other: LocalTime) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L53)
   Orders times by their nanosecond offsets from midnight. Tagged `#Pure`.
-- **LocalTime.LocalTime** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L65)
-  Tests equality of nanosecond offsets from midnight. Tagged `#Pure`.
+- **LocalTime.LocalTime** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L62)
+  Tests equality of nanosecond offsets from midnight. Reading the argument can run its class hook.
 - **LocalTime.LocalTime** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L71)
   Hashes the nanosecond offset from midnight. Tagged `#Pure`.
 - **LocalTime.LocalTime** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-time.nra#L76)

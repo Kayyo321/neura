@@ -6,7 +6,7 @@ export let Version = module (
     /// @brief The major version component of the shipped library.
     export const Major: int = 0;
     /// @brief The minor version component of the shipped library.
-    export const Minor: int = 2;
+    export const Minor: int = 3;
     /// @brief The patch version component of the shipped library.
-    export const Patch: int = 1;
+    export const Patch: int = 0;
 );

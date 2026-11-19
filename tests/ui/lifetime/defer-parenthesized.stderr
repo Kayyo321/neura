@@ -1,0 +1,9 @@
+error[E0304]: unknown name 'defer'
+ --> $DIR/defer-parenthesized.nra:7:5
+  |
+7 |     defer (pick())();
+  |     ^^^^^ not found in this scope
+  |
+  = help: to defer a call, write 'defer f();' without parentheses around the call; a callee in parentheses is bound to a name first
+
+For more information about this error, try `neura explain E0304`.

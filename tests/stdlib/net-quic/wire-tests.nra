@@ -1,0 +1,186 @@
+let datagram = import:Std.Net.Quic.DatagramFrame;
+let error = import:Std.Core.Error;
+let stream_id = import:Std.Net.Quic.StreamId;
+let test = import:Std.Test;
+let varint = import:Std.Net.Quic.VarInt;
+
+// Std.Net.Quic wire rules: variable-length integers (RFC 9000 section 16 and A.1), stream IDs (section 2.1)
+// and DATAGRAM frames (RFC 9221 section 4).
+let WireTests = module (
+    let list_of = func(values: int[list]) -> uint8[list] {
+        let out: uint8[list] = new;
+        for (let v in values) {
+            out.append(v as uint8);
+        }
+        return out;
+    };
+
+    let assert_bytes = func(expected: int[list], actual: uint8[list]) {
+        test.assert_equal<int>(expected.length, actual.length);
+        let i = 0;
+        while (i < expected.length) {
+            test.assert_equal<uint8>(expected[i] as uint8, actual[i]);
+            i++;
+        }
+    };
+
+    let decoded = func(bytes: int[list]) -> [uint64, int] =>
+        test.assert_ok<[uint64, int]>(varint.decode(list_of(bytes), 0));
+
+    // RFC 9000 section A.1: 0xc2197c5eff14e88c is 151,288,809,941,952,652; 0x9d7f3e7d is 494,878,333; 0x7bbd is
+    // 15,293; 0x25 and 0x4025 are 37 (bytes written in decimal).
+    export let test_rfc9000_a1_examples = func {
+        let [eight, eight_size] = decoded(new([194, 25, 124, 94, 255, 20, 232, 140]));
+        test.assert_equal_uint64(151288809941952652, eight);
+        test.assert_equal<int>(8, eight_size);
+        let [four, four_size] = decoded(new([157, 127, 62, 125]));
+        test.assert_equal_uint64(494878333, four);
+        test.assert_equal<int>(4, four_size);
+        let [two, two_size] = decoded(new([123, 189]));
+        test.assert_equal_uint64(15293, two);
+        test.assert_equal<int>(2, two_size);
+        let [one, one_size] = decoded(new([37]));
+        test.assert_equal_uint64(37, one);
+        test.assert_equal<int>(1, one_size);
+        let [long_one, long_size] = decoded(new([64, 37]));
+        test.assert_equal_uint64(37, long_one);
+        test.assert_equal<int>(2, long_size);
+    };
+
+    export let test_encoding_round_trips_the_examples = func {
+        assert_bytes(new([194, 25, 124, 94, 255, 20, 232, 140]), varint.encode(151288809941952652));
+        assert_bytes(new([157, 127, 62, 125]), varint.encode(494878333));
+        assert_bytes(new([123, 189]), varint.encode(15293));
+        assert_bytes(new([37]), varint.encode(37));
+        assert_bytes(new([64, 37]), varint.encode_with_length(37, 2));
+    };
+
+    // RFC 9000 Table 4: the ranges of each length.
+    export let test_length_boundaries = func {
+        test.assert_equal<int>(1, varint.encoded_length(0));
+        test.assert_equal<int>(1, varint.encoded_length(63));
+        test.assert_equal<int>(2, varint.encoded_length(64));
+        test.assert_equal<int>(2, varint.encoded_length(16383));
+        test.assert_equal<int>(4, varint.encoded_length(16384));
+        test.assert_equal<int>(4, varint.encoded_length(1073741823));
+        test.assert_equal<int>(8, varint.encoded_length(1073741824));
+        test.assert_equal<int>(8, varint.encoded_length(4611686018427387903));
+        assert_bytes(new([255, 255, 255, 255, 255, 255, 255, 255]), varint.encode(4611686018427387903));
+        assert_bytes(new([128, 0, 64, 0]), varint.encode(16384));
+        let [max, size] = decoded(new([255, 255, 255, 255, 255, 255, 255, 255]));
+        test.assert_equal_uint64(4611686018427387903, max);
+    };
+
+    export let test_decode_at_an_offset_and_truncation = func {
+        last bytes = list_of(new([0, 123, 189, 37]));
+        let [value, size] = test.assert_ok<[uint64, int]>(varint.decode(bytes, 1));
+        test.assert_equal_uint64(15293, value);
+        test.assert_equal<int>(2, size);
+        last failure = test.assert_err<[uint64, int]>(varint.decode(list_of(new([157, 127, 62])), 0));
+        match (failure) {
+            error.Error.Parse { kind, offset, message } => {
+                test.assert(kind == error.ParseErrorKind.UnexpectedEnd);
+                test.assert_equal<int>(0, offset);
+            },
+            _ => {
+                test.fail("expected a parse error");
+            },
+        }
+        test.assert_err<[uint64, int]>(varint.decode(bytes, 4));
+    };
+
+    // RFC 9000 section 2.1 and Table 1.
+    export let test_stream_id_types = func {
+        test.assert(stream_id.type_of(0) == stream_id.StreamType.ClientBidirectional);
+        test.assert(stream_id.type_of(1) == stream_id.StreamType.ServerBidirectional);
+        test.assert(stream_id.type_of(2) == stream_id.StreamType.ClientUnidirectional);
+        test.assert(stream_id.type_of(3) == stream_id.StreamType.ServerUnidirectional);
+        test.assert(stream_id.type_of(4) == stream_id.StreamType.ClientBidirectional);
+        test.assert(stream_id.is_client_initiated(8));
+        test.assert(!stream_id.is_client_initiated(9));
+        test.assert(stream_id.is_bidirectional(9));
+        test.assert(!stream_id.is_bidirectional(10));
+        test.assert_equal_int64(2, stream_id.index_of(11));
+        test.assert_equal_int64(11, stream_id.nth(stream_id.StreamType.ServerUnidirectional, 2));
+        test.assert_equal_int64(4611686018427387903, stream_id.nth(stream_id.StreamType.ServerUnidirectional,
+            1152921504606846975));
+        test.assert(stream_id.type_of(4611686018427387903) == stream_id.StreamType.ServerUnidirectional);
+    };
+
+    // Section 2.1: unidirectional streams carry data from their initiator only.
+    export let test_stream_directions = func {
+        // Client side: its own unidirectional stream 2 is send-only, the server's 3 receive-only.
+        test.assert(stream_id.may_send(2, true));
+        test.assert(!stream_id.may_receive(2, true));
+        test.assert(!stream_id.may_send(3, true));
+        test.assert(stream_id.may_receive(3, true));
+        // Server side: the reverse.
+        test.assert(!stream_id.may_send(2, false));
+        test.assert(stream_id.may_receive(2, false));
+        test.assert(stream_id.may_send(3, false));
+        test.assert(!stream_id.may_receive(3, false));
+        // Bidirectional streams of either initiator carry both directions for both sides.
+        for (let id in [0, 1, 4, 5]) {
+            test.assert(stream_id.may_send(id as int64, true) && stream_id.may_receive(id as int64, true));
+            test.assert(stream_id.may_send(id as int64, false) && stream_id.may_receive(id as int64, false));
+        }
+    };
+
+    export let test_allocator_respects_limits = func {
+        last client = new stream_id.StreamIdAllocator(true, 2, 1);
+        test.assert_equal_int64(0, test.assert_ok<int64>(client.open(true)));
+        test.assert_equal_int64(4, test.assert_ok<int64>(client.open(true)));
+        test.assert_equal_int64(2, test.assert_ok<int64>(client.open(false)));
+        last blocked = test.assert_err<int64>(client.open(true));
+        test.assert_equal_string("the peer allows 2 bidirectional streams", error.message(blocked));
+        client.raise_limit(true, 1);
+        test.assert_err<int64>(client.open(true));
+        client.raise_limit(true, 3);
+        test.assert_equal_int64(8, test.assert_ok<int64>(client.open(true)));
+        test.assert_equal_string("StreamIdAllocator(client, 3/3 bidirectional, 1/1 unidirectional)", client.to_string());
+        last server = new stream_id.StreamIdAllocator(false, 5, 5);
+        test.assert_equal_int64(1, test.assert_ok<int64>(server.open(true)));
+        test.assert_equal_int64(3, test.assert_ok<int64>(server.open(false)));
+        test.assert_equal_int64(7, test.assert_ok<int64>(server.open(false)));
+    };
+
+    // Section 2.1: a stream used out of order opens every lower-numbered stream of its type.
+    export let test_peer_streams_open_implicitly = func {
+        last server_side = new stream_id.PeerStreams(false, 10, 2);
+        last opened = test.assert_ok<int64[list]>(server_side.receive(8));
+        test.assert_equal<int>(3, opened.length);
+        test.assert_equal_int64(0, opened[0]);
+        test.assert_equal_int64(4, opened[1]);
+        test.assert_equal_int64(8, opened[2]);
+        test.assert_equal<int>(0, test.assert_ok<int64[list]>(server_side.receive(4)).length);
+        test.assert_equal<int>(1, test.assert_ok<int64[list]>(server_side.receive(12)).length);
+        last own = test.assert_err<int64[list]>(server_side.receive(1));
+        test.assert_equal_string("stream 1 is opened by this endpoint, not the peer", error.message(own));
+        test.assert_equal<int>(2, test.assert_ok<int64[list]>(server_side.receive(6)).length);
+        last over = test.assert_err<int64[list]>(server_side.receive(10));
+        test.assert_equal_string("stream 10 exceeds the limit of 2 streams", error.message(over));
+        test.assert_equal_string("PeerStreams(4 bidirectional, 2 unidirectional)", server_side.to_string());
+    };
+
+    // RFC 9221 section 4: types 0x30 (48) and 0x31 (49), the Length a varint.
+    export let test_datagram_frames = func {
+        last payload = list_of(new([1, 2, 3]));
+        assert_bytes(new([49, 3, 1, 2, 3]), datagram.encode(payload, true));
+        assert_bytes(new([48, 1, 2, 3]), datagram.encode(payload, false));
+        assert_bytes(new([49, 0]), datagram.encode(list_of(new()), true));
+        let [data, end] = test.assert_ok<[uint8[list], int]>(datagram.decode(list_of(new([9, 49, 2, 7, 8, 5])), 1));
+        assert_bytes(new([7, 8]), data);
+        test.assert_equal<int>(5, end);
+        let [rest, rest_end] = test.assert_ok<[uint8[list], int]>(datagram.decode(list_of(new([48, 7, 8, 5])), 0));
+        assert_bytes(new([7, 8, 5]), rest);
+        test.assert_equal<int>(4, rest_end);
+        test.assert_err<[uint8[list], int]>(datagram.decode(list_of(new([49, 4, 1])), 0));
+        test.assert_err<[uint8[list], int]>(datagram.decode(list_of(new([50, 1])), 0));
+        test.assert_equal<int>(103, datagram.encoded_size(100, true));
+        test.assert_equal<int>(1 + 2 + 1000, datagram.encoded_size(1000, true));
+        test.assert(datagram.fits(1000, true, 1003));
+        test.assert(!datagram.fits(1000, true, 1002));
+        test.assert(!datagram.fits(0, false, 0));
+        test.assert_equal_uint64(32, datagram.MaxDatagramFrameSizeParameter);
+    };
+);

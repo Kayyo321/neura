@@ -25,8 +25,8 @@ The following public declarations are taken from the module source; each links t
   Stores the supplied offset in seconds.
 - **ZoneOffset.ZoneOffset** · [`export let compare_to = func(other: ZoneOffset) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/zone-offset.nra#L25)
   By total seconds, west before east. Tagged `#Pure`.
-- **ZoneOffset.ZoneOffset** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/zone-offset.nra#L37)
-  Tests equality of offsets in seconds. Tagged `#Pure`.
+- **ZoneOffset.ZoneOffset** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/zone-offset.nra#L34)
+  Tests equality of offsets in seconds. Reading the argument can run its class hook.
 - **ZoneOffset.ZoneOffset** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/zone-offset.nra#L43)
   Hashes the offset in seconds. Tagged `#Pure`.
 - **ZoneOffset.ZoneOffset** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/zone-offset.nra#L47)

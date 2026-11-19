@@ -1,0 +1,5 @@
+// A lambda's parameter takes no default (edge case 30).
+let apply = func -> int {
+    let g = func(a: int = 1) -> int => a;
+    return g(2);
+};

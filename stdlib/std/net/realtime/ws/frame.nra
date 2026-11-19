@@ -1,0 +1,361 @@
+let close_status = import:Std.Net.Realtime.Ws.CloseStatus;
+let hashing = import:Std.Core.Hash;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Random.Random;
+let.promote _ = import:Std.Core.Result;
+
+/// @brief The WebSocket frame codec (RFC 6455 section 5.2): encoding, and an incremental decoder over byte chunks.
+///
+/// A frame is FIN, RSV1 to RSV3, a 4-bit opcode, an optional 4-byte masking key, and a payload whose length is
+/// written in 7 bits, 7+16 bits, or 7+64 bits, always in the shortest form. Frames a client sends are masked
+/// and frames a server sends are not (section 5.1). Control frames (opcodes 8 to 15) carry at most 125 bytes
+/// and are never fragmented (section 5.5). `Frame.payload` is always the unmasked payload. Decoding failures are
+/// `CloseStatus.ProtocolFailure` errors: 1002 for a malformed or forbidden frame and 1009 for a frame above the
+/// size limit.
+/// @see [Std.Net.Realtime.Ws.Frame](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-Ws-Frame)
+#Since("0.3.0")
+export let Frame = module (
+    /// @brief Opcode 0: a continuation frame.
+    export const Continuation: int = 0;
+    /// @brief Opcode 1: a text frame.
+    export const Text: int = 1;
+    /// @brief Opcode 2: a binary frame.
+    export const Binary: int = 2;
+    /// @brief Opcode 8: a connection close.
+    export const Close: int = 8;
+    /// @brief Opcode 9: a ping.
+    export const Ping: int = 9;
+    /// @brief Opcode 10: a pong.
+    export const Pong: int = 10;
+
+    /// @brief The largest control frame payload (RFC 6455 section 5.5).
+    export const MaxControlPayload: int = 125;
+
+    /// @brief Which end of the connection a codec serves; it fixes the masking rule.
+    export let Role = enum (Client, Server);
+
+    /// @brief One WebSocket frame with its payload unmasked.
+    #Final
+    export let Frame = class (
+        /// @brief The final fragment of a message.
+        export last fin: bool;
+        /// @brief RSV1, used by an extension such as permessage-deflate.
+        export last rsv1: bool;
+        /// @brief RSV2.
+        export last rsv2: bool;
+        /// @brief RSV3.
+        export last rsv3: bool;
+        /// @brief The opcode, 0 to 15.
+        export last opcode: int;
+        /// @brief The application data, unmasked.
+        export last payload: uint8[list];
+
+        /// @brief A frame with every field given. An opcode outside 0 to 15 traps with "invalid argument:
+        /// opcode".
+        export let init = func(final: bool, reserved1: bool, reserved2: bool, reserved3: bool, code: int,
+            data: uint8[list]) {
+            if (code < 0 || code > 15) {
+                trap_with_message("invalid argument: opcode");
+            }
+            fin = final;
+            rsv1 = reserved1;
+            rsv2 = reserved2;
+            rsv3 = reserved3;
+            opcode = code;
+            payload = data;
+        };
+
+        /// @brief Whether the opcode is a control opcode (8 to 15).
+        #NoDiscard
+        export let is_control = func -> bool => opcode >= 8;
+
+        /// @brief Equal when every field and every payload byte are.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: Frame) {
+                return false;
+            }
+            if (fin != that.fin || rsv1 != that.rsv1 || rsv2 != that.rsv2 || rsv3 != that.rsv3
+                || opcode != that.opcode || payload.length != that.payload.length) {
+                return false;
+            }
+            for (let i = 0; i < payload.length; i++) {
+                if (payload[i] != that.payload[i]) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        /// @brief Combines the header bits, the opcode and the payload bytes.
+        export let.override hash_code = func -> uint32 {
+            let hash = hashing.combine(17, (opcode as uint32) + (fin ? 16 : 0) + (rsv1 ? 32 : 0) + (rsv2 ? 64 : 0)
+                + (rsv3 ? 128 : 0));
+            for (let b in payload) {
+                hash = hashing.combine(hash, b as uint32);
+            }
+            return hash;
+        };
+
+        /// @brief The opcode, flags and payload length.
+        export let.override to_string = func -> string {
+            let flags = fin ? "FIN" : "";
+            if (rsv1) {
+                flags ..= " RSV1";
+            }
+            if (rsv2) {
+                flags ..= " RSV2";
+            }
+            if (rsv3) {
+                flags ..= " RSV3";
+            }
+            return "Frame(opcode " .. opcode.to_string() .. ", " .. flags .. ", " .. payload.length.to_string()
+                .. " bytes)";
+        };
+    );
+
+    /// @brief A final frame with no reserved bits.
+    #NoDiscard
+    export let of = func(opcode: int, payload: uint8[list]) -> Frame =>
+        new Frame(true, false, false, false, opcode, payload);
+
+    /// @brief Encodes the frame, masked with `mask` when it is `Some` (it must hold 4 bytes).
+    ///
+    /// Fails with status 1002 when the frame breaks a rule a sender must keep: a control frame longer than 125
+    /// bytes or not final, or a reserved opcode (3 to 7, 11 to 15). A mask that is not 4 bytes traps with
+    /// "invalid argument: mask".
+    #NoDiscard
+    export let encode = func(frame: Frame, mask: Optional<uint8[list]>) -> Result<uint8[list]> {
+        last code = frame.opcode;
+        if ((code >= 3 && code <= 7) || code >= 11) {
+            return Result<uint8[list]>.Err(close_status.failure(close_status.ProtocolError,
+                "reserved opcode " .. code.to_string()));
+        }
+        if (code >= 8 && (not frame.fin || frame.payload.length > MaxControlPayload)) {
+            return Result<uint8[list]>.Err(close_status.failure(close_status.ProtocolError,
+                "a control frame must be final and at most 125 bytes"));
+        }
+        last out: uint8[list] = new;
+        let first = code;
+        if (frame.fin) {
+            first += 128;
+        }
+        if (frame.rsv1) {
+            first += 64;
+        }
+        if (frame.rsv2) {
+            first += 32;
+        }
+        if (frame.rsv3) {
+            first += 16;
+        }
+        out.append(first as uint8);
+        last masked = is_some<uint8[list]>(mask);
+        last mask_bit = masked ? 128 : 0;
+        last length = frame.payload.length;
+        if (length < 126) {
+            out.append((mask_bit + length) as uint8);
+        } else if (length < 65536) {
+            out.append((mask_bit + 126) as uint8);
+            out.append((length / 256) as uint8);
+            out.append((length % 256) as uint8);
+        } else {
+            out.append((mask_bit + 127) as uint8);
+            last wide = length as uint64;
+            for (let shift = 56; shift >= 0; shift = shift - 8) {
+                out.append(((wide >> shift) & 255) as uint8);
+            }
+        }
+        match (mask) {
+            Optional.Some(key) => {
+                if (key.length != 4) {
+                    trap_with_message("invalid argument: mask");
+                }
+                for (let b in key) {
+                    out.append(b);
+                }
+                last data = frame.payload;
+                for (let i = 0; i < length; i++) {
+                    out.append(data[i] ^ key[i % 4]);
+                }
+            },
+            Optional.None => {
+                for (let b in frame.payload) {
+                    out.append(b);
+                }
+            },
+        }
+        return Result<uint8[list]>.Ok(out);
+    };
+
+    /// @brief Encodes a frame as `role` must send it: a client masks with 4 fresh bytes from `random`, a server
+    /// does not mask.
+    #NoDiscard
+    export let encode_as = func(role: Role, frame: Frame, random: Random) -> Result<uint8[list]> => match (role) {
+        Role.Client => encode(frame, Optional<uint8[list]>.Some(random.fill_bytes(4))),
+        Role.Server => encode(frame, Optional<uint8[list]>.None),
+    };
+
+    /// @brief Decodes frames from a byte stream that arrives in chunks of any size.
+    ///
+    /// `receiver` is the role of the endpoint that reads: a server requires every frame to be masked and a
+    /// client requires none to be (RFC 6455 section 5.1). `max_frame_size` bounds a frame's payload; a larger
+    /// length fails with status 1009 as soon as the header is read, before the payload arrives. `allowed_rsv`
+    /// is a bit set of the reserved bits an extension negotiated (4 for RSV1, 2 for RSV2, 1 for RSV3); any other
+    /// reserved bit fails. After a failure the decoder stays failed. The buffered bytes are read through an
+    /// offset and compacted once the consumed prefix is at least half the buffer.
+    #[Final, NotThreadSafe]
+    export let FrameDecoder = class (
+        /// @brief The role of the reading endpoint.
+        last receiver: Role;
+        /// @brief The largest payload accepted.
+        last max_frame_size: int;
+        /// @brief The reserved bits an extension allows (RSV1 = 4, RSV2 = 2, RSV3 = 1).
+        last allowed_rsv: int;
+        /// @brief Bytes received and not yet consumed from `offset` on.
+        let buffer: uint8[list] = new;
+        /// @brief The start of the unconsumed bytes in `buffer`.
+        let offset: int = 0;
+        /// @brief Set once a frame failed to decode.
+        let failed: bool = false;
+
+        /// @brief A decoder for the endpoint `role`. A maximum below 125 traps with "invalid argument:
+        /// max_frame_size".
+        export let init = func(role: Role, max_size: int, rsv_bits: int) {
+            if (max_size < MaxControlPayload) {
+                trap_with_message("invalid argument: max_frame_size");
+            }
+            receiver = role;
+            max_frame_size = max_size;
+            allowed_rsv = rsv_bits;
+        };
+
+        /// @brief The number of received bytes not yet decoded.
+        #NoDiscard
+        export let buffered = func -> int => buffer.length - offset;
+
+        /// @brief Adds received bytes.
+        export let push = func(chunk: uint8[list]) {
+            for (let b in chunk) {
+                buffer.append(b);
+            }
+        };
+
+        /// @brief The next whole frame, `None` when more bytes are needed, or the failure of a malformed frame.
+        #NoDiscard
+        export let next = func -> Result<Optional<Frame>> {
+            if (failed) {
+                return fail("the decoder already failed", close_status.ProtocolError);
+            }
+            last available = buffer.length - offset;
+            if (available < 2) {
+                return Result<Optional<Frame>>.Ok(Optional<Frame>.None);
+            }
+            last first = buffer[offset] as int;
+            last second = buffer[offset + 1] as int;
+            last fin = first >= 128;
+            last rsv = (first / 16) % 8;
+            last code = first % 16;
+            last masked = second >= 128;
+            last short_length = second % 128;
+            if ((rsv & (7 - allowed_rsv)) != 0) {
+                return fail("reserved bits set without a negotiated extension", close_status.ProtocolError);
+            }
+            if ((code >= 3 && code <= 7) || code >= 11) {
+                return fail("reserved opcode " .. code.to_string(), close_status.ProtocolError);
+            }
+            if (code >= 8 && (not fin || short_length > MaxControlPayload)) {
+                return fail("a control frame must be final and at most 125 bytes", close_status.ProtocolError);
+            }
+            match (receiver) {
+                Role.Server => {
+                    return fail("a client frame must be masked", close_status.ProtocolError) unless masked;
+                },
+                Role.Client => {
+                    if (masked) {
+                        return fail("a server frame must not be masked", close_status.ProtocolError);
+                    }
+                },
+            }
+            let header = 2;
+            let length: uint64 = short_length as uint64;
+            if (short_length == 126) {
+                header = 4;
+                if (available < header) {
+                    return Result<Optional<Frame>>.Ok(Optional<Frame>.None);
+                }
+                length = ((buffer[offset + 2] as uint64) << 8) | (buffer[offset + 3] as uint64);
+                if (length < 126) {
+                    return fail("a 16-bit length below 126 is not minimal", close_status.ProtocolError);
+                }
+            } else if (short_length == 127) {
+                header = 10;
+                if (available < header) {
+                    return Result<Optional<Frame>>.Ok(Optional<Frame>.None);
+                }
+                if (buffer[offset + 2] >= 128) {
+                    return fail("the most significant bit of a 64-bit length is set", close_status.ProtocolError);
+                }
+                length = 0;
+                for (let i = 2; i < 10; i++) {
+                    length = (length << 8) | (buffer[offset + i] as uint64);
+                }
+                if (length < 65536) {
+                    return fail("a 64-bit length below 65536 is not minimal", close_status.ProtocolError);
+                }
+            }
+            if (length > (max_frame_size as uint64)) {
+                return fail("frame of " .. length.to_string() .. " bytes exceeds the limit of "
+                    .. max_frame_size.to_string(), close_status.MessageTooBig);
+            }
+            last size = length as int;
+            last key_start = offset + header;
+            last data_start = masked ? key_start + 4 : key_start;
+            if (buffer.length - data_start < size) {
+                return Result<Optional<Frame>>.Ok(Optional<Frame>.None);
+            }
+            last payload: uint8[list] = new;
+            if (masked) {
+                last k0 = buffer[key_start];
+                last k1 = buffer[key_start + 1];
+                last k2 = buffer[key_start + 2];
+                last k3 = buffer[key_start + 3];
+                for (let i = 0; i < size; i++) {
+                    last phase = i % 4;
+                    last key = phase == 0 ? k0 : (phase == 1 ? k1 : (phase == 2 ? k2 : k3));
+                    payload.append(buffer[data_start + i] ^ key);
+                }
+            } else {
+                for (let i = 0; i < size; i++) {
+                    payload.append(buffer[data_start + i]);
+                }
+            }
+            offset = data_start + size;
+            compact();
+            return Result<Optional<Frame>>.Ok(Optional<Frame>.Some(new Frame(fin, (rsv & 4) != 0, (rsv & 2) != 0,
+                (rsv & 1) != 0, code, payload)));
+        };
+
+        /// @brief The role and buffered byte count.
+        export let.override to_string = func -> string =>
+            "FrameDecoder(" .. receiver.to_string() .. ", " .. buffered().to_string() .. " bytes buffered)";
+
+        /// @brief Drops the consumed prefix once it is at least half the buffer.
+        let compact = func {
+            if (offset == 0 || offset * 2 < buffer.length) {
+                return;
+            }
+            last rest: uint8[list] = new;
+            for (let i = offset; i < buffer.length; i++) {
+                rest.append(buffer[i]);
+            }
+            buffer = rest;
+            offset = 0;
+        };
+
+        /// @brief Marks the decoder failed and returns the failure.
+        let fail = func(message: string, status: int) -> Result<Optional<Frame>> {
+            failed = true;
+            return Result<Optional<Frame>>.Err(close_status.failure(status, message));
+        };
+    );
+);

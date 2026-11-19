@@ -7,8 +7,8 @@ let program = import:Std.Program;
 
 export let Main = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
-        let flip: bool[list] = [false];
-        let items = priority_queue.create<int>(func(a: int, b: int) -> ordering.Ordering {
+        let flip: bool[list] = new([false]);
+        let items = priority_queue.create<int>(new func(a: int, b: int) -> ordering.Ordering {
             if (flip[0]) {
                 if (a > b) {
                     return ordering.Ordering.Less;

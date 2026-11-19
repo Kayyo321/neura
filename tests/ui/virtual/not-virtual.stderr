@@ -1,0 +1,12 @@
+error[E0575]: invalid accessor override
+ --> $DIR/not-virtual.nra:8:15
+  |
+4 |         | get: label;
+  |         ------------- this clause is not '.virtual'
+...
+8 |         | get.override: "circle";
+  |               ^^^^^^^^ 'Shape.label' has no virtual getter to override
+  |
+  = help: mark it '| get.virtual:'
+
+For more information about this error, try `neura explain E0575`.

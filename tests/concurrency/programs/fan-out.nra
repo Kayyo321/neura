@@ -27,7 +27,7 @@ let twice = func<T>(value: T, work: func(T) -> T) -> T {
 let fan_out = func(width: int) -> int {
     let sum = 0;
     scope {
-        let pending: tasks.Task<int>[list] = [];
+        let pending: tasks.Task<int>[list] = new;
         for (let i: int = 0; i < width; i++) {
             pending.append(spawn Counter.count_to("w" + i.to_string(), 3));
         }
@@ -68,7 +68,7 @@ let early = func(limit: int) -> int {
 };
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let add_one = func(x: int) -> int => x + 1;
         console.print_line("twice " + twice<int>(5, add_one).to_string());
         console.print_line("fan " + fan_out(3).to_string());

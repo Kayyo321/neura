@@ -1,0 +1,12 @@
+// Edge case 74: an int32 receiver.
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Error;
+let Owner = class (
+    export let name: string = "";
+);
+let Pet = class (
+    export let owner: Owner = nil;
+    export let age: int = 0;
+);
+let size = func(count: int32) => count?.abs();

@@ -2,11 +2,13 @@
 
 #include "nvr/image.hpp"
 
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <functional>
 #include <limits>
 #include <map>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -89,6 +91,45 @@ struct HostCompletion {
     static HostCompletion terminate(std::int32_t status) { return {true, {}, status}; }
 };
 
+struct PosixWait {
+    enum class Events { Read, Write, ReadWrite };
+    struct Interest {
+        int descriptor = -1; // A negative descriptor uses the default poll-at-check behavior.
+        Events events = Events::Read;
+    };
+
+    Interest interest;
+    // A provider that switches descriptors or events reports them together.
+    std::function<Interest()> current_interest{};
+    Interest current() const { return current_interest ? current_interest() : interest; }
+};
+
+struct WindowsWait {
+    // A borrowed Win32 HANDLE. It must stay valid while the operation is
+    // pending and signal without being consumed by a wait (e.g. a manual-reset event).
+    void* handle = nullptr;
+};
+
+class ExternalSignal {
+public:
+    // The producer publishes readiness for one operation. Repeated signals
+    // coalesce. The embedding loop arranges the next driver poll.
+    void signal() noexcept { ready_.store(true, std::memory_order_release); }
+
+private:
+    friend class PendingRequests;
+    // Consume readiness before attempting. A signal after this exchange is
+    // retained for the next check if the operation remains pending.
+    bool take() noexcept { return ready_.exchange(false, std::memory_order_acquire); }
+    std::atomic<bool> ready_{false};
+};
+
+struct ExternalWait {
+    std::shared_ptr<ExternalSignal> signal; // One token per pending operation.
+};
+
+using WaitSource = std::variant<std::monostate, PosixWait, WindowsWait, ExternalWait>;
+
 // An overlapping request that has not finished (docs/lang/Concurrency.md
 // section 10.4). The driver keeps it until it can supply the completion; it
 // never blocks on it and starts no thread for it. Everything the operation
@@ -97,22 +138,15 @@ struct HostCompletion {
 struct PendingOperation {
     static constexpr std::int64_t no_deadline = std::numeric_limits<std::int64_t>::max();
 
-    // The operation can proceed when this descriptor is readable or writable
-    // (POSIX poll). -1: it waits for no descriptor.
-    int descriptor = -1;
-    bool readable = false;
-    bool writable = false;
-    // Optional: the descriptor the operation waits for now, when it changes
-    // while the operation is pending (a connect that moves to its next
-    // address). Replaces `descriptor` when set.
-    std::function<int()> current_descriptor{};
+    // The default source asks for an attempt on each scheduling check.
+    WaitSource wait_source;
     // The operation can also proceed when the task clock reads this many
     // nanoseconds.
     std::int64_t deadline = no_deadline;
     // Tries to finish without blocking: the completion, or nothing when it
-    // must wait longer. The driver calls it when the descriptor is ready,
-    // at every check when there is no descriptor, and after a cancel
-    // request with cancelled set. A cancellable operation answers a call
+    // must wait longer. The driver calls it when the wait source is ready,
+    // at the deadline, and after a cancel request with cancelled set.
+    // A cancellable operation answers a call
     // with cancelled set with its completion if it finished first and with
     // host_error::cancelled otherwise; it is never asked again.
     std::function<std::optional<HostCompletion>(bool cancelled)> attempt;

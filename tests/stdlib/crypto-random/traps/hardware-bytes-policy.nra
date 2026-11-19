@@ -1,0 +1,13 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): denied: HardwareEntropy is not allowed under the Fips140_3 policy
+let policy = import:Std.Crypto.Core.CryptoPolicy;
+let entropy = import:Std.Crypto.Random.Entropy;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        policy.set_policy(policy.Policy.Fips140_3);
+        let _ = entropy.hardware_bytes(19);
+        return program.ExitCode.Ok;
+    };
+);

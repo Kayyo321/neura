@@ -1,0 +1,10 @@
+// A generic class cannot implement a requirement that mentions its own
+// type parameters (edge case 111).
+let Additive = interface<T> (
+    static let zero = func() -> T;
+    static let add = func(left: T, right: T) -> T;
+);
+let Vec = class<T> implements Additive<Vec<T>> (
+    export static let zero = func() -> Vec<T> => new Vec<T>();
+    export static let add = func(left: Vec<T>, right: Vec<T>) -> Vec<T> => left;
+);

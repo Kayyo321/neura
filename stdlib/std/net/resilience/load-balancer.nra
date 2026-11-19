@@ -1,0 +1,49 @@
+let durations = import:Std.Time.Duration;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief The contract of a client-side load balancer over a fixed list of endpoints.
+///
+/// `pick` chooses an endpoint for one request and counts it as pending there; the caller sends the request and then
+/// calls `report` once with the selection, the observed latency, and whether it succeeded, which ends the pending
+/// request and feeds load-aware balancers. `RoundRobin`, `PowerOfTwoChoices`, and `PeakEwma` implement it. A
+/// balancer with no endpoints answers `pick` with the `Custom` error `resilience.no_endpoints`.
+/// @see [Std.Net.Resilience.LoadBalancer](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-LoadBalancer)
+#Since("0.3.0")
+export let LoadBalancer = module (
+    /// @brief The error code of a pick from a balancer with no endpoints.
+    export const NoEndpointsCode = "resilience.no_endpoints";
+
+    /// @brief Chooses endpoints of type `Endpoint` for requests.
+    export let LoadBalancer = interface<Endpoint> (
+        /// @brief Chooses an endpoint for one request and counts it as pending. Err when there are no endpoints or
+        /// the balancer's clock fails.
+        #NoDiscard
+        let pick = func -> Result<Selection<Endpoint>>;
+        /// @brief Ends the pending request of `selection` and records its latency and outcome. Err when the
+        /// balancer's clock fails.
+        let report = func(selection: Selection<Endpoint>, latency: durations.Duration, success: bool) -> Result<Unit>;
+        /// @brief The number of endpoints.
+        let size = func -> int;
+        /// @brief The requests picked for endpoint `index` and not yet reported.
+        let pending = func(index: int) -> int;
+    );
+
+    /// @brief One pick: the endpoint and its position in the balancer's list.
+    #[Final, NoDiscard]
+    export let Selection = class<Endpoint> (
+        /// @brief The position of the endpoint in the balancer's list.
+        export last index: int;
+        /// @brief The chosen endpoint.
+        export last endpoint: Endpoint;
+
+        /// @brief The pick of `chosen` at `position`.
+        export let init = func(position: int, chosen: Endpoint) {
+            index = position;
+            endpoint = chosen;
+        };
+
+        /// @brief Text such as "Selection(index 2)".
+        export let.override to_string = func -> string => "Selection(index " .. index.to_string() .. ")";
+    );
+);

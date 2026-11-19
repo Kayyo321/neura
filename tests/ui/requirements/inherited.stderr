@@ -1,0 +1,12 @@
+error[E0504]: 'Money' must declare 'static let add = func(left: Money, right: Money) -> Money'
+  --> $DIR/inherited.nra:12:5
+   |
+ 4 |     static let add = func(left: T, right: T) -> T;
+   |                --- 'add' is required here
+...
+12 | let Money = class : Base implements Additive<Money> (
+   |     ^^^^^ 'Money' implements 'Additive<Money>'
+   |
+   = note: 'Money' declares no static function 'add'; an inherited one does not implement it
+
+For more information about this error, try `neura explain E0504`.

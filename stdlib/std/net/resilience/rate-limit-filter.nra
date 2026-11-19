@@ -1,0 +1,67 @@
+let errors = import:Std.Core.Error;
+let.promote _ = import:Std.Net.Filter;
+let optional = import:Std.Core.Optional;
+let limiters = import:Std.Net.Resilience.RateLimiter;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Net.Service;
+
+/// @brief A filter that admits each request through a keyed `RateLimiter`, one permit per request, with the key
+/// computed from the request (a client IP, a tenant, an API key).
+///
+/// A denied request does not reach the service and returns the `Custom` error with the code `resilience.rate_limited`
+/// and the message "rate limit exceeded; retry after <duration>", the duration in ISO 8601 form. A limiter error
+/// (clock or store) is returned as is. `last_decision` reports the decision for the latest request, for a server
+/// that sets `RateLimit` or `Retry-After` headers.
+/// @see [Std.Net.Resilience.RateLimitFilter](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-RateLimitFilter)
+#Since("0.3.0")
+export let RateLimitFilter = module (
+    /// @brief The error code of a request the limiter denied.
+    export const LimitedCode = "resilience.rate_limited";
+
+    /// @brief Admits requests through a keyed limiter.
+    #[Final, NotThreadSafe]
+    export let RateLimitFilter = class<Req, Resp> implements SimpleFilter<Req, Resp> (
+        /// @brief The limiter consulted per request.
+        last limiter: limiters.RateLimiter;
+        /// @brief The key of a request.
+        last key_of: func(Req) -> string;
+        /// @brief The decision for the latest request, if any.
+        let latest: limiters.RateDecision[list] = new;
+
+        /// @brief A filter that asks `rates` for one permit under `key(request)`.
+        export let init = func(rates: limiters.RateLimiter, key: func(Req) -> string) {
+            limiter = rates;
+            key_of = key;
+        };
+
+        /// @brief Calls `next` when the limiter grants a permit for the request's key.
+        export let apply = func(request: Req, next: Service<Req, Resp>) -> Result<Resp> {
+            last decision = limiter.try_acquire(key_of(request), 1)?;
+            if (latest.length == 0) {
+                latest.append(decision);
+            } else {
+                latest[0] = decision;
+            }
+            if (not decision.allowed) {
+                return Result<Resp>.Err(errors.custom(LimitedCode,
+                    "rate limit exceeded; retry after " .. decision.retry_after.to_string()));
+            }
+            return next.call(request);
+        };
+
+        /// @brief The decision for the latest request that reached the limiter, or None before the first.
+        #NoDiscard
+        export let last_decision = func -> optional.Optional<limiters.RateDecision> {
+            return if (latest.length == 0) -> optional.Optional<limiters.RateDecision>.None
+                else -> optional.Optional<limiters.RateDecision>.Some(latest[0]);
+        };
+
+        /// @brief The fixed text "RateLimitFilter".
+        export let.override to_string = func -> string => "RateLimitFilter";
+    );
+
+    /// @brief A filter over `limiter` keyed by `key`.
+    #NoDiscard
+    export let of = func<Req, Resp>(limiter: limiters.RateLimiter, key: func(Req) -> string)
+        -> RateLimitFilter<Req, Resp> => new RateLimitFilter<Req, Resp>(limiter, key);
+);

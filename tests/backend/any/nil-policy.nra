@@ -1,0 +1,20 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let Session = class (
+    | set: nil;
+);
+let Stored = enum (Empty, Value(any));
+let result: any = nil;
+let raw: any = nil;
+let pass = func(value: any) -> any => value;
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let absent: Session = new;
+        let packed: any = absent;
+        let list: any[list] = new([packed]);
+        let choice = Stored.Value(list[0]);
+        result = match (choice) { Stored.Value(value) => pass(value), Stored.Empty => raw, };
+        console.print_line("ready");
+        return program.ExitCode.Ok;
+    };
+);

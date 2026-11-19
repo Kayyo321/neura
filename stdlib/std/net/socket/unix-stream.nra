@@ -1,0 +1,136 @@
+let bytes = import:Std.Io.Internal.Bytes;
+let.promote _ = import:Std.Time.Duration;
+let host = import:Std.Net.Socket.Internal.HostCalls;
+let host_error = import:Std.Core.Internal.HostError;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let socket = import:Std.Net.Internal.Socket;
+let.promote _ = import:Std.Net.Socket.StreamSocket;
+let.promote _ = import:Std.Net.TcpStream;
+let.promote _ = import:Std.Net.Core.UnixAddr;
+let unix_addrs = import:Std.Net.Core.UnixAddr;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief A connected Unix-domain stream socket: a `StreamSocket` of `Std.Net.Core.UnixAddr`, including the
+/// Linux abstract namespace (`UnixAddr.abstract_name`, written `@name`). Needs the net capability.
+///
+/// The host shares one socket table between TCP and Unix-domain streams, so reading, writing, the read timeout
+/// and close are those of a `Std.Net.TcpStream` over the Unix socket's ID. Opening one uses the host's
+/// `neura.net.unix.connect` (or `UnixListener`'s `neura.net.unix.listen`). A connecting socket's peer is the address it
+/// dialed and an accepted socket's local address is its listener's; the other address needs a host service and
+/// traps (a client's local address is usually unnamed). Not available on Windows.
+/// @see [Std.Net.Socket.UnixStream](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-UnixStream)
+#Since("0.3.0")
+export let UnixStream = module (
+    /// @brief One connected Unix-domain stream.
+    #[Final, NoDiscard(reason: "a socket must be closed"), NotThreadSafe]
+    export let UnixStream = class implements StreamSocket<UnixAddr> (
+        /// @brief The host's socket ID.
+        last id: int64;
+        /// @brief The address text used in error messages.
+        last label: string;
+        /// @brief The stream that reads, writes and closes.
+        last stream: TcpStream;
+        /// @brief The dialed peer, when known.
+        last peer: Optional<UnixAddr>;
+        /// @brief The local address, when known.
+        last known_local: Optional<UnixAddr>;
+        /// @brief Tracks whether the socket may still use the host ID.
+        let open_now: bool = true;
+
+        /// @brief Use `connect` or `UnixListener.accept`; the handle comes from the library.
+        export let init = func(opened: socket.Handle, dialed: Optional<UnixAddr>, local: Optional<UnixAddr>) {
+            id = opened.id;
+            label = opened.address;
+            stream = new TcpStream(opened);
+            peer = dialed;
+            known_local = local;
+        };
+
+        /// @brief Up to `max` bytes; an empty list once the peer has finished sending. A maximum below 1 traps.
+        #NoDiscard
+        export let read = func(max: int) -> Result<uint8[list]> => stream.read(max);
+
+        /// @brief Writes every byte.
+        #NoDiscard
+        export let write = func(data: uint8[list]) -> Result<Unit> => stream.write(data);
+
+        /// @brief The next bytes the peer sent (at most `ReceiveChunk`), or `None` at the end of its data.
+        #NoDiscard
+        export let receive = func -> Result<Optional<uint8[list]>> {
+            last chunk = stream.read(ReceiveChunk)?;
+            return if (chunk.length == 0) -> Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.None)
+                else -> Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.Some(chunk));
+        };
+
+        /// @brief Sends every byte; the `Std.Net.Transport` form of `write`.
+        #NoDiscard
+        export let send = func(data: uint8[list]) -> Result<Unit> => stream.write(data);
+
+        /// @brief The longest a read waits; zero waits without limit.
+        export let read_timeout = func -> Duration => stream.read_timeout;
+
+        /// @brief Sets the read timeout. A negative timeout traps with "invalid argument: negative timeout".
+        export let set_read_timeout = func(timeout: Duration) {
+            stream.read_timeout = timeout;
+        };
+
+        /// @brief The dialed peer, or `None` for an accepted socket.
+        export let peer_address = func -> Optional<UnixAddr> => peer;
+
+        /// @brief The listener's address for an accepted socket; otherwise it asks the host, which traps in
+        /// Neura 0.3.0 (no local-address service).
+        #NoDiscard
+        export let local_address = func -> Result<UnixAddr> {
+            return Result<UnixAddr>.Err(bytes.closed("socket", label)) unless open_now;
+            return match (known_local) {
+                Optional.Some(address) => Result<UnixAddr>.Ok(address),
+                Optional.None => match (host.local_address(id)) {
+                    host.AddressOutcome.Ok(reported) => unix_address(reported),
+                    host.AddressOutcome.Error(code) => Result<UnixAddr>.Err(
+                        host_error.io(code, "local address failed", label)),
+                },
+            };
+        };
+
+        /// @brief Ends reading, writing or both. Traps in Neura 0.3.0: the runtime has no shutdown service.
+        #NoDiscard
+        export let shutdown = func(how: Shutdown) -> Result<Unit> {
+            return Result<Unit>.Err(bytes.closed("socket", label)) unless open_now;
+            last code = how == Shutdown.Read ? 0 : how == Shutdown.Write ? 1 : 2;
+            return match (host.shutdown(id, code)) {
+                host.DoneOutcome.Ok => bytes.ok(),
+                host.DoneOutcome.Error(failure) => Result<Unit>.Err(host_error.io(failure, "shutdown failed", label)),
+            };
+        };
+
+        /// @brief Releases the connection. Closing again returns Ok.
+        export let close = func -> Result<Unit> {
+            open_now = false;
+            return stream.close();
+        };
+
+        /// @brief Text such as "UnixStream(to /run/app.sock)" or "UnixStream(accepted on @bus)".
+        export let.override to_string = func -> string => match (peer) {
+            Optional.Some(address) => "UnixStream(to " .. address.to_string() .. ")",
+            Optional.None => "UnixStream(accepted on " .. label .. ")",
+        };
+    );
+
+    /// @brief Connects to the Unix-domain stream socket at `address` (`neura.net.unix.connect`).
+    #NoDiscard
+    export let connect = func(address: UnixAddr) -> Result<UnixStream> {
+        last text = address.to_string();
+        return match (host.unix_connect(text)) {
+            host.IdOutcome.Ok(id) => Result<UnixStream>.Ok(new UnixStream(new socket.Handle(id, text),
+                Optional<UnixAddr>.Some(address), Optional<UnixAddr>.None)),
+            host.IdOutcome.Error(code) => Result<UnixStream>.Err(host_error.io(code, "connect failed", text)),
+        };
+    };
+
+    /// @brief A Unix address from the host's [path, port] pair; `@name` is abstract.
+    let unix_address = func(reported: [string, int]) -> Result<UnixAddr> {
+        let [text, port] = reported;
+        return unix_addrs.parse(text);
+    };
+);

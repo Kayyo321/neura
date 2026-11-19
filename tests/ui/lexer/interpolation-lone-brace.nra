@@ -1,0 +1,2 @@
+// A single '}' closes no hole; doubled it is a brace (edge case 75).
+let text = $"a}";

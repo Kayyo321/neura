@@ -1,0 +1,3 @@
+// Edge case 42 of docs/design/Expressions030.md: `a .. b == c` is
+// `a .. (b == c)`, which is E1100 at the bool.
+let same = func(a: string, b: string, c: string) -> string => a .. b == c;

@@ -1,0 +1,145 @@
+let.promote _ = import:Std.Core.Result;
+let error = import:Std.Core.Error;
+let mp = import:Std.Crypto.Internal.Mp;
+let rsa_core = import:Std.Crypto.Internal.RsaCore;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief Independent RSA message blinding and public fault checks for private operations. Internal.
+export let RsaBlinding = module (
+    let failure = func<T>(code: string, message: string) -> Result<T> => Result<T>.Err(error.custom(code, message));
+
+    let signing_failure = func -> Result<uint8[list]> =>
+        failure<uint8[list]>("crypto.fault", "RSA private operation failed its check");
+
+    /// @brief Takes the factor limbs, blinds the representative, performs checked CRT and verifies the unblinded result.
+    export let apply = func(private: rsa_core.PrivateCore, input: uint32[list], factor: uint32[list])
+        -> Result<uint8[list]> {
+        private.require_live();
+        if (factor.length == 0 || mp.is_zero(factor) == 1) {
+            wipe_limbs(factor);
+            return failure<uint8[list]>("crypto.blinding", "invalid server blinding factor");
+        }
+        last public = private.public_core;
+        last inverse = invert(factor, public);
+        if (inverse.length == 0) {
+            wipe_limbs(factor);
+            return failure<uint8[list]>("crypto.blinding", "server blinding factor has no inverse");
+        }
+        last power = public.apply(factor);
+        last blinded = multiply(public.modulus, input, power);
+        last signed = private.apply(blinded);
+        wipe_limbs(factor);
+        wipe_limbs(power);
+        wipe_limbs(blinded);
+        if (signed.length == 0) {
+            wipe_limbs(inverse);
+            return signing_failure();
+        }
+        last output = multiply(public.modulus, signed, inverse);
+        wipe_limbs(signed);
+        wipe_limbs(inverse);
+        if (mp.equal(input, public.apply(output)) != 1) {
+            wipe_limbs(output);
+            return signing_failure();
+        }
+        return Result<uint8[list]>.Ok(rsa_core.i2osp(public, output));
+    };
+
+    export let sample_factor = func(key: rsa_core.PublicCore, random: func(int) -> Result<uint8[list]>)
+        -> Result<uint32[list]> {
+        last mask = (255 >> (key.k * 8 - key.bits)) as uint8;
+        for (let attempts in 0 .. 128) {
+            last candidate = random(key.k)?;
+            candidate[0] &= mask;
+            last value = rsa_core.os2ip_below(key, candidate);
+            words.wipe(candidate);
+            if (value.length != 0 && mp.is_zero(value) == 0) {
+                return Result<uint32[list]>.Ok(value);
+            }
+            wipe_limbs(value);
+        }
+        return failure<uint32[list]>("crypto.blinding", "could not draw a blinding factor");
+    };
+
+    export let multiply = func(modulus: mp.Modulus, left: uint32[list], right: uint32[list]) -> uint32[list] =>
+        modulus.mul(modulus.to_mont(left), right);
+
+    export let wipe_limbs = func(number: uint32[list]) {
+        for (let i = 0; i < number.length; i++) {
+            number[i] = 0;
+        }
+    };
+
+    // The odd operand b stays odd. Reduce the even a or subtract the smaller odd operand before halving.
+    // Each step decreases the sum of the two bit lengths until a is zero, then subsequent steps do nothing.
+    let reduce_once = func(a: uint32[list], b: uint32[list], difference: uint32[list]) -> [uint32, uint32] {
+        last odd = a[0] & 1;
+        last swap = odd & mp.less(a, b);
+        mp.cswap(swap, a, b);
+        let _ = mp.sub_into(difference, a, b);
+        mp.assign_if(odd, a, difference);
+        shift_down(a, 0);
+        return [odd, swap];
+    };
+
+    let shift_down = func(number: uint32[list], top: uint32) {
+        let carry = top;
+        for (let i = number.length - 1; i >= 0; i--) {
+            last previous = number[i];
+            number[i] = (previous >> 1) | (carry << 31);
+            carry = previous & 1;
+        }
+    };
+
+    export let coprime = func(input: uint32[list], key: rsa_core.PublicCore) -> bool {
+        last a = mp.copy(input);
+        last b = mp.copy(key.n);
+        last difference = mp.zeros(a.length);
+        for (let i = 0; i < 2 * key.bits; i++) {
+            let _ = reduce_once(a, b, difference);
+        }
+        last valid = mp.equal(b, mp.small(1, b.length)) == 1;
+        wipe_limbs(a);
+        wipe_limbs(b);
+        wipe_limbs(difference);
+        return valid;
+    };
+
+    // Keep a = x * input (mod n) and b = y * input (mod n) across the same GCD steps.
+    export let invert = func(input: uint32[list], key: rsa_core.PublicCore) -> uint32[list] {
+        last a = mp.copy(input);
+        last b = mp.copy(key.n);
+        last difference = mp.zeros(a.length);
+        last x = mp.small(1, a.length);
+        last y = mp.zeros(a.length);
+        for (let i = 0; i < 2 * key.bits; i++) {
+            const [odd, swap] = reduce_once(a, b, difference);
+            mp.cswap(swap, x, y);
+            last subtracted = key.modulus.sub(x, y);
+            mp.assign_if(odd, x, subtracted);
+            wipe_limbs(subtracted);
+            halve_residue(x, key.n);
+        }
+        last valid = mp.equal(b, mp.small(1, b.length)) == 1;
+        wipe_limbs(a);
+        wipe_limbs(b);
+        wipe_limbs(difference);
+        wipe_limbs(x);
+        if (not valid) {
+            wipe_limbs(y);
+            return new;
+        }
+        return y;
+    };
+
+    let halve_residue = func(number: uint32[list], modulus: uint32[list]) {
+        last mask = ((number[0] & 1) as uint64) * 4294967295;
+        let carry: uint64 = 0;
+        for (let i = 0; i < number.length; i++) {
+            last sum = (number[i] as uint64) + ((modulus[i] as uint64) & mask) + carry;
+            number[i] = (sum & 4294967295) as uint32;
+            carry = sum >> 32;
+        }
+        shift_down(number, carry as uint32);
+    };
+);

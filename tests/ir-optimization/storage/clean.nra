@@ -1,0 +1,59 @@
+// The same shapes as escapes.nra where nothing escapes.
+let Clean = module (
+    export let inner_only = func() -> int {
+        let outer: int[] = [1];
+        {
+            let inner: int[] = [2];
+            let sum: int = inner[0];
+        }
+        return outer[0];
+    };
+
+    export let borrow_outer = func() -> int {
+        let outer: int[] = [1];
+        {
+            let view = outer;
+            return view[0];
+        }
+    };
+
+    export let per_pass = func(count: int) -> int {
+        let total: int = 0;
+        for (let i = 0; i < count; i += 1) {
+            let item: int[] = [i];
+            total += item[0];
+        }
+        return total;
+    };
+
+    export let fresh = func() -> int[] {
+        return [1];
+    };
+
+    export let ranged = func() -> int {
+        let numbers = {
+            0 .. 4
+        };
+        return numbers[0];
+    };
+
+    export let argument = func(source: int[]) -> int {
+        let copy: int[] = [source[0]];
+        return copy[0];
+    };
+
+    let use_borrow = func(value: &int) {
+        value += 1;
+    };
+
+    export let forwarded = func(value: &int) {
+        use_borrow(value);
+    };
+
+    export let reference_use = func() -> int {
+        let cell: int = 1;
+        let alias: &int = cell;
+        alias += 1;
+        return cell;
+    };
+);

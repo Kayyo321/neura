@@ -21,7 +21,7 @@ let PortableErrorTests = module (
 
     // One error of every variant; the last is a Context nested two deep over a Custom.
     let samples = func -> error.Error[list] {
-        let all: error.Error[list] = [];
+        let all: error.Error[list] = new;
         all.append(error.Error.Io { kind: error.IoErrorKind.NotFound, message: "no file", path: "a.txt" });
         all.append(error.Error.Io { kind: error.IoErrorKind.Closed, message: "stream closed", path: "" });
         all.append(error.Error.Parse { kind: error.ParseErrorKind.OutOfRange, offset: 7, message: "too big" });
@@ -77,10 +77,10 @@ let PortableErrorTests = module (
         match (portable) {
             error.PortableError.Context { message, cause } => {
                 test.assert_equal_string("outer", message);
-                match (cause) {
+                match (cause.cause) {
                     error.PortableError.Context { message: inner, cause: root } => {
                         test.assert_equal_string("middle", inner);
-                        match (root) {
+                        match (root.cause) {
                             error.PortableError.Custom { code, message: text } => {
                                 test.assert_equal_string("billing.card_declined", code);
                                 test.assert_equal_string("card declined for 9", text);
@@ -116,7 +116,7 @@ let PortableErrorTests = module (
     // 2, so it parks and the tasks interleave) and the consumer rebuilds the errors and compares messages.
     export let test_portable_errors_cross_a_channel_between_two_tasks = func() -> void {
         let [out, incoming, closer] = channels.open<error.PortableError>(2);
-        let received: error.Error[list] = [];
+        let received: error.Error[list] = new;
         let produced = 0;
         scope {
             let producer = spawn send_errors(out, closer);

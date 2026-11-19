@@ -1,0 +1,30 @@
+// A narrowing `if` (docs/design/Expressions030.md, Narrowing): `is not` with an else branch, whose true branch completes.
+// Built against narrowing-is-not.expanded.nra, the same program written with match.is.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Shape = class (
+    export let sides: int = 0;
+);
+let Circle = class : Shape (
+    export let radius: int = 1;
+);
+
+let describe = func(shape: Shape, limit: int) -> string {
+    let text = "";
+    if (shape is not circle: Circle) {
+        text = "other";
+    } else {
+        text = "circle " + circle.radius.to_string();
+    }
+    return text;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(describe(new Circle(), 0));
+        console.print_line(describe(new Circle(), 3));
+        console.print_line(describe(new Shape(), 0));
+        return program.ExitCode.Ok;
+    };
+);

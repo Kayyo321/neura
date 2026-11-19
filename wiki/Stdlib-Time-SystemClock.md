@@ -25,7 +25,9 @@ The following public declarations are taken from the module source; each links t
   The host's monotonic clock, from an origin fixed for the run. Tagged `#NoDiscard`.
 - **SystemClock.SystemClock** · [`export let sleep = func(span: Duration) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/system-clock.nra#L55)
   Waits for the duration; a zero or negative duration asks the host to wait for zero nanoseconds. Fails with Cancelled when the task's scope is cancelled first.
-- **SystemClock** · [`export let create = func -> SystemClock`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/system-clock.nra#L66)
+- **SystemClock.SystemClock** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/system-clock.nra#L64)
+  Names the clock.
+- **SystemClock** · [`export let create = func -> SystemClock`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/system-clock.nra#L69)
   Creates a clock backed by the host's wall and monotonic clocks. Tagged `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 

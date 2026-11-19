@@ -1,0 +1,10 @@
+error[E0575]: invalid accessor override
+ --> $DIR/wrong-type.nra:7:32
+  |
+3 |     export let label: string = "shape";
+  |                ----- 'label' has type string here
+...
+7 |     export let.override label: int;
+  |                                ^^^ an accessor override repeats the property's type 'string'
+
+For more information about this error, try `neura explain E0575`.

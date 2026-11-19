@@ -1,0 +1,9 @@
+error[E0570]: invalid record declaration
+ --> $DIR/default.nra:2:24
+  |
+2 | let P = record (x: int = 0);
+  |                        ^ a record component has no default value
+  |
+  = help: remove it, or declare a class instead of a record
+
+For more information about this error, try `neura explain E0570`.

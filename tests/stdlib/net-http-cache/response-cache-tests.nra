@@ -1,0 +1,246 @@
+let cache = import:Std.Net.Http.Cache;
+let fixed = import:Std.Time.FixedClock;
+let headers = import:Std.Net.Http.Headers;
+let instant = import:Std.Time.Instant;
+let test = import:Std.Test;
+
+// Std.Net.Http.Cache.ResponseCache: the storage rules of RFC 9111 section 3 and 3.5, request directives of
+// section 5.2.1, serving stale responses (section 4.2.4), Vary (section 4.1) and invalidation (section 4.4).
+// Every stored response is requested at R-2 and received at R, so its current age at R+t is 2+t seconds
+// (section 4.2.3 with no Date or Age field). Ages and margins come from (run verbatim):
+// python3 -I -c 'age=lambda t: 2+t; print(age(10), age(97), age(98)); print(age(50), 100-age(50)); print(age(148), age(148)-100); print(age(1000), 100000*10//100)'
+// -> 12 99 100 (max-age=10/12 at R+10; max-age=100 fresh at R+97, stale at R+98); 52 48 (min-fresh 49/48 at
+//    R+50); 150 50 (max-stale 50/49 at R+148); 1002 10000 (heuristic lifetime at R+1000).
+let ResponseCacheTests = module (
+    const Received: int64 = 1794873600;
+
+    let at = func(offset: int64) -> instant.Instant => instant.of_epoch_seconds(Received + offset, 0);
+
+    let fields = func(name: string, value: string) -> headers.Headers {
+        last map = new headers.Headers();
+        map.add(name, value);
+        return map;
+    };
+
+    let none = func -> headers.Headers => new headers.Headers();
+
+    let response = func(code: int, map: headers.Headers) -> cache.StoredResponse =>
+        new cache.StoredResponse(code, map, new uint8[list](), at(-2), at(0));
+
+    let controlled = func(directives: string) -> cache.StoredResponse => response(200,
+        fields("Cache-Control", directives));
+
+    let kind = func(result: cache.Lookup) -> string => match (result) {
+        cache.Lookup.Fresh(_) => "fresh",
+        cache.Lookup.Stale(_) => "stale",
+        cache.Lookup.Miss => "miss",
+    };
+
+    let refusal = func(method: string,
+        request: headers.Headers, code: int, map: headers.Headers, shared: bool) -> string =>
+        cache.refusal(method, request, code, map, shared);
+
+    export let test_storage_refusals = func {
+        last ok = fields("Cache-Control", "max-age=60");
+        test.assert_equal_string("", refusal("GET", none(), 200, ok, true));
+        test.assert_equal_string("", refusal("HEAD", none(), 200, ok, true));
+        test.assert_equal_string("method", refusal("POST", none(), 200, ok, false));
+        test.assert_equal_string("status", refusal("GET", none(), 103, ok, false));
+        test.assert_equal_string("status not understood", refusal("GET", none(), 206, ok, false));
+        test.assert_equal_string("status not understood", refusal("GET", none(), 304, ok, false));
+        test.assert_equal_string("request no-store",
+            refusal("GET", fields("Cache-Control", "no-store"), 200, ok, false));
+        test.assert_equal_string("no-store",
+            refusal("GET", none(), 200, fields("Cache-Control", "max-age=60, no-store"), false));
+        // must-understand lets a cache that understands the status ignore no-store (section 5.2.2.3).
+        test.assert_equal_string("",
+            refusal("GET", none(), 200, fields("Cache-Control", "max-age=60, no-store, must-understand"), false));
+        test.assert_equal_string("private",
+            refusal("GET", none(), 200, fields("Cache-Control", "private, max-age=60"), true));
+        test.assert_equal_string("", refusal("GET", none(), 200, fields("Cache-Control", "private"), false));
+        test.assert_equal_string("vary *", refusal("GET", none(), 200, fields("Vary", "Accept, *"), false));
+        test.assert_equal_string("no freshness information", refusal("GET", none(), 201, none(), false));
+        test.assert_equal_string("", refusal("GET", none(), 201, fields("Expires", "0"), false));
+        test.assert_equal_string("", refusal("GET", none(), 404, none(), true));
+        test.assert(cache.is_storable("GET", none(), 200, none(), false));
+    };
+
+    export let test_authorization_in_shared_cache = func {
+        last auth = fields("Authorization", "Bearer abc");
+        test.assert_equal_string("authorization",
+            refusal("GET", auth, 200, fields("Cache-Control", "max-age=60"), true));
+        test.assert_equal_string("", refusal("GET", auth, 200, fields("Cache-Control", "max-age=60"), false));
+        test.assert_equal_string("", refusal("GET", auth, 200, fields("Cache-Control", "public, max-age=60"), true));
+        test.assert_equal_string("",
+            refusal("GET", auth, 200, fields("Cache-Control", "must-revalidate, max-age=60"), true));
+        test.assert_equal_string("", refusal("GET", auth, 200, fields("Cache-Control", "s-maxage=60"), true));
+    };
+
+    export let test_fresh_stale_miss = func {
+        last store = new cache.ResponseCache(false, 8);
+        test.assert(store.store("GET", "https://a.example/x", none(), controlled("max-age=100")));
+        test.assert(!store.store("POST", "https://a.example/x", none(), controlled("max-age=100")));
+        test.assert_equal<int>(1, store.size());
+        test.assert_equal_string("fresh", kind(store.lookup("GET", "https://a.example/x", none(), at(97))));
+        test.assert_equal_string("stale", kind(store.lookup("GET", "https://a.example/x", none(), at(98))));
+        test.assert_equal_string("miss", kind(store.lookup("HEAD", "https://a.example/x", none(), at(0))));
+        test.assert_equal_string("miss", kind(store.lookup("GET", "https://a.example/y", none(), at(0))));
+        last hit = match (store.lookup("GET", "https://a.example/x", none(), at(0))) {
+            cache.Lookup.Fresh(stored) => stored.status,
+            _ => 0,
+        };
+        test.assert_equal<int>(200, hit);
+    };
+
+    export let test_no_cache_needs_validation = func {
+        last store = new cache.ResponseCache(false, 8);
+        test.assert(store.store("GET", "u1", none(), controlled("max-age=100, no-cache")));
+        test.assert_equal_string("stale", kind(store.lookup("GET", "u1", none(), at(0))));
+        test.assert(store.store("GET", "u2", none(), controlled("max-age=100, no-cache=\"Set-Cookie\"")));
+        test.assert_equal_string("stale", kind(store.lookup("GET", "u2", none(), at(0))));
+        test.assert(store.store("GET", "u3", none(), controlled("max-age=100")));
+        test.assert_equal_string("stale", kind(store.lookup("GET", "u3", fields("Cache-Control", "no-cache"), at(0))));
+        test.assert_equal_string("fresh", kind(store.lookup("GET", "u3", none(), at(0))));
+        // Request no-store does not affect an already stored response (RFC 9111 section 5.2.1.5).
+        test.assert_equal_string("fresh", kind(store.lookup("GET", "u3", fields("Cache-Control", "no-store"), at(0))));
+    };
+
+    export let test_request_max_age_and_min_fresh = func {
+        last store = new cache.ResponseCache(false, 8);
+        test.assert(store.store("GET", "u", none(), controlled("max-age=100")));
+        // Age at R+10 is 12.
+        test.assert_equal_string("stale",
+            kind(store.lookup("GET", "u", fields("Cache-Control", "max-age=10"), at(10))));
+        test.assert_equal_string("fresh",
+            kind(store.lookup("GET", "u", fields("Cache-Control", "max-age=12"), at(10))));
+        // Age at R+50 is 52, 48 seconds of freshness remain.
+        test.assert_equal_string("stale",
+            kind(store.lookup("GET", "u", fields("Cache-Control", "min-fresh=49"), at(50))));
+        test.assert_equal_string("fresh",
+            kind(store.lookup("GET", "u", fields("Cache-Control", "min-fresh=48"), at(50))));
+        test.assert_equal_string("fresh",
+            kind(store.lookup("GET", "u", fields("Cache-Control", "min-fresh=x"), at(50))));
+    };
+
+    export let test_max_stale = func {
+        last store = new cache.ResponseCache(false, 8);
+        test.assert(store.store("GET", "u", none(), controlled("max-age=100")));
+        // Age at R+148 is 150: 50 seconds stale.
+        test.assert_equal_string("stale", kind(store.lookup("GET", "u", none(), at(148))));
+        test.assert_equal_string("fresh",
+            kind(store.lookup("GET", "u", fields("Cache-Control", "max-stale=50"), at(148))));
+        test.assert_equal_string("stale",
+            kind(store.lookup("GET", "u", fields("Cache-Control", "max-stale=49"), at(148))));
+        test.assert_equal_string("fresh",
+            kind(store.lookup("GET", "u", fields("Cache-Control", "max-stale"), at(148))));
+        test.assert_equal_string("stale",
+            kind(store.lookup("GET", "u", fields("Cache-Control", "max-stale=x"), at(148))));
+        // must-revalidate forbids serving it stale.
+        test.assert(store.store("GET", "m", none(), controlled("max-age=100, must-revalidate")));
+        test.assert_equal_string("stale",
+            kind(store.lookup("GET", "m", fields("Cache-Control", "max-stale"), at(148))));
+    };
+
+    export let test_shared_and_private_stale_rules = func {
+        last shared = new cache.ResponseCache(true, 8);
+        last private = new cache.ResponseCache(false, 8);
+        last stored = controlled("max-age=100, proxy-revalidate");
+        test.assert(shared.store("GET", "u", none(), stored));
+        test.assert(private.store("GET", "u", none(), stored));
+        last tolerant = fields("Cache-Control", "max-stale");
+        test.assert_equal_string("stale", kind(shared.lookup("GET", "u", tolerant, at(148))));
+        test.assert_equal_string("fresh", kind(private.lookup("GET", "u", tolerant, at(148))));
+        // s-maxage gives the shared cache its lifetime and forbids stale use there.
+        last both = controlled("max-age=10, s-maxage=100");
+        test.assert(shared.store("GET", "s", none(), both));
+        test.assert(private.store("GET", "s", none(), both));
+        test.assert_equal_string("fresh", kind(shared.lookup("GET", "s", none(), at(50))));
+        test.assert_equal_string("stale", kind(private.lookup("GET", "s", none(), at(50))));
+        test.assert_equal_string("stale", kind(shared.lookup("GET", "s", tolerant, at(148))));
+        test.assert_equal_string("fresh", kind(private.lookup("GET", "s", tolerant, at(148))));
+        // private responses are kept only by the private cache.
+        test.assert(!shared.store("GET", "p", none(), controlled("private, max-age=100")));
+        test.assert(private.store("GET", "p", none(), controlled("private, max-age=100")));
+    };
+
+    export let test_heuristic_switch = func {
+        last map = new headers.Headers();
+        map.add("Date", "Mon, 16 Nov 2026 23:59:55 GMT");
+        map.add("Last-Modified", "Sun, 15 Nov 2026 20:13:15 GMT");
+        last store = new cache.ResponseCache(false, 8);
+        test.assert(store.store("GET", "h", none(), response(200, map)));
+        // Heuristic lifetime 10000 seconds (10% of 100000).
+        test.assert_equal_string("fresh", kind(store.lookup("GET", "h", none(), at(1000))));
+        store.set_heuristic(false);
+        test.assert_equal_string("stale", kind(store.lookup("GET", "h", none(), at(1000))));
+    };
+
+    export let test_vary = func {
+        last map = new headers.Headers();
+        map.add("Cache-Control", "max-age=100");
+        map.add("Vary", "Accept-Encoding");
+        last store = new cache.ResponseCache(false, 8);
+        test.assert(store.store("GET", "v", fields("Accept-Encoding", "gzip"), response(200, map)));
+        test.assert_equal_string("fresh", kind(store.lookup("GET", "v", fields("accept-encoding", "gzip"), at(0))));
+        test.assert_equal_string("miss", kind(store.lookup("GET", "v", fields("Accept-Encoding", "br"), at(0))));
+        test.assert_equal_string("miss", kind(store.lookup("GET", "v", none(), at(0))));
+        // A field absent from the original request matches only when absent again.
+        last store2 = new cache.ResponseCache(false, 8);
+        test.assert(store2.store("GET", "v", none(), response(200, map)));
+        test.assert_equal_string("fresh", kind(store2.lookup("GET", "v", none(), at(0))));
+        test.assert_equal_string("miss", kind(store2.lookup("GET", "v", fields("Accept-Encoding", "gzip"), at(0))));
+    };
+
+    export let test_eviction_is_least_recently_used = func {
+        last store = new cache.ResponseCache(false, 2);
+        test.assert(store.store("GET", "a", none(), controlled("max-age=100")));
+        test.assert(store.store("GET", "b", none(), controlled("max-age=100")));
+        test.assert_equal_string("fresh", kind(store.lookup("GET", "a", none(), at(0))));
+        test.assert(store.store("GET", "c", none(), controlled("max-age=100")));
+        test.assert_equal<int>(2, store.size());
+        test.assert(store.contains("GET", "a"));
+        test.assert(!store.contains("GET", "b"));
+        test.assert(store.contains("GET", "c"));
+        // Replacing a stored key evicts nothing.
+        test.assert(store.store("GET", "a", none(), controlled("max-age=5")));
+        test.assert(store.contains("GET", "c"));
+        test.assert_equal_string("stale", kind(store.lookup("GET", "a", none(), at(10))));
+        test.assert_equal_string("ResponseCache{private, 2/2}", store.to_string());
+        test.assert(store.remove("GET", "a"));
+        test.assert(!store.remove("GET", "a"));
+        store.clear();
+        test.assert_equal<int>(0, store.size());
+    };
+
+    export let test_invalidation_after_unsafe_methods = func {
+        last store = new cache.ResponseCache(true, 8);
+        test.assert(store.store("GET", "u", none(), controlled("max-age=100")));
+        test.assert(store.store("HEAD", "u", none(), controlled("max-age=100")));
+        test.assert(store.store("GET", "w", none(), controlled("max-age=100")));
+        test.assert_equal<int>(0, store.record_response("GET", "u", 200));
+        test.assert_equal<int>(0, store.record_response("POST", "u", 500));
+        test.assert_equal<int>(0, store.record_response("DELETE", "u", 404));
+        test.assert_equal<int>(2, store.record_response("POST", "u", 303));
+        test.assert_equal<int>(1, store.size());
+        // A method whose safety is unknown counts as unsafe.
+        test.assert_equal<int>(1, store.record_response("PURGE", "w", 200));
+        test.assert_equal<int>(0, store.size());
+    };
+
+    export let test_clock_lookup = func {
+        last store = new cache.ResponseCache(false, 4);
+        test.assert(store.store("GET", "u", none(), controlled("max-age=100")));
+        last clock = fixed.of(at(97));
+        test.assert_equal_string("fresh",
+            kind(test.assert_ok<cache.Lookup>(store.lookup_with(clock, "GET", "u", none()))));
+        clock.set(at(98));
+        test.assert_equal_string("stale",
+            kind(test.assert_ok<cache.Lookup>(store.lookup_with(clock, "GET", "u", none()))));
+    };
+
+    export let test_negative_age_needs_validation = func {
+        last store = new cache.ResponseCache(false, 4);
+        test.assert(store.store("GET", "u", none(), controlled("max-age=0")));
+        test.assert_equal_string("stale", kind(store.lookup("GET", "u", none(), at(-100))));
+    };
+);

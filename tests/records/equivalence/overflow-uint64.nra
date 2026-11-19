@@ -1,0 +1,23 @@
+// A sum through Std.Core.Arithmetic traps on overflow at the width of uint64, at
+// the same element in every build and tier (docs/design/Records030.md, edge
+// case 101).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let.promote _ = import:Std.Core.Arithmetic;
+
+let sum = func<T: Additive<T>>(items: T[]) -> T {
+    let total = T.zero();
+    for (let i = 0; i < items.length; i++) {
+        console.print_line("element " + i.to_string());
+        total = T.add(total, items[i]);
+    }
+    return total;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let items: uint64[] = [18446744073709551000, 600, 15, 1];
+        console.print_line(sum(items).to_string());
+        return program.ExitCode.Ok;
+    };
+);

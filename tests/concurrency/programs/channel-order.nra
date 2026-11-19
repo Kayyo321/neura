@@ -35,7 +35,7 @@ let receive_and_report = func(label: string, incoming: channels.Receiver<int>) -
 };
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line("== rendezvous");
         let [out, incoming, closer] = channels.open<int>(0);
         // Nobody is waiting, so a send that never parks cannot commit.

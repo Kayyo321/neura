@@ -1,0 +1,71 @@
+let.promote _ = import:Std.Time.Clock;
+let durations = import:Std.Time.Duration;
+let hash_maps = import:Std.Collections.HashMap;
+let optional = import:Std.Core.Optional;
+let limiters = import:Std.Net.Resilience.RateLimiter;
+let.promote _ = import:Std.Core.Result;
+let buckets = import:Std.Net.Resilience.TokenBucket;
+
+/// @brief An in-memory keyed rate limiter with one `TokenBucket` per key, all with the same capacity and refill
+/// rate and created full on a key's first request. Buckets are never evicted: `forget` drops one, `clear` drops all.
+/// @see [Std.Net.Resilience.TokenBucketLimiter](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-TokenBucketLimiter)
+#Since("0.3.0")
+export let TokenBucketLimiter = module (
+    /// @brief One token bucket per key.
+    #[Final, NotThreadSafe]
+    export let TokenBucketLimiter = class implements limiters.RateLimiter (
+        /// @brief The capacity of each bucket.
+        last capacity: int;
+        /// @brief Tokens added per period.
+        last tokens: int;
+        /// @brief The refill period.
+        last period: durations.Duration;
+        /// @brief The clock every bucket reads.
+        last clock: Clock;
+        /// @brief The bucket of each key seen.
+        last buckets_by_key: hash_maps.HashMap<string, buckets.TokenBucket> =
+            hash_maps.create<string, buckets.TokenBucket>();
+
+        /// @brief A limiter whose buckets hold `size` tokens and gain `refill` tokens per `refill_period`. The
+        /// arguments are checked as for `TokenBucket`.
+        export let init = func(size: int, refill: int, refill_period: durations.Duration, source: Clock) {
+            // Validate once, so a bad configuration traps at construction rather than at the first request.
+            let _ = new buckets.TokenBucket(size, refill, refill_period, source);
+            capacity = size;
+            tokens = refill;
+            period = refill_period;
+            clock = source;
+        };
+
+        /// @brief Takes `permits` tokens from the key's bucket.
+        export let try_acquire = func(key: string, permits: int) -> Result<limiters.RateDecision> {
+            last existing = buckets_by_key.get(key);
+            return match (existing) {
+                optional.Optional.Some(bucket) => bucket.try_acquire(permits),
+                optional.Optional.None => fresh(key).try_acquire(permits),
+            };
+        };
+
+        /// @brief The number of keys with a bucket.
+        export let size = func -> int => buckets_by_key.size();
+
+        /// @brief Drops the bucket of `key`; its next request starts full. Returns whether it had one.
+        export let forget = func(key: string) -> bool => buckets_by_key.delete(key);
+
+        /// @brief Drops every bucket.
+        export let clear = func {
+            buckets_by_key.clear();
+        };
+
+        /// @brief Text such as "TokenBucketLimiter(capacity 10, 2 keys)".
+        export let.override to_string = func -> string =>
+            "TokenBucketLimiter(capacity " .. capacity.to_string() .. ", " .. buckets_by_key.size().to_string() .. " keys)";
+
+        /// @brief Creates and stores a full bucket for `key`.
+        let fresh = func(key: string) -> buckets.TokenBucket {
+            last bucket = new buckets.TokenBucket(capacity, tokens, period, clock);
+            buckets_by_key.set(key, bucket);
+            return bucket;
+        };
+    );
+);

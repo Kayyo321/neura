@@ -1,0 +1,220 @@
+let.promote _ = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let ips = import:Std.Net.Core.IpAddr;
+let v4 = import:Std.Net.Core.Ipv4Addr;
+let v6 = import:Std.Net.Core.Ipv6Addr;
+let.promote _ = import:Std.Net.Core.NetAddress;
+let.promote _ = import:Std.Core.Result;
+
+/// @brief CIDR blocks (RFC 4632 for IPv4, RFC 4291 section 2.3 for IPv6): a network address and a prefix
+/// length, with membership tests. `PrefixTrie` maps blocks to values by longest-prefix match.
+///
+/// A block's network always has its host bits cleared and carries no IPv6 zone; the constructor traps
+/// otherwise, `of` and `parse_lenient` clear the host bits and drop the zone, and `parse` reports them as
+/// errors. Membership ignores the zone of the queried address. An IPv4-mapped IPv6 address
+/// (`::ffff:a.b.c.d`) is an IPv6 address: it is not inside an IPv4 block. A `CidrBlock` is an immutable
+/// class, so each value is one heap object; this runtime does not provide zero-allocation value types.
+/// @see [Std.Net.Core.CidrBlock](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Core-CidrBlock)
+#Since("0.3.0")
+export let CidrBlock = module (
+    /// @brief All 64 bits set.
+    const AllOnes: uint64 = 18446744073709551615;
+
+    /// @brief A network address with its host bits cleared and a prefix length.
+    #[Final, NoDiscard, Immutable, ThreadSafe, Since("0.3.0")]
+    export let CidrBlock = class (
+        /// @brief The network address: the host bits are clear and an IPv6 network has no zone.
+        export last network: ips.IpAddr;
+        /// @brief The prefix length: 0 to 32 for IPv4, 0 to 128 for IPv6.
+        export last prefix_length: int;
+
+        /// @brief Constructs the block; traps when the prefix is out of range for the family, when a host bit
+        /// is set, or when an IPv6 network has a zone.
+        export let init = func(address: ips.IpAddr, prefix: int) {
+            last problem = check(address, prefix);
+            if (problem != "") {
+                trap_with_message("CidrBlock: " .. problem);
+            }
+            network = address;
+            prefix_length = prefix;
+        };
+
+        /// @brief Tests whether the address lies in the block; false for the other family.
+        #Pure
+        export let contains = func(ip: ips.IpAddr) -> bool => match (network) {
+            ips.IpAddr.V4(net_v4) => match (ip) {
+                ips.IpAddr.V4(a) => (a.bits & mask_v4(prefix_length)) == net_v4.bits,
+                ips.IpAddr.V6(_) => false,
+            },
+            ips.IpAddr.V6(net_v6) => match (ip) {
+                ips.IpAddr.V4(_) => false,
+                ips.IpAddr.V6(a) => (a.high & mask_high(prefix_length)) == net_v6.high
+                    && (a.low & mask_low(prefix_length)) == net_v6.low,
+            },
+        };
+
+        /// @brief The family of the network address.
+        #Pure
+        export let family = func -> AddressFamily => ips.family(network);
+
+        /// @brief Tests whether another object is a `CidrBlock` with an equal network and prefix length.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not block: CidrBlock) {
+                return false;
+            }
+            return prefix_length == block.prefix_length && ips.equals(network, block.network);
+        };
+
+        /// @brief Combines the network hash with the prefix length.
+        #Pure
+        export let.override hash_code = func -> uint32 =>
+            hashing.combine(ips.hash(network), prefix_length as uint32);
+
+        /// @brief `network/prefix`, for example `10.0.0.0/8` or `2001:db8::/32`.
+        #Pure
+        export let.override to_string = func -> string =>
+            ips.to_string(network) .. "/" .. prefix_length.to_string();
+    );
+
+    /// @brief The block of `ip` with the host bits cleared and any zone dropped; traps when the prefix is out
+    /// of range for the family.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let of = func(ip: ips.IpAddr, prefix: int) -> CidrBlock {
+        if (prefix < 0 || prefix > max_prefix(ip)) {
+            trap_with_message("CidrBlock.of: prefix length out of range for the address family");
+        }
+        return new CidrBlock(masked(ip, prefix), prefix);
+    };
+
+    /// @brief Parses `address/prefix`, where the prefix is 1 to 3 decimal digits without a leading zero
+    /// (except `0`), at most 32 for IPv4 and 128 for IPv6.
+    ///
+    /// Python's `ipaddress.ip_network` is laxer: it also takes a bare address (as a /32 or /128), a netmask
+    /// (`10.0.0.0/255.0.0.0`), a leading zero (`/08`) and a zone; this parser rejects each.
+    ///
+    /// Errors: Empty for ""; Syntax at the length when there is no `/`; the address parser's error; Syntax
+    /// at the `%` of a zone; InvalidCharacter at a byte of the prefix that is not a digit or follows a leading
+    /// zero; UnexpectedEnd for an empty prefix; OutOfRange at the prefix's start when it is too long for the
+    /// family; Syntax at the `/` when host bits are set.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let parse = func(text: string) -> Result<CidrBlock> => parse_with(text, false);
+
+    /// @brief Parses like `parse`, but clears host bits (`10.1.2.3/8` gives `10.0.0.0/8`) and drops an IPv6
+    /// zone instead of reporting them.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let parse_lenient = func(text: string) -> Result<CidrBlock> => parse_with(text, true);
+
+    /// @brief The parser shared by `parse` and `parse_lenient`.
+    let parse_with = func(text: string, lenient: bool) -> Result<CidrBlock> {
+        last length = text.byte_length;
+        if (length == 0) {
+            return failed(ParseErrorKind.Empty, 0, "empty input");
+        }
+        let slash = -1;
+        for (let i = 0; i < length; i++) {
+            if (text.byte_at(i) == 47) {
+                slash = i;
+                break;
+            }
+        }
+        if (slash < 0) {
+            return failed(ParseErrorKind.Syntax, length, "expected '/' and a prefix length");
+        }
+        let ip = ips.IpAddr.V4(v4.unspecified());
+        match (ips.parse(text.slice(0, slash))) {
+            Result.Ok(address) => {
+                ip = address;
+            },
+            Result.Err(e) => {
+                return Result<CidrBlock>.Err(e);
+            },
+        }
+        if (not lenient) {
+            for (let i = 0; i < slash; i++) {
+                if (text.byte_at(i) == 37) {
+                    return failed(ParseErrorKind.Syntax, i, "a network cannot have a zone");
+                }
+            }
+        }
+        last start = slash + 1;
+        if (start >= length) {
+            return failed(ParseErrorKind.UnexpectedEnd, length, "expected a prefix length");
+        }
+        let prefix = 0;
+        for (let i = start; i < length; i++) {
+            last b = text.byte_at(i) as int;
+            if (b < 48 || b > 57 || (i > start && text.byte_at(start) == 48)) {
+                return failed(ParseErrorKind.InvalidCharacter, i, "expected a decimal prefix length");
+            }
+            if (i - start >= 3) {
+                return failed(ParseErrorKind.OutOfRange, start, "prefix length too long for the family");
+            }
+            prefix = prefix * 10 + b - 48;
+        }
+        if (prefix > max_prefix(ip)) {
+            return failed(ParseErrorKind.OutOfRange, start, "prefix length too long for the family");
+        }
+        last network = masked(ip, prefix);
+        return if (not lenient && not ips.equals(network, without_zone(ip))) -> failed(ParseErrorKind.Syntax, slash, "host bits are set")
+            else -> Result<CidrBlock>.Ok(new CidrBlock(network, prefix));
+    };
+
+    /// @brief Why an address and prefix do not form a block, or "" when they do.
+    let check = func(address: ips.IpAddr, prefix: int) -> string {
+        if (prefix < 0 || prefix > max_prefix(address)) {
+            return "prefix length out of range for the address family";
+        }
+        last has_zone = match (address) {
+            ips.IpAddr.V4(_) => false,
+            ips.IpAddr.V6(a) => a.zone.byte_length > 0,
+        };
+        if (has_zone) {
+            return "a network cannot have a zone";
+        }
+        return "host bits are set" unless ips.equals(masked(address, prefix), address);
+        return "";
+    };
+
+    /// @brief 32 for IPv4, 128 for IPv6.
+    let max_prefix = func(ip: ips.IpAddr) -> int => match (ip) {
+        ips.IpAddr.V4(_) => 32,
+        ips.IpAddr.V6(_) => 128,
+    };
+
+    /// @brief The address with the bits after `prefix` cleared and no zone.
+    let masked = func(ip: ips.IpAddr, prefix: int) -> ips.IpAddr => match (ip) {
+        ips.IpAddr.V4(a) => ips.IpAddr.V4(new v4.Ipv4Addr(a.bits & mask_v4(prefix))),
+        ips.IpAddr.V6(a) => ips.IpAddr.V6(new v6.Ipv6Addr(a.high & mask_high(prefix), a.low & mask_low(prefix), "")),
+    };
+
+    /// @brief The address without an IPv6 zone.
+    let without_zone = func(ip: ips.IpAddr) -> ips.IpAddr => match (ip) {
+        ips.IpAddr.V4(_) => ip,
+        ips.IpAddr.V6(a) => ips.IpAddr.V6(a.without_zone()),
+    };
+
+    /// @brief The IPv4 netmask of a prefix length 0 to 32.
+    let mask_v4 = func(prefix: int) -> uint32 {
+        return if (prefix == 0) -> 0
+            else -> ((AllOnes << ((64 - prefix) as uint64)) >> 32) as uint32;
+    };
+
+    /// @brief The netmask bits of groups 1 to 4 for an IPv6 prefix length 0 to 128.
+    let mask_high = func(prefix: int) -> uint64 {
+        if (prefix >= 64) {
+            return AllOnes;
+        }
+        return if (prefix == 0) -> 0
+            else -> AllOnes << ((64 - prefix) as uint64);
+    };
+
+    /// @brief The netmask bits of groups 5 to 8 for an IPv6 prefix length 0 to 128.
+    let mask_low = func(prefix: int) -> uint64 {
+        return if (prefix <= 64) -> 0
+            else -> AllOnes << ((128 - prefix) as uint64);
+    };
+
+    /// @brief Creates a CIDR parse error at a UTF-8 byte offset.
+    let failed = func(kind: ParseErrorKind, offset: int, message: string) -> Result<CidrBlock> =>
+        Result<CidrBlock>.Err(Error.Parse { kind: kind, offset: offset, message: message });
+);

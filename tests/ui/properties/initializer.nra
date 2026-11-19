@@ -1,0 +1,5 @@
+// A property has no initializer (edge case 63).
+let Named = interface (
+    let name: string = "x";
+        | get;
+);

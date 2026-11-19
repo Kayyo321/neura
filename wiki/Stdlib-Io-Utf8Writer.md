@@ -25,7 +25,9 @@ The following public declarations are taken from the module source; each links t
   Writes the UTF-8 bytes of the text and returns the sink's result. Tagged `#NoDiscard`.
 - **Utf8Writer.Utf8Writer** · [`export let write_line = func(text: string) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-writer.nra#L26)
   Writes the text and one LF. Tagged `#NoDiscard`.
-- **Utf8Writer** · [`export let create = func(sink: func(uint8[list]) -> Result<Unit>) -> Utf8Writer`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-writer.nra#L32)
+- **Utf8Writer.Utf8Writer** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-writer.nra#L30)
+  Names the writer.
+- **Utf8Writer** · [`export let create = func(sink: func(uint8[list]) -> Result<Unit>) -> Utf8Writer`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-writer.nra#L35)
   Creates a UTF-8 writer over the supplied byte sink. Tagged `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 

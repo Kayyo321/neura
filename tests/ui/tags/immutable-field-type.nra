@@ -7,6 +7,6 @@ let Path = class (
 
     export let init = func(label: string) {
         name = label;
-        steps = [];
+        steps = new;
     };
 );

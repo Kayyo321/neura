@@ -24,9 +24,9 @@ export let StringMap = module (
         /// @brief Never replaced, so iterators can read its modification count.
         last core: hash_core.HashCore;
         /// @brief The keys indexed by dense entry number, including entries pending compaction.
-        let stored_keys: string[list] = [];
+        let stored_keys: string[list] = new;
         /// @brief The values indexed by the same dense entry numbers as their keys.
-        let stored_values: V[list] = [];
+        let stored_values: V[list] = new;
         /// @brief Whether this instance's text conversion is running.
         let printing: bool = false;
 
@@ -44,8 +44,8 @@ export let StringMap = module (
         /// @brief Removes all entries, resets the table to its original size, and invalidates iterators.
         export let clear = func {
             core.reset();
-            stored_keys = [];
-            stored_values = [];
+            stored_keys = new;
+            stored_values = new;
         };
 
         /// @brief Reports whether an entry exists for `key`.
@@ -64,10 +64,7 @@ export let StringMap = module (
         /// @brief Returns the associated value, or `fallback` when the key is absent.
         export let get_or = func(key: string, fallback: V) -> V {
             last slot = find(key, spread(key.hash_code()));
-            if (slot < 0) {
-                return fallback;
-            }
-            return stored_values[core.index[slot]];
+            return if (slot < 0) -> fallback else -> stored_values[core.index[slot]];
         };
 
         /// @brief Returns the associated value. Traps with `no such element` when the key is absent.
@@ -127,7 +124,7 @@ export let StringMap = module (
 
         /// @brief Copies the keys to a new built-in list in insertion order.
         export let keys = func -> string[list] {
-            last result: string[list] = [];
+            last result: string[list] = new;
             last live = core.live;
             last length = live.length;
             let entry = 0;
@@ -142,7 +139,7 @@ export let StringMap = module (
 
         /// @brief Copies the values to a new built-in list in insertion order.
         export let values = func -> V[list] {
-            last result: V[list] = [];
+            last result: V[list] = new;
             last live = core.live;
             last length = live.length;
             let entry = 0;
@@ -157,7 +154,7 @@ export let StringMap = module (
 
         /// @brief Copies the `[key, value]` tuples to a new built-in list in insertion order.
         export let entries = func -> [string, V][list] {
-            last result: [string, V][list] = [];
+            last result: [string, V][list] = new;
             last live = core.live;
             last length = live.length;
             let entry = 0;
@@ -208,7 +205,7 @@ export let StringMap = module (
         /// @return The number of removed entries.
         export let remove_if = func(drop: func(string, V) -> bool) -> int {
             last expected = core.modifications;
-            last chosen: int[list] = [];
+            last chosen: int[list] = new;
             last length = core.live.length;
             let entry = 0;
             while (entry < length) {
@@ -343,10 +340,9 @@ export let StringMap = module (
         /// @brief Another StringMap with the same size in which, for each of its
         /// entries, this map holds an equal value for the key.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is StringMap<V>)) {
+            if (other is not that: StringMap<V>) {
                 return false;
             }
-            last that = other as StringMap<V>;
             if (that.size() != core.count) {
                 return false;
             }
@@ -356,7 +352,7 @@ export let StringMap = module (
             while (i < count) {
                 let [key, value] = items[i];
                 last slot = find(key, spread(key.hash_code()));
-                if (slot < 0 || !(stored_values[core.index[slot]] === value)) {
+                if (slot < 0 || not (stored_values[core.index[slot]] === value)) {
                     return false;
                 }
                 i += 1;
@@ -388,12 +384,12 @@ export let StringMap = module (
                 return "(this collection)";
             }
             printing = true;
-            last parts: string[list] = [];
+            last parts: string[list] = new;
             last live = core.live;
             let entry = 0;
             while (entry < live.length) {
                 if (live[entry]) {
-                    parts.append(stored_keys[entry].to_string() + ": " + stored_values[entry].to_string());
+                    parts.append(stored_keys[entry].to_string() .. ": " .. stored_values[entry].to_string());
                 }
                 entry += 1;
             }
@@ -496,7 +492,7 @@ export let StringMap = module (
                 trap_with_message("collection modified during iteration");
             }
             last live = core.live;
-            while (position < live.length && !live[position]) {
+            while (position < live.length && not live[position]) {
                 position += 1;
             }
             return position < live.length;
@@ -504,13 +500,17 @@ export let StringMap = module (
 
         /// @brief Returns the next live `[key, value]` tuple and advances. Traps with `collection modified during iteration` after a structural change. Traps with `no such element` at exhaustion.
         export let next = func -> [string, V] {
-            if (!has_next()) {
+            if (not has_next()) {
                 trap_with_message("no such element");
             }
             last item: [string, V] = [source_keys[position], source_values[position]];
             position += 1;
             return item;
         };
+
+        /// @brief Names the iterator and its position.
+        export let.override to_string = func -> string =>
+            "StringMapIterator(position " .. position.to_string() .. ")";
     );
 
     /// @brief Creates an empty map with the default table size.
@@ -526,7 +526,7 @@ export let StringMap = module (
 
     /// @brief Copies entries from `old` at the indices in `order`.
     let reordered = func<T>(old: T[list], order: int[list]) -> T[list] {
-        last result: T[list] = [];
+        last result: T[list] = new;
         last count = order.length;
         let i = 0;
         while (i < count) {
@@ -539,6 +539,6 @@ export let StringMap = module (
     /// @brief `[a, b]` text of the parts with braces in place of the brackets.
     let braced = func(parts: string[list]) -> string {
         last text = parts.to_string();
-        return "{" + text.slice(1, text.byte_length - 1) + "}";
+        return "{" .. text.slice(1, text.byte_length - 1) .. "}";
     };
 );

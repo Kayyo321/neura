@@ -1,0 +1,161 @@
+let certificate = import:Std.Crypto.Pki.Certificate;
+let console = import:Std.Io.Console;
+let hex = import:Std.Encoding.Hex;
+let host_name = import:Std.Crypto.Pki.HostName;
+let instant = import:Std.Time.Instant;
+let int64s = import:Std.Core.Int64;
+let paths = import:Std.Crypto.Pki.PathValidation;
+let verifiers = import:TestVerifiers;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+
+// Runs selected C2SP x509-limbo cases (support/limbo-vectors-*.nra, scripts/crypto-vectors/gen-pki-paths.py)
+// through PathValidation with the generator's signature truth table, and lists every case whose outcome differs
+// from the expected one.
+export let LimboRunner = module (
+    /// @brief One line per case whose outcome differs: "<id>: expected <X>, got <Y> (<error>)".
+    export let trace: bool = false;
+    export let only: string = "";
+    export let strict: bool = true;
+
+    export let run = func(cases: string[], certificates: string[], signatures: string[]) -> string[list] {
+        let mismatches: string[list] = new;
+        for (let i = 0; i < cases.length; i += 11) {
+            last id = cases[i];
+            if (only.byte_length > 0 && id != only) {
+                continue;
+            }
+            last outcome = run_case(id, cases, i, certificates, signatures);
+            if (trace) {
+                console.print_line(id + " => " + outcome);
+            }
+            last got = outcome.byte_length == 0 ? "SUCCESS" : "FAILURE";
+            if (got != cases[i + 2]) {
+                mismatches.append(id + ": expected " + cases[i + 2] + ", got " + got + " (" + outcome + ")");
+            } else if (contains(outcome, "unsupported signature algorithm") && !contains(id, "pathological-chain")
+                    && !contains(id, "forbidden-dsa")) {
+                // A failure only because the truth table lacks the pair would pass vacuously (DSA is not offered by
+                // Std.Crypto, so DSA cases fail as unsupported for real).
+                mismatches.append(id + ": failed for want of a signature result (" + outcome + ")");
+            }
+        }
+        return mismatches;
+    };
+
+    /// @brief "" when the path validates, else the failure text.
+    let run_case = func(id: string, cases: string[], at: int, certificates: string[], signatures: string[]) -> string {
+        let peer: certificate.Certificate[list] = new;
+        let pool: certificate.Certificate[list] = new;
+        let anchors: certificate.Certificate[list] = new;
+        for (let j = 0; j < certificates.length; j += 3) {
+            if (certificates[j] != id) {
+                continue;
+            }
+            last bytes = must_hex(certificates[j + 2]);
+            match (certificate.parse(bytes)) {
+                Result.Ok(c) => {
+                    if (certificates[j + 1] == "peer") {
+                        peer.append(c);
+                    } else if (certificates[j + 1] == "intermediate") {
+                        pool.append(c);
+                    } else {
+                        anchors.append(c);
+                    }
+                },
+                Result.Err(e) => {
+                    if (certificates[j + 1] == "peer") {
+                        return "peer does not parse: " + e.to_string();
+                    }
+                },
+            }
+        }
+        if (peer.length != 1) {
+            return "no peer";
+        }
+        let keys: string[list] = new;
+        let values: string[list] = new;
+        for (let j = 0; j < signatures.length; j += 3) {
+            if (signatures[j] == id) {
+                keys.append(signatures[j + 1]);
+                values.append(signatures[j + 2]);
+            }
+        }
+        last time = cases[at + 6].byte_length > 0 ? instant.of_epoch_seconds(must_int(cases[at + 6]), 0)
+            : instant.of_epoch_seconds(1700000000, 0);
+        let options = new paths.ValidationOptions(time, new verifiers.Table(keys, values));
+        options.strict_profile = strict;
+        last kind = cases[at + 4];
+        last name = cases[at + 5];
+        if (kind == "DNS") {
+            options.dns_name = name;
+        } else if (kind == "IP") {
+            match (host_name.parse_ip(name)) {
+                Optional.Some(bytes) => {
+                    options.ip_address = bytes;
+                },
+                Optional.None => {
+                    return "peer IP does not parse";
+                },
+            }
+        } else if (kind == "RFC822") {
+            options.email_address = name;
+        }
+        last depth = must_int(cases[at + 7]);
+        if (depth >= 0) {
+            options.max_intermediates = depth as int;
+        }
+        if (cases[at + 8].byte_length > 0) {
+            last ekus = cases[at + 8];
+            let comma = ekus.byte_length;
+            for (let k = 0; k < ekus.byte_length; k++) {
+                if (ekus.byte_at(k) == 44) {
+                    comma = k;
+                    break;
+                }
+            }
+            options.purpose = ekus.slice(0, comma);
+        }
+        match (paths.validate(peer[0], pool, anchors, options)) {
+            Result.Ok(path) => {
+                return "";
+            },
+            Result.Err(e) => {
+                return e.to_string();
+            },
+        }
+        return "unreachable";
+    };
+
+    let contains = func(text: string, needle: string) -> bool {
+        for (let i = 0; i + needle.byte_length <= text.byte_length; i++) {
+            if (text.slice(i, i + needle.byte_length) == needle) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    let must_hex = func(text: string) -> uint8[list] {
+        match (hex.decode(text)) {
+            Result.Ok(bytes) => {
+                return bytes;
+            },
+            Result.Err(e) => {
+                trap_with_message("bad hex in a limbo vector");
+            },
+        }
+        trap_with_message("bad hex in a limbo vector");
+    };
+
+    let must_int = func(text: string) -> int64 {
+        match (int64s.parse(text)) {
+            Result.Ok(v) => {
+                return v;
+            },
+            Result.Err(e) => {
+                trap_with_message("bad number in a limbo vector");
+            },
+        }
+        trap_with_message("bad number in a limbo vector");
+    };
+);

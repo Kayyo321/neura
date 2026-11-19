@@ -27,7 +27,7 @@ export let Uuid = module (
         /// @brief The 16 bytes in order, as a new list.
         #Pure
         export let to_bytes = func -> uint8[list] {
-            last bytes: uint8[list] = [];
+            last bytes: uint8[list] = new;
             append_word(bytes, high);
             append_word(bytes, low);
             return bytes;
@@ -39,19 +39,15 @@ export let Uuid = module (
             if (high != other.high) {
                 return order(high < other.high);
             }
-            if (low != other.low) {
-                return order(low < other.low);
-            }
-            return Ordering.Equal;
+            return if (low != other.low) -> order(low < other.low) else -> Ordering.Equal;
         };
 
         /// @brief Tests whether another UUID has the same two halves.
-        #Pure
+        /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Uuid)) {
+            if (other is not id: Uuid) {
                 return false;
             }
-            last id = other as Uuid;
             return high == id.high && low == id.low;
         };
 
@@ -143,10 +139,7 @@ export let Uuid = module (
         if (b >= 97 && b <= 102) {
             return b - 87;
         }
-        if (b >= 65 && b <= 70) {
-            return b - 55;
-        }
-        return -1;
+        return if (b >= 65 && b <= 70) -> b - 55 else -> -1;
     };
 
     /// @brief Eight bytes from `start`, big-endian.

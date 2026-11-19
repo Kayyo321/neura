@@ -4,7 +4,9 @@
 
 #include <algorithm>
 #include <charconv>
+#include <map>
 #include <optional>
+#include <set>
 #include <string_view>
 
 namespace neura {
@@ -15,27 +17,54 @@ inline bool has_enum_payload(const IrProgram& program, SymbolId enumeration) {
     });
 }
 
-// Whether `equals`, `hash_code`, and `to_string` are built in for a type
-// (Types.md): scalars, strings, fieldless enums, class references, and
-// tuples, arrays, and lists of such types. Enums with payloads and function
-// values have none.
+// Value members recurse into active payloads. A recursive enum behind a
+// collection revisits the same declaration with the same argument capabilities.
 inline bool supports_value_members(const IrProgram& program, const IrType& type) {
-    switch (type.kind) {
-    case TypeKind::Void:
-    case TypeKind::Module:
-    case TypeKind::Callable:
-        return false;
-    case TypeKind::Enum:
-        return !has_enum_payload(program, type.symbol);
-    case TypeKind::Array:
-    case TypeKind::List:
-    case TypeKind::Tuple:
-        return std::ranges::all_of(type.arguments, [&](const IrType& part) {
-            return supports_value_members(program, part);
-        });
-    default:
-        return true;
-    }
+    using Bindings = std::map<SymbolId, bool>;
+    std::set<std::pair<SymbolId, std::vector<bool>>> seen;
+    const auto supports = [&](const auto& self, const IrType& item, const Bindings& bindings) -> bool {
+        switch (item.kind) {
+        case TypeKind::Void:
+        case TypeKind::Module:
+        case TypeKind::Callable:
+        case TypeKind::Any:
+            return false;
+        case TypeKind::TypeParameter: {
+            const auto found = bindings.find(item.symbol);
+            return found == bindings.end() || found->second;
+        }
+        case TypeKind::Enum: {
+            if (item.symbol >= program.symbols.size()) return false;
+            const auto& parameters = program.symbols[item.symbol].generics;
+            Bindings inner;
+            std::vector<bool> capabilities;
+            for (std::size_t i = 0; i < parameters.size() && i < item.arguments.size(); ++i) {
+                const bool available = self(self, item.arguments[i], bindings);
+                inner.emplace(parameters[i], available);
+                capabilities.push_back(available);
+            }
+            const auto [entry, inserted] = seen.emplace(item.symbol, capabilities);
+            if (!inserted) return true;
+            for (const auto& variant : program.symbols) {
+                if (variant.kind != SymbolKind::Variant || variant.owner != item.symbol) continue;
+                for (const auto& payload : variant.payload_types)
+                    if (!self(self, payload, inner)) {
+                        seen.erase(entry);
+                        return false;
+                    }
+            }
+            seen.erase(entry);
+            return true;
+        }
+        case TypeKind::Array:
+        case TypeKind::List:
+        case TypeKind::Tuple:
+            return std::ranges::all_of(item.arguments, [&](const IrType& part) { return self(self, part, bindings); });
+        default:
+            return true;
+        }
+    };
+    return supports(supports, type, {});
 }
 
 inline std::size_t enum_ordinal(const IrProgram& program, SymbolId variant) {

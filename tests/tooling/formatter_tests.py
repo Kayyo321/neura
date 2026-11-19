@@ -37,6 +37,80 @@ class FormatterTests(unittest.TestCase):
         self.assertEqual(self.formatted("let count=1;"), "let count = 1;\n")
         self.assertEqual(self.formatted(""), "")
 
+    def test_matching_operators_patterns_and_match_is(self):
+        # docs/design/Matching030.md, Grammar: `a?.b` and `r?` without
+        # spaces, `a ?? b` with spaces, single spaces around a guard, and
+        # `match.is (x) {` written as `match (x) {` is.
+        source = '''let read=func(pet:Pet)->string=>pet  ?.  owner?.name??"x";
+let run=func(text:string)->Result<int>{
+let x=parse(text) ? ;
+let y=ready?1:2;
+return Result<int>.Ok(x+y);
+};
+let area=func(shape:Shape)->int=>match(shape){
+Shape.Line(n)  if  n>0=>n,
+Shape.Box{size:[w,h],label}=>w*h,
+_=>0,
+};
+let kind=func(v:class)->int=>match . is(v){
+shape:Shape if shape.sides>4=>1,
+_=>0,
+};
+'''
+        expected = '''let read = func(pet: Pet) -> string => pet?.owner?.name ?? "x";
+let run = func(text: string) -> Result<int> {
+    let x = parse(text)?;
+    let y = ready ? 1 : 2;
+    return Result<int>.Ok(x + y);
+};
+let area = func(shape: Shape) -> int => match (shape) {
+    Shape.Line(n) if n > 0 => n,
+    Shape.Box { size: [w, h], label } => w * h,
+    _ => 0,
+};
+let kind = func(v: class) -> int => match.is (v) {
+    shape: Shape if shape.sides > 4 => 1,
+    _ => 0,
+};
+'''
+        self.assertEqual(self.formatted(source), expected)
+        self.assertEqual(self.formatted(expected), expected)
+
+    def test_defer_using_generators_and_yield(self):
+        # docs/design/Lifetime030.md, Tooling: `defer` and one space before
+        # its call, joined when split; `using (name = value) {` with one
+        # space before `(`, while a call `using(x)` keeps none; `iterator(`
+        # and `iterator<T>(` with none; `yield` and one space.
+        source = """let squares=iterator<T>(items:T[list])->T{
+for(let item:T in items){
+yield(item);
+}
+};
+let run=func(log:Log)->Result<int>{
+defer
+log.end();
+using(source=open()){
+using(source);
+}
+return Result<int>.Ok(0);
+};
+"""
+        expected = """let squares = iterator<T>(items: T[list]) -> T {
+    for (let item: T in items) {
+        yield (item);
+    }
+};
+let run = func(log: Log) -> Result<int> {
+    defer log.end();
+    using (source = open()) {
+        using(source);
+    }
+    return Result<int>.Ok(0);
+};
+"""
+        self.assertEqual(self.formatted(source), expected)
+        self.assertEqual(self.formatted(expected), expected)
+
     def test_comments_and_documentation_attachment(self):
         source = '''// ordinary comment: https://example.test/a//b
 /// Documentation has @param [in] name and \\return text.
@@ -77,6 +151,66 @@ let reference=func(value:&int)->&int=>value;'''
         self.assertIn('(value << 2) >> 1 - -other', formatted)
         self.assertIn('value: &int', formatted)
         self.assertIn('-> &int', formatted)
+
+    def test_expression_operators_of_0_3_0(self):
+        # docs/design/Expressions030.md, Tooling: one space around `!==`.
+        source = """let f=func(a:int,b:int)->bool=>a!==b||!(a===b);"""
+        formatted = self.formatted(source)
+        self.assertIn('=> a !== b || !(a === b);', formatted)
+        # One space around `..=`, and around the colon of its step.
+        formatted = self.formatted("let r=0..=5:2;let t=0..5:2;let u=0..(5);let v=0..=(5);let w=1!==(2);")
+        self.assertIn('let r = 0 ..= 5 : 2;', formatted)
+        self.assertIn('let t = 0 .. 5 : 2;', formatted)
+        self.assertIn('let u = 0 .. (5);', formatted)
+        self.assertIn('let v = 0 ..= (5);', formatted)
+        self.assertIn('let w = 1 !== (2);', formatted)
+        formatted = self.formatted('let s=func(a:string)->string=>a.."b"..("c"..a);')
+        self.assertIn('=> a .. "b" .. ("c" .. a);', formatted)
+        formatted = self.formatted('let f=func(a:string){let s="";s..=a.."!";s..=(a);};')
+        self.assertIn('s ..= a .. "!";', formatted)
+        self.assertIn('s ..= (a);', formatted)
+        # docs/design/Expressions030.md, Escapes: every escape stays as written.
+        formatted = self.formatted('let a="\\u{1F600}\\xC3\\xA9\\0\\\'";let c=\'\\u{e9}\';')
+        self.assertIn('let a = "\\u{1F600}\\xC3\\xA9\\0\\\'";', formatted)
+        self.assertIn("let c = '\\u{e9}';", formatted)
+        # docs/design/Expressions030.md, Return forms: a guard keeps its line,
+        # also after a '}', and a ';' after an arm puts the next arm on its own
+        # line at the statement's indent.
+        formatted = self.formatted('let f=func(x:int)->int{return 1 unless x>9;return match(x){_=>1,} unless x>2;'
+                                   'return if(x>0)->1;else ->2;};')
+        self.assertIn('    return 1 unless x > 9;', formatted)
+        self.assertIn('    } unless x > 2;', formatted)
+        self.assertIn('    return if (x > 0) -> 1;\n    else -> 2;', formatted)
+
+    def test_negation_words_keep_their_spelling(self):
+        # docs/design/Expressions030.md, Tooling: `not` and `!` stay as written.
+        source = """let Shape=class();let Circle=class:Shape();
+let f=func(a:bool,b:bool,s:Shape)->bool=>not a||not(a&&b)||!not b||!a||s is   not Circle;
+let g=func(a:bool)->bool=>not   [a][0];"""
+        formatted = self.formatted(source)
+        self.assertIn('=> not a || not (a && b) || !not b || !a || s is not Circle;', formatted)
+        self.assertIn('=> not [a][0];', formatted)
+
+    def test_narrowing_colon_spacing(self):
+        # docs/design/Expressions030.md, Tooling: `x is y: T`, and `?:` unchanged.
+        source = """let Shape=class();let Circle=class:Shape(export let radius:int=1;);
+let f=func(s:Shape,c:bool)->int{if(s is   c2 :Circle&&c2.radius>0){return c2.radius;}if(s is not c3:Circle){return 0;}if(c?s is Circle:c){return 1;}return 2;};"""
+        formatted = self.formatted(source)
+        self.assertIn('    if (s is c2: Circle && c2.radius > 0) {\n', formatted)
+        self.assertIn('    if (s is not c3: Circle) {\n', formatted)
+        self.assertIn('    if (c ? s is Circle : c) {\n', formatted)
+
+    def test_character_literals_keep_their_spelling(self):
+        # docs/design/Expressions030.md, Tooling: a character literal is
+        # written back as written, and a quote in it hides no comment.
+        source = r"""let q='"';// a comment with " quote
+let t=['\t','\\','\'','\x41','\xff'];let n='a'..'z';let y=t[0]+'B';let s=$"{'}'}";"""
+        formatted = self.formatted(source)
+        self.assertIn("""let q = '"'; // a comment with " quote""", formatted)
+        self.assertIn(r"""let t = ['\t', '\\', '\'', '\x41', '\xff'];""", formatted)
+        self.assertIn("let n = 'a' .. 'z';", formatted)
+        self.assertIn("let y = t[0] + 'B';", formatted)
+        self.assertIn("""let s = $"{'}'}";""", formatted)
 
     def test_for_header_and_overload_groups(self):
         source = '''let Example=module(export let run=func(){for(let i=0;i<10;i++){if(i==3){continue;}else{let last=i;last++;}}}or func(value:int){do{value--;}while(value>0);};);'''
@@ -170,6 +304,403 @@ let handle=func(value:Shape){match(value){Shape.Point{x,y}=>{if(x>y){return;}},S
                 result = execute(*flags, source=b'let value=1;')
                 self.assertNotEqual(result.returncode, 0)
 
+    def test_grouped_parameters_and_shorthand_keep_the_authors_grouping(self):
+        source = """let Point=class(
+    export last x:int;
+    export last y:int;
+    export let init=func(x,y:int)=>set;
+);
+let distance=func(a,b:float64,label:string)->string{return label;};
+let split=func(a:float64,b:float64,label:string)->string{return label;};
+let commented=func(
+// the corners
+a,   b: float64, // after a group
+#Note("text") label : string
+)->string{return label;};
+"""
+        formatted = self.formatted(source)
+        self.assertIn("func(x, y: int) => set;", formatted)
+        self.assertIn("func(a, b: float64, label: string) -> string {", formatted)
+        self.assertIn("func(a: float64, b: float64, label: string) -> string {", formatted)
+        self.assertIn("// the corners", formatted)
+        self.assertIn("// after a group", formatted)
+        self.assertIn("a, b: float64,", formatted)
+
+    def test_typeof_and_not_after_the_rewrite(self):
+        # docs/design/Expressions030.md: `typeof(x)` is written against its
+        # parenthesis like a call; `not` is a word and groups what follows.
+        formatted = self.formatted("let a=typeof (v).name;\nlet b=not(x);\nlet c=not [x];\n")
+        self.assertIn("typeof(v).name", formatted)
+        self.assertIn("not (x)", formatted)
+        self.assertIn("not [x]", formatted)
+
+    def test_labels_defaults_interpolation_and_nameof(self):
+        # docs/design/Calls030.md, Grammar: a label is written 'name: value',
+        # a default 'name: Type = value', and an interpolated string is
+        # copied byte for byte. Labels are never added, removed or reordered.
+        source = '''let schedule=func(job:string,retries:int=-3,urgent:bool=false,ratio:float64=-0.5)->string=>job;
+let first=schedule(urgent : true,job:"backup");
+let second=schedule("x",retries:ok?1:2);
+let text=$"{ job }:{retries:>4}  {{x}} {$"{a}"}";
+let name=nameof( schedule );
+let lengths=transform(names,func(word)=>word.byte_length);
+let r=f(new(0..10:2));
+'''
+        formatted = self.formatted(source)
+        self.assertIn("func(job: string, retries: int = -3, urgent: bool = false, ratio: float64 = -0.5) -> string", formatted)
+        self.assertIn('schedule(urgent: true, job: "backup")', formatted)
+        self.assertIn('schedule("x", retries: ok ? 1 : 2)', formatted)
+        self.assertIn('$"{ job }:{retries:>4}  {{x}} {$"{a}"}"', formatted)
+        self.assertIn("nameof(schedule)", formatted)
+        self.assertIn("transform(names, func(word) => word.byte_length)", formatted)
+        self.assertIn("new(0 .. 10 : 2)", formatted)
+
+    def test_records(self):
+        # docs/design/Records030.md, Formatter: a record is laid out like an
+        # enum with named payloads, one component per line with a trailing
+        # comma, or on one line when it was written on one line. A call of a
+        # function named record keeps its spacing.
+        source = '''let P=record(x:int,y:int);
+let Q=record (
+  // first
+  id:int64,
+  /// the name
+  #Deprecated("no") name:string
+);
+let total=record(first);
+'''
+        self.assertEqual(self.formatted(source), '''let P = record (x: int, y: int);
+let Q = record (
+    // first
+    id: int64,
+    /// the name
+    #Deprecated("no") name: string,
+);
+let total = record(first);
+''')
+
+    def test_copies(self):
+        # docs/design/Records030.md, Formatter: a copy written on one line stays
+        # on one line; written over several, it has one replacement per line
+        # and a trailing comma.
+        source = '''let a=new with(user){name:"x",id:3};
+let b=new with(user){};
+let c=new with(user){
+name:"G",
+id:3
+};
+let with=1;
+'''
+        self.assertEqual(self.formatted(source), '''let a = new with(user) { name: "x", id: 3 };
+let b = new with(user) {};
+let c = new with(user) {
+    name: "G",
+    id: 3,
+};
+let with = 1;
+''')
+
+    def test_virtual_accessor_words_are_joined(self):
+        # docs/design/Records030.md, Grammar: the words of a clause may be
+        # separated by spaces or comments; neura fmt writes them joined.
+        source = '''let Shape=class(
+export let label:string="s";
+| get . virtual : label;
+);
+let Named=interface(
+let name:string;
+| get;
+);
+'''
+        self.assertEqual(self.formatted(source), '''let Shape = class (
+    export let label: string = "s";
+        | get.virtual: label;
+);
+let Named = interface (
+    let name: string;
+        | get;
+);
+''')
+
+    def test_derivations(self):
+        # docs/design/Records030.md, Formatter: a derivation's type arguments
+        # are written like any generic's, and its mappings one per line.
+        source = '''let A=derive json.Codec < User >;
+let B=derive json.Codec<Variant<int>>{};
+let C=derive json.Codec<Variant<[int,bool]> > {field User.name:"display_name";variant Mode.Fast : "fast";};
+let derive=1;
+let after=derive<2;
+'''
+        self.assertEqual(self.formatted(source), '''let A = derive json.Codec<User>;
+let B = derive json.Codec<Variant<int>> {};
+let C = derive json.Codec<Variant<[int, bool]>> {
+    field User.name: "display_name";
+    variant Mode.Fast: "fast";
+};
+let derive = 1;
+let after = derive < 2;
+''')
+
+    def test_grouping_parentheses_and_brackets_are_spaced_as_operands(self):
+        # A '(' or '[' written against an operand opens a call, an index or a
+        # parameter list; after an operator or a keyword it groups and is
+        # spaced like any operand (docs/style/CodingStyle.md, section 3).
+        source = '''let f=func(a:int,b:int)->bool=>a==(b+1)&&(a<<2)>(b)||!(a>b);
+let g=func(v:int)->int{return (v>>1)|(v<<(3-v));};
+let h=func(x:int[list],y:int)->int=>x[0]+[1,2][y]-(-y);
+let grid=[["a","b"],["c"]];
+let t=f<int>(1)(2)[0];
+let s=new(0);
+'''
+        self.assertEqual(self.formatted(source), '''let f = func(a: int, b: int) -> bool => a == (b + 1) && (a << 2) > (b) || !(a > b);
+let g = func(v: int) -> int {
+    return (v >> 1) | (v << (3 - v));
+};
+let h = func(x: int[list], y: int) -> int => x[0] + [1, 2][y] - (-y);
+let grid = [["a", "b"], ["c"]];
+let t = f<int>(1)(2)[0];
+let s = new(0);
+''')
+
+    def test_tag_groups_stay_on_one_line(self):
+        # A tag group is one line above its declaration (CodingStyle.md,
+        # section 6), also after a member that spans several lines, and a
+        # group that an earlier formatter split is joined again.
+        source = '''let M=module(
+#[Final,Immutable,Since("0.3.0")]
+export let C=class(export last x:int;);
+#[Since("0.3.0"),NoDiscard]
+export let f=func(a:int)->int=>a;
+#[
+
+NoDiscard, Pure]
+export let g=func(a:int)->int=>a;
+);
+'''
+        self.assertEqual(self.formatted(source), '''let M = module (
+    #[Final, Immutable, Since("0.3.0")]
+    export let C = class (
+        export last x: int;
+    );
+
+    #[Since("0.3.0"), NoDiscard]
+    export let f = func(a: int) -> int => a;
+    #[NoDiscard, Pure]
+    export let g = func(a: int) -> int => a;
+);
+''')
+
+    def test_member_separation_comments_and_one_line_members(self):
+        # A blank line follows a member that spans several lines and goes
+        # before the comments above the next member; one-line members, such
+        # as a one-line enum, need none.
+        source = '''let M = module (
+    let E = enum (A, B);
+    let Pair = enum<T> (Both(T, T), Neither);
+    // about f
+    let f = func -> int => 1;
+    let g = func {
+        work();
+    };
+    // about I
+    /// Documented.
+    let I = interface<T>:Iterable<T> (
+        let size = func -> int;
+    );
+);
+'''
+        self.assertEqual(self.formatted(source), '''let M = module (
+    let E = enum (A, B);
+    let Pair = enum<T> (Both(T, T), Neither);
+    // about f
+    let f = func -> int => 1;
+    let g = func {
+        work();
+    };
+
+    // about I
+    /// Documented.
+    let I = interface<T>:Iterable<T> (
+        let size = func -> int;
+    );
+);
+''')
+
+    def test_statement_layout(self):
+        # A do-while's `while` follows its '}', a while statement after a
+        # block starts its own line, a ',' in a statement never ends a line,
+        # a braced range stays inline, and a member named scope is called as
+        # any member is.
+        source = '''let run = func(arena: Arena) {
+    do { step(); } while (more());
+    while (more()) { step(); }
+    let [left, right]: [Point, Point] = make("a"), new;
+    last indices = {0 .. 10};
+    last s = arena.scope();
+    scope(handle) { step(); }
+    match (pick()) { Shape.Line(n) => { step(); }, _ => {}, }
+};
+'''
+        self.assertEqual(self.formatted(source), '''let run = func(arena: Arena) {
+    do {
+        step();
+    } while (more());
+    while (more()) {
+        step();
+    }
+    let [left, right]: [Point, Point] = make("a"), new;
+    last indices = {0 .. 10};
+    last s = arena.scope();
+    scope (handle) {
+        step();
+    }
+    match (pick()) {
+        Shape.Line(n) => {
+            step();
+        },
+        _ => {},
+    }
+};
+''')
+
+    def test_wrapped_lines_are_kept(self):
+        # A line break written inside a statement is kept, one level deeper
+        # than the line that opened the innermost open parenthesis, bracket
+        # or brace, or than the statement's first line. A closing delimiter
+        # written on its own line after an opening one that ends its line
+        # stays there.
+        source = '''let f = func(a: int, b: int) -> string =>
+                a.to_string() + b.to_string();
+let g = func(first: int,
+                         second: int) -> int {
+    return combine(
+        first,   // the first
+        Error.Io {
+            kind: Kind.Missing,
+            path: "x",
+        },
+        second
+    );
+};
+let C = class (
+    export let.as int16 = func -> int16 => value as int16
+        or as int64 = func -> int64 => value;
+);
+let h = func(values: int[list]) -> int {
+    return values.length
+        + 1;
+};
+'''
+        self.assertEqual(self.formatted(source), '''let f = func(a: int, b: int) -> string =>
+    a.to_string() + b.to_string();
+let g = func(first: int,
+    second: int) -> int {
+    return combine(
+        first, // the first
+        Error.Io {
+            kind: Kind.Missing,
+            path: "x",
+        },
+        second
+    );
+};
+let C = class (
+    export let.as int16 = func -> int16 => value as int16
+        or as int64 = func -> int64 => value;
+);
+let h = func(values: int[list]) -> int {
+    return values.length
+        + 1;
+};
+''')
+
+    def test_accessor_block_indentation(self):
+        source = '''let Gauge = class (
+    export let level: int = 0;
+        | get: level;
+        | set: {
+            if (value < 0) {
+                trap_with_message("negative");
+            }
+            level = value;
+        };
+);
+'''
+    def test_islands_shift_indentation_only(self):
+        source = """let ui = import:Std.Ui;
+
+let part_row = html(name: string, count: int32) {
+        <li class="part" title="two
+   lines">
+          <span>{name}</span>   
+            <pre>  keep
+      this   
+  </pre>
+          <!-- a
+     comment -->
+            @if (count > 0) {
+                <strong>{ "a}b" /* x
+  y */ }</strong>
+            }
+        </li>
+};
+
+let Inner = module (
+  const Styles = css {
+  .a { color: red; }   
+      .b { content: "x"; }  /* keep
+         this */
+};
+);
+"""
+        expected = """let ui = import:Std.Ui;
+
+let part_row = html(name: string, count: int32) {
+    <li class="part" title="two
+   lines">
+      <span>{name}</span>
+        <pre>  keep
+      this   
+  </pre>
+      <!-- a
+     comment -->
+        @if (count > 0) {
+            <strong>{ "a}b" /* x
+  y */ }</strong>
+        }
+    </li>
+};
+
+let Inner = module (
+    const Styles = css {
+        .a { color: red; }
+            .b { content: "x"; }  /* keep
+         this */
+    };
+);
+"""
+        formatted = self.formatted(source)
+        self.assertEqual(formatted, expected)
+        if arguments.standalone:
+            return
+        # Re-indenting never changes a template's descriptor.
+        with tempfile.TemporaryDirectory() as temporary:
+            descriptors = []
+            for name, text in (("before.nra", source), ("after.nra", formatted)):
+                path = pathlib.Path(temporary) / name
+                path.write_text(text)
+                result = subprocess.run([str(arguments.binary.resolve()), "emit-ir", "--no-optimize", str(path)],
+                                        capture_output=True, text=True, timeout=60)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                descriptors.append([line.strip().split(" : string at ")[0] for line in result.stdout.splitlines()
+                                    if '{\\"encoding\\":1' in line])
+            self.assertTrue(descriptors[0])
+            self.assertEqual(descriptors[0], descriptors[1])
+
+    def test_one_line_islands_are_kept(self):
+        source = 'let ready = html() { <p>Ready</p> };\nconst Empty = css { };\n'
+        self.assertEqual(self.formatted(source), source)
+
     def test_real_language_corpus(self):
         repository = pathlib.Path(__file__).resolve().parents[2]
         sources = sorted((repository / 'examples').rglob('*.nra'))
@@ -177,7 +708,9 @@ let handle=func(value:Shape){match(value){Shape.Point{x,y}=>{if(x>y){return;}},S
         self.assertGreater(len(sources), 100)
         for source in sources:
             with self.subTest(source=str(source.relative_to(repository))):
-                self.formatted(source.read_bytes())
+                # The standard library and the examples are formatted:
+                # `neura fmt --check` passes on both trees.
+                self.assertEqual(self.formatted(source.read_bytes()), source.read_text())
 
 
 if __name__ == '__main__':

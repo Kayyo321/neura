@@ -1,6 +1,6 @@
 #include "machine.hpp"
 
-#include "driver.hpp"
+#include "addressable.hpp"
 #include "graph_device.hpp"
 #include "heap.hpp"
 #include "run_support.hpp"
@@ -9,7 +9,10 @@
 #include "tier2.hpp"
 #include "tier3.hpp"
 
+#ifndef NEURA_WASM_RUNTIME
+#include "driver.hpp"
 #include "jit/tier3_native.hpp"
+#endif
 #include "lift/evaluate.hpp"
 #include "nvr/format.hpp"
 #include "nvr/names.hpp"
@@ -33,6 +36,7 @@
 #include <limits>
 #include <map>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string_view>
 #include <unordered_map>
@@ -66,6 +70,12 @@ std::string_view describe(TrapKind kind) {
     case TrapKind::RequestLimit: return "pending request limit exceeded";
     case TrapKind::InvalidTaskOperation: return "invalid task operation";
     case TrapKind::Deadlock: return "deadlock";
+    case TrapKind::StackLimit: return "stack limit exceeded";
+    case TrapKind::ReleasedStorage: return "released storage accessed";
+    case TrapKind::InvalidRegion: return "invalid region operation";
+    case TrapKind::HookRecursion: return "class hook recursion";
+    case TrapKind::HookLimit: return "class hook nesting limit exceeded";
+    case TrapKind::InvalidHook: return "invalid class hook operation";
     }
     return "trap";
 }
@@ -88,20 +98,26 @@ int exit_status(const Trap& trap) {
         default: return illegal_instruction;
         }
     case TrapKind::InvalidCast:
+    case TrapKind::HookRecursion:
     case TrapKind::Deadlock: return abort;
+    case TrapKind::HookLimit: return segmentation_fault;
+    case TrapKind::InvalidHook: return illegal_instruction;
     case TrapKind::UninitializedSlot:
     case TrapKind::UninitializedField:
     case TrapKind::UninitializedGlobal:
     case TrapKind::InvalidHandle:
     case TrapKind::NilReference:
     case TrapKind::IndexOutOfBounds:
-    case TrapKind::FrameLimit: return segmentation_fault;
+    case TrapKind::FrameLimit:
+    case TrapKind::StackLimit:
+    case TrapKind::ReleasedStorage: return segmentation_fault;
     case TrapKind::GraphOverflow:
     case TrapKind::NonBinaryLane:
     case TrapKind::InvalidSelector:
     case TrapKind::ReferenceType:
     case TrapKind::InvalidText:
     case TrapKind::InvalidCompletion:
+    case TrapKind::InvalidRegion:
     case TrapKind::InvalidTaskOperation: return illegal_instruction;
     case TrapKind::HeapLimit:
     case TrapKind::HandleLimit:
@@ -315,7 +331,7 @@ std::optional<std::size_t> evaluate_loaded_outputs(const nvr::Graph& graph, std:
 } // namespace
 
 std::optional<std::size_t> evaluate_graph(const nvr::Graph& graph, std::vector<std::int64_t>& wires) {
-    wires.resize(std::size_t{graph.input_lanes} + graph.nodes.size());
+    wires.resize(detail::add_elements(graph.input_lanes, graph.nodes.size(), wires.max_size()));
     return evaluate_nodes(graph, wires);
 }
 
@@ -374,7 +390,9 @@ public:
     }
 
     ~State() {
+#ifndef NEURA_WASM_RUNTIME
         stop_parallel_workers();
+#endif
         stop_tracking_heap();
         // A shadow's tier steps are not the run's (NEURA_TIER_CHECK=2).
         if (tier_ && !shadow_role_) {
@@ -390,6 +408,9 @@ public:
     void setup_tier() {
         // Setting up an execution is part of loading for --tier-stats.
         time_as(TierTimes::Category::Load);
+#ifdef NEURA_WASM_RUNTIME
+        limits_.parallel_workers = 1;
+#endif
         if (limits_.graph_device || std::min(limits_.tier, tier_ceiling()) < 1) {
             limits_.tier_cache = nullptr;
             return;
@@ -406,10 +427,13 @@ public:
         // Regions and programs skip prepare_step, so a block observer (which
         // sees every step) runs below tier 2.
         tier2_ = std::min(limits_.tier, tier_ceiling()) >= 2 && !limits_.block_observer;
+        programs_ = tier_->programs();
+#ifdef NEURA_WASM_RUNTIME
+        if (tier2_ && limits_.jit == jit::Mode::On) throw std::invalid_argument("the browser runtime has no native code");
+#else
         // Tier 3 runs function programs: it is on when the cache turns
         // them native (docs/runtime/NVM.md, "Execution tiers").
         tier3_ = tier2_ && tier_->native_enabled();
-        programs_ = tier_->programs();
         // Native code exists only at tier 2 (docs/runtime/NVM.md, "Native
         // compilation"). --jit=on fails here, before the run starts, when
         // the platform cannot run it.
@@ -441,6 +465,7 @@ public:
             }
             tier_->note_native(tier3_native_, off);
         }
+#endif
     }
 
     // --tier-stats: the wall time from here on belongs to `category`. The
@@ -469,7 +494,11 @@ public:
         }
     }
 
-    Event advance() {
+    Event advance()
+#ifdef NEURA_WASM_RUNTIME
+    try
+#endif
+    {
         // A run with a shadow (NEURA_TIER_CHECK=2) runs this loop with its
         // sync points in shadowed_advance.
         if (shadow_) return shadowed_advance();
@@ -495,6 +524,48 @@ public:
             }
         }
     }
+#ifdef NEURA_WASM_RUNTIME
+    catch (const std::bad_alloc&) {
+        try {
+            fault(TrapKind::HeapLimit, "the wasm memory allocator could not grow");
+        } catch (const Fault& failure) {
+            return trap(failure);
+        }
+    }
+#endif
+
+#ifdef NEURA_WASM_RUNTIME
+    std::optional<Event> advance_slice(std::uint64_t budget) try {
+        if (budget == 0) throw std::invalid_argument("a slice needs a positive step budget");
+        if (finished_) return *finished_;
+        if (pending_) throw std::logic_error("advance_slice() called while a host request is pending");
+        serve_dump_request();
+        const auto initial_steps = steps_;
+        while (steps_ - initial_steps < budget) {
+            if (tier2_) {
+                run_regions(budget - (steps_ - initial_steps));
+                if (finished_) {
+                    time_as(TierTimes::Category::Other);
+                    return *finished_;
+                }
+                if (steps_ - initial_steps >= budget) break;
+            }
+            if (auto event = step(wires_)) {
+                const bool ended = event->kind == Event::Kind::Completed || event->kind == Event::Kind::Trapped;
+                time_as(ended ? TierTimes::Category::Other : TierTimes::Category::Host);
+                return event;
+            }
+        }
+        time_as(TierTimes::Category::Host);
+        return std::nullopt;
+    } catch (const std::bad_alloc&) {
+        try {
+            fault(TrapKind::HeapLimit, "the wasm memory allocator could not grow");
+        } catch (const Fault& failure) {
+            return trap(failure);
+        }
+    }
+#endif
 
     std::optional<Event> begin_step(GraphStep& step) {
         if (auto event = begin_active_step<false>()) return event;
@@ -612,6 +683,10 @@ public:
     std::uint64_t steps() const { return steps_; }
     std::uint64_t live_heap_cells() const { return live_cells_; }
     std::uint64_t peak_heap_cells() const { return peak_cells_; }
+    std::uint64_t live_stack_cells() const { return live_stack_cells_; }
+    std::uint64_t peak_stack_cells() const { return peak_stack_cells_; }
+    std::uint64_t text_allocations() const { return heap_.text_counters().allocations - text_baseline_.allocations; }
+    std::uint64_t text_bytes_copied() const { return heap_.text_counters().bytes_copied - text_baseline_.bytes_copied; }
     std::vector<HeapEntryWidth> heap_entry_widths() const {
         std::vector<HeapEntryWidth> entries;
         heap_.for_each([&](std::uint64_t handle, Heap::Ref item) {
@@ -690,6 +765,26 @@ private:
         std::uint8_t* initialized;
     };
 
+    // A storage region of a task (NVR 1.7, docs/runtime/NVM.md, "Storage
+    // regions"): its token, the number of frames the task had when it entered
+    // it (the frame that owns it is the one at that depth), and the handles of
+    // the entries it owns, ascending, which is creation order.
+    struct StorageRegion {
+        std::uint64_t token = 0;
+        std::size_t depth = 0;
+        std::vector<std::uint64_t> handles;
+    };
+
+    // One open class hook event: its kind, policy word and reference, and the
+    // depth of the frame that opened it.
+    struct HookEvent {
+        std::uint32_t kind = 0;
+        std::uint32_t policy = 0;
+        std::uint64_t handle = 0;
+        std::size_t depth = 0;
+        bool operator==(const HookEvent&) const = default;
+    };
+
     // The frames of one task, outermost first. Every frame's slots and
     // initialized flags live in two arenas, one frame after another, so a
     // call or return only moves the end of the arenas. The headers and the
@@ -705,6 +800,7 @@ private:
             slots_ = std::move(other.slots_);
             initialized_ = std::move(other.initialized_);
             record_ = std::exchange(other.record_, tier3::FrameRecord{});
+            regions = std::exchange(other.regions, {});
             return *this;
         }
         FrameStack(const FrameStack&) = delete;
@@ -729,16 +825,19 @@ private:
         // Pushes a frame of `slot_count` slots whose first slots hold the
         // arguments. The other slots are zero and uninitialized.
         void push(std::uint32_t function, std::size_t slot_count, std::span<const std::uint64_t> arguments,
-                  std::uint32_t return_slot, std::uint32_t return_block) {
+                  std::uint32_t return_slot, std::uint32_t return_block,
+                  std::size_t frame_limit = detail::addressable_bytes / sizeof(FrameHeader)) {
             const auto base = record_.slot_size;
-            reserve(record_.size + 1, base + slot_count);
+            const auto frames = detail::add_elements(record_.size, 1, frame_limit);
+            const auto slots = detail::add_elements(base, slot_count, max_slots);
+            reserve(frames, slots, frame_limit);
             headers_[record_.size] = FrameHeader{function, 0, return_slot, return_block, base, false, nullptr};
             std::fill_n(slots_.get() + base, slot_count, std::uint64_t{0});
             std::fill_n(initialized_.get() + base, slot_count, std::uint8_t{0});
             std::ranges::copy(arguments, slots_.get() + base);
             std::fill_n(initialized_.get() + base, arguments.size(), std::uint8_t{1});
-            ++record_.size;
-            record_.slot_size = base + slot_count;
+            record_.size = frames;
+            record_.slot_size = slots;
         }
 
         void pop_back() {
@@ -749,16 +848,32 @@ private:
         void clear() {
             record_.size = 0;
             record_.slot_size = 0;
+            hooks.clear();
         }
 
         // What native code reads and writes (tier3::FrameRecord).
         tier3::FrameRecord* record() { return &record_; }
 
+        // The task's open storage regions, outermost first (NVR 1.7). They
+        // live beside the frames, not in a frame's header, which native code
+        // indexes; they move with the stack when the task parks, and native
+        // code never touches them: it pops a frame in place only for a
+        // function without EnterRegion (tier3::Function::enters_region), and
+        // every other return goes through the return helper, which releases
+        // them as commit_exit does.
+        std::vector<StorageRegion> regions;
+        // The task's open class hook events, oldest first
+        // (docs/design/Hooks030.md, Recursion). Native code never touches
+        // them: a block that opens or closes one runs at tier 1.
+        std::vector<HookEvent> hooks;
+
     private:
+        static constexpr std::size_t max_slots = detail::addressable_bytes / sizeof(std::uint64_t);
+
         // Room for `frames` headers and `slots` slots, keeping what is there.
-        void reserve(std::size_t frames, std::size_t slots) {
+        void reserve(std::size_t frames, std::size_t slots, std::size_t frame_limit) {
             if (frames > record_.capacity) {
-                const auto capacity = std::max<std::size_t>({frames, 2 * record_.capacity, 16});
+                const auto capacity = detail::grow_capacity(record_.capacity, frames, 16, frame_limit);
                 auto grown = std::make_unique<FrameHeader[]>(capacity);
                 std::copy_n(headers_.get(), record_.size, grown.get());
                 headers_ = std::move(grown);
@@ -766,7 +881,7 @@ private:
                 record_.capacity = capacity;
             }
             if (slots > record_.slot_capacity) {
-                const auto capacity = std::max<std::size_t>({slots, 2 * record_.slot_capacity, 256});
+                const auto capacity = detail::grow_capacity(record_.slot_capacity, slots, 256, max_slots);
                 auto grown_slots = std::make_unique_for_overwrite<std::uint64_t[]>(capacity);
                 auto grown_flags = std::make_unique_for_overwrite<std::uint8_t[]>(capacity);
                 std::copy_n(slots_.get(), record_.slot_size, grown_slots.get());
@@ -785,7 +900,9 @@ private:
         tier3::FrameRecord record_;
     };
 
-    static_assert(std::is_standard_layout_v<FrameHeader> && sizeof(FrameHeader) == tier3::frame_offsets::header_bytes);
+    static_assert(std::is_standard_layout_v<FrameHeader>);
+#ifndef NEURA_WASM_RUNTIME
+    static_assert(sizeof(FrameHeader) == tier3::frame_offsets::header_bytes);
     static_assert(offsetof(FrameHeader, function) == tier3::frame_offsets::function &&
                   offsetof(FrameHeader, block) == tier3::frame_offsets::block &&
                   offsetof(FrameHeader, return_slot) == tier3::frame_offsets::return_slot &&
@@ -794,6 +911,7 @@ private:
                   offsetof(FrameHeader, boundary) == tier3::frame_offsets::boundary &&
                   offsetof(FrameHeader, called_from) == tier3::frame_offsets::called_from);
     static_assert(sizeof(std::size_t) == 8);
+#endif
 
     enum class TaskState {
         Running, Runnable, Joining, LeavingScope, Finished,
@@ -989,6 +1107,7 @@ private:
         // Items started since the last time none was outstanding: one map.
         std::uint64_t batch = 0;
         std::shared_ptr<const GlobalsSnapshot> globals;
+#ifndef NEURA_WASM_RUNTIME
         // Worker threads take the lowest unstarted item. Everything below
         // is guarded by the mutex.
         std::mutex mutex;
@@ -996,6 +1115,7 @@ private:
         std::deque<ParallelItem*> unstarted;
         std::vector<std::thread> workers;
         bool stopping = false;
+#endif
     };
 
     // An armed deadline: a scope's, or a timer some task waits for.
@@ -1103,9 +1223,13 @@ private:
     }
 
     void check_device() const {
+#ifdef NEURA_WASM_RUNTIME
+        if (limits_.graph_device) throw std::invalid_argument("the browser runtime has no graph device");
+#else
         if (limits_.graph_device && &limits_.graph_device->image() != &image_) {
             throw std::invalid_argument("graph device was created for another image");
         }
+#endif
     }
 
     void stop_tracking_heap() {
@@ -1113,6 +1237,9 @@ private:
     }
 
     void set_finished(Event event) {
+        // Whatever the run leaves open (a trap, or an image that did not
+        // release) is released with it, so no region cell outlives the run.
+        if (!limits_.keep_regions_at_end) release_all_regions();
         finished_ = std::move(event);
         stop_tracking_heap();
     }
@@ -1181,6 +1308,237 @@ private:
     // The declared element width of array or list type `collection`.
     ElementWidth collection_width(std::uint32_t collection) const {
         return element_width(type(type(collection).reference));
+    }
+
+    // The component types of the elements of collection type `collection`
+    // when they are aggregates, or null (NVR 1.7).
+    const std::vector<std::uint32_t>* components_of(std::uint32_t collection) const {
+        return aggregates_ ? nvr::collection_components(image_, collection) : nullptr;
+    }
+
+    // The component positions that hold references, as a trace plan of the
+    // aggregate's layout, for the collection type `collection`.
+    const std::vector<std::size_t>& component_plan(std::uint32_t collection, const std::vector<std::uint32_t>& fields) {
+        return trace_plan(layout_traces_, type(type(collection).reference).reference, image_.layouts.size(), fields);
+    }
+
+    // --- Storage regions (NVR 1.7) ---------------------------------------
+
+    bool region_released(std::uint64_t handle) const {
+        if (released_handles_.empty()) return false;
+        auto at = released_handles_.upper_bound(handle);
+        if (at == released_handles_.begin()) return false;
+        --at;
+        return handle <= at->second;
+    }
+
+    void note_released(std::uint64_t handle) {
+        auto next = released_handles_.lower_bound(handle);
+        if (next != released_handles_.end() && next->first == handle + 1) {
+            const auto last = next->second;
+            next = released_handles_.erase(next);
+            next = released_handles_.emplace_hint(next, handle, last);
+        } else {
+            next = released_handles_.emplace_hint(next, handle, handle);
+        }
+        if (next != released_handles_.begin()) {
+            auto before = std::prev(next);
+            if (before->second + 1 == next->first) {
+                before->second = next->second;
+                released_handles_.erase(next);
+            }
+        }
+    }
+
+    void ensure_stack_cells(std::uint64_t cells, std::string_view action) const {
+        if (cells > limits_.max_stack_cells || live_stack_cells_ > limits_.max_stack_cells - cells) {
+            fault(TrapKind::StackLimit, std::string(action) + std::to_string(cells) + " cells");
+        }
+    }
+
+    void record_stack_cells(std::uint64_t cells) {
+        live_stack_cells_ += cells;
+        peak_stack_cells_ = std::max(peak_stack_cells_, live_stack_cells_);
+    }
+
+    void add_stack_cells(std::uint64_t cells, std::string_view action) {
+        ensure_stack_cells(cells, action);
+        record_stack_cells(cells);
+    }
+
+    void remove_stack_cells(std::uint64_t cells) { live_stack_cells_ -= cells; }
+
+    // Frees the entries of the region at `index` of `frames`, in creation
+    // order, and closes it. Handles are not reused: an access finds no entry.
+    void release_region(FrameStack& frames, std::size_t index) {
+        auto handles = std::move(frames.regions[index].handles);
+        frames.regions.erase(frames.regions.begin() + static_cast<std::ptrdiff_t>(index));
+        release_region_entries(handles);
+    }
+
+    void release_region_entries(const std::vector<std::uint64_t>& handles) {
+        for (const auto handle : handles) {
+            const auto item = heap_.find(handle);
+            if (!item) continue;
+            remove_stack_cells(heap_.cells(item));
+            heap_.free(handle);
+            note_released(handle);
+        }
+    }
+
+    // Releases every region of `frames` entered at frame depth `depth` or
+    // deeper, the innermost first: what a frame's return, a trap or a task's
+    // end leaves open.
+    void release_regions_from(FrameStack& frames, std::size_t depth) {
+        while (!frames.regions.empty() && frames.regions.back().depth >= depth) {
+            release_region(frames, frames.regions.size() - 1);
+        }
+        // A trap or the end of a run also ends the class hook events it had
+        // open; a frame's return checks its own after this.
+        if (depth == 0) frames.hooks.clear();
+    }
+
+    void release_all_regions() {
+        release_regions_from(frames_, 0);
+        if (scheduler_) {
+            for (auto& [id, task] : scheduler_->tasks) release_regions_from(task.frames, 0);
+        }
+        release_region_entries(static_handles_);
+        static_handles_.clear();
+    }
+
+    std::size_t region_index(std::uint64_t token) {
+        const auto& regions = frames_.regions;
+        const auto at = std::lower_bound(regions.begin(), regions.end(), token,
+                                         [](const StorageRegion& r, std::uint64_t t) { return r.token < t; });
+        if (at == regions.end() || at->token != token) {
+            fault(TrapKind::InvalidRegion, "token " + std::to_string(token) + " is not a live region of this task");
+        }
+        return static_cast<std::size_t>(at - regions.begin());
+    }
+
+    // The region of the running task that owns `handle`, or its count.
+    std::size_t owning_region(std::uint64_t handle) const {
+        const auto& regions = frames_.regions;
+        for (std::size_t i = 0; i < regions.size(); ++i) {
+            if (std::ranges::binary_search(regions[i].handles, handle)) return i;
+        }
+        return regions.size();
+    }
+
+    // Makes the entry just created under `handle` an entry of region `index`.
+    std::vector<std::uint64_t>& region_handles(std::uint64_t token) {
+        return token == nvr::static_region_token ? static_handles_ : frames_.regions[region_index(token)].handles;
+    }
+
+    void adopt(std::vector<std::uint64_t>& handles, std::uint64_t handle) {
+        handles.push_back(handle);
+        heap_.set_region(heap_.find(handle));
+    }
+
+    // Calls `visit(handle)` for each reference an entry holds.
+    template <typename Visit>
+    void visit_references(Heap::Ref item, Visit&& visit) {
+        const auto kind = heap_.kind(item);
+        if (kind == EntryKind::Object) {
+            const auto layout = heap_.type(item);
+            const auto& fields = image_.layouts[layout].fields;
+            heap_.visit_fields(item, trace_plan(layout_traces_, layout, image_.layouts.size(), fields), visit);
+        } else if (kind == EntryKind::Array || kind == EntryKind::List) {
+            if (const auto* fields = components_of(heap_.type(item))) {
+                heap_.visit_components_reverse(item, fields->size(), component_plan(heap_.type(item), *fields), visit);
+            } else if (nvr::is_reference(type(type(heap_.type(item)).reference).kind)) {
+                heap_.visit_elements(item, visit);
+            }
+        }
+    }
+
+    // MoveToRegion: the entry and every entry reachable from it that the
+    // region that owns it also owns go to region `target`, an enclosing (or
+    // the same) region.
+    void move_to_region(std::uint64_t handle, std::uint64_t token) {
+        const auto source = owning_region(handle);
+        if (source == frames_.regions.size()) {
+            fault(TrapKind::InvalidRegion, "handle " + std::to_string(handle) + " is not owned by a live region");
+        }
+        const auto target = region_index(token);
+        if (target > source) {
+            fault(TrapKind::InvalidRegion, "region " + std::to_string(token) + " does not enclose the region of handle " +
+                                               std::to_string(handle));
+        }
+        if (target == source) return;
+        const auto& owned = frames_.regions[source].handles;
+        std::set<std::uint64_t> moved;
+        std::vector<std::uint64_t> work{handle};
+        while (!work.empty()) {
+            const auto next = work.back();
+            work.pop_back();
+            if (!moved.insert(next).second) continue;
+            visit_references(heap_.find(next), [&](std::uint64_t child) {
+                if (child != 0 && !moved.contains(child) && std::ranges::binary_search(owned, child)) {
+                    work.push_back(child);
+                }
+            });
+        }
+        auto& from = frames_.regions[source].handles;
+        std::erase_if(from, [&](std::uint64_t h) { return moved.contains(h); });
+        auto& to = frames_.regions[target].handles;
+        const auto old = to.size();
+        to.insert(to.end(), moved.begin(), moved.end());
+        std::inplace_merge(to.begin(), to.begin() + static_cast<std::ptrdiff_t>(old), to.end());
+    }
+
+    // An owned return transfers all array entries reached through array
+    // components. They can be owned by different blocks of this frame.
+    void move_return_array(std::uint64_t handle, std::uint64_t token) {
+        auto& destination = region_handles(token);
+        const auto depth = frames_.size();
+        if (token != nvr::static_region_token && frames_.regions[region_index(token)].depth >= depth) {
+            fault(TrapKind::InvalidRegion, "a result region must belong to a caller");
+        }
+        const auto in_destination = [&](std::uint64_t item) { return std::ranges::binary_search(destination, item); };
+        const auto returning_region = [&](std::uint64_t item) {
+            const auto source = owning_region(item);
+            if (source == frames_.regions.size() || frames_.regions[source].depth != depth)
+                fault(TrapKind::InvalidRegion, "returned array is not owned by the returning frame");
+            return source;
+        };
+        const auto contains_arrays = [&](Heap::Ref item) {
+            const auto array = heap_.type(item);
+            const auto is_array = [&](std::uint32_t type_id) { return type(type_id).kind == nvr::TypeKind::Array; };
+            if (const auto* fields = components_of(array)) return std::ranges::any_of(*fields, is_array);
+            return is_array(type(array).reference);
+        };
+        if (in_destination(handle)) return;
+        if (!contains_arrays(entry(handle))) {
+            auto& source = frames_.regions[returning_region(handle)].handles;
+            source.erase(std::ranges::lower_bound(source, handle));
+            destination.insert(std::ranges::lower_bound(destination, handle), handle);
+            return;
+        }
+        std::map<std::size_t, std::set<std::uint64_t>> by_region;
+        std::set<std::uint64_t> moved;
+        std::vector<std::uint64_t> work{handle};
+        while (!work.empty()) {
+            const auto next = work.back();
+            work.pop_back();
+            if (moved.contains(next) || in_destination(next)) continue;
+            moved.insert(next);
+            by_region[returning_region(next)].insert(next);
+            const auto array = entry(next);
+            if (contains_arrays(array)) {
+                visit_references(array, [&](std::uint64_t child) {
+                    const auto item = heap_.find(child);
+                    if (item && heap_.kind(item) == EntryKind::Array) work.push_back(child);
+                });
+            }
+        }
+        for (const auto& [source, handles] : by_region) {
+            std::erase_if(frames_.regions[source].handles, [&](std::uint64_t item) { return handles.contains(item); });
+        }
+        const auto old = destination.size();
+        destination.insert(destination.end(), moved.begin(), moved.end());
+        std::inplace_merge(destination.begin(), destination.begin() + static_cast<std::ptrdiff_t>(old), destination.end());
     }
 
     void add_live_cells(std::uint64_t cells) {
@@ -1260,9 +1618,14 @@ private:
             const auto layout = heap_.type(item);
             const auto& fields = image_.layouts[layout].fields;
             heap_.visit_fields_reverse(item, trace_plan(layout_traces_, layout, image_.layouts.size(), fields), mark_one);
-        } else if ((kind == EntryKind::Array || kind == EntryKind::List) &&
-                   nvr::is_reference(type(type(heap_.type(item)).reference).kind)) {
-            heap_.visit_elements_reverse(item, mark_one);
+        } else if (kind == EntryKind::Array || kind == EntryKind::List) {
+            if (const auto* fields = components_of(heap_.type(item))) {
+                // An aggregate collection traces the reference components of
+                // every element, by the aggregate layout's plan.
+                heap_.visit_components_reverse(item, fields->size(), component_plan(heap_.type(item), *fields), mark_one);
+            } else if (nvr::is_reference(type(type(heap_.type(item)).reference).kind)) {
+                heap_.visit_elements_reverse(item, mark_one);
+            }
         }
     }
 
@@ -1274,9 +1637,12 @@ private:
         if (kind == EntryKind::Object) {
             const auto& fields = image_.layouts[item.type()].fields;
             item.visit_fields_reverse(trace_plan(layout_traces_, item.type(), image_.layouts.size(), fields), mark_one);
-        } else if ((kind == EntryKind::Array || kind == EntryKind::List) &&
-                   nvr::is_reference(type(type(item.type()).reference).kind)) {
-            item.visit_elements_reverse(mark_one);
+        } else if (kind == EntryKind::Array || kind == EntryKind::List) {
+            if (const auto* fields = components_of(item.type())) {
+                item.visit_components_reverse(fields->size(), component_plan(item.type(), *fields), mark_one);
+            } else if (nvr::is_reference(type(type(item.type()).reference).kind)) {
+                item.visit_elements_reverse(mark_one);
+            }
         }
     }
 
@@ -1305,12 +1671,21 @@ private:
             }
         }
         mark_frames(frames_);
+        // Regions are roots: the entries they own are never swept, and the
+        // references they hold keep their referents alive.
+        for (const auto& region : frames_.regions) {
+            for (const auto handle : region.handles) mark(handle);
+        }
+        for (const auto handle : static_handles_) mark(handle);
         if (scheduler_) {
             const auto mark_typed = [&](std::uint64_t value, std::uint32_t value_type) {
                 if (value_type != nvr::absent && nvr::is_reference(type(value_type).kind)) mark(value);
             };
             for (const auto& [id, task] : scheduler_->tasks) {
                 mark_frames(task.frames);
+                for (const auto& region : task.frames.regions) {
+                    for (const auto handle : region.handles) mark(handle);
+                }
                 if (task.state == TaskState::Finished) mark_typed(task.result, task.result_type);
                 // Values in flight: a parked send's, a select's, and one
                 // received but not yet taken.
@@ -1412,6 +1787,7 @@ private:
     Heap::Ref entry(std::uint64_t handle) {
         const auto found = heap_.find(handle);
         if (!found) {
+            if (region_released(handle)) fault(TrapKind::ReleasedStorage, "handle " + std::to_string(handle));
             fault(TrapKind::InvalidHandle, "handle " + std::to_string(handle));
         }
         return found;
@@ -1465,6 +1841,11 @@ private:
                 const_values_[i] = allocate_text(
                     kind == nvr::TypeKind::Text ? EntryKind::Text : EntryKind::Bytes, constant.type,
                     std::string_view(reinterpret_cast<const char*>(constant.payload.data()), constant.payload.size()));
+            } else if (nvr::is_static_object_constant(type(constant.type), constant)) {
+                if (heap_.last_handle() >= limits_.max_handles) fault(TrapKind::HandleLimit);
+                add_stack_cells(Heap::object_cells(0), "static object constant of ");
+                const_values_[i] = heap_.create_object(type(constant.type).reference, 0);
+                adopt(static_handles_, const_values_[i]);
             } else {
                 std::uint64_t bits = 0;
                 for (std::size_t b = 0; b < constant.payload.size(); ++b) {
@@ -1473,6 +1854,7 @@ private:
                 const_values_[i] = bits;
             }
         }
+        text_baseline_ = heap_.text_counters();
 
         if (item_) {
             initialize_globals();
@@ -1514,11 +1896,22 @@ private:
 
     void make_frame(FrameStack& frames, std::uint32_t function, std::span<const std::uint64_t> arguments,
                     std::uint32_t return_slot, std::uint32_t return_block) const {
-        frames.push(function, image_.functions[function].frame_types.size(), arguments, return_slot, return_block);
+        constexpr auto addressable_frames = detail::addressable_bytes / sizeof(FrameHeader);
+#ifdef NEURA_WASM_RUNTIME
+        try {
+            frames.push(function, image_.functions[function].frame_types.size(), arguments, return_slot, return_block,
+                        std::min<std::size_t>(addressable_frames, limits_.max_frames));
+        } catch (const std::bad_alloc&) {
+            fault(TrapKind::StackLimit, "frame arena exceeds addressable storage");
+        }
+#else
+        frames.push(function, image_.functions[function].frame_types.size(), arguments, return_slot, return_block,
+                    addressable_frames);
+#endif
     }
 
     std::uint64_t frame_cells(std::uint32_t function) const {
-        return 1 + image_.functions[function].frame_types.size();
+        return 1 + std::uint64_t{image_.functions[function].frame_types.size()};
     }
 
     std::vector<std::uint64_t> argument_roots(std::uint32_t function,
@@ -2241,6 +2634,7 @@ private:
         RunLimits limits;
         limits.max_steps = item.max_steps;
         limits.max_heap_cells = item.max_cells;
+        limits.max_stack_cells = parent.max_stack_cells;
         limits.max_frames = parent.max_frames;
         limits.max_handles = parent.max_handles;
         // Items share the starting run's lifted blocks. With a graph device
@@ -2280,6 +2674,7 @@ private:
         }
     }
 
+#ifndef NEURA_WASM_RUNTIME
     void start_parallel_workers() {
         if (limits_.parallel_workers <= 1 || !parallel_->workers.empty()) return;
         for (std::uint32_t i = 0; i < limits_.parallel_workers; ++i) {
@@ -2312,6 +2707,7 @@ private:
         for (auto& worker : parallel_->workers) worker.join();
         parallel_->workers.clear();
     }
+#endif
 
     std::uint64_t start_parallel_item(const nvr::Exit& exit, const std::vector<std::uint64_t>& arguments) {
         const auto max_steps = static_cast<std::int64_t>(arguments[1]);
@@ -2329,7 +2725,9 @@ private:
         const std::vector<std::uint64_t> roots{arguments[0]};
         ensure_heap_cells(item->charged_cells, "parallel item of ", roots);
         {
+#ifndef NEURA_WASM_RUNTIME
             const std::lock_guard lock(parallel_->mutex);
+#endif
             // The items of one map see the globals as they were when its
             // first item started.
             if (parallel_->items.empty() || !parallel_->globals) {
@@ -2339,12 +2737,16 @@ private:
             item->globals = parallel_->globals;
             item->id = parallel_->next_id++;
             item->index = parallel_->batch++;
+#ifndef NEURA_WASM_RUNTIME
             parallel_->unstarted.push_back(item.get());
+#endif
             parallel_->items.push_back(std::move(item));
         }
         add_live_cells(parallel_->items.back()->charged_cells);
+#ifndef NEURA_WASM_RUNTIME
         start_parallel_workers();
         parallel_->changed.notify_one();
+#endif
         return parallel_->items.back()->id;
     }
 
@@ -2355,28 +2757,38 @@ private:
     std::uint64_t finish_parallel_item(std::uint64_t id, std::uint32_t slot_type,
                                        std::span<const std::uint64_t> roots) {
         if (!parallel_) fault(TrapKind::InvalidTaskOperation, "no such parallel item");
+#ifndef NEURA_WASM_RUNTIME
         std::unique_lock lock(parallel_->mutex);
+#endif
         const auto found = std::ranges::find(parallel_->items, id, [](const auto& item) { return item->id; });
         if (found == parallel_->items.end()) fault(TrapKind::InvalidTaskOperation, "no such parallel item");
+#ifndef NEURA_WASM_RUNTIME
         auto& item = **found;
         if (parallel_->workers.empty()) {
+#endif
             // The reference executor: items run one after another, in order,
             // on this thread.
             for (auto& earlier : parallel_->items) {
                 if (!earlier->done) {
                     earlier->started = true;
+#ifndef NEURA_WASM_RUNTIME
                     std::erase(parallel_->unstarted, earlier.get());
+#endif
                     run_item(image_, limits_, *earlier, shadow_ != nullptr);
                     earlier->done = true;
                 }
                 if (earlier->id == id) break;
             }
+#ifndef NEURA_WASM_RUNTIME
         } else {
             parallel_->changed.wait(lock, [&] { return item.done; });
         }
+#endif
         const auto finished = std::move(*found);
         parallel_->items.erase(found);
+#ifndef NEURA_WASM_RUNTIME
         lock.unlock();
+#endif
         remove_live_cells(finished->charged_cells);
         if (finished->trapped) {
             auto trap = finished->trap;
@@ -2395,7 +2807,8 @@ private:
     }
 
     // Finishes every item `list` names, in order, into a new array.
-    std::uint64_t finish_parallel_items(std::uint64_t list, std::uint32_t list_type, std::uint32_t array_type) {
+    std::uint64_t finish_parallel_items(std::uint64_t list, std::uint32_t list_type, std::uint32_t array_type,
+                                        std::optional<std::uint64_t> region_token) {
         const auto source = typed_entry(list, list_type);
         std::vector<std::uint64_t> ids(heap_.length(source));
         heap_.copy_out(source, ids.data(), ElementWidth::W8);
@@ -2409,7 +2822,13 @@ private:
             results.push(value);
             if (references) roots.push_back(value);
         }
-        return allocate(std::move(results), roots);
+        if (!region_token) return allocate(std::move(results), roots);
+        auto& handles = region_handles(*region_token);
+        if (heap_.last_handle() >= limits_.max_handles) fault(TrapKind::HandleLimit);
+        add_stack_cells(ids.size() + 1, "region allocation of ");
+        const auto handle = heap_.create(std::move(results));
+        adopt(handles, handle);
+        return handle;
     }
 
     void check_scheduler_exit(const nvr::Exit& exit, const std::vector<std::uint64_t>& arguments,
@@ -2486,7 +2905,27 @@ private:
         }
     }
 
+    // The class name of a policy word, from the image's names when it has
+    // them: the word is the layout identifier plus 1.
+    const std::vector<std::string>& layout_names() const {
+        if (!policy_names_) {
+            policy_names_.emplace();
+            if (const auto names = nvr::decode_names(image_)) *policy_names_ = names->layouts;
+        }
+        return *policy_names_;
+    }
+
+    std::string policy_name(std::uint32_t policy) const {
+        const auto layout = policy == 0 ? nvr::absent : policy - 1;
+        const auto& names = layout_names();
+        if (layout < names.size() && !names[layout].empty()) return names[layout];
+        return policy == 0 ? std::string("no policy") : "layout " + std::to_string(layout);
+    }
+
     void scheduler_exit(const nvr::Exit& exit, const std::vector<std::uint64_t>& arguments) {
+        // A hook cannot use the scheduler (E0544): an event never spans a
+        // suspension.
+        if (!frames_.hooks.empty()) fault(TrapKind::InvalidHook, "a scheduler operation with a class hook event open");
         using Op = nvr::SchedulerOp;
         using Outcome = nvr::SchedulerOutcome;
         const auto self = scheduler_->current;
@@ -2716,7 +3155,8 @@ private:
             break;
         case Op::ParallelFinish: {
             const auto slot_type = image_.functions[frame.function].frame_types[exit.result_slot];
-            const auto value = finish_parallel_items(arguments[0], exit.arguments[0].type, slot_type);
+            const auto token = arguments.size() == 2 ? std::optional{arguments[1]} : std::nullopt;
+            const auto value = finish_parallel_items(arguments[0], exit.arguments[0].type, slot_type, token);
             write_result(frames_.back(), exit.result_slot, value);
             break;
         }
@@ -2819,6 +3259,8 @@ private:
         set_state(child, TaskState::Finished);
         emit(TaskEvent::Kind::Finish, id);
         // A finished task keeps only what a join needs.
+        release_regions_from(frames_, 0);
+        release_regions_from(child.frames, 0);
         child.frames = FrameStack{};
         std::vector<TaskScope>().swap(child.scopes);
         child.stashed = false;
@@ -2926,9 +3368,11 @@ private:
         const tier2::Region* region = nullptr;
         // For a function program (region->program): the entry at this block.
         std::uint32_t program_entry = 0;
+#ifndef NEURA_WASM_RUNTIME
         // Its native code (src/jit), or null, for `native_region`.
         const tier2::Region* native_region = nullptr;
         const jit::Program* native = nullptr;
+#endif
         // --tier-stats: steps of the region entered here, and regions that
         // deoptimized at or left to this block.
         std::uint64_t region_steps = 0;
@@ -3189,7 +3633,9 @@ private:
 
 #include "tier1_steps.inc"
 #include "tier2_steps.inc"
+#ifndef NEURA_WASM_RUNTIME
 #include "tier3_steps.inc"
+#endif
 #include "tier_shadow.inc"
 
     std::optional<Event> commit_step(const nvr::Block& block, const BlockPlan& plan) {
@@ -3246,6 +3692,11 @@ private:
                 }
                 remove_live_cells(frame_cells(frame.function));
             }
+            // The regions the frame entered and did not release (NVR 1.7).
+            if (!frames_.regions.empty()) release_regions_from(frames_, frames_.size());
+            // A hook function closes the event it opened before it returns.
+            if (!frames_.hooks.empty() && frames_.hooks.back().depth >= frames_.size())
+                fault(TrapKind::InvalidHook, "a frame returns with a class hook event open");
             frames_.pop_back();
             if (scheduler_ && frames_.empty() && scheduler_->current != 0) {
                 finish_task(result);
@@ -3266,8 +3717,14 @@ private:
             }
             auto caller = frames_.back();
             if (return_slot != nvr::absent) {
-                caller.slots[return_slot] = result;
-                caller.initialized[return_slot] = 1;
+                // A multi-word callee (NVR 1.7) writes its words to the
+                // consecutive slots from the result slot; the loader checked
+                // that they fit and take each word's type. The frame header
+                // is unchanged: the count is the number of return values.
+                for (std::size_t word = 0; word < std::max<std::size_t>(arguments.size(), 1); ++word) {
+                    caller.slots[return_slot + word] = word < arguments.size() ? arguments[word] : 0;
+                    caller.initialized[return_slot + word] = 1;
+                }
             }
             caller.block = return_block;
             return std::nullopt;
@@ -3465,9 +3922,44 @@ private:
         return static_cast<std::size_t>(index);
     }
 
+    // The element index checked against a collection of aggregates, whose
+    // length is its words divided by the components per element.
+    std::size_t checked_aggregate_index(Heap::Ref item, std::uint64_t index, std::size_t width) {
+        const auto elements = length(item) / width;
+        if (index >= elements) {
+            fault(TrapKind::IndexOutOfBounds, "index " + std::to_string(index) + " for length " +
+                                                  std::to_string(elements));
+        }
+        return static_cast<std::size_t>(index);
+    }
+
+    // The references among the components of one element, which a collection
+    // started by the allocation must keep alive.
+    std::vector<std::uint64_t> component_roots(const std::vector<std::uint32_t>& fields,
+                                               std::span<const std::uint64_t> words) const {
+        std::vector<std::uint64_t> roots;
+        for (std::size_t i = 0; i < fields.size() && i < words.size(); ++i) {
+            if (nvr::is_reference(type(fields[i]).kind) && words[i] != 0) roots.push_back(words[i]);
+        }
+        return roots;
+    }
+
     std::uint64_t state(const nvr::Exit& exit, const std::vector<std::uint64_t>& args) {
         const auto& types = exit.arguments;
         switch (exit.operation) {
+        case nvr::StateOp::ReadComponent:
+        case nvr::StateOp::WriteComponent: {
+            const auto item = typed_entry(args[0], types[0].type);
+            const auto width = components_of(types[0].type)->size();
+            const auto word = checked_aggregate_index(item, args[1], width) * width + exit.immediate;
+            if (exit.operation == nvr::StateOp::ReadComponent) return heap_.element(item, word);
+            for (std::size_t i = 2; i < args.size(); ++i) {
+                const auto at = static_cast<std::uint32_t>(word + i - 2);
+                if (heap_log_) heap_log_->push_back({false, false, args[0], at, heap_.element(item, at), 0, args[i]});
+                heap_.set_element(item, at, args[i]);
+            }
+            return 0;
+        }
         case nvr::StateOp::ClassHash:
         case nvr::StateOp::ClassText: {
             const auto identity = heap_.ensure_identity(typed_entry(args[0], types[0].type));
@@ -3482,7 +3974,12 @@ private:
         case nvr::StateOp::ClassIs:
         case nvr::StateOp::ClassCast: {
             const bool test = exit.operation == nvr::StateOp::ClassIs;
-            if (args[0] == 0) return 0;
+            if (args[0] == 0) {
+                if (args.size() == 2 && args[1] != 0 &&
+                    (args[1] > image_.layouts.size() || !types_.derives(args[1] - 1, exit.immediate)))
+                    fault(TrapKind::InvalidCast, {});
+                return 0;
+            }
             const bool matches = types_.derives(heap_.type(typed_entry(args[0], types[0].type)), exit.immediate);
             if (test) return matches;
             if (!matches) fault(TrapKind::InvalidCast, {});
@@ -3504,21 +4001,133 @@ private:
         case nvr::StateOp::ReadField: {
             const auto item = typed_entry(args[0], types[0].type);
             if (!heap_.initialized(item, exit.immediate)) {
+                if (args.size() == 2) return args[1];
                 fault(TrapKind::UninitializedField, "field " + std::to_string(exit.immediate));
             }
             return heap_.field(item, exit.immediate);
         }
         case nvr::StateOp::WriteField: {
             const auto item = typed_entry(args[0], types[0].type);
-            if (heap_log_) {
-                heap_log_->push_back({false, true, args[0], exit.immediate, heap_.field(item, exit.immediate),
-                                      heap_.initialized(item, exit.immediate), args[1]});
+            for (std::size_t i = 1; i < args.size(); ++i) {
+                const auto at = exit.immediate + static_cast<std::uint32_t>(i - 1);
+                if (heap_log_) heap_log_->push_back({false, true, args[0], at, heap_.field(item, at),
+                                                     heap_.initialized(item, at), args[i]});
+                heap_.set_field(item, at, args[i]);
             }
-            heap_.set_field(item, exit.immediate, args[1]);
             return 0;
         }
+        case nvr::StateOp::HookEnter: {
+            auto& events = frames_.hooks;
+            const HookEvent event{exit.immediate, static_cast<std::uint32_t>(args[0]), args[1], frames_.size()};
+            for (const auto& open : events) {
+                if (open.kind == event.kind && open.policy == event.policy && open.handle == event.handle)
+                    fault(TrapKind::HookRecursion, std::string(event.kind == 0 ? "get" : "set") + " of " +
+                                                       (args.size() == 3 ? std::string(heap_.text(typed_entry(args[2], types[2].type))) :
+                                                                           policy_name(event.policy)));
+            }
+            if (events.size() >= nvr::max_hook_events)
+                fault(TrapKind::HookLimit, std::to_string(nvr::max_hook_events) + " events are open");
+            events.push_back(event);
+            return 0;
+        }
+        case nvr::StateOp::ConcatText: {
+            // A string chain (docs/design/Expressions030.md): the total is
+            // checked first, then one block of the final length is reserved
+            // with the operands as roots, and only after any collection that
+            // causes are the operands' bytes read and copied into place.
+            std::uint64_t total = 0;
+            for (std::size_t i = 0; i < args.size(); ++i) {
+                total += heap_.length(typed_entry(args[i], types[i].type));
+                if (total > max_text_bytes) fault(TrapKind::InvalidText, "text exceeds the int32 byte length limit");
+            }
+            if (heap_.last_handle() >= limits_.max_handles) fault(TrapKind::HandleLimit);
+            const auto cells = Heap::text_cells(static_cast<std::size_t>(total));
+            ensure_heap_cells(cells, "allocation of ", args);
+            std::vector<std::string_view> parts;
+            parts.reserve(args.size());
+            for (std::size_t i = 0; i < args.size(); ++i) parts.push_back(heap_.text(typed_entry(args[i], types[i].type)));
+            const auto result_type = image_.functions[frames_.back().function].frame_types[exit.result_slot];
+            return insert_allocation(heap_.create_text_parts(result_type, static_cast<std::size_t>(total), parts), cells);
+        }
+        case nvr::StateOp::HookLeave: {
+            auto& events = frames_.hooks;
+            if (events.empty() || events.back().depth != frames_.size())
+                fault(TrapKind::InvalidHook, "no event of this frame is open");
+            events.pop_back();
+            return 0;
+        }
+        case nvr::StateOp::EnterRegion: {
+            if (region_serial_ == nvr::static_region_token - 1)
+                fault(TrapKind::InvalidRegion, "region token limit exceeded");
+            const auto token = ++region_serial_;
+            frames_.regions.push_back({token, frames_.size(), {}});
+            return token;
+        }
+        case nvr::StateOp::ReleaseRegion: {
+            const auto index = region_index(args[0]);
+            if (frames_.regions[index].depth != frames_.size()) {
+                fault(TrapKind::InvalidRegion, "region " + std::to_string(args[0]) +
+                                                   " is released by the frame that entered it");
+            }
+            // Regions entered after it, in the same frame, end with it.
+            while (frames_.regions.size() > index) release_region(frames_, frames_.regions.size() - 1);
+            return 0;
+        }
+        case nvr::StateOp::RegionObject: {
+            auto& handles = region_handles(args[0]);
+            if (heap_.last_handle() >= limits_.max_handles) fault(TrapKind::HandleLimit);
+            const auto fields = image_.layouts[exit.immediate].fields.size();
+            const auto cells = Heap::object_cells(fields);
+            ensure_stack_cells(cells, "region allocation of ");
+            const auto handle = heap_.create_object(exit.immediate, fields);
+            adopt(handles, handle);
+            record_stack_cells(cells);
+            return handle;
+        }
+        case nvr::StateOp::RegionCollection:
+        case nvr::StateOp::RegionRepeat: {
+            auto& handles = region_handles(args[0]);
+            if (heap_.last_handle() >= limits_.max_handles) fault(TrapKind::HandleLimit);
+            const auto kind = type(exit.immediate).kind == nvr::TypeKind::Array ? EntryKind::Array : EntryKind::List;
+            const auto width = collection_width(exit.immediate);
+            const auto* fields = components_of(exit.immediate);
+            const auto words = args.size() - 1;
+            std::uint64_t handle = 0;
+            std::uint64_t cells = 0;
+            if (exit.operation == nvr::StateOp::RegionRepeat) {
+                const auto count = args[1];
+                const auto stride = fields ? fields->size() : 1;
+                if (count > Heap::max_elements() / stride || count == std::numeric_limits<std::uint64_t>::max())
+                    fault(TrapKind::HeapLimit, "collection length exceeds storage limits");
+                cells = count * stride + 1;
+                ensure_stack_cells(cells, "region allocation of ");
+                handle = fields ? heap_.create_repeated(kind, exit.immediate, static_cast<std::size_t>(count),
+                                                        std::span<const std::uint64_t>(args).subspan(2, stride))
+                                : heap_.create_filled(kind, exit.immediate, width, static_cast<std::size_t>(count), args[2]);
+            } else {
+                cells = words + 1;
+                ensure_stack_cells(cells, "region allocation of ");
+                auto item = Heap::Builder::collection(kind, exit.immediate, width);
+                item.reserve(words);
+                for (std::size_t i = 1; i < args.size(); ++i) item.push(args[i]);
+                handle = heap_.create(std::move(item));
+            }
+            adopt(handles, handle);
+            record_stack_cells(cells);
+            return handle;
+        }
+        case nvr::StateOp::MoveToRegion:
+            // A pooled enum word can be the nil collection when inactive.
+            if (exit.immediate == 1 && args[0] == 0) return 0;
+            typed_entry(args[0], types[0].type);
+            if (exit.immediate == 1) move_return_array(args[0], args[1]);
+            else move_to_region(args[0], args[1]);
+            return 0;
         case nvr::StateOp::FreeObject: {
             const auto item = typed_entry(args[0], types[0].type);
+            if (heap_.in_region(item)) {
+                fault(TrapKind::InvalidRegion, "handle " + std::to_string(args[0]) + " belongs to a region and is freed by its release");
+            }
             if (scheduler_) release_scheduler_object(args[0]);
             remove_live_cells(heap_.cells(item));
             heap_.free(args[0]);
@@ -3526,21 +4135,37 @@ private:
         }
         case nvr::StateOp::ReadGlobal:
             if (!global_initialized_[exit.immediate]) {
+                if (!args.empty()) return args[0];
                 fault(TrapKind::UninitializedGlobal, "global " + std::to_string(exit.immediate));
             }
             return globals_[exit.immediate];
         case nvr::StateOp::WriteGlobal:
-            if (heap_log_) {
-                heap_log_->push_back({true, false, 0, exit.immediate, globals_[exit.immediate],
-                                      global_initialized_[exit.immediate], args[0]});
+            for (std::size_t i = 0; i < args.size(); ++i) {
+                const auto at = exit.immediate + static_cast<std::uint32_t>(i);
+                if (heap_log_) heap_log_->push_back({true, false, 0, at, globals_[at], global_initialized_[at], args[i]});
+                globals_[at] = args[i];
+                global_initialized_[at] = 1;
             }
-            globals_[exit.immediate] = args[0];
-            global_initialized_[exit.immediate] = 1;
             return 0;
         case nvr::StateOp::RepeatCollection:
         case nvr::StateOp::AllocateCollection: {
             const auto kind = type(exit.immediate).kind == nvr::TypeKind::Array ? EntryKind::Array : EntryKind::List;
             const auto width = collection_width(exit.immediate);
+            if (const auto* fields = components_of(exit.immediate);
+                fields && exit.operation == nvr::StateOp::RepeatCollection) {
+                // One element's words follow the length; the entry holds that
+                // run `count` times and costs one cell per word.
+                if (heap_.last_handle() >= limits_.max_handles) fault(TrapKind::HandleLimit);
+                const auto count = args[0];
+                if (count > Heap::max_elements() / fields->size())
+                    fault(TrapKind::HeapLimit, "collection length exceeds storage limits");
+                const auto cells = count * fields->size() + 1;
+                const std::span<const std::uint64_t> words(args.data() + 1, fields->size());
+                const auto roots = count != 0 ? component_roots(*fields, words) : std::vector<std::uint64_t>{};
+                ensure_heap_cells(cells, "allocation of ", roots);
+                return insert_allocation(
+                    heap_.create_repeated(kind, exit.immediate, static_cast<std::size_t>(count), words), cells);
+            }
             if (exit.operation == nvr::StateOp::RepeatCollection) {
                 if (heap_.last_handle() >= limits_.max_handles) fault(TrapKind::HandleLimit);
                 const auto count = args[0];
@@ -3560,8 +4185,11 @@ private:
             for (const auto element : args) item.push(element);
             return allocate(std::move(item));
         }
-        case nvr::StateOp::ReadLength:
-            return length(typed_entry(args[0], types[0].type));
+        case nvr::StateOp::ReadLength: {
+            const auto item = typed_entry(args[0], types[0].type);
+            if (const auto* fields = components_of(types[0].type)) return length(item) / fields->size();
+            return length(item);
+        }
         case nvr::StateOp::ReadElement: {
             const auto item = typed_entry(args[0], types[0].type);
             const auto index = checked_index(item, args[1]);
@@ -3581,6 +4209,27 @@ private:
             // The list is a root of any collection the growth starts, so
             // `item` stays valid across it.
             const auto item = typed_entry(args[0], types[0].type);
+            if (heap_.in_region(item)) {
+                // A region list grows in place, in its region: stack cells,
+                // and no collection.
+                const auto* fields = components_of(types[0].type);
+                const auto cells = fields ? fields->size() : 1;
+                ensure_stack_cells(cells, "growth by ");
+                if (fields) heap_.append_words(item, std::span<const std::uint64_t>(args).subspan(1));
+                else heap_.append(item, args[1]);
+                record_stack_cells(cells);
+                return 0;
+            }
+            if (const auto* fields = components_of(types[0].type)) {
+                // The element's words are appended together: one structural
+                // change, and one cell per word.
+                auto roots = component_roots(*fields, std::span<const std::uint64_t>(args).subspan(1));
+                roots.push_back(args[0]);
+                ensure_heap_cells(fields->size(), "growth by ", roots);
+                heap_.append_words(item, std::span<const std::uint64_t>(args).subspan(1));
+                add_live_cells(fields->size());
+                return 0;
+            }
             const auto element_type = type(heap_.type(item)).reference;
             const std::array roots{args[0], nvr::is_reference(type(element_type).kind) ? args[1] : std::uint64_t{0}};
             ensure_heap_cells(1, "growth by ", roots);
@@ -3590,9 +4239,18 @@ private:
         }
         case nvr::StateOp::RemoveElement: {
             const auto item = typed_entry(args[0], types[0].type);
+            const bool in_region = heap_.in_region(item);
+            if (const auto* fields = components_of(types[0].type)) {
+                const auto index = checked_aggregate_index(item, args[1], fields->size());
+                heap_.remove_words(item, index * fields->size(), fields->size());
+                if (in_region) remove_stack_cells(fields->size());
+                else remove_live_cells(fields->size());
+                return 0;
+            }
             const auto index = checked_index(item, args[1]);
             heap_.remove(item, index);
-            remove_live_cells(1);
+            if (in_region) remove_stack_cells(1);
+            else remove_live_cells(1);
             return 0;
         }
         case nvr::StateOp::ReadVersion:
@@ -3797,9 +4455,24 @@ private:
         std::array<Cell, max_kernel_params> cells{};
         std::array<std::uint64_t, max_kernel_params> results{};
         std::array<void*, max_kernel_params> pointers{};
+        // The C ABI can pad between a pointer and a uint64_t, as on wasm32.
+        // The view declarations all use the same pointer/length layout.
         const auto view = [](Cell& cell, const void* data, std::uint64_t length) {
-            std::memcpy(cell.bytes, &data, sizeof data);
-            std::memcpy(cell.bytes + sizeof data, &length, sizeof length);
+            const neura_bytes record{static_cast<const std::uint8_t*>(data), length};
+            std::memcpy(cell.bytes, &record, sizeof record);
+        };
+        constexpr auto output_offset = alignof(neura_out_bytes);
+        constexpr auto state_offset = alignof(neura_state);
+        static_assert(sizeof(neura_bytes) <= sizeof(Cell));
+        static_assert(output_offset >= sizeof(void*) && output_offset + sizeof(neura_out_bytes) <= sizeof(Cell));
+        static_assert(state_offset >= sizeof(void*) && state_offset + sizeof(neura_state) <= sizeof(Cell));
+        static_assert(sizeof(neura_out_bytes) == sizeof(neura_out_text) &&
+                      alignof(neura_out_bytes) == alignof(neura_out_text) &&
+                      offsetof(neura_out_bytes, len) == offsetof(neura_out_text, len) &&
+                      offsetof(neura_out_bytes, cap) == offsetof(neura_out_text, cap));
+        const auto buffer_bytes = [](std::uint64_t count, std::size_t width = 1) {
+            if (count > detail::addressable_bytes) throw std::bad_array_new_length();
+            return detail::allocation_bytes(static_cast<std::size_t>(count), width);
         };
         const auto pack = [&](std::size_t p, Heap::Ref item, Kind element) {
             auto& buffer = kernel_buffers_[p];
@@ -3809,7 +4482,7 @@ private:
                 buffer.assign(bytes.begin(), bytes.end());
                 return;
             }
-            buffer.resize(heap_.length(item) * width);
+            buffer.resize(detail::allocation_bytes(heap_.length(item), width));
             heap_.copy_out(item, buffer.data(), static_cast<ElementWidth>(width));
         };
         for (std::size_t p = 0; p < count; ++p) {
@@ -3843,26 +4516,19 @@ private:
                 pack(p, item, element);
                 auto& buffer = kernel_buffers_[p];
                 if (kind == Kind::State) {
-                    const auto length = static_cast<std::uint64_t>(buffer.size());
-                    view(cell, buffer.data(), length);
+                    const neura_state record{buffer.data(), buffer.size()};
+                    void* state = cell.bytes + state_offset;
+                    std::memcpy(state, &record, sizeof record);
+                    std::memcpy(cell.bytes, &state, sizeof state);
                 } else {
                     view(cell, buffer.data(), buffer.size() / element_bytes(element));
-                }
-                if (kind == Kind::State) {
-                    // neura_state holds a writable pointer, as neura_mut_T does.
-                    auto* data = buffer.data();
-                    const auto length = static_cast<std::uint64_t>(buffer.size());
-                    std::memcpy(cell.bytes + 16, &data, sizeof data);
-                    std::memcpy(cell.bytes + 16 + sizeof data, &length, sizeof length);
-                    void* state = cell.bytes + 16;
-                    std::memcpy(cell.bytes, &state, sizeof state);
                 }
                 break;
             }
             case Role::Scratch: {
                 const auto element = kernels::element_kind(kind);
                 auto& buffer = kernel_buffers_[p];
-                buffer.assign(static_cast<std::size_t>(sizes[p]) * element_bytes(element), 0);
+                buffer.assign(buffer_bytes(sizes[p], element_bytes(element)), 0);
                 view(cell, buffer.data(), sizes[p]);
                 break;
             }
@@ -3870,14 +4536,10 @@ private:
             case Role::ErrorOffset:
                 if (kind == Kind::OutText || kind == Kind::OutBytes) {
                     auto& buffer = kernel_buffers_[p];
-                    buffer.assign(static_cast<std::size_t>(sizes[p]), 0);
-                    auto* data = buffer.data();
-                    const std::uint64_t zero = 0;
-                    const std::uint64_t capacity = sizes[p];
-                    std::memcpy(cell.bytes + 8, &data, sizeof data);
-                    std::memcpy(cell.bytes + 8 + sizeof data, &zero, sizeof zero);
-                    std::memcpy(cell.bytes + 16 + sizeof data, &capacity, sizeof capacity);
-                    void* out = cell.bytes + 8;
+                    buffer.assign(buffer_bytes(sizes[p]), 0);
+                    const neura_out_bytes record{buffer.data(), 0, sizes[p]};
+                    void* out = cell.bytes + output_offset;
+                    std::memcpy(out, &record, sizeof record);
                     std::memcpy(cell.bytes, &out, sizeof out);
                 } else {
                     void* result = &results[p];
@@ -3899,14 +4561,14 @@ private:
             if (status != NEURA_NEED_CAPACITY || attempt == 1 || binding.value_param == kernels::Binding::none) break;
             auto& cell = cells[binding.value_param];
             neura_out_bytes out{};
-            std::memcpy(&out, cell.bytes + 8, sizeof out);
+            std::memcpy(&out, cell.bytes + output_offset, sizeof out);
             if (out.len <= out.cap) break;
             auto& buffer = kernel_buffers_[binding.value_param];
-            buffer.assign(static_cast<std::size_t>(out.len), 0);
+            buffer.assign(buffer_bytes(out.len), 0);
             out.data = buffer.data();
             out.cap = out.len;
             out.len = 0;
-            std::memcpy(cell.bytes + 8, &out, sizeof out);
+            std::memcpy(cell.bytes + output_offset, &out, sizeof out);
         }
         const bool error = status >= NEURA_ERR_INVALID_START_BYTE && status < NEURA_TRAP_OFFSET_OUT_OF_RANGE;
         if (status != NEURA_OK && !(error && binding.result == kernels::ResultShape::Outcome)) {
@@ -3941,7 +4603,7 @@ private:
                 return value_bits() & mask(kernels::scalar_width(kind));
             }
             neura_out_bytes out{};
-            std::memcpy(&out, cells[binding.value_param].bytes + 8, sizeof out);
+            std::memcpy(&out, cells[binding.value_param].bytes + output_offset, sizeof out);
             const auto length = empty ? 0 : static_cast<std::size_t>(std::min(out.len, out.cap));
             if (kind == Kind::OutText) {
                 const std::string_view bytes(reinterpret_cast<const char*>(out.data), length);
@@ -3979,6 +4641,11 @@ private:
 
     const nvr::Image& image_;
     nvr::TypeSystem types_;
+    // Whether any type is an aggregate (NVR 1.7), so that an image without
+    // one pays nothing for the checks on its collections.
+    bool aggregates_ = std::ranges::any_of(image_.types, [](const nvr::Type& t) {
+        return t.kind == nvr::TypeKind::Aggregate;
+    });
     RunLimits limits_;
     std::optional<std::uint32_t> entry_;
     std::vector<std::string> arguments_;
@@ -3994,9 +4661,21 @@ private:
     std::vector<Heap::Ref> mark_work_;
     std::vector<std::uint64_t> channel_work_;
     std::uint64_t live_cells_ = 0;
+    // Storage regions (NVR 1.7): the cells of region entries, which are stack
+    // cells and not heap cells; the largest live number; the token counter,
+    // never reused; and the handles of released region entries as ascending
+    // disjoint closed intervals (first -> last), so that an access to one is
+    // told from an access to a handle that never named an entry.
+    std::uint64_t live_stack_cells_ = 0;
+    std::uint64_t peak_stack_cells_ = 0;
+    std::uint64_t region_serial_ = 0;
+    std::vector<std::uint64_t> static_handles_;
+    mutable std::optional<std::vector<std::string>> policy_names_;
+    std::map<std::uint64_t, std::uint64_t> released_handles_;
     FleetHeapCells* fleet_heap_ = nullptr;
     // The largest live heap size the run reached, in cells.
     std::uint64_t peak_cells_ = 0;
+    Heap::TextCounters text_baseline_{};
     std::vector<std::uint64_t> function_steps_;
     std::uint64_t next_collection_ = std::min<std::uint64_t>(256, limits_.max_heap_cells);
     std::vector<std::uint64_t> const_values_;
@@ -4058,12 +4737,15 @@ private:
     std::vector<std::vector<std::uint64_t>> program_images_;
     std::vector<const tier2::Region*> function_programs_;
     RegionCounts region_counts_;
+#ifndef NEURA_WASM_RUNTIME
     // Tier 3 (tier3_steps.inc): whether function programs run as native
     // programs, the context they run in, and the events for --tier-stats.
     bool tier3_ = false;
+#endif
     // Whether blocks form function programs: the cache's setting, less the
     // programs only a default tier 3 asked for when it is off for this run.
     bool programs_ = false;
+#ifndef NEURA_WASM_RUNTIME
     // Whether they run their machine code (else the IR interpreter), and
     // the values a deoptimization stub stores, by SSA value.
     bool tier3_native_ = false;
@@ -4082,6 +4764,7 @@ private:
     bool jit_ = false;
     jit::Context jit_context_;
     std::exception_ptr region_exception_;
+#endif
     // NEURA_TIER_CHECK=1: the heap and global writes of state operations,
     // in order, while a region and its tier-1 replay run.
     std::vector<HeapWrite>* heap_log_ = nullptr;
@@ -4231,15 +4914,27 @@ DebugValue Execution::State::debug_value(std::uint32_t index, std::uint64_t bits
         break;
     case EntryKind::Array:
     case EntryKind::List:
-        value.text = std::string(heap_.kind(entry) == EntryKind::Array ? "array[" : "list[") +
-                     std::to_string(heap_.length(entry)) + "]";
-        value.children = heap_.length(entry);
+        {
+            const auto* fields = aggregates_ ? nvr::collection_components(image_, heap_.type(entry)) : nullptr;
+            const auto elements = fields ? heap_.length(entry) / fields->size() : heap_.length(entry);
+            value.text = std::string(heap_.kind(entry) == EntryKind::Array ? "array[" : "list[") +
+                         std::to_string(elements) + "]";
+            value.children = elements;
+        }
         break;
     case EntryKind::Object:
         value.layout = heap_.type(entry);
         value.text = "object @" + std::to_string(bits);
         value.children = heap_.field_count(entry);
         break;
+    }
+    // An entry of a storage region (NVR 1.7) shows as a heap entry does,
+    // marked with its region's token while its task is the running one.
+    if (heap_.in_region(entry)) {
+        const auto owner = owning_region(bits);
+        value.text += owner < frames_.regions.size()
+                          ? " [region " + std::to_string(frames_.regions[owner].token) + "]"
+                          : std::string(" [region]");
     }
     return value;
 }
@@ -4257,6 +4952,33 @@ std::vector<DebugValue> Execution::State::debug_children(std::uint32_t index, st
         for (auto i = start; i < end; ++i) values.push_back(debug_value(fields[i], heap_.field(entry, static_cast<std::uint32_t>(i)), heap_.initialized(entry, static_cast<std::uint32_t>(i))));
     } else if (heap_.kind(entry) == EntryKind::Array || heap_.kind(entry) == EntryKind::List) {
         const auto element = image_.types[heap_.type(entry)].reference;
+        if (const auto* fields = nvr::aggregate_components(image_, element)) {
+            // Each element is one group of its components, shown as text.
+            const auto elements = heap_.length(entry) / fields->size();
+            const auto last = start + std::min(count, elements - std::min(start, elements));
+            const auto layout = image_.types[element].reference;
+            const auto& names = layout_names();
+            const bool reference = layout < names.size() && names[layout] == "$reference" && fields->size() == 2 &&
+                                   image_.types[fields->front()].kind == nvr::TypeKind::Object &&
+                                   image_.types[fields->back()].kind == nvr::TypeKind::Unsigned &&
+                                   image_.types[fields->back()].width == 32;
+            for (auto i = start; i < last; ++i) {
+                if (reference) {
+                    auto value = debug_value(fields->front(), heap_.element(entry, 2 * i), true);
+                    const auto policy = static_cast<std::uint32_t>(heap_.element(entry, 2 * i + 1));
+                    if (value.bits == 0 && policy != 0) value.text += " (policy " + policy_name(policy) + ")";
+                    values.push_back(std::move(value));
+                    continue;
+                }
+                std::string text = "(";
+                for (std::size_t c = 0; c < fields->size(); ++c) {
+                    text += (c == 0 ? "" : ", ") +
+                            debug_value((*fields)[c], heap_.element(entry, i * fields->size() + c), true).text;
+                }
+                values.push_back(DebugValue{element, 0, true, text + ")", 0});
+            }
+            return values;
+        }
         const auto end = start + std::min(count, heap_.length(entry) - std::min(start, heap_.length(entry)));
         // Collections are initialized atomically at allocation; only object
         // fields carry per-cell initialized flags.
@@ -4478,6 +5200,9 @@ Execution::ReferenceRounds Execution::advance_reference_rounds(std::vector<std::
 }
 
 Event Execution::advance() { return state_->advance(); }
+#ifdef NEURA_WASM_RUNTIME
+std::optional<Event> Execution::advance_slice(std::uint64_t budget) { return state_->advance_slice(budget); }
+#endif
 std::string Execution::dump_tasks(TaskDumpFormat format) const { return state_->dump_tasks(format); }
 DebugPosition Execution::debug_position() const { return state_->debug_position(); }
 DebugSnapshot Execution::debug_snapshot() const { return state_->debug_snapshot(); }
@@ -4487,11 +5212,13 @@ std::vector<DebugValue> Execution::debug_children(std::uint32_t type, std::uint6
 }
 
 std::uint64_t Execution::peak_tasks() const { return state_->peak_tasks(); }
+#ifndef NEURA_WASM_RUNTIME
 std::vector<Execution::Tier3Frame> Execution::tier3_frames() const { return state_->tier3_frames(); }
 Execution::Tier3Ending Execution::tier3_run(const tier3::Program& program, std::uint32_t entry) {
     return state_->tier3_run(program, entry);
 }
 std::vector<std::uint64_t> Execution::heap_snapshot() const { return state_->heap_snapshot(); }
+#endif
 std::uint64_t Execution::tick() const { return state_->tick(); }
 std::uint64_t Execution::peak_queued_messages() const { return state_->peak_queued_messages(); }
 std::uint64_t Execution::peak_pending_requests() const { return state_->peak_pending_requests(); }
@@ -4544,9 +5271,14 @@ std::optional<HostValue> Execution::invoke_callback(std::string_view name, std::
 std::uint64_t Execution::steps() const { return state_->steps(); }
 std::uint64_t Execution::live_heap_cells() const { return state_->live_heap_cells(); }
 std::uint64_t Execution::peak_heap_cells() const { return state_->peak_heap_cells(); }
+std::uint64_t Execution::text_allocations() const { return state_->text_allocations(); }
+std::uint64_t Execution::text_bytes_copied() const { return state_->text_bytes_copied(); }
+std::uint64_t Execution::live_stack_cells() const { return state_->live_stack_cells(); }
+std::uint64_t Execution::peak_stack_cells() const { return state_->peak_stack_cells(); }
 std::vector<Execution::HeapEntryWidth> Execution::heap_entry_widths() const { return state_->heap_entry_widths(); }
 const std::vector<std::uint64_t>& Execution::function_steps() const { return state_->function_steps(); }
 
+#ifndef NEURA_WASM_RUNTIME
 std::int64_t SteadyTaskClock::now() {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(
                std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -4585,5 +5317,6 @@ RunResult run(const nvr::Image& image, const Bindings& bindings, std::span<const
     const auto last = drive(execution, bindings, *clock, hooks);
     return detail::finished_result(execution, last, requests);
 }
+#endif
 
 } // namespace neura::nvm

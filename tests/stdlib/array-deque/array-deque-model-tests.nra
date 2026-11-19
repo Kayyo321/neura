@@ -21,7 +21,7 @@ let ArrayDequeModelTests = module (
     };
 
     let without = func(model: int[list], index: int) -> int[list] {
-        let result: int[list] = [];
+        let result: int[list] = new;
         let i = 0;
         while (i < model.length) {
             if (i != index) {
@@ -33,7 +33,7 @@ let ArrayDequeModelTests = module (
     };
 
     let prepended = func(model: int[list], value: int) -> int[list] {
-        let result: int[list] = [value];
+        let result: int[list] = new([value]);
         for (let element in model) {
             result.append(element);
         }
@@ -43,7 +43,7 @@ let ArrayDequeModelTests = module (
     let run = func(seed: uint64, operations: int) -> void {
         let random = model_random.seeded(seed);
         let actual = array_deque.create<int>();
-        let model: int[list] = [];
+        let model: int[list] = new;
         let step = 0;
         while (step < operations) {
             let choice = random.below(100);
@@ -111,14 +111,14 @@ let ArrayDequeModelTests = module (
                 test.assert_equal_bool(expected, actual.contains(probe));
             } else if (choice < 89) {
                 actual.clear();
-                let empty: int[list] = [];
+                let empty: int[list] = new;
                 model = empty;
             } else if (choice < 94) {
                 test.assert(actual.to_list().equals(model));
             } else if (choice < 97) {
                 test.assert_equal_string(model.to_string(), actual.to_string());
             } else {
-                let seen: int[list] = [];
+                let seen: int[list] = new;
                 actual.for_each(func(element: int) -> void {
                     seen.append(element);
                 });

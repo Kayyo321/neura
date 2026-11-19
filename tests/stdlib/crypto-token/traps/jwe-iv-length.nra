@@ -1,0 +1,14 @@
+// test-options: --gpu=off
+// run-options: --gpu=off
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: wrong length for JWE initialization vector
+let jwe = import:Std.Crypto.Token.Jwe;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let key = new jwe.DirectKey(jwe.ContentEncryption.A128Gcm, new([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
+        let _ = jwe.seal_with(key, new, new);
+        return program.ExitCode.Ok;
+    };
+);

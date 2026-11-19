@@ -1,0 +1,333 @@
+let.promote _ = import:Std.Time.Clock;
+let durations = import:Std.Time.Duration;
+let messages = import:Std.Net.Dns.Message;
+let.promote _ = import:Std.Core.Result;
+let string_maps = import:Std.Collections.StringMap;
+let.promote _ = import:Std.Core.Optional;
+
+/// @brief A TTL cache of DNS answers over an injected clock, with negative caching (RFC 2308) and a size bound.
+///
+/// Time is the clock's monotonic reading, so tests drive it with `Std.Time.FixedClock.advance`.
+///
+/// - **Positive answers** are cached for the smallest TTL of their records, clamped to `[min_ttl, max_ttl]`
+///   seconds. A lookup returns the records with their TTL lowered by the time spent in the cache.
+/// - **Negative answers** (RFC 2308 section 5) are cached only when the authority section has an SOA record; the
+///   TTL is the smaller of the SOA record's TTL and its MINIMUM field (section 3), capped at
+///   `max_negative_ttl`. A name error (NXDOMAIN) is keyed by `<QNAME, QCLASS>` and so answers every type; a no-data
+///   answer (NODATA) is keyed by `<QNAME, QTYPE, QCLASS>`. A negative response without an SOA is not cached.
+/// - **Size**: at most `capacity` entries. Inserting into a full cache first drops expired entries, then the
+///   least recently used entry (a hit counts as a use). Eviction order is an explicit recency list, never the
+///   hash table's order.
+///
+/// A clock failure makes `get` miss and `put_*` store nothing.
+/// @see [Std.Net.Dns.DnsCache](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-DnsCache)
+#Since("0.3.0")
+export let DnsCache = module (
+    /// @brief The default capacity.
+    export const DefaultCapacity: int = 1024;
+    /// @brief The default lower TTL clamp in seconds.
+    export const DefaultMinTtl: int64 = 0;
+    /// @brief The default upper TTL clamp in seconds (one day).
+    export const DefaultMaxTtl: int64 = 86400;
+    /// @brief The default cap on negative TTLs in seconds (three hours, the upper end RFC 2308 section 5 suggests).
+    export const DefaultMaxNegativeTtl: int64 = 10800;
+
+    /// @brief What a lookup found.
+    export let CacheResult = enum (
+        Miss,
+        Answer(messages.ResourceRecord[list]),
+        NameError,
+        NoData
+    );
+
+    /// @brief One cached entry.
+    #[Final, NotThreadSafe]
+    let Entry = class (
+        /// @brief Answer, NameError or NoData.
+        export last result: CacheResult;
+        /// @brief The monotonic time it was stored, in nanoseconds.
+        export last stored_at: int64;
+        /// @brief The monotonic time it expires, in nanoseconds.
+        export last expires_at: int64;
+
+        /// @brief An entry.
+        export let init = func(found: CacheResult, stored: int64, expires: int64) {
+            result = found;
+            stored_at = stored;
+            expires_at = expires;
+        };
+
+        /// @brief Text such as "Entry(expires 300000000000)".
+        export let.override to_string = func -> string => "Entry(expires " .. expires_at.to_string() .. ")";
+    );
+
+    /// @brief The cache.
+    #[Final, NotThreadSafe]
+    export let DnsCache = class (
+        /// @brief The time source.
+        last clock: Clock;
+        /// @brief The most entries kept.
+        export last capacity: int;
+        /// @brief The lower TTL clamp in seconds.
+        export last min_ttl: int64;
+        /// @brief The upper TTL clamp in seconds.
+        export last max_ttl: int64;
+        /// @brief The cap on negative TTLs in seconds.
+        export last max_negative_ttl: int64;
+        /// @brief The entries by key.
+        last entries: string_maps.StringMap<Entry> = string_maps.create<Entry>();
+        /// @brief The keys from least to most recently used.
+        let recency: string[list] = new;
+        /// @brief Lookups that found an entry.
+        let hit_count: int = 0;
+        /// @brief Lookups that found none.
+        let miss_count: int = 0;
+        /// @brief Entries dropped to make room.
+        let eviction_count: int = 0;
+
+        /// @brief A cache over `time` with the defaults; or with a capacity and TTL clamps (seconds). A capacity
+        /// below 1, a negative clamp or `min` above `max` traps with "invalid argument: cache".
+        export let init = func(time: Clock) {
+            clock = time;
+            capacity = DefaultCapacity;
+            min_ttl = DefaultMinTtl;
+            max_ttl = DefaultMaxTtl;
+            max_negative_ttl = DefaultMaxNegativeTtl;
+        } or func(time: Clock, most: int, lowest_ttl: int64, highest_ttl: int64, highest_negative_ttl: int64) {
+            if (most < 1 || lowest_ttl < 0 || highest_ttl < lowest_ttl || highest_negative_ttl < 0) {
+                trap_with_message("invalid argument: cache");
+            }
+            clock = time;
+            capacity = most;
+            min_ttl = lowest_ttl;
+            max_ttl = highest_ttl;
+            max_negative_ttl = highest_negative_ttl;
+        };
+
+        /// @brief The entries held, expired ones included until they are dropped.
+        #NoDiscard
+        export let size = func -> int => entries.size();
+
+        /// @brief Lookups that found an entry.
+        #NoDiscard
+        export let hits = func -> int => hit_count;
+
+        /// @brief Lookups that found none.
+        #NoDiscard
+        export let misses = func -> int => miss_count;
+
+        /// @brief Entries dropped to make room.
+        #NoDiscard
+        export let evictions = func -> int => eviction_count;
+
+        /// @brief The cached result for a question: a name error for its name and class, otherwise the answer or
+        /// no-data entry for its name, type and class; Miss when none is live.
+        #NoDiscard
+        export let get = func(question: messages.Question) -> CacheResult {
+            last now = now_nanos();
+            if (now < 0) {
+                miss_count++;
+                return CacheResult.Miss;
+            }
+            last name_key = name_error_key(question);
+            match (live(name_key, now)) {
+                Optional.Some(entry) => {
+                    touch(name_key);
+                    hit_count++;
+                    return entry.result;
+                },
+                Optional.None => {
+                },
+            }
+            last type_key = answer_key(question);
+            match (live(type_key, now)) {
+                Optional.Some(entry) => {
+                    touch(type_key);
+                    hit_count++;
+                    return match (entry.result) {
+                        CacheResult.Answer(records) => CacheResult.Answer(aged(records, now - entry.stored_at)),
+                        _ => entry.result,
+                    };
+                },
+                Optional.None => {
+                },
+            }
+            miss_count++;
+            return CacheResult.Miss;
+        };
+
+        /// @brief Caches `records` as the answer to `question` for their smallest TTL, clamped. An empty list
+        /// stores nothing. Returns the TTL used in seconds, or -1 when nothing was stored.
+        export let put_answer = func(question: messages.Question, records: messages.ResourceRecord[list]) -> int64 {
+            if (records.length == 0) {
+                return -1;
+            }
+            let ttl = records[0].ttl;
+            for (let record in records) {
+                if (record.ttl < ttl) {
+                    ttl = record.ttl;
+                }
+            }
+            ttl = clamp(ttl, min_ttl, max_ttl);
+            return store(answer_key(question), CacheResult.Answer(records), ttl);
+        };
+
+        /// @brief Caches a negative answer from the authority section of a response (RFC 2308 section 5):
+        /// `name_error` true for NXDOMAIN, false for NODATA. Returns the TTL used, or -1 when the authority section
+        /// has no SOA and nothing was stored.
+        export let put_negative = func(question: messages.Question, name_error: bool,
+            authority: messages.ResourceRecord[list]) -> int64 {
+            last ttl = negative_ttl(authority);
+            if (ttl < 0) {
+                return -1;
+            }
+            last capped = ttl > max_negative_ttl ? max_negative_ttl : ttl;
+            return if (name_error) -> store(name_error_key(question), CacheResult.NameError, capped)
+                else -> store(answer_key(question), CacheResult.NoData, capped);
+        };
+
+        /// @brief Drops every entry for the question's name, type and class, and its name error.
+        export let remove = func(question: messages.Question) {
+            drop(answer_key(question));
+            drop(name_error_key(question));
+        };
+
+        /// @brief Drops everything.
+        export let clear = func {
+            entries.clear();
+            recency = new;
+        };
+
+        /// @brief Text such as "DnsCache(3 of 1024 entries)".
+        export let.override to_string = func -> string =>
+            "DnsCache(" .. entries.size().to_string() .. " of " .. capacity.to_string() .. " entries)";
+
+        /// @brief The monotonic time in nanoseconds, or -1 when the clock fails.
+        let now_nanos = func -> int64 => match (clock.monotonic()) {
+            Result.Ok(span) => span.to_nanos(),
+            Result.Err(_) => -1,
+        };
+
+        /// @brief The entry for a key unless it is missing or expired (an expired one is dropped).
+        let live = func(key: string, now: int64) -> Optional<Entry> {
+            match (entries.get(key)) {
+                Optional.Some(entry) => {
+                    if (now >= entry.expires_at) {
+                        drop(key);
+                        return Optional<Entry>.None;
+                    }
+                    return Optional<Entry>.Some(entry);
+                },
+                Optional.None => {
+                    return Optional<Entry>.None;
+                },
+            }
+        };
+
+        /// @brief Stores an entry for `ttl` seconds, making room first. A TTL of 0 stores nothing.
+        let store = func(key: string, found: CacheResult, ttl: int64) -> int64 {
+            last now = now_nanos();
+            if (now < 0 || ttl <= 0) {
+                return ttl <= 0 ? 0 : -1;
+            }
+            drop(key);
+            if (entries.size() >= capacity) {
+                drop_expired(now);
+            }
+            while (entries.size() >= capacity && recency.length > 0) {
+                last oldest = recency[0];
+                drop(oldest);
+                eviction_count++;
+            }
+            entries.set(key, new Entry(found, now, now + ttl * 1000000000));
+            recency.append(key);
+            return ttl;
+        };
+
+        /// @brief Drops every expired entry.
+        let drop_expired = func(now: int64) {
+            last keys: string[list] = new;
+            for (let key in recency) {
+                keys.append(key);
+            }
+            for (let key in keys) {
+                match (entries.get(key)) {
+                    Optional.Some(entry) => {
+                        if (now >= entry.expires_at) {
+                            drop(key);
+                        }
+                    },
+                    Optional.None => {
+                    },
+                }
+            }
+        };
+
+        /// @brief Removes a key from the table and the recency list.
+        let drop = func(key: string) {
+            if (not entries.delete(key)) {
+                return;
+            }
+            last kept: string[list] = new;
+            for (let other in recency) {
+                if (other != key) {
+                    kept.append(other);
+                }
+            }
+            recency = kept;
+        };
+
+        /// @brief Moves a key to the most recently used end.
+        let touch = func(key: string) {
+            last kept: string[list] = new;
+            for (let other in recency) {
+                if (other != key) {
+                    kept.append(other);
+                }
+            }
+            kept.append(key);
+            recency = kept;
+        };
+    );
+
+    /// @brief The negative TTL of an authority section: the smaller of the first SOA record's TTL and its
+    /// MINIMUM (RFC 2308 sections 3 and 5), or -1 when there is no SOA.
+    #NoDiscard
+    export let negative_ttl = func(authority: messages.ResourceRecord[list]) -> int64 {
+        for (let record in authority) {
+            match (record.data) {
+                messages.RecordData.Soa { mname, rname, serial, refresh, retry, expire, minimum } => {
+                    return record.ttl < minimum ? record.ttl : minimum;
+                },
+                _ => {
+                },
+            }
+        }
+        return -1;
+    };
+
+    /// @brief Records with their TTL lowered by `elapsed` nanoseconds (whole seconds, never below 0).
+    let aged = func(records: messages.ResourceRecord[list], elapsed: int64) -> messages.ResourceRecord[list] {
+        last seconds = elapsed / 1000000000;
+        last out: messages.ResourceRecord[list] = new;
+        for (let record in records) {
+            last left = record.ttl - seconds;
+            out.append(record.with_ttl(left < 0 ? 0 : left));
+        }
+        return out;
+    };
+
+    /// @brief `value` limited to `[low, high]`.
+    let clamp = func(value: int64, low: int64, high: int64) -> int64 {
+        return if (value < low) -> low
+            else -> value > high ? high : value;
+    };
+
+    /// @brief The key of an answer or no-data entry.
+    let answer_key = func(question: messages.Question) -> string =>
+        question.name.key() .. " " .. question.qtype.to_string() .. " " .. question.qclass.to_string();
+
+    /// @brief The key of a name-error entry.
+    let name_error_key = func(question: messages.Question) -> string =>
+        question.name.key() .. " NXDOMAIN " .. question.qclass.to_string();
+);

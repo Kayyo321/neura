@@ -1,0 +1,6 @@
+let Point = class (
+    export last x: int;
+    export last y: int;
+
+    export let init = func(x: int) => set;
+);

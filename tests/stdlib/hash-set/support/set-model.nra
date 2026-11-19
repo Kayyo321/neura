@@ -15,7 +15,7 @@ export let SetModel = module (
                              trim: func() -> void, sorted: bool, seed: uint64, operations: int, small_domain: int,
                              large_domain: int) -> void {
         let generator = random.seeded(seed);
-        let ids: int[list] = [];
+        let ids: int[list] = new;
         let step = 0;
         while (step < operations) {
             let domain = small_domain;
@@ -42,11 +42,11 @@ export let SetModel = module (
                 let divisor = 2 + generator.next_int_below(6);
                 let calls = cell.of<int>(0);
                 let retain = generator.next_int_below(2) == 0;
-                let test_element = func(e: T) -> bool {
+                let test_element = new func(e: T) -> bool {
                     calls.value = calls.value + 1;
                     return position_of<T>(e, ids, element_of) % divisor == 0;
                 };
-                let kept: int[list] = [];
+                let kept: int[list] = new;
                 let i = 0;
                 while (i < ids.length) {
                     if ((i % divisor == 0) == retain) {
@@ -64,7 +64,7 @@ export let SetModel = module (
                 test.assert_equal_int32(ids.length - kept.length, removed);
                 replace(ids, kept);
             } else if (choice < 88) {
-                let items: T[list] = [element, element_of(generator.next_int_below(domain)), element];
+                let items: T[list] = new([element, element_of(generator.next_int_below(domain)), element]);
                 set.add_all(items);
                 let j = 0;
                 while (j < items.length) {
@@ -90,7 +90,7 @@ export let SetModel = module (
             } else if (choice < 95) {
                 if (generator.next_int_below(3) == 0) {
                     set.clear();
-                    replace(ids, []);
+                    replace(ids, new);
                 }
             } else {
                 let seen = cell.of<int>(0);

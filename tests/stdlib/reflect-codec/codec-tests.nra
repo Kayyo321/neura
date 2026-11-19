@@ -1,0 +1,282 @@
+// Std.Reflect.Codec (docs/design/Reflect030.md, edge cases 9 and 10): the JSON bridge, the walk engine and the
+// schema builder, all driven by descriptors.
+let.promote errors = import:Std.Core.Error;
+let.promote optional = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote json = import:Std.Encoding.Json;
+let bridge = import:Std.Reflect.Codec.JsonBridge;
+let schemas = import:Std.Reflect.Codec.SchemaBuilder;
+let walks = import:Std.Reflect.Codec.Walk;
+let members = import:Std.Reflect.Member.Members;
+let types = import:Std.Reflect.Type.TypeDescriptor;
+let variants = import:Std.Reflect.Dynamic.Variant;
+let test = import:Std.Test;
+
+let Address = record (city: string, zip: int32);
+let User = record (id: int64, name: string, score: float64, active: bool, span: [int32, int32], home: Address,
+                   nickname: Optional<string>);
+let Shape = enum (Dot, Circle { radius: float64 }, Rect(int32, int32));
+
+let Account = class (
+    export let owner: string = "";
+    export let notes: string[list] = new;
+    export let balance: int64 = 0;
+    #Sensitive
+    export let pin: string = "0000";
+    #Skip
+    export let cache: int32 = 9;
+    #SerialName("kind")
+    export let shape: Shape = Shape.Dot;
+    export let small: uint8 = 0;
+    export let init = func { };
+);
+
+let Status = enum (Open, Closed);
+
+let Order = class (
+    export let id: int64 = 0;
+    export let items: string[list] = new;
+    export let discount: Optional<float64> = Optional<float64>.None;
+    #SerialName("ship_to")
+    export let address: Address = nil;
+    export let status: Status = Status.Open;
+    export let small: uint8 = 0;
+    #Skip
+    export let cache: int32 = 0;
+);
+
+let Row = class (
+    export let count: int64 = 0;
+    export let note: Optional<string> = Optional<string>.None;
+    export let tiny: int8 = 0;
+);
+
+let policies = import:Std.Reflect.Core.ReflectPolicy;
+
+let Vault = class implements policies.Layout (
+    export let name: string = "v";
+    #Sensitive
+    export let key: string = "k";
+    let hidden: int32 = 3;
+    export let init = func { };
+);
+
+let Login = record (user: string, #Sensitive password: string);
+
+#Sensitive
+let Token = class (
+    export let raw: string = "t";
+    export let init = func { };
+);
+
+let Mode = enum (#SerialName("fast") Quick, Slow);
+
+let Session = class (
+    export let user: string = "u";
+    export let token: Token = new Token();
+    export let mode: Mode = Mode.Slow;
+    export let init = func { };
+);
+
+let Odd = class (
+    export let label: string = "o";
+    export let extra: any = 2 as int32;
+    export let pointer: &int32;
+    export let init = func(target: &int32) {
+        pointer = target;
+    };
+);
+
+let Loose = class (
+    export let label: string = "o";
+    export let extra: any = 2 as int32;
+    export let init = func { };
+);
+
+let shared_count: int32 = 4;
+
+let Sealed = class (
+    export let name: string = "";
+    let init = func { };
+);
+
+let Node = class (
+    export let name: string = "";
+    export let next: Node = nil;
+    export let init = func { };
+);
+
+let Names = class implements walks.ReflectVisitor (
+    export let seen: string[list] = new;
+    export let cycles: int32 = 0;
+    export let enter = func(path: string, value: variants.Variant, control: walks.WalkControl) -> walks.WalkControl {
+        if (control == walks.WalkControl.Cycle) {
+            cycles = cycles + 1;
+            return control;
+        }
+        seen.append(path);
+        return walks.WalkControl.Continue;
+    };
+    export let leave = func(path: string, value: variants.Variant) { };
+);
+
+let Upper = class implements walks.ReflectMutVisitor (
+    export let visit_field = func(owner: variants.Variant, field: members.FieldInfo, value: variants.Variant)
+        -> variants.Variant {
+        if (field.name == "name") {
+            return variants.of(value.get<string>() + "!");
+        }
+        return value;
+    };
+);
+
+let CodecTests = module (
+    export let test_record_round_trip = func() -> void {
+        last user = new User(7, "Ada", 2.5, true, [1, 9], new Address("Paris", 75001), Optional<string>.Some("ace"));
+        last text = bridge.encode(variants.of(user));
+        test.assert_equal_string(
+            "{\"id\":7,\"name\":\"Ada\",\"score\":2.5,\"active\":true,\"span\":[1,9],\"home\":{\"city\":\"Paris\",\"zip\":75001},\"nickname\":\"ace\"}",
+            text);
+        last back: User = bridge.decode_as<User>(text);
+        test.assert(back === user);
+        last plain = new User(1, "B", 0.5, false, [0, 0], new Address("X", 1), Optional<string>.None);
+        last none_text = bridge.encode(variants.of(plain));
+        test.assert(bridge.decode_as<User>(none_text) === plain);
+    };
+
+    export let test_class_round_trip_with_tags = func() -> void {
+        last account = new Account();
+        account.owner = "Bo";
+        account.balance = 42;
+        account.notes.append("a");
+        account.shape = Shape.Rect(3, 4);
+        account.small = 200;
+        account.pin = "1234";
+        account.cache = 1;
+        last text = bridge.encode(variants.of(account));
+        test.assert_equal_string(
+            "{\"owner\":\"Bo\",\"notes\":[\"a\"],\"balance\":42,\"pin\":\"<redacted>\",\"kind\":{\"variant\":\"Rect\",\"payload\":[3,4]},\"small\":200}",
+            text);
+        last copy: Account = bridge.decode_as<Account>(text);
+        test.assert_equal_string("Bo", copy.owner);
+        test.assert(copy.balance == 42);
+        test.assert_equal_string("a", copy.notes[0]);
+        test.assert_equal_string("Rect(3, 4)", copy.shape.to_string());
+        test.assert(copy.small == 200);
+        // Sensitive and skipped fields keep the values the constructor gave them.
+        test.assert_equal_string("0000", copy.pin);
+        test.assert_equal_int32(9, copy.cache);
+    };
+
+    export let test_decode_errors = func() -> void {
+        last missing = test.assert_err(bridge.decode("{\"city\":\"P\"}", types.of<Address>()));
+        test.assert(missing.to_string().contains("reflect.json.missing"));
+        test.assert(missing.to_string().contains("$.zip"));
+        last range = test.assert_err(bridge.decode("{\"owner\":\"x\",\"small\":300}", types.of<Account>()));
+        test.assert(range.to_string().contains("reflect.json.range"));
+        last kind = test.assert_err(bridge.decode("{\"city\":5,\"zip\":1}", types.of<Address>()));
+        test.assert(kind.to_string().contains("reflect.json.type"));
+        last variant = test.assert_err(bridge.decode("{\"variant\":\"Hexagon\"}", types.of<Shape>()));
+        test.assert(variant.to_string().contains("reflect.json.variant"));
+    };
+
+    export let test_walk_reports_cycles = func() -> void {
+        last first = new Node();
+        first.name = "a";
+        last second = new Node();
+        second.name = "b";
+        first.next = second;
+        second.next = first;
+        last names = new Names();
+        last result = new walks.WalkEngine().walk(variants.of(first), names);
+        test.assert(result == walks.WalkControl.Continue);
+        test.assert_equal_int32(1, names.cycles);
+        test.assert_equal_string("$", names.seen[0]);
+        test.assert_equal_string("$.name", names.seen[1]);
+        test.assert_equal_string("$.next.name", names.seen[3]);
+    };
+
+    export let test_mutable_walk = func() -> void {
+        last first = new Node();
+        first.name = "a";
+        first.next = new Node();
+        first.next.name = "b";
+        new walks.WalkEngine().walk_mut(variants.of(first), new Upper());
+        test.assert_equal_string("a!", first.name);
+        test.assert_equal_string("b!", first.next.name);
+    };
+
+    export let test_schema = func() -> void {
+        last text = schemas.json_schema_text(types.of<Address>());
+        test.assert_equal_string(
+            "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"$ref\":\"#/$defs/Address\",\"$defs\":{\"Address\":{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\"},\"zip\":{\"type\":\"integer\"}},\"required\":[\"city\",\"zip\"]}}}",
+            text);
+        // A type that reaches itself is defined once.
+        last node = schemas.json_schema_text(types.of<Node>());
+        test.assert(node.contains("\"next\":{\"$ref\":\"#/$defs/Node\"}"));
+    };
+
+    export let test_protobuf_schema = func() -> void {
+        last text = schemas.protobuf_schema(types.of<Order>());
+        test.assert_equal_string(
+            "syntax = \"proto3\";\n\nmessage Address {\n    string city = 1;\n    int32 zip = 2;\n}\n\nenum Status {\n    STATUS_OPEN = 0;\n    STATUS_CLOSED = 1;\n}\n\nmessage Order {\n    int64 id = 1;\n    repeated string items = 2;\n    optional double discount = 3;\n    Address ship_to = 4;\n    Status status = 5;\n    uint32 small = 6;\n}\n",
+            text);
+    };
+
+    export let test_sql_table = func() -> void {
+        test.assert_equal_string(
+            "CREATE TABLE addresses (\n    city TEXT NOT NULL,\n    zip INTEGER NOT NULL\n);",
+            schemas.sql_table(types.of<Address>(), "addresses"));
+        test.assert_equal_string(
+            "CREATE TABLE rows (\n    count BIGINT NOT NULL,\n    note TEXT,\n    tiny SMALLINT NOT NULL\n);",
+            schemas.sql_table(types.of<Row>(), "rows"));
+    };
+
+    export let test_layout_policy_keeps_field_tags_and_hides_unexported_fields = func() -> void {
+        last vault = new Vault();
+        test.assert_equal_string("{\"name\":\"v\",\"key\":\"<redacted>\"}", bridge.encode(variants.of(vault)));
+    };
+
+    export let test_a_record_with_a_sensitive_component_is_not_rebuilt = func() -> void {
+        last text = bridge.encode(variants.of(new Login("ada", "secret")));
+        test.assert_equal_string("{\"user\":\"ada\",\"password\":\"<redacted>\"}", text);
+        last problem = test.assert_err(bridge.decode(text, types.of<Login>()));
+        test.assert(problem.to_string().contains("reflect.json.missing"));
+        test.assert(problem.to_string().contains("$.password"));
+    };
+
+    export let test_type_and_variant_tags = func() -> void {
+        last session = new Session();
+        session.mode = Mode.Quick;
+        last text = bridge.encode(variants.of(session));
+        test.assert_equal_string("{\"user\":\"u\",\"token\":\"<redacted>\",\"mode\":{\"variant\":\"fast\"}}", text);
+        last back: Session = bridge.decode_as<Session>(text);
+        test.assert_equal_string("Quick", back.mode.to_string());
+        test.assert_equal_string("t", back.token.raw);
+        test.assert(schemas.json_schema_text(types.of<Mode>()).contains("\"const\":\"fast\""));
+    };
+
+    export let test_fields_reflection_cannot_hold_or_decode = func() -> void {
+        last odd = new Odd(shared_count);
+        // The any field is written; the primitive reference field is left out everywhere.
+        last text = bridge.encode(variants.of(odd));
+        test.assert_equal_string("{\"label\":\"o\",\"extra\":2}", text);
+        // Its only constructor takes a reference, which decoding cannot supply.
+        test.assert(test.assert_err(bridge.decode(text, types.of<Odd>())).to_string().contains("reflect.json.type"));
+        // An any field is written but not read back: the constructor's value stays.
+        last loose: Loose = bridge.decode_as<Loose>("{\"label\":\"x\",\"extra\":\"y\"}");
+        test.assert_equal_string("x", loose.label);
+        test.assert(match.is (loose.extra) {
+            v: int32 => v == 2,
+            _ => false,
+        });
+        last names = new Names();
+        new walks.WalkEngine().walk(variants.of(odd), names);
+        test.assert_equal_int32(3, names.seen.length);
+        test.assert_equal_string("$.extra", names.seen[2]);
+        test.assert(schemas.json_schema_text(types.of<Odd>()).contains("\"extra\":{}"));
+        last problem = test.assert_err(bridge.decode("{}", types.of<Sealed>()));
+        test.assert(problem.to_string().contains("reflect.json.type"));
+    };
+);
+

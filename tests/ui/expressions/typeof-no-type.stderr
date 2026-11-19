@@ -1,0 +1,9 @@
+error[E0267]: typeof needs a value or a type
+ --> $DIR/typeof-no-type.nra:5:39
+  |
+5 | let void_call = func { let t = typeof(console.print_line("x")); };
+  |                                       ^^^^^^^^^^^^^^^^^^^^^^^ this has type void and no value
+  |
+  = help: pass a value, such as 'typeof(shape)', or a type, such as 'typeof(int32)'
+
+For more information about this error, try `neura explain E0267`.

@@ -1,0 +1,8 @@
+// The field must be exported (edge case 68).
+let Named = interface (
+    let name: string;
+        | get;
+);
+let Private = class implements Named (
+    let name: string = "p";
+);

@@ -1,0 +1,151 @@
+let errors = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let instants = import:Std.Time.Instant;
+let.promote _ = import:Std.Core.Result;
+
+/// @brief A TLS 1.3 session ticket kept by a QUIC client for resumption and 0-RTT (RFC 8446 section 4.6.1,
+/// RFC 9001 section 4.6).
+///
+/// The ticket bytes are opaque and secret-bearing: `to_string` never shows them. The rules here are real:
+/// a ticket lifetime is at most 604,800 seconds (seven days) and zero means discard; a client uses a ticket
+/// only while its age (from receipt, on the injected clock) is below the lifetime and below seven days; the
+/// `obfuscated_ticket_age` it sends is the age in milliseconds plus `ticket_age_add`, modulo 2^32 (RFC 8446
+/// section 4.2.11.1); and a QUIC server allows 0-RTT only with the `max_early_data_size` sentinel 0xffffffff,
+/// any other value being a PROTOCOL_VIOLATION (RFC 9001 section 4.6.1). Failures are Custom errors with the code
+/// `quic.ticket`.
+/// @see [Std.Net.Quic.SessionTicket](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Quic-SessionTicket)
+#Since("0.3.0")
+export let SessionTicket = module (
+    /// @brief The longest ticket lifetime in seconds (seven days).
+    export const MaxLifetimeSeconds: int64 = 604800;
+    /// @brief The `max_early_data_size` that announces QUIC 0-RTT (0xffffffff).
+    export const QuicEarlyDataSentinel: int64 = 4294967295;
+
+    /// @brief A received session ticket.
+    #Final
+    export let SessionTicket = class (
+        /// @brief The opaque ticket.
+        last ticket: uint8[list];
+        /// @brief The server name the ticket was issued for.
+        export last server_name: string;
+        /// @brief The ALPN protocol of the connection that issued it.
+        export last alpn: string;
+        /// @brief When the client received it.
+        export last received: instants.Instant;
+        /// @brief The lifetime in seconds.
+        export last lifetime_seconds: int64;
+        /// @brief The `ticket_age_add` value.
+        export last age_add: int64;
+        /// @brief True when the server allows 0-RTT with it.
+        export last early_data: bool;
+
+        /// @brief Use `create`, which checks the values.
+        export let init = func(opaque: uint8[list], name: string, protocol: string, at: instants.Instant,
+            lifetime: int64, add: int64, allows_early_data: bool) {
+            let copy: uint8[list] = new;
+            for (let b in opaque) {
+                copy.append(b);
+            }
+            ticket = copy;
+            server_name = name;
+            alpn = protocol;
+            received = at;
+            lifetime_seconds = lifetime;
+            age_add = add;
+            early_data = allows_early_data;
+        };
+
+        /// @brief The ticket bytes. A copy.
+        #NoDiscard
+        export let ticket_bytes = func -> uint8[list] {
+            let out: uint8[list] = new;
+            for (let b in ticket) {
+                out.append(b);
+            }
+            return out;
+        };
+
+        /// @brief The ticket's age at `now` in milliseconds (negative when `now` is before receipt).
+        #Pure
+        export let age_millis = func(now: instants.Instant) -> int64 => now.duration_since(received).to_millis();
+
+        /// @brief True when the ticket may be used at `now`: its age is from 0 up to (not including) the
+        /// lifetime.
+        #Pure
+        export let is_usable_at = func(now: instants.Instant) -> bool {
+            last age = age_millis(now);
+            return age >= 0 && age < lifetime_seconds * 1000;
+        };
+
+        /// @brief The `obfuscated_ticket_age` at `now`: (age in milliseconds + ticket_age_add) mod 2^32. A
+        /// negative age traps with "invalid argument: ticket age".
+        #Pure
+        export let obfuscated_age = func(now: instants.Instant) -> int64 {
+            last age = age_millis(now);
+            if (age < 0) {
+                trap_with_message("invalid argument: ticket age");
+            }
+            return (age % 4294967296 + age_add) % 4294967296;
+        };
+
+        /// @brief Equal when every field is.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: SessionTicket) {
+                return false;
+            }
+            return same_bytes(ticket, that.ticket) && server_name == that.server_name && alpn == that.alpn
+                && received.equals(that.received) && lifetime_seconds == that.lifetime_seconds
+                && age_add == that.age_add && early_data == that.early_data;
+        };
+
+        /// @brief A hash consistent with equals.
+        export let.override hash_code = func -> uint32 =>
+            hashing.combine(hashing.combine(ticket.length as uint32, server_name.hash_code()), received.hash_code());
+
+        /// @brief Text such as "SessionTicket(example.com, h3, 7200 s, 0-RTT, ticket redacted)".
+        export let.override to_string = func -> string => "SessionTicket(" .. server_name .. ", " .. alpn .. ", "
+            .. lifetime_seconds.to_string() .. " s" .. (early_data ? ", 0-RTT" : "") .. ", ticket redacted)";
+    );
+
+    /// @brief A ticket from a NewSessionTicket: the opaque ticket (1 through 65,535 bytes), the server name and
+    /// ALPN, the receipt time, `ticket_lifetime` (1 through 604,800 seconds; 0 means discard and is an error
+    /// here), `ticket_age_add` (0 through 2^32 - 1), and the `max_early_data_size` of its early_data extension
+    /// (-1 when absent; present, it must be the QUIC sentinel 0xffffffff).
+    #NoDiscard
+    export let create = func(ticket: uint8[list], server_name: string, alpn: string, received: instants.Instant,
+        lifetime_seconds: int64, age_add: int64, max_early_data: int64) -> Result<SessionTicket> {
+        if (ticket.length < 1 || ticket.length > 65535) {
+            return invalid("the ticket must be 1 through 65535 bytes");
+        }
+        if (lifetime_seconds < 1 || lifetime_seconds > MaxLifetimeSeconds) {
+            return invalid("the lifetime must be 1 through 604800 seconds");
+        }
+        if (age_add < 0 || age_add > 4294967295) {
+            return invalid("ticket_age_add must be a 32-bit unsigned value");
+        }
+        if (max_early_data != -1 && max_early_data != QuicEarlyDataSentinel) {
+            return invalid("a QUIC ticket's max_early_data_size must be 0xffffffff (PROTOCOL_VIOLATION)");
+        }
+        return Result<SessionTicket>.Ok(new SessionTicket(ticket, server_name, alpn, received, lifetime_seconds,
+            age_add, max_early_data == QuicEarlyDataSentinel));
+    };
+
+    /// @brief True when both lists hold the same bytes.
+    let same_bytes = func(a: uint8[list], b: uint8[list]) -> bool {
+        if (a.length != b.length) {
+            return false;
+        }
+        let i = 0;
+        while (i < a.length) {
+            if (a[i] != b[i]) {
+                return false;
+            }
+            i++;
+        }
+        return true;
+    };
+
+    /// @brief A `quic.ticket` failure.
+    let invalid = func(text: string) -> Result<SessionTicket> =>
+        Result<SessionTicket>.Err(errors.custom("quic.ticket", text));
+);

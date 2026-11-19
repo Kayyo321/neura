@@ -1,0 +1,239 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+
+/// @brief Byte views (`IoSlice`) and gather lists (`IoSliceList`) for parsing and for writev-style output.
+///
+/// An `IoSlice` is a window (offset and length) over one backing `uint8[list]`: `slice` makes a narrower view
+/// of the same list without copying, and only `to_list`, `append_to` and `gather` copy bytes. A view does not
+/// own its bytes: a change to the backing list shows through every view of it, and a view whose range no
+/// longer fits the list traps when read. Views are ordinary heap objects reclaimed by the tracing
+/// collector; nothing is reference-counted, and allocating the view object itself is not avoided.
+///
+/// Scatter-gather: there is no vectored host write (`writev`) in this runtime. A gather list is written slice
+/// by slice through a function the caller passes (`write_gather`, `IoSliceList.write_to`), which resumes inside
+/// a slice after a short write. A host vectored write would take the same list in one call; it is recorded
+/// as a runtime need (`neura.net.write_vectored`). There is no scatter read (`readv`) API.
+/// @see [Std.Net.Core.IoSlice](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Core-IoSlice)
+#Since("0.3.0")
+export let IoSlice = module (
+    /// @brief A read-only window over a backing byte list.
+    #[Final, NoDiscard, Since("0.3.0")]
+    export let IoSlice = class (
+        /// @brief The backing list, shared and not copied.
+        last source: uint8[list];
+        /// @brief The index in `source` of the view's first byte.
+        last first: int;
+        /// @brief The number of bytes in the view.
+        last count: int;
+
+        /// @brief Constructs the view of `bytes[offset]` to `bytes[offset + length - 1]`; traps when that
+        /// range is not inside the list.
+        export let init = func(bytes: uint8[list], offset: int, length: int) {
+            if (offset < 0 || length < 0 || offset > bytes.length - length) {
+                trap_with_message("IoSlice: range outside the backing list");
+            }
+            source = bytes;
+            first = offset;
+            count = length;
+        };
+
+        /// @brief The number of bytes in the view.
+        export let length = func -> int => count;
+
+        /// @brief Byte `index` of the view (0 is the first); traps when the index is outside the view.
+        export let byte_at = func(index: int) -> uint8 {
+            if (index < 0 || index >= count) {
+                trap_with_message("IoSlice.byte_at: index outside the view");
+            }
+            return source[first + index];
+        };
+
+        /// @brief The view of bytes `start` to `end - 1` of this view, over the same backing list; traps unless
+        /// 0 <= start <= end <= length.
+        export let slice = func(start: int, end: int) -> IoSlice {
+            if (start < 0 || start > end || end > count) {
+                trap_with_message("IoSlice.slice: range outside the view");
+            }
+            return new IoSlice(source, first + start, end - start);
+        };
+
+        /// @brief A new list holding a copy of the view's bytes.
+        export let to_list = func -> uint8[list] {
+            last copy: uint8[list] = new;
+            append_to(copy);
+            return copy;
+        };
+
+        /// @brief Appends a copy of the view's bytes to `target`.
+        export let append_to = func(target: uint8[list]) {
+            for (let i = first; i < first + count; i++) {
+                target.append(source[i]);
+            }
+        };
+
+        /// @brief The index in the view of the first byte equal to `value`, or -1.
+        export let index_of = func(value: uint8) -> int {
+            for (let i = 0; i < count; i++) {
+                if (source[first + i] == value) {
+                    return i;
+                }
+            }
+            return -1;
+        };
+
+        /// @brief Tests whether the view holds exactly the bytes of `bytes`.
+        export let equals_bytes = func(bytes: uint8[list]) -> bool {
+            return if (bytes.length != count) -> false
+                else -> starts_with(bytes);
+        };
+
+        /// @brief Tests whether two views hold the same bytes (wherever they are stored).
+        export let content_equals = func(other: IoSlice) -> bool {
+            if (other.length() != count) {
+                return false;
+            }
+            for (let i = 0; i < count; i++) {
+                if (source[first + i] != other.byte_at(i)) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        /// @brief Tests whether the view begins with the bytes of `prefix`.
+        export let starts_with = func(prefix: uint8[list]) -> bool {
+            if (prefix.length > count) {
+                return false;
+            }
+            for (let i = 0; i < prefix.length; i++) {
+                if (source[first + i] != prefix[i]) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        /// @brief The backing list itself (not a copy), for a host call that takes a list and a range.
+        export let backing = func -> uint8[list] => source;
+
+        /// @brief The index in the backing list of the view's first byte.
+        export let offset = func -> int => first;
+
+        /// @brief `IoSlice(offset N, length M)`; the bytes are not shown.
+        export let.override to_string = func -> string =>
+            "IoSlice(offset " .. first.to_string() .. ", length " .. count.to_string() .. ")";
+    );
+
+    /// @brief An ordered list of views to be written as one gather (writev-style) vector.
+    #[Final, NoDiscard, Since("0.3.0")]
+    export let IoSliceList = class (
+        /// @brief The views in order.
+        last items: IoSlice[list];
+
+        /// @brief Creates an empty list.
+        export let init = func {
+            items = new;
+        };
+
+        /// @brief Appends a view.
+        export let add = func(slice: IoSlice) {
+            items.append(slice);
+        };
+
+        /// @brief The number of views.
+        export let count = func -> int => items.length;
+
+        /// @brief View `index`; traps when it is outside the list.
+        export let get = func(index: int) -> IoSlice {
+            if (index < 0 || index >= items.length) {
+                trap_with_message("IoSliceList.get: index outside the list");
+            }
+            return items[index];
+        };
+
+        /// @brief A new list of the views (the views themselves are shared).
+        export let slices = func -> IoSlice[list] {
+            last copy: IoSlice[list] = new;
+            for (let s in items) {
+                copy.append(s);
+            }
+            return copy;
+        };
+
+        /// @brief The sum of the views' lengths.
+        export let total_length = func -> int => total_length_of(items);
+
+        /// @brief A new list holding the views' bytes in order.
+        export let gather = func -> uint8[list] => gather_all(items);
+
+        /// @brief Writes the views in order through `writer`, as `write_gather` does.
+        export let write_to = func(writer: func(IoSlice) -> Result<int>) -> Result<int> =>
+            write_gather(items, writer);
+
+        /// @brief `IoSliceList(N slices, M bytes)`.
+        export let.override to_string = func -> string =>
+            "IoSliceList(" .. items.length.to_string() .. " slices, " .. total_length_of(items).to_string() .. " bytes)";
+    );
+
+    /// @brief The view of the whole list.
+    #[NoDiscard, ThreadSafe]
+    export let of = func(bytes: uint8[list]) -> IoSlice => new IoSlice(bytes, 0, bytes.length);
+
+    /// @brief The view of `length` bytes from `offset`; traps when that range is not inside the list.
+    #[NoDiscard, ThreadSafe]
+    export let view = func(bytes: uint8[list], offset: int, length: int) -> IoSlice =>
+        new IoSlice(bytes, offset, length);
+
+    /// @brief The sum of the views' lengths.
+    #ThreadSafe
+    export let total_length = func(slices: IoSlice[list]) -> int => total_length_of(slices);
+
+    /// @brief A new list holding the views' bytes in order (one copy of each byte).
+    #[NoDiscard, ThreadSafe]
+    export let gather = func(slices: IoSlice[list]) -> uint8[list] => gather_all(slices);
+
+    /// @brief Writes the views in order through `writer` and returns the number of bytes written.
+    ///
+    /// `writer` is offered the unwritten rest of one view at a time and returns how many of its bytes it took,
+    /// 1 to the view's length; after a short write it is offered the rest of the same view. Empty views are
+    /// skipped. An error from `writer` is returned as is (the bytes written before it are not reported); a
+    /// count of 0 or more than offered is an `Io` error of kind `Other`. This is the writev-style entry point:
+    /// a runtime with a vectored host write would take the whole list in one call.
+    #[NoDiscard, ThreadSafe]
+    export let write_gather = func(slices: IoSlice[list], writer: func(IoSlice) -> Result<int>) -> Result<int> {
+        let total = 0;
+        for (let s in slices) {
+            let done = 0;
+            while (done < s.length()) {
+                last rest = s.slice(done, s.length());
+                last taken = writer(rest)?;
+                if (taken < 1 || taken > rest.length()) {
+                    return Result<int>.Err(Error.Io { kind: IoErrorKind.Other,
+                        message: "gather writer took " .. taken.to_string() .. " of " .. rest.length().to_string()
+                        .. " bytes", path: "" });
+                }
+                done += taken;
+                total += taken;
+            }
+        }
+        return Result<int>.Ok(total);
+    };
+
+    /// @brief The sum of the views' lengths.
+    let total_length_of = func(slices: IoSlice[list]) -> int {
+        let total = 0;
+        for (let s in slices) {
+            total += s.length();
+        }
+        return total;
+    };
+
+    /// @brief The views' bytes in order, as a new list.
+    let gather_all = func(slices: IoSlice[list]) -> uint8[list] {
+        last bytes: uint8[list] = new;
+        for (let s in slices) {
+            s.append_to(bytes);
+        }
+        return bytes;
+    };
+);

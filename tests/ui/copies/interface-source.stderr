@@ -1,0 +1,9 @@
+error[E0572]: 'new with' copies a record, and this is the interface 'Named'
+ --> $DIR/interface-source.nra:7:21
+  |
+7 | let copy = new with(named) { };
+  |                     ^^^^^ not a value of a record type
+  |
+  = help: copy a value whose static type is a record
+
+For more information about this error, try `neura explain E0572`.

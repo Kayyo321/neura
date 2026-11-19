@@ -1,0 +1,5 @@
+// Case 13: after a method, a clause is an accessor clause of the method.
+let Session = class (
+    export let run = func() { };
+    | get: instance;
+);

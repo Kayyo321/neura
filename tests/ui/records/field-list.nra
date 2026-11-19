@@ -1,0 +1,2 @@
+// A list is mutable (edge case 19).
+let P = record (items: int[list]);

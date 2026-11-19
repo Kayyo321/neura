@@ -1,0 +1,88 @@
+let hashing = import:Std.Core.Hash;
+let.promote _ = import:Std.Core.Optional;
+let strings = import:Std.Text.Strings;
+
+/// @brief One server-sent event (WHATWG HTML section 9.2), as the parser dispatches it and the emitter writes it.
+///
+/// The event type is `message` unless the stream named another. The identifier is the stream's last event ID
+/// when the event was dispatched: it carries over from earlier events until an `id` field changes it, and the
+/// empty string means there is none. `retry` is the reconnection time in milliseconds that the event's block
+/// set, if any.
+/// @see [Std.Net.Realtime.Sse.SseEvent](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-Sse-SseEvent)
+#Since("0.3.0")
+export let SseEvent = module (
+    /// @brief The type an event has when its stream names none.
+    export const DefaultType: string = "message";
+
+    /// @brief An immutable event: type, data, last event ID and an optional reconnection time.
+    #[Final, Immutable]
+    export let SseEvent = class (
+        /// @brief The event type; `message` by default.
+        export last event_type: string;
+        /// @brief The data: the `data` lines joined with LF.
+        export last data: string;
+        /// @brief The last event ID at dispatch; empty when none.
+        export last id: string;
+        /// @brief The reconnection time in milliseconds set by this event's block, if any.
+        export last retry: Optional<int64>;
+
+        /// @brief Stores the fields.
+        export let init = func(kind: string, payload: string, identifier: string, retry_millis: Optional<int64>) {
+            event_type = kind;
+            data = payload;
+            id = identifier;
+            retry = retry_millis;
+        };
+
+        /// @brief Equal when the type, data, identifier and reconnection time are equal.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not event: SseEvent) {
+                return false;
+            }
+            return event_type == event.event_type && data == event.data && id == event.id
+                && optional_equals(retry, event.retry);
+        };
+
+        /// @brief Combines the hashes of the four fields in order.
+        export let.override hash_code = func -> uint32 {
+            let hash = hashing.combine(17, strings.hash(event_type));
+            hash = hashing.combine(hash, strings.hash(data));
+            hash = hashing.combine(hash, strings.hash(id));
+            return match (retry) {
+                Optional.Some(millis) => hashing.combine(hash, hashing.of_int64(millis)),
+                Optional.None => hashing.combine(hash, 0),
+            };
+        };
+
+        /// @brief `SseEvent(type, id "...", data "...")`, with the reconnection time when set.
+        export let.override to_string = func -> string {
+            let text = "SseEvent(" .. event_type .. ", id \"" .. id .. "\", data \"" .. data .. "\"";
+            match (retry) {
+                Optional.Some(millis) => {
+                    text ..= ", retry " .. millis.to_string();
+                },
+                Optional.None => {},
+            }
+            return text .. ")";
+        };
+    );
+
+    /// @brief An event of type `message` with the data and no identifier or reconnection time.
+    #NoDiscard
+    export let message = func(payload: string) -> SseEvent =>
+        new SseEvent(DefaultType, payload, "", Optional<int64>.None);
+
+    /// @brief An event with the type, data and identifier and no reconnection time.
+    #NoDiscard
+    export let of = func(kind: string, payload: string, identifier: string) -> SseEvent =>
+        new SseEvent(kind, payload, identifier, Optional<int64>.None);
+
+    /// @brief Whether two optional reconnection times are equal.
+    let optional_equals = func(a: Optional<int64>, b: Optional<int64>) -> bool => match (a) {
+        Optional.Some(x) => match (b) {
+            Optional.Some(y) => x == y,
+            Optional.None => false,
+        },
+        Optional.None => not is_some<int64>(b),
+    };
+);

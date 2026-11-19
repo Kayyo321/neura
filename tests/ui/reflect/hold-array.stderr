@@ -1,0 +1,9 @@
+error[E1301]: an array, which lives in its region, cannot be held by a Std.Reflect dynamic value
+ --> $DIR/hold-array.nra:4:45
+  |
+4 | let hold = func(values: int32[]) -> bool => variants.of(values).is_nil();
+  |                                             ^^^^^^^^^^^^^^^^^^^ reflects a value of type int32[]
+  |
+  = help: reflect a value that can be copied out of its scope; copy an array into a list
+
+For more information about this error, try `neura explain E1301`.

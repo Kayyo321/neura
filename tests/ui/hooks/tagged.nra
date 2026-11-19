@@ -1,0 +1,6 @@
+// Case 9: a clause takes no tags, and the tag is not moved to the class.
+let Session = class (
+    #Deprecated
+    | get: instance;
+    export let user: string = "";
+);

@@ -1,0 +1,9 @@
+error[E0570]: invalid record declaration
+ --> $DIR/empty-implements.nra:5:34
+  |
+5 | let P = record implements Named ();
+  |                                  ^ a record needs at least one component
+  |
+  = help: remove it, or declare a class instead of a record
+
+For more information about this error, try `neura explain E0570`.

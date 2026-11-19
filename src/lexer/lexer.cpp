@@ -1,7 +1,9 @@
 #include "lexer.hpp"
+#include "island.hpp"
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cstdint>
 #include <string>
 #include <optional>
@@ -22,16 +24,167 @@ constexpr bool is_name_char(char c) {
     return is_name_start(c) || is_digit(c);
 }
 
+constexpr bool is_hex_digit(char c) {
+    return is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+constexpr std::uint32_t hex_value(char c) {
+    return is_digit(c) ? static_cast<std::uint32_t>(c - '0')
+                       : static_cast<std::uint32_t>((c | 0x20) - 'a' + 10);
+}
+
+constexpr std::size_t lead_width(unsigned char lead) {
+    return lead < 0x80 ? 1 : lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : 2;
+}
+
+// One escape of a string or character literal (docs/lang/CoreLanguage.md,
+// Escapes): `text` starts at the backslash and ends where the literal's
+// line does. `width` is the escape's length in source bytes, backslash
+// included; for an invalid escape it covers what was read, for the span of
+// the diagnostic. `value` is the byte of a simple or `\x` escape, or the
+// code point of a Unicode escape, backslash u{...}.
+struct EscapeRead {
+    enum class Status : std::uint8_t {
+        Ok, End, Unknown, BadByte, BadUnicode, NotScalar
+    };
+    Status status = Status::Ok;
+    std::size_t width = 1;
+    std::uint32_t value = 0;
+    bool byte = false;
+    bool scalar = false;
+};
+
+EscapeRead read_escape(std::string_view text) {
+    EscapeRead result;
+    const auto at = [&](std::size_t i) { return i < text.size() ? text[i] : '\0'; };
+    const char kind = at(1);
+    if (text.size() < 2 || kind == '\n' || kind == '\r') {
+        result.status = EscapeRead::Status::End;
+        return result;
+    }
+    result.width = 2;
+    switch (kind) {
+    case 'n': result.value = '\n'; return result;
+    case 'r': result.value = '\r'; return result;
+    case 't': result.value = '\t'; return result;
+    case '0': result.value = 0; return result;
+    case '\\': case '\'': case '"': result.value = static_cast<unsigned char>(kind); return result;
+    case 'x':
+        result.byte = true;
+        while (result.width < 4 && is_hex_digit(at(result.width))) {
+            result.value = result.value * 16 + hex_value(at(result.width));
+            ++result.width;
+        }
+        if (result.width != 4) result.status = EscapeRead::Status::BadByte;
+        return result;
+    case 'u': {
+        result.scalar = true;
+        if (at(2) != '{') {
+            result.status = EscapeRead::Status::BadUnicode;
+            return result;
+        }
+        std::size_t i = 3;
+        while (i < text.size() && is_hex_digit(text[i]) && i < 3 + 7) {
+            result.value = result.value * 16 + hex_value(text[i]);
+            ++i;
+        }
+        const auto digits = i - 3;
+        if (at(i) != '}' || digits == 0 || digits > 6) {
+            // The span runs through a `}` a few bytes on, so a backslash-u{zz}
+            // is one error and its brace closes nothing else.
+            auto close = i;
+            while (close < text.size() && close < i + 8 && text[close] != '}' && text[close] != '"' &&
+                   text[close] != '\'' && text[close] != '\\' && static_cast<unsigned char>(text[close]) < 0x80)
+                ++close;
+            result.width = at(close) == '}' ? close + 1 : i;
+            result.status = EscapeRead::Status::BadUnicode;
+            return result;
+        }
+        result.width = i + 1;
+        if (result.value > 0x10FFFF || (result.value >= 0xD800 && result.value <= 0xDFFF))
+            result.status = EscapeRead::Status::NotScalar;
+        return result;
+    }
+    default:
+        result.width = std::min(text.size(), 1 + lead_width(static_cast<unsigned char>(kind)));
+        result.status = EscapeRead::Status::Unknown;
+        return result;
+    }
+}
+
+void append_utf8(std::string& out, std::uint32_t value) {
+    if (value < 0x80) {
+        out += static_cast<char>(value);
+    } else if (value < 0x800) {
+        out += static_cast<char>(0xC0 | (value >> 6));
+        out += static_cast<char>(0x80 | (value & 0x3F));
+    } else if (value < 0x10000) {
+        out += static_cast<char>(0xE0 | (value >> 12));
+        out += static_cast<char>(0x80 | ((value >> 6) & 0x3F));
+        out += static_cast<char>(0x80 | (value & 0x3F));
+    } else {
+        out += static_cast<char>(0xF0 | (value >> 18));
+        out += static_cast<char>(0x80 | ((value >> 12) & 0x3F));
+        out += static_cast<char>(0x80 | ((value >> 6) & 0x3F));
+        out += static_cast<char>(0x80 | (value & 0x3F));
+    }
+}
+
+// The decoded bytes of a valid escape: one byte, or a code point's UTF-8.
+void append_escape(std::string& out, const EscapeRead& escape) {
+    if (escape.scalar) append_utf8(out, escape.value);
+    else out += static_cast<char>(escape.value);
+}
+
+// The offset of the first byte of `text` that does not begin a valid UTF-8
+// sequence, or npos.
+std::size_t first_invalid_utf8(std::string_view text) {
+    for (std::size_t i = 0; i < text.size();) {
+        const auto lead = static_cast<unsigned char>(text[i]);
+        if (lead < 0x80) {
+            ++i;
+            continue;
+        }
+        const auto width = lead_width(lead);
+        const auto second = i + 1 < text.size() ? static_cast<unsigned char>(text[i + 1]) : 0;
+        bool valid = lead >= 0xC2 && lead <= 0xF4 && i + width <= text.size() &&
+                     !(lead == 0xE0 && second < 0xA0) && !(lead == 0xED && second > 0x9F) &&
+                     !(lead == 0xF0 && second < 0x90) && !(lead == 0xF4 && second > 0x8F);
+        for (std::size_t k = 1; valid && k < width; ++k) {
+            const auto continuation = static_cast<unsigned char>(text[i + k]);
+            valid = continuation >= 0x80 && continuation <= 0xBF;
+        }
+        if (!valid) return i;
+        i += width;
+    }
+    return std::string_view::npos;
+}
+
+std::string hex_digits(std::uint32_t value, int minimum) {
+    constexpr char digits[] = "0123456789ABCDEF";
+    std::string text;
+    for (int shift = 20; shift >= 0; shift -= 4) {
+        if (!text.empty() || (value >> shift) != 0 || shift < minimum * 4) text += digits[(value >> shift) & 0xF];
+    }
+    return text;
+}
+
 constexpr auto keywords = std::to_array<std::string_view>({
     "let", "const", "export", "override", "func", "module", "class", "import", "new",
     "destroy", "if", "else", "while", "do", "for", "in", "break", "continue", "return", "true", "false",
     "as", "is", "nil", "enum", "match", "and", "or", "interface", "implements",
     "promote", "static", "singleton",
+    // docs/design/Expressions030.md: the negation word and the type query.
+    "not", "typeof",
 });
 
 constexpr auto compound_symbols = std::to_array<std::string_view>({
     "===", "<<=", ">>=",
+    // docs/design/Expressions030.md, Value inequality: before "!=".
+    "!==",
     "->", "=>", "==", "!=", "<=", ">=", "&&", "||",
+    // docs/design/Matching030.md: optional access and coalescing.
+    "?.", "??",
     "++", "--", "+=", "-=", "*=", "/=", "%=", "&=", "^=", "|=",
 });
 
@@ -41,7 +194,8 @@ struct Skipped {};
 
 class Lexer {
 public:
-    Lexer(std::string_view source, const std::string& file) : source_(source), file_(file) {}
+    Lexer(std::string_view source, const std::string& file, bool template_neura = false)
+        : source_(source), file_(file), template_neura_(template_neura) {}
 
     std::vector<Token> run(std::vector<Diagnostic>* diagnostics = nullptr) {
         if (source_.starts_with("\xEF\xBB\xBF")) {
@@ -58,12 +212,27 @@ public:
                 comment();
                 continue;
             }
+            if (template_neura_ && c == '/' && peek(1) == '*') {
+                const auto close = source_.find("*/", offset_ + 2);
+                const auto end = close == std::string_view::npos ? source_.size() : close + 2;
+                while (offset_ < end) advance_text();
+                documentation_.reset();
+                continue;
+            }
             const Span start = location();
+            if (c == '{') {
+                if (const auto body = island::start(tokens)) {
+                    tokens.push_back(scan_island(start, *body, diagnostics != nullptr));
+                    documentation_.reset();
+                    continue;
+                }
+            }
             TokenKind kind;
             try {
                 kind = scan(start);
             } catch (const Skipped&) {
                 documentation_.reset();
+                parts_.reset();
                 continue;
             }
             const auto width = offset_ - start.offset;
@@ -74,7 +243,7 @@ public:
             documentation_.reset();
             tokens.push_back({kind, std::string(source_.substr(start.offset, width)),
                               {file_, start.line, start.column, start.offset, width},
-                              std::move(documentation)});
+                              std::move(documentation), std::exchange(parts_, nullptr)});
         }
         if (!errors_.empty()) {
             if (!diagnostics) throw combined();
@@ -102,6 +271,24 @@ private:
     }
 
     Span location() const { return {file_, line_, column_, offset_, 0}; }
+
+    Token scan_island(Span span, island::Start body, bool recovering) {
+        const auto begin = span.offset + 1;
+        const auto close = island::close(source_, begin, body.kind);
+        auto end = close.value_or(source_.size());
+        if (!close) {
+            auto opening = span;
+            opening.length = 1;
+            report(Diagnostic(opening, "unterminated template or stylesheet").with_code("E0241")
+                .label("this body has no closing '}'"));
+            if (!recovering) throw combined();
+            end = island::recover(source_, span.offset, body.declaration);
+        }
+        const auto limit = end + (close ? 1 : 0);
+        while (offset_ < limit) advance_text();
+        span.length = limit - span.offset;
+        return {body.kind, std::string(source_.substr(begin, end - begin)), std::move(span)};
+    }
 
     // The first error, carrying the others (Tooling.md, Diagnostics).
     Diagnostic combined() const {
@@ -208,10 +395,17 @@ private:
         if (peek() == '"') {
             return string(start);
         }
+        if (peek() == '$' && peek(1) == '"') {
+            return interpolated(start);
+        }
+        if (peek() == '\'') {
+            return character(start);
+        }
         if (peek() == '.' && peek(1) == '.') {
             advance();
             advance();
-            if (peek() == '.') advance();
+            // `...`, and `..=` (docs/design/Expressions030.md, Ranges with `..=`).
+            if (peek() == '.' || peek() == '=') advance();
             return TokenKind::Symbol;
         }
         const auto remaining = source_.substr(offset_);
@@ -257,7 +451,7 @@ private:
         if (text == "\u201C" || text == "\u201D")
             error.suggest("use an ASCII double quote", invalid, "\"", Applicability::MaybeIncorrect);
         else if (text == "\u2018" || text == "\u2019")
-            error.note("Neura has no character literals; strings use '\"'");
+            error.note("a character literal uses the ASCII quote ', as in 'a', and a string uses '\"'");
         else if (text == "\u2212" || text == "\u2013")
             error.suggest("use an ASCII minus sign", invalid, "-", Applicability::MaybeIncorrect);
         else if (text == "\u00A0")
@@ -309,11 +503,232 @@ private:
         return kind;
     }
 
+    // Character literals (docs/design/Expressions030.md, Character
+    // literals): one printable ASCII byte or one escape between single
+    // quotes. The token is an Integer whose text is the literal as written,
+    // so the formatter writes it back; decode_character_literal gives its
+    // value.
+    static constexpr std::string_view character_escapes =
+        "the escapes are \\n, \\r, \\t, \\0, \\\\, \\', \\\", \\xHH with two hexadecimal digits, and "
+        "\\u{H} with one to six hexadecimal digits and a value up to FF";
+    static constexpr std::string_view string_escapes =
+        "the escapes are \\n, \\r, \\t, \\0, \\\\, \\', \\\", \\xHH with two hexadecimal digits, and "
+        "\\u{H} with one to six hexadecimal digits";
+
+    // A malformed Unicode escape (E0268), at the escape.
+    static Diagnostic unicode_escape_error(Span escape) {
+        return Diagnostic(std::move(escape), "invalid Unicode escape").with_code("E0268")
+            .label("a Unicode escape is \\u{...} with one to six hexadecimal digits")
+            .help("write a code point in braces, such as \\u{E9} or \\u{1F600}");
+    }
+
+    // A Unicode escape whose value is a surrogate or above U+10FFFF (E0269).
+    static Diagnostic scalar_escape_error(Span escape, std::uint32_t value) {
+        const bool surrogate = value >= 0xD800 && value <= 0xDFFF;
+        return Diagnostic(std::move(escape), "Unicode escape is not a Unicode scalar value").with_code("E0269")
+            .label(surrogate ? "U+" + hex_digits(value, 4) + " is a surrogate code point"
+                             : "this value is above U+10FFFF")
+            .note("a Unicode escape names a scalar value: U+0000 to U+D7FF or U+E000 to U+10FFFF");
+    }
+
+    static constexpr std::size_t utf8_width(unsigned char lead) {
+        return lead < 0x80 ? 1 : lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : 2;
+    }
+
+    TokenKind character(Span start) {
+        // Find the closing quote on this line; a backslash takes the byte
+        // after it, so '\'' closes at its third quote.
+        std::size_t end = offset_ + 1;
+        while (end < source_.size() && source_[end] != '\n' && source_[end] != '\r' && source_[end] != '\'') {
+            if (source_[end] == '\\' && end + 1 < source_.size() && source_[end + 1] != '\n' &&
+                source_[end + 1] != '\r')
+                ++end;
+            ++end;
+        }
+        const bool closed = end < source_.size() && source_[end] == '\'';
+        const auto content = source_.substr(offset_ + 1, end - offset_ - 1);
+        // Consumes the literal through its closing quote, or to the line end.
+        const auto finish = [&] {
+            advance();
+            while (offset_ < end) advance_text();
+            if (closed) advance();
+        };
+        const auto malformed = [&](Diagnostic error) {
+            finish();
+            report(std::move(error));
+            throw Skipped{};
+        };
+        auto literal = start;
+        literal.length = (closed ? end + 1 : end) - start.offset;
+        if (!closed) {
+            auto quote = start;
+            quote.length = 1;
+            finish();
+            report(Diagnostic(quote, "unterminated character literal").with_code("E0261")
+                .label("this character literal is not closed")
+                .label(location(), offset_ >= source_.size() ? "the file ends here" : "the line ends here")
+                .note("a character literal is one character or one escape between single quotes, such as 'a' "
+                      "or '\\n'"));
+            throw Skipped{};
+        }
+        if (content.empty()) {
+            // Three quotes in a row most likely mean a quote character.
+            if (peek(2) == '\'') {
+                literal.length = 3;
+                end = offset_ + 2;
+                malformed(Diagnostic(literal, "empty character literal").with_code("E0261")
+                    .label("the first two quotes enclose nothing")
+                    .suggest("escape the quote character", literal, "'\\''", Applicability::MaybeIncorrect));
+            }
+            malformed(Diagnostic(literal, "empty character literal").with_code("E0261")
+                .label("a character literal holds one character")
+                .help("write one character or one escape, such as 'a' or '\\0'"));
+        }
+        const auto first = static_cast<unsigned char>(content.front());
+        if (first == '\\') {
+            const auto read = read_escape(content);
+            auto escape = start;
+            escape.offset += 1;
+            escape.column += 1;
+            // A short \\x escape is shown with the two bytes after `x`.
+            escape.length = std::min(read.status == EscapeRead::Status::BadByte ? std::size_t{4} : read.width,
+                                     content.size());
+            switch (read.status) {
+            case EscapeRead::Status::Ok: break;
+            case EscapeRead::Status::BadUnicode: malformed(unicode_escape_error(escape)); break;
+            case EscapeRead::Status::NotScalar: malformed(scalar_escape_error(escape, read.value)); break;
+            default:
+                malformed(Diagnostic(escape, read.byte ? "invalid \\x escape in character literal"
+                                                       : "unknown escape in character literal")
+                    .with_code("E0261")
+                    .label(read.byte ? "\\x takes exactly two hexadecimal digits" : "unknown escape")
+                    .note(std::string(character_escapes)));
+                break;
+            }
+            if (read.scalar && read.value > 0xFF) {
+                malformed(Diagnostic(literal, "character literal is not one byte").with_code("E0260")
+                    .label("this escape is U+" + hex_digits(read.value, 4) + ", above U+00FF")
+                    .help("use Std.Core.Character for a Unicode code point, such as Character.of(0x" +
+                          hex_digits(read.value, 1) + "), or a string literal for text")
+                    .note(std::string(character_escapes)));
+            }
+            if (content.size() == read.width) {
+                finish();
+                return TokenKind::Integer;
+            }
+        } else if (first >= 0x80) {
+            if (content.size() == utf8_width(first)) {
+                const auto before = errors_.size();
+                finish();
+                // Invalid UTF-8 is E0102, which advance_text reported.
+                if (errors_.size() != before) throw Skipped{};
+                report(Diagnostic(literal, "character literal is not one byte").with_code("E0260")
+                    .label("this character is not ASCII")
+                    .help("use Std.Core.Character for a Unicode code point, or a string literal for text")
+                    .note("a character literal names one byte; \\xHH writes any byte"));
+                throw Skipped{};
+            }
+        } else if (first < 0x20 || first == 0x7F) {
+            auto error = Diagnostic(literal, "control character in character literal").with_code("E0261")
+                .label(first == '\t' ? "a tab is written \\t" : "a control character is written as an escape")
+                .note(std::string(character_escapes));
+            if (first == '\t' && content.size() == 1)
+                error.suggest("write the escape", literal, "'\\t'", Applicability::MachineApplicable);
+            malformed(std::move(error));
+        } else if (content.size() == 1) {
+            finish();
+            return TokenKind::Integer;
+        }
+        auto error = Diagnostic(literal, "character literal holds more than one character").with_code("E0261")
+            .label("a character literal holds one character");
+        if (content.find_first_of("\\\"") == std::string_view::npos)
+            error.suggest("use double quotes for a string", literal, "\"" + std::string(content) + "\"",
+                          Applicability::MaybeIncorrect);
+        else
+            error.help("use a string literal, in double quotes, for text");
+        malformed(std::move(error));
+        throw Skipped{}; // not reached: malformed throws, which the compiler cannot see through the lambda
+    }
+
+    // The `\\x` escapes of a literal's text: where each one's byte is in
+    // the decoded text, and its span (docs/lang/CoreLanguage.md, Escapes).
+    struct ByteEscape {
+        std::size_t at = 0;
+        Span span;
+        std::uint32_t value = 0;
+    };
+
+    // E0270 when `\\x` escapes leave `decoded` invalid UTF-8; `literal` is
+    // the literal's span. The label names the escape where the first
+    // invalid sequence starts.
+    void check_byte_escapes(const std::string& decoded, const std::vector<ByteEscape>& escapes, Span literal) {
+        if (escapes.empty()) return;
+        const auto invalid = first_invalid_utf8(decoded);
+        if (invalid == std::string_view::npos) return;
+        const ByteEscape* culprit = &escapes.front();
+        for (const auto& escape : escapes)
+            if (escape.at <= invalid) culprit = &escape;
+        auto error = Diagnostic(std::move(literal), "string literal escapes do not form valid UTF-8").with_code("E0270")
+            .label(culprit->span, "this byte does not form a valid UTF-8 sequence here")
+            .note("a string holds UTF-8 text: \\xHH escapes must together form UTF-8 sequences, as "
+                  "\\xC3\\xA9 does for U+00E9");
+        if (culprit->value >= 0x80)
+            error.suggest("to write the code point U+" + hex_digits(culprit->value, 4) + ", use a Unicode escape",
+                          culprit->span, "\\u{" + hex_digits(culprit->value, 2) + "}", Applicability::MaybeIncorrect);
+        report(std::move(error));
+    }
+
+    // One escape of a string literal at the current offset: its decoded
+    // bytes are appended to `decoded`, or an error is reported. Leaves the
+    // offset after the escape.
+    void string_escape(std::string& decoded, std::vector<ByteEscape>& bytes) {
+        auto escape = location();
+        const auto read = read_escape(source_.substr(offset_));
+        escape.length = read.width;
+        if (read.status == EscapeRead::Status::Ok) {
+            if (read.byte) bytes.push_back({decoded.size(), escape, read.value});
+            append_escape(decoded, read);
+            for (std::size_t i = 0; i < read.width; ++i) advance();
+            return;
+        }
+        if (read.status == EscapeRead::Status::BadUnicode) {
+            report(unicode_escape_error(escape));
+        } else if (read.status == EscapeRead::Status::NotScalar) {
+            report(scalar_escape_error(escape, read.value));
+        } else {
+            const bool more = read.status != EscapeRead::Status::End;
+            escape.length = more && !read.byte ? 2 : read.width;
+            auto error = Diagnostic(escape, "invalid string escape").with_code("E0104")
+                .label(read.byte ? "\\x takes exactly two hexadecimal digits" : "unknown escape")
+                .note(std::string(string_escapes));
+            if (more && !read.byte) {
+                escape.length = 1;
+                error.suggest("to write a backslash, escape it", escape, "\\\\", Applicability::MaybeIncorrect);
+            }
+            report(std::move(error));
+            if (!more) {
+                advance();
+                return;
+            }
+            if (!read.byte) {
+                advance();
+                advance_text();
+                return;
+            }
+        }
+        for (std::size_t i = 0; i < read.width; ++i) advance();
+    }
+
     TokenKind string(Span start) {
         advance();
+        std::string decoded;
+        std::vector<ByteEscape> bytes;
         while (offset_ < source_.size() && peek() != '\n' && peek() != '\r') {
             if (peek() == '"') {
                 advance();
+                auto literal = start;
+                literal.length = offset_ - start.offset;
+                check_byte_escapes(decoded, bytes, literal);
                 return TokenKind::String;
             }
             if (peek() == '\0') {
@@ -325,24 +740,12 @@ private:
                 continue;
             }
             if (peek() == '\\') {
-                auto escape = location();
-                advance();
-                constexpr std::string_view escapes = "nrt\\\"";
-                if (escapes.find(peek()) == std::string_view::npos) {
-                    const bool more = offset_ < source_.size() && peek() != '\n' && peek() != '\r';
-                    escape.length = more ? 2 : 1;
-                    auto error = Diagnostic(escape, "invalid string escape").with_code("E0104")
-                        .label("unknown escape")
-                        .note("the escapes are \\n, \\r, \\t, \\\\, and \\\"");
-                    if (more) {
-                        escape.length = 1;
-                        error.suggest("to write a backslash, escape it", escape, "\\\\", Applicability::MaybeIncorrect);
-                    }
-                    report(std::move(error));
-                    if (!more) continue;
-                }
+                string_escape(decoded, bytes);
+                continue;
             }
+            const auto before = offset_;
             advance_text();
+            decoded.append(source_.substr(before, offset_ - before));
         }
         // The string runs to the end of its line: label the opening quote,
         // and offer the closing one where the line ends, before a final ';'
@@ -364,8 +767,259 @@ private:
         throw Skipped{};
     }
 
+    // Interpolated strings (docs/design/Calls030.md, Interpolated strings).
+    // The literal is one line. Outside holes it has the escapes of a string
+    // literal, and `{{` and `}}` are braces. A hole is lexed with this
+    // lexer, token by token, so a nested literal is one token of it; the
+    // first ':' outside brackets begins the specification.
+    static constexpr std::size_t interpolation_limit = 8;
+
+    bool line_end() const { return offset_ >= source_.size() || peek() == '\n' || peek() == '\r'; }
+
+    [[noreturn]] void unterminated(Span start) {
+        Span end = location();
+        start.length = 2;
+        report(Diagnostic(start, "unterminated string literal").with_code("E0103")
+            .label("this interpolated string is not closed")
+            .label(end, "the line ends here")
+            .note("an interpolated string, its holes included, ends on the line where it starts"));
+        throw Skipped{};
+    }
+
+    void malformed(Span at, const std::string& message, const std::string& label) {
+        report(Diagnostic(std::move(at), message).with_code("E0227").label(label));
+    }
+
+    [[noreturn]] void malformed_and_skip(Span at, const std::string& message, const std::string& label) {
+        malformed(std::move(at), message, label);
+        while (!line_end()) advance_text();
+        throw Skipped{};
+    }
+
+    TokenKind interpolated(Span start) {
+        if (++interpolation_depth_ > interpolation_limit) {
+            auto at = start;
+            at.length = 2;
+            --interpolation_depth_;
+            malformed_and_skip(at, "interpolated strings nest deeper than eight",
+                               "this literal is the ninth level of nesting");
+        }
+        struct Depth {
+            std::size_t& depth;
+            ~Depth() { --depth; }
+        } depth{interpolation_depth_};
+        advance();
+        advance();
+        auto parts = std::make_shared<std::vector<InterpolationPart>>();
+        std::string text;
+        std::vector<ByteEscape> bytes;
+        Span text_start = location();
+        const auto flush = [&] {
+            if (location().offset == text_start.offset) return;
+            auto span = text_start;
+            span.length = offset_ - text_start.offset;
+            check_byte_escapes(text, bytes, span);
+            bytes.clear();
+            parts->push_back({InterpolationPart::Kind::Text, span, std::exchange(text, {}), {}, {}, std::nullopt});
+        };
+        while (!line_end()) {
+            const char c = peek();
+            if (c == '"') {
+                flush();
+                advance();
+                parts_ = std::move(parts);
+                return TokenKind::String;
+            }
+            if (c == '\\') {
+                string_escape(text, bytes);
+                continue;
+            }
+            if (c == '{' && peek(1) == '{') {
+                text += '{';
+                advance();
+                advance();
+                continue;
+            }
+            if (c == '}' && peek(1) == '}') {
+                text += '}';
+                advance();
+                advance();
+                continue;
+            }
+            if (c == '{') {
+                flush();
+                parts->push_back(hole(start, false));
+                text_start = location();
+                continue;
+            }
+            if (c == '}') {
+                auto at = location();
+                at.length = 1;
+                report(Diagnostic(at, "malformed interpolated string").with_code("E0227")
+                    .label("a single '}' closes no hole")
+                    .suggest("double it to write a brace", at, "}}", Applicability::MaybeIncorrect));
+                text += '}';
+                advance();
+                continue;
+            }
+            if (c == '\0') {
+                auto invalid = location();
+                invalid.length = 1;
+                report(Diagnostic(std::move(invalid), "null byte in string literal").with_code("E0104")
+                    .label("a string cannot contain a null byte"));
+                advance();
+                continue;
+            }
+            const auto before = offset_;
+            advance_text();
+            text += source_.substr(before, offset_ - before);
+        }
+        unterminated(start);
+    }
+
+    static bool begins_expression(const Token& token) {
+        switch (token.kind) {
+        case TokenKind::Identifier:
+        case TokenKind::Integer:
+        case TokenKind::Float:
+        case TokenKind::String:
+            return true;
+        case TokenKind::Keyword:
+            return token.text == "new" || token.text == "func" || token.text == "match" || token.text == "import" ||
+                   token.text == "true" || token.text == "false" || token.text == "nil";
+        case TokenKind::Symbol:
+            return token.text == "(" || token.text == "[" || token.text == "{" || token.text == "-" ||
+                   token.text == "!" || token.text == "~" || token.text == "++" || token.text == "--";
+        default:
+            return false;
+        }
+    }
+
+    // A hole from its '{' through its '}'. A nested hole, in a
+    // specification, has no specification of its own.
+    InterpolationPart hole(Span literal, bool nested) {
+        InterpolationPart part{InterpolationPart::Kind::Hole, location(), {}, {}, {}, std::nullopt};
+        advance();
+        std::vector<char> brackets;
+        std::optional<Span> conditional;
+        std::optional<Span> question;
+        while (true) {
+            while (peek() == ' ' || peek() == '\t') advance();
+            if (line_end()) unterminated(literal);
+            if (peek() == '/' && (peek(1) == '/' || peek(1) == '*')) {
+                auto at = location();
+                at.length = 2;
+                malformed_and_skip(at, "malformed interpolated string", "a hole contains no comment");
+            }
+            if (brackets.empty() && (peek() == '}' || peek() == ':')) break;
+            const auto start = location();
+            const auto kind = scan(start);
+            const auto width = offset_ - start.offset;
+            Token token{kind, std::string(source_.substr(start.offset, width)),
+                        {file_, start.line, start.column, start.offset, width}, nullptr,
+                        std::exchange(parts_, nullptr)};
+            // A top-level '?' is a conditional's when the next token can
+            // begin an expression, and otherwise a postfix propagation,
+            // which ends no hole (docs/design/Matching030.md).
+            if (question && !conditional && begins_expression(token)) conditional = question;
+            question.reset();
+            if (kind == TokenKind::Symbol && token.text == "?" && brackets.empty()) {
+                question = token.span;
+            } else if (kind == TokenKind::Symbol && token.text.size() == 1) {
+                const char c = token.text.front();
+                if (c == '(' || c == '[' || c == '{') {
+                    brackets.push_back(c);
+                } else if (c == ')' || c == ']' || c == '}') {
+                    const char open = c == ')' ? '(' : c == ']' ? '[' : '{';
+                    if (brackets.empty() || brackets.back() != open)
+                        malformed_and_skip(token.span, "malformed interpolated string",
+                                           brackets.empty() ? "this bracket closes nothing in the hole"
+                                                            : "this bracket does not close the '" +
+                                                                  std::string(1, brackets.back()) + "' before it");
+                    brackets.pop_back();
+                }
+            }
+            part.tokens.push_back(std::move(token));
+        }
+        const auto close = location();
+        if (part.tokens.empty()) {
+            auto at = part.span;
+            at.length = offset_ - at.offset + 1;
+            malformed_and_skip(at, "malformed interpolated string", "an empty hole");
+        }
+        if (conditional) {
+            // The conditional runs to the hole's '}', past the ':' that ended
+            // its expression.
+            const auto& first = part.tokens.front().span;
+            auto end = source_.find('}', offset_);
+            const auto line = source_.find_first_of("\r\n", offset_);
+            if (end == std::string_view::npos || (line != std::string_view::npos && line < end)) end = offset_;
+            while (end > first.offset && (source_[end - 1] == ' ' || source_[end - 1] == '\t')) --end;
+            Span expression{first.file, first.line, first.column, first.offset, end - first.offset};
+            auto error = Diagnostic(*conditional, "malformed interpolated string").with_code("E0227")
+                .label("a conditional at the top of a hole is written in parentheses")
+                .note("the first ':' outside brackets begins the hole's specification");
+            error.suggest("parenthesize the conditional", expression,
+                          "(" + std::string(source_.substr(first.offset, expression.length)) + ")",
+                          Applicability::MaybeIncorrect);
+            report(std::move(error));
+            while (!line_end()) advance_text();
+            throw Skipped{};
+        }
+        part.tokens.push_back({TokenKind::End, {}, close});
+        if (peek() == ':') {
+            if (nested) {
+                auto at = location();
+                at.length = 1;
+                malformed_and_skip(at, "malformed interpolated string",
+                                   "a nested width or precision hole has no specification");
+            }
+            advance();
+            const auto specification = location();
+            std::string text;
+            Span text_start = specification;
+            const auto flush = [&] {
+                if (location().offset == text_start.offset) return;
+                auto span = text_start;
+                span.length = offset_ - text_start.offset;
+                part.specification.push_back(
+                    {InterpolationPart::Kind::Text, span, std::exchange(text, {}), {}, {}, std::nullopt});
+            };
+            while (true) {
+                if (line_end()) unterminated(literal);
+                const char c = peek();
+                if (c == '}') break;
+                if (c == '"') {
+                    auto at = location();
+                    at.length = 1;
+                    malformed_and_skip(at, "malformed interpolated string", "a specification holds no string");
+                }
+                if (c == '{') {
+                    flush();
+                    part.specification.push_back(hole(literal, true));
+                    text_start = location();
+                    continue;
+                }
+                const auto before = offset_;
+                advance_text();
+                text += source_.substr(before, offset_ - before);
+            }
+            flush();
+            auto span = specification;
+            span.length = offset_ - specification.offset;
+            part.specification_span = span;
+        }
+        advance();
+        part.span.length = offset_ - part.span.offset;
+        return part;
+    }
+
+    std::shared_ptr<const std::vector<InterpolationPart>> parts_;
+    std::size_t interpolation_depth_{};
+
     std::string_view source_;
     const std::string& file_;
+    bool template_neura_;
     std::size_t offset_{};
     std::size_t line_{1};
     std::size_t column_{1};
@@ -377,8 +1031,17 @@ private:
 
 } // namespace
 
+bool is_identifier(std::string_view spelling) {
+    return !spelling.empty() && is_name_start(spelling.front()) &&
+           std::ranges::all_of(spelling, is_name_char) && std::ranges::find(keywords, spelling) == keywords.end();
+}
+
 std::vector<Token> lex(std::string_view source, const std::string& file) {
     return Lexer(source, file).run();
+}
+
+std::vector<Token> lex_template_neura(std::string_view source, const std::string& file) {
+    return Lexer(source, file, true).run();
 }
 
 std::vector<Token> lex_recovering(std::string_view source, const std::string& file,
@@ -386,19 +1049,26 @@ std::vector<Token> lex_recovering(std::string_view source, const std::string& fi
     return Lexer(source, file).run(&diagnostics);
 }
 
+std::uint8_t decode_character_literal(std::string_view literal) {
+    const auto text = literal.substr(1, literal.size() - 2);
+    if (text.front() != '\\') return static_cast<std::uint8_t>(text.front());
+    // The lexer accepted the literal, so its escape is valid and, for a
+    // Unicode escape, at most U+00FF.
+    return static_cast<std::uint8_t>(read_escape(text).value);
+}
+
 std::string decode_string_literal(std::string_view literal) {
     auto text = literal.substr(1, literal.size() - 2);
     std::string result;
     result.reserve(text.size());
-    for (std::size_t i = 0; i < text.size(); ++i) {
-        auto ch = text[i];
-        if (ch == '\\') {
-            ch = text[++i];
-            if (ch == 'n') ch = '\n';
-            else if (ch == 'r') ch = '\r';
-            else if (ch == 't') ch = '\t';
+    for (std::size_t i = 0; i < text.size();) {
+        if (text[i] != '\\') {
+            result += text[i++];
+            continue;
         }
-        result += ch;
+        const auto escape = read_escape(text.substr(i));
+        if (escape.status == EscapeRead::Status::Ok) append_escape(result, escape);
+        i += std::max<std::size_t>(escape.width, 1);
     }
     return result;
 }

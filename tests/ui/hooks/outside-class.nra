@@ -1,0 +1,17 @@
+// Case 14: only a declared class can have class hooks.
+let Shape = interface (
+    | get: instance;
+    let area = func() -> int32;
+);
+
+let Registry = module (
+    | get: instance;
+    export let size: int32 = 0;
+);
+
+let Color = enum (
+    | get: instance;
+    Red
+);
+
+let point: class (| get: instance; export let x: int32 = 0;) = nil;

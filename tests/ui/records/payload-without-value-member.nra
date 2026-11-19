@@ -1,0 +1,3 @@
+// A variant with an any payload cannot acquire a text member.
+let Cell = enum (Stored(any));
+let render = func(cell: Cell) -> string => cell.to_string();

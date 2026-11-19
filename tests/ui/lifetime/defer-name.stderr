@@ -1,0 +1,9 @@
+error[E0219]: 'defer' takes one call
+ --> $DIR/defer-name.nra:4:11
+  |
+4 |     defer log;
+  |           ^^^ this is not a call
+  |
+  = help: put the statements in a function and defer a call of it
+
+For more information about this error, try `neura explain E0219`.

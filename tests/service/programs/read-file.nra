@@ -1,0 +1,23 @@
+// Prints the text of the file named by the first argument, or why it could
+// not be read.
+let console = import:Std.Io.Console;
+let error = import:Std.Core.Error;
+let fs = import:Std.Fs.Fs;
+let path = import:Std.Fs.Path;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+export let ReadFile = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        match (fs.read_text(path.of(args[0]))) {
+            result.Result.Ok(text) => {
+                console.print(text);
+            },
+            result.Result.Err(failure) => {
+                console.print_line("cannot read " + args[0] + ": " + error.message(failure));
+                return program.ExitCode.Failure;
+            },
+        }
+        return program.ExitCode.Ok;
+    };
+);

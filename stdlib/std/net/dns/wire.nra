@@ -1,0 +1,288 @@
+let errors = import:Std.Core.Error;
+let names = import:Std.Net.Dns.Name;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let string_maps = import:Std.Collections.StringMap;
+
+/// @brief The DNS wire primitives (RFC 1035 sections 3.1 and 4.1.4): big-endian integers, character-strings and
+/// domain names with message compression.
+///
+/// `WireReader` reads from a whole message, so a compression pointer can reach any earlier byte. Every read is
+/// bounds-checked and fails with a `Parse` error carrying the offset; nothing in hostile input traps. A pointer
+/// must point strictly before the label sequence it ends (where the current run of labels began), which rejects
+/// both forward pointers and loops; an expanded name above 255 bytes is rejected too. `WireWriter` compresses a
+/// name against every name it wrote before at offsets below 16384 (the reach of a 14-bit pointer), comparing
+/// suffixes without regard to ASCII case.
+/// @see [Std.Net.Dns.Wire](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-Wire)
+#Since("0.3.0")
+export let Wire = module (
+    /// @brief The largest offset a compression pointer can hold.
+    export const MaxPointerOffset: int = 16383;
+
+    /// @brief A bounds-checked reader over one DNS message.
+    #[Final, NotThreadSafe]
+    export let WireReader = class (
+        /// @brief The whole message.
+        last data: uint8[list];
+        /// @brief The next byte to read.
+        let position: int = 0;
+
+        /// @brief A reader at offset 0 of `message`; or at `start`.
+        export let init = func(message: uint8[list]) {
+            data = message;
+        } or func(message: uint8[list], start: int) {
+            data = message;
+            position = start;
+        };
+
+        /// @brief The offset of the next byte.
+        #NoDiscard
+        export let offset = func -> int => position;
+
+        /// @brief Moves to `target` (0 to the message length).
+        export let seek = func(target: int) {
+            if (target < 0 || target > data.length) {
+                trap_with_message("invalid argument: offset");
+            }
+            position = target;
+        };
+
+        /// @brief The bytes left.
+        #NoDiscard
+        export let remaining = func -> int => data.length - position;
+
+        /// @brief The message length.
+        #NoDiscard
+        export let length = func -> int => data.length;
+
+        /// @brief One byte.
+        #NoDiscard
+        export let read_u8 = func -> Result<int> {
+            if (position >= data.length) {
+                return Result<int>.Err(truncated(position, "byte"));
+            }
+            last value = data[position] as int;
+            position++;
+            return Result<int>.Ok(value);
+        };
+
+        /// @brief A big-endian 16-bit value.
+        #NoDiscard
+        export let read_u16 = func -> Result<int> {
+            if (position + 2 > data.length) {
+                return Result<int>.Err(truncated(position, "16-bit field"));
+            }
+            last value = (data[position] as int) * 256 + (data[position + 1] as int);
+            position = position + 2;
+            return Result<int>.Ok(value);
+        };
+
+        /// @brief A big-endian 32-bit unsigned value.
+        #NoDiscard
+        export let read_u32 = func -> Result<int64> {
+            if (position + 4 > data.length) {
+                return Result<int64>.Err(truncated(position, "32-bit field"));
+            }
+            let value: int64 = 0;
+            for (let i = 0; i < 4; i++) {
+                value = value * 256 + (data[position + i] as int64);
+            }
+            position = position + 4;
+            return Result<int64>.Ok(value);
+        };
+
+        /// @brief The next `count` bytes.
+        #NoDiscard
+        export let read_bytes = func(count: int) -> Result<uint8[list]> {
+            if (count < 0 || position + count > data.length) {
+                return Result<uint8[list]>.Err(truncated(position, "byte string"));
+            }
+            last out: uint8[list] = new;
+            for (let i = 0; i < count; i++) {
+                out.append(data[position + i]);
+            }
+            position = position + count;
+            return Result<uint8[list]>.Ok(out);
+        };
+
+        /// @brief A character-string: a length byte and that many bytes (RFC 1035 section 3.3).
+        #NoDiscard
+        export let read_character_string = func -> Result<uint8[list]> {
+            last count = read_u8()?;
+            return read_bytes(count);
+        };
+
+        /// @brief A domain name, following compression pointers; the reader moves past the name as written here
+        /// (past the first pointer when there is one).
+        #NoDiscard
+        export let read_name = func -> Result<names.DnsName> {
+            last labels: uint8[list][list] = new;
+            let at = position;
+            // The start of the current run of labels: a pointer must point strictly before it.
+            let run_start = position;
+            let resume = -1;
+            let total = 1;
+            while (true) {
+                if (at >= data.length) {
+                    return name_error(errors.ParseErrorKind.UnexpectedEnd, at, "name runs past the message");
+                }
+                last head = data[at] as int;
+                if (head == 0) {
+                    at++;
+                    break;
+                }
+                last kind = head / 64;
+                if (kind == 3) {
+                    if (at + 1 >= data.length) {
+                        return name_error(errors.ParseErrorKind.UnexpectedEnd, at, "pointer runs past the message");
+                    }
+                    last target = (head % 64) * 256 + (data[at + 1] as int);
+                    if (target >= run_start) {
+                        return name_error(errors.ParseErrorKind.Syntax, at,
+                            "compression pointer does not point backwards (forward pointer or loop)");
+                    }
+                    if (resume < 0) {
+                        resume = at + 2;
+                    }
+                    at = target;
+                    run_start = target;
+                    continue;
+                }
+                if (kind != 0) {
+                    return name_error(errors.ParseErrorKind.Syntax, at, "reserved label type");
+                }
+                if (at + 1 + head > data.length) {
+                    return name_error(errors.ParseErrorKind.UnexpectedEnd, at, "label runs past the message");
+                }
+                total = total + 1 + head;
+                if (total > names.MaxNameLength) {
+                    return name_error(errors.ParseErrorKind.OutOfRange, at, "name longer than 255 bytes");
+                }
+                last label: uint8[list] = new;
+                for (let i = 1; i <= head; i++) {
+                    label.append(data[at + i]);
+                }
+                labels.append(label);
+                at = at + 1 + head;
+            }
+            position = resume >= 0 ? resume : at;
+            return names.from_labels(labels);
+        };
+
+        /// @brief The text "WireReader(offset N of M)".
+        export let.override to_string = func -> string =>
+            "WireReader(offset " .. position.to_string() .. " of " .. data.length.to_string() .. ")";
+    );
+
+    /// @brief A writer that builds one DNS message and remembers name offsets for compression.
+    #[Final, NotThreadSafe]
+    export let WireWriter = class (
+        /// @brief The bytes written.
+        last out: uint8[list] = new;
+        /// @brief The offset of each name suffix written, by its lowered text.
+        last suffixes: string_maps.StringMap<int> = string_maps.create<int>();
+
+        /// @brief An empty writer.
+        export let init = func {
+        };
+
+        /// @brief The bytes written so far (the writer's own list).
+        #NoDiscard
+        export let bytes = func -> uint8[list] => out;
+
+        /// @brief The number of bytes written.
+        #NoDiscard
+        export let length = func -> int => out.length;
+
+        /// @brief Appends one byte; a value outside 0-255 traps with "invalid argument: u8".
+        export let write_u8 = func(value: int) {
+            if (value < 0 || value > 255) {
+                trap_with_message("invalid argument: u8");
+            }
+            out.append(value as uint8);
+        };
+
+        /// @brief Appends a big-endian 16-bit value; outside 0-65535 traps with "invalid argument: u16".
+        export let write_u16 = func(value: int) {
+            if (value < 0 || value > 65535) {
+                trap_with_message("invalid argument: u16");
+            }
+            out.append((value / 256) as uint8);
+            out.append((value % 256) as uint8);
+        };
+
+        /// @brief Appends a big-endian 32-bit value; outside 0 to 2^32-1 traps with "invalid argument: u32".
+        export let write_u32 = func(value: int64) {
+            if (value < 0 || value > 4294967295) {
+                trap_with_message("invalid argument: u32");
+            }
+            out.append(((value >> 24) & 255) as uint8);
+            out.append(((value >> 16) & 255) as uint8);
+            out.append(((value >> 8) & 255) as uint8);
+            out.append((value & 255) as uint8);
+        };
+
+        /// @brief Appends bytes.
+        export let write_bytes = func(bytes: uint8[list]) {
+            for (let b in bytes) {
+                out.append(b);
+            }
+        };
+
+        /// @brief Appends a character-string; more than 255 bytes traps with "invalid argument: character-string".
+        export let write_character_string = func(bytes: uint8[list]) {
+            if (bytes.length > 255) {
+                trap_with_message("invalid argument: character-string");
+            }
+            out.append(bytes.length as uint8);
+            write_bytes(bytes);
+        };
+
+        /// @brief Overwrites a 16-bit value at `at` (for a length written after its data).
+        export let patch_u16 = func(at: int, value: int) {
+            if (value < 0 || value > 65535 || at < 0 || at + 2 > out.length) {
+                trap_with_message("invalid argument: patch");
+            }
+            out[at] = (value / 256) as uint8;
+            out[at + 1] = (value % 256) as uint8;
+        };
+
+        /// @brief Appends a name, ending in a pointer to an earlier copy of its longest known suffix when
+        /// `compress` is true. Every suffix written at an offset below 16384 becomes a target for later names,
+        /// whether or not this name was compressed.
+        export let write_name = func(name: names.DnsName, compress: bool) {
+            last count = name.label_count();
+            for (let i = 0; i < count; i++) {
+                last suffix_key = name.suffix(i).key();
+                if (compress) {
+                    match (suffixes.get(suffix_key)) {
+                        Optional.Some(target) => {
+                            write_u16(49152 + target);
+                            return;
+                        },
+                        Optional.None => {
+                        },
+                    }
+                }
+                if (out.length <= MaxPointerOffset && not suffixes.contains_key(suffix_key)) {
+                    suffixes.set(suffix_key, out.length);
+                }
+                last label = name.label(i);
+                out.append(label.length as uint8);
+                write_bytes(label);
+            }
+            out.append(0);
+        };
+
+        /// @brief The text "WireWriter(N bytes)".
+        export let.override to_string = func -> string => "WireWriter(" .. out.length.to_string() .. " bytes)";
+    );
+
+    /// @brief A truncation error at `at`.
+    let truncated = func(at: int, what: string) -> errors.Error =>
+        errors.Error.Parse { kind: errors.ParseErrorKind.UnexpectedEnd, offset: at, message: what .. " runs past the message" };
+
+    /// @brief A name error.
+    let name_error = func(kind: errors.ParseErrorKind, at: int, text: string) -> Result<names.DnsName> =>
+        Result<names.DnsName>.Err(errors.Error.Parse { kind: kind, offset: at, message: text });
+);

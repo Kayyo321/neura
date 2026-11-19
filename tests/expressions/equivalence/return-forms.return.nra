@@ -1,0 +1,51 @@
+// Return forms (docs/design/Expressions030.md, Return forms, edge cases
+// 48-53): `return if` with compact arms, with and without `;` before
+// `else`, and `return ... unless guard`, also over a whole `return if`,
+// build the image of the `if` statements they stand for; `unless` stays an
+// ordinary name elsewhere.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let sign = func(x: int) -> string {
+    return if (x > 0) -> "Positive"; else if (x == 0) -> "Zero"; else -> "Negative";
+};
+
+let compact = func(c: bool) -> int {
+    return if (c) -> 1 else -> 2;
+};
+
+let note = func(text: string) -> bool {
+    console.print_line("guard " + text);
+    return text == "stop";
+};
+
+let guarded = func(text: string) -> string {
+    return text + "!" unless note(text);
+    return "stopped";
+};
+
+let both = func(c: bool, g: bool) -> int {
+    return if (c) -> 10 else -> 20 unless g;
+    return 0;
+};
+
+let unless = 5;
+let named = func -> int {
+    return unless;
+};
+
+let flagged = func(flag: bool) -> int {
+    return unless unless flag;
+    return -1;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(sign(3) + " " + sign(0) + " " + sign(-2));
+        console.print_line(compact(true).to_string() + " " + compact(false).to_string());
+        console.print_line(guarded("go") + " " + guarded("stop"));
+        console.print_line(both(true, false).to_string() + " " + both(false, false).to_string() + " " + both(true, true).to_string());
+        console.print_line(named().to_string() + " " + flagged(false).to_string() + " " + flagged(true).to_string());
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,85 @@
+// test-options: --gpu=off --deny-entropy --max-steps 2000000000
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let hex = import:Std.Encoding.Hex;
+let oprf = import:Std.Crypto.Advanced.Oprf;
+let test = import:Std.Test;
+let vectors = import:OprfVectors;
+
+let OprfTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let mode_of = func(name: string) -> oprf.Mode {
+        if (name == "OPRF") {
+            return oprf.Mode.Base;
+        }
+        return name == "VOPRF" ? oprf.Mode.Verifiable : oprf.Mode.Partial;
+    };
+
+    export let test_every_single_element_rfc_vector = func {
+        last rows = vectors.cases;
+        for (let i = 0; i < rows.length; i += 13) {
+            last mode = mode_of(rows[i]);
+            last server = test.assert_ok(oprf.derive_key_pair(mode, decode(rows[i + 1]), decode(rows[i + 2])));
+            test.assert_equal_string(rows[i + 3], hex.encode(server.expose()));
+            if (mode != oprf.Mode.Base) {
+                test.assert_equal_string(rows[i + 4], hex.encode(server.public_key_bytes()));
+            }
+            last client = new oprf.Client(mode, decode(rows[i + 4]));
+            last input = decode(rows[i + 5]);
+            last info = decode(rows[i + 6]);
+            last state = test.assert_ok(client.blind_with(input, info, decode(rows[i + 7])));
+            test.assert_equal_string(rows[i + 8], hex.encode(state.blinded_element()));
+            last evaluated = test.assert_ok(server.evaluate_with(state.blinded_element(), info, decode(rows[i + 11])));
+            test.assert_equal_string(rows[i + 9], hex.encode(evaluated.evaluated_element()));
+            test.assert_equal_string(rows[i + 10], hex.encode(evaluated.encoded_proof()));
+            last finalized = test.assert_ok(state.finalize(evaluated.evaluated_element(), evaluated.encoded_proof()));
+            test.assert_equal_string(rows[i + 12], hex.encode(finalized));
+            test.assert_equal_string(rows[i + 12], hex.encode(test.assert_ok(server.full_evaluate(input, info))));
+            test.assert(state.is_spent());
+            server.wipe();
+        }
+    };
+
+    export let test_malformed_responses_and_wrong_public_info = func {
+        last rows = vectors.cases;
+        last i = 52;
+        test.assert_equal_string("POPRF", rows[i]);
+        last client = new oprf.Client(oprf.Mode.Partial, decode(rows[i + 4]));
+        last server = new oprf.Server(oprf.Mode.Partial, decode(rows[i + 3]));
+        last input = decode(rows[i + 5]);
+        last info = decode(rows[i + 6]);
+        last nonce = decode(rows[i + 7]);
+        last valid_element = decode(rows[i + 9]);
+        let proof = decode(rows[i + 10]);
+        last first = test.assert_ok(client.blind_with(input, info, nonce));
+        proof[0] = proof[0] ^ 1;
+        let _ = test.assert_err(first.finalize(valid_element, proof));
+        test.assert(first.is_spent());
+
+        last second = test.assert_ok(client.blind_with(input, new([1]), nonce));
+        let _ = test.assert_err(second.finalize(valid_element, decode(rows[i + 10])));
+        test.assert(second.is_spent());
+        last third = test.assert_ok(client.blind_with(input, info, nonce));
+        let _ = test.assert_err(third.finalize(new, decode(rows[i + 10])));
+        test.assert(third.is_spent());
+
+        let _ = test.assert_err(server.evaluate(new, info));
+        let _ = test.assert_err(server.evaluate(decode(rows[i + 8]), info));
+        let _ = test.assert_err(oprf.generate_key_pair(oprf.Mode.Partial));
+        let _ = test.assert_err(client.blind(input, info));
+    };
+
+    export let test_seeded_entropy_paths = func {
+        last rows = vectors.cases;
+        last random = new drbg.ChaCha20Drbg(decode(rows[1]));
+        last server = test.assert_ok(oprf.generate_key_pair(oprf.Mode.Verifiable, random));
+        last client = new oprf.Client(oprf.Mode.Verifiable, server.public_key_bytes());
+        last message: uint8[list] = new([0, 97]);
+        last state = test.assert_ok(client.blind(message, new, random));
+        last evaluation = test.assert_ok(server.evaluate(state.blinded_element(), new, random));
+        last output = test.assert_ok(state.finalize(evaluation.evaluated_element(), evaluation.encoded_proof()));
+        test.assert_equal_string(hex.encode(test.assert_ok(server.full_evaluate(message, new))), hex.encode(output));
+        last display = state.to_string();
+        test.assert_equal_string("Oprf.BlindState(<redacted>)", display);
+    };
+);

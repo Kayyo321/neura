@@ -201,7 +201,7 @@ ada true
 - There is no `?` operator: propagate an error with an explicit `match` arm that returns it, usually wrapped with `error.context(cause, "what was being attempted")` or `result.with_context<T>(r, "...")`.
 - Construct with type arguments (`result.Result<int>.Ok(1)`); match without them (`result.Result.Ok(v)`).
 - Helpers on `Optional`: `is_some`, `is_none`, `value_or`, `value_or_else`, `expect`, `map`, `and_then`, `filter`, `or_else`, `to_result`. On `Result`: `is_ok`, `is_err`, `value_or`, `expect`, `to_optional`, `with_context`, `map`, `and_then`, `map_error`. All are generic: pass type arguments.
-- `Error` is an enum: `Io { kind, message, path }`, `Parse { kind, offset, message }`, `Encoding { offset, message }`, `Custom(ErrorDetail)`, `Context { message, cause }`. Build with `error.custom(code, message)` and `error.context(cause, message)`; read with `error.message(e)` and `error.root_cause(e)`. Match `error.Error.Io { kind, message: _, path: _ }` to test `kind == error.IoErrorKind.NotFound`.
+- `Error` is an enum: `Io { kind, message, path }`, `Parse { kind, offset, message }`, `Encoding { offset, message }`, `Custom(ErrorDetail)`, `Context { message, cause }`, whose `cause` is an `ErrorLink` (read the error as `cause.cause`). Build with `error.custom(code, message)` and `error.context(cause, message)`; read with `error.message(e)` and `error.root_cause(e)`. Match `error.Error.Io { kind, message: _, path: _ }` to test `kind == error.IoErrorKind.NotFound`.
 - `Error` is not transferable to tasks; send `error.to_portable(e)` instead ([concurrency.md](concurrency.md)).
 
 ## Collections
@@ -223,7 +223,7 @@ let strings = import:Std.Text.Strings;
 let App = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         // Built-in list plus helpers
-        let numbers: int[list] = [5, 3, 9, 1];
+        let numbers: int[list] = new([5, 3, 9, 1]);
         sorting.sort_ascending(numbers);                          // in place, on a kernel
         lists.insert_at<int>(numbers, 0, 0);
         console.println("{} {} {}", numbers[0], numbers[1], numbers.length);
@@ -384,7 +384,7 @@ let App = module:program.Entry (
                 return program.ExitCode.Failure;
             },
         }
-        let members: [string, json.JsonValue][list] = [];
+        let members: [string, json.JsonValue][list] = new;
         members.append(["ok", json.JsonValue.Boolean(true)]);
         members.append(["count", json.number_of_int64(3)]);
         console.print_line(json.write(json.JsonValue.Object(members)));
@@ -439,7 +439,7 @@ let App = module:program.Entry (
         let first = rng.next_int_below(100);
         let again = randoms.seeded(42).next_int_below(100);
         console.println("{}", first == again);
-        let deck: int[list] = [1, 2, 3, 4];
+        let deck: int[list] = new([1, 2, 3, 4]);
         rng.shuffle<int>(deck);
         console.println("{}", deck.length);
         return program.ExitCode.Ok;

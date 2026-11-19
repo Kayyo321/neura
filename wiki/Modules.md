@@ -112,6 +112,37 @@ let dispatch = func(stub: int64, arguments: uint8[list]) -> uint8[list] {
 
 A callback is a non-generic module function whose parameters are host data and whose result is host data or void. The image includes a callback when the built program reaches a member of the module that declares it, and records it in the `CALB` table ([NVR](NVR#imports-and-optional-source-maps)). `Std.DynamicForeign` uses one for [upcalls](ForeignInterop#upcalls).
 
+### Extension sets
+
+`let.extension name = func(receiver: T, ...) ...;` declares an extension function in a file or a module. It is an ordinary function, callable as one, that may also be called as a member of its first parameter's type. `let.extensions alias = import:Module;` is an import that also enables the extension functions the module exports, in the file or module that contains the declaration; `alias` is an ordinary import alias.
+
+<!-- example: fragment: two files; the second imports the first as App.Words -->
+```neura
+// In app/words.nra:
+let Words = module (
+    export let.extension shout = func(text: string, marks: int = 1) -> string {
+        return text + "!";
+    };
+);
+
+// In a file that uses it:
+let.extensions words = import:App.Words;
+
+let loud = "ready".shout();
+let same = words.shout("ready", marks: 2);
+```
+
+| Rule | Detail |
+| --- | --- |
+| A file or module enables its own extension functions and those of the modules it imports with `let.extensions`. | A plain `import` enables nothing. Enabling is not inherited by importers, not exported, and not available in a function body. A module without extension functions is still imported. |
+| `value.name(arguments)` looks for an extension function last. | On the static type of `value`: an accessible member of the type or its bases and an intrinsic member, then a function of the [primitive companion](Types#primitive-companions), then the enabled extension functions named `name` whose first parameter accepts the receiver: an equal type, a base class or interface of it, the referent of a `&T`, or a type that [inference](Polymorphism#type-argument-inference) solves. The first step that finds something wins, so a member of the same name hides an extension function, and a private member, which is not accessible outside its class, does not. |
+| Two enabled extension functions that accept the receiver are `E0315`. | Whatever the order of the imports and however the receiver types relate. The qualified call `alias.name(value, ...)` is the way out. The alternatives of one `or func` group are one function, chosen by the overload rules. Without a set that enables it, the member is unknown (`E0305`), with a help naming the set when an imported module exports one. |
+| The call is the ordinary call `name(value, arguments)`. | The receiver is evaluated first and once, and is the first argument; named arguments and defaults apply to the others. A nil receiver is passed, not trapped. To change a primitive receiver, the first parameter is `&T`, and the receiver obeys the borrow rules of a `&T` argument. |
+| An extension function has the access of any function of its module. | It reaches no private member of the receiver's class, adds no storage, overrides nothing, and satisfies no interface requirement. `value.name` without a call is `E0316`: an extension function is not a bound method. |
+| The forms are checked as they are written. | `let.extension` on something that is not a function, without a parameter, in a class or a block, or with `static`, and `let.extensions` on something that is not a module import, in a block, or with `promote`, a wildcard, `_`, `const` or a C header are `E0228`. A first parameter that is variadic, a bare type parameter without a bound, `void`, or a function type is `E0488`. |
+
+`extension` and `extensions` are words only directly after `let.`: a binding named `extension` and a call such as `path.extension()` keep their meaning. A prebuilt `.nir` module marks each extension function with the `function.extension` attribute ([NeuraIR format](NirFormat#revision-110-symbol-attributes-and-deferred-initialization)), so an importer enables its set as it enables a source module's.
+
 ## Interfaces and inheritance
 
 A module can inherit another module with `module:Base`. Its interface includes the inherited exports as well as its own. The derived module can implement inherited function signatures and use inherited implementations.
@@ -160,6 +191,33 @@ The constant applies to the binding; it does not by itself establish deep immuta
 
 See `examples/modules/module-interface.nra` for an interface with exported data, a class, a required function, and an inherited implementation.
 
+A module that overrides `main` can leave work to the modules that inherit it, as a library's application module does: its `main` calls a requirement, and the program's own module implements it. The image runs `main` for the one module of that line that no other module inherits, so the call reaches that module's implementation. Two modules that both inherit such a `main` are two entry points (`E0804`), and a requirement that the entry module leaves without a body cannot be called (`E0434`).
+
+<!-- example: run -->
+```neura
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Server = module:program.Entry (
+    export let serve = func(path: string) -> string;
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(serve("/"));
+        return program.ExitCode.Ok;
+    };
+);
+
+let Site = module:Server (
+    export let.override serve = func(path: string) -> string => "served " + path;
+);
+```
+
+```text
+served /
+```
+
+See `examples/modules/inherited-entry.nra`.
+
 ### Program entry
 
 A program implements the standard library requirement `Std.Program.Entry.main(string[]) -> ExitCode`. The compiler maps the library's `ExitCode.Ok` to process status 0, `ExitCode.Failure` to 1, and `ExitCode.Status(int)` to the supplied status. An explicit status outside 0 through 255 traps with `invalid argument: exit status`. The other variants name conventional statuses; most follow the shell convention of 128 plus the Linux number of the signal that would end a native process:
@@ -178,7 +236,7 @@ A program implements the standard library requirement `Std.Program.Entry.main(st
 | `CpuTimeExceeded` | 152 | SIGXCPU: the CPU time limit was exceeded |
 | `FileSizeExceeded` | 153 | SIGXFSZ: the file size limit was exceeded |
 
-SIGXCPU and SIGXFSZ are signals 24 and 25 on Linux for x86, Arm, and RISC-V, and 30 and 31 on MIPS, where a shell reports 158 and 159; Neura always uses 152 and 153. Integer division by zero raises SIGFPE (136), not SIGTRAP (133). `Std.Program.status_of(code)` returns the status a variant stands for, and `Std.Program.Process.exit` accepts either a status or an `ExitCode`. A runtime trap ends the run with the status of the variant that names its class ([Errors](Errors)). A program with more than one entry override is rejected.
+SIGXCPU and SIGXFSZ are signals 24 and 25 on Linux for x86, Arm, and RISC-V, and 30 and 31 on MIPS, where a shell reports 158 and 159; Neura always uses 152 and 153. Integer division by zero raises SIGFPE (136), not SIGTRAP (133). `Std.Program.status_of(code)` returns the status a variant stands for, and `Std.Program.Process.exit` accepts either a status or an `ExitCode`. A runtime trap ends the run with the status of the variant that names its class ([Errors](Errors)). A program with more than one entry override is rejected, as is one where two modules inherit the module that overrides `main` and no other module inherits either ([Interfaces and inheritance](#interfaces-and-inheritance)).
 
 The former built-in `SysIo` and `Test` modules are retired. Importing either is an error that names the replacement: `Std.Io.Console` and `Std.Program` for `SysIo`, and `Std.Test` for `Test`. Images built while they existed keep running under `neura run` as long as they import only `neura.console.write_line`; images that called the retired assertion services `neura.test.assert` or `neura.test.assert_equal_int32` no longer bind, because the runner no longer provides those services.
 
@@ -230,3 +288,45 @@ A startup trap ends the run before `main`. If a static initializer traps
 during an active use, execution ends before that use completes. Cyclic imports
 between files can run in the order above when every read finds an initialized
 global.
+
+### Startup blocks
+
+`static scope { ... }` is a startup block: work that runs once per execution, before `main`, with bindings of its own. It is written among the top-level statements of a file or among the members of a module, takes no `export` and no tags, and has no `;` after its `}`. `scope` after `static` is read by context, so `static let scope = 1;`, a local named `scope`, and the `scope { }` statement of a function keep their meaning.
+
+<!-- example: run -->
+```neura
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let names: string[] = ["ada", "grace"];
+
+static scope {
+    let count = names.length;
+    console.print_line("loaded " + count.to_string() + " names");
+}
+
+let Registry = module (
+    export let size: int32 = 2;
+
+    static scope {
+        console.print_line("registry ready");
+    }
+);
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("main");
+        return program.ExitCode.Ok;
+    };
+);
+```
+
+```text
+loaded 2 names
+registry ready
+main
+```
+
+The block is an ordinary block. It runs at its place in source order among its file's initializers and top-level statements, in the order of the list above; a module's block runs where the module is written, and a file may have several. It runs whether or not anything in its file or module is used. A file or prebuilt module that several files import runs its blocks once, and a module that inherits another does not run the base's blocks again. A class whose statics are first used in a block initializes there.
+
+The block is not inside a function. `return` in it is `E0470`, and `scope { }`, `spawn` and `select` written in it are rejected as they are at file level (`E0607`, `E0603`, `E0606`); a function that uses them may still be called from the block. A block in a function, a class, an interface, an enum or a nested block is `E0218`, and a malformed block is `E0217`. A trap in a block ends the run before `main`, and each test under `neura test` runs every block again in its fresh execution. `neura check`, `neura emit-ir`, the language server and test discovery run none. A library with startup blocks and no entry point is checked but is not runnable.

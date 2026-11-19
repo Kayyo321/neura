@@ -1,0 +1,14 @@
+// Edge case 42: an element of an array that holds the resource is the
+// resource.
+let closeable = import:Std.Io.Closeable;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+let Resource = class implements closeable.Closeable (
+    export let close = func -> Result<Unit> => Result<Unit>.Ok(Unit.Value);
+);
+let work = func() -> Result<Resource> {
+    using (source = new Resource()) {
+        let held = [source];
+        return Result<Resource>.Ok(held[0]);
+    }
+};

@@ -1,0 +1,7 @@
+error[E0226]: parameter 'a' takes no default
+ --> $DIR/default-reference.nra:2:25
+  |
+2 | let bump = func(a: &int = 1) {
+  |                         ^^^ a primitive reference parameter is bound to a caller's place
+
+For more information about this error, try `neura explain E0226`.

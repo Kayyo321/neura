@@ -1,0 +1,120 @@
+/// @brief Reads the generated Unicode tables of Std.Core.Internal.UnicodeProperties, Std.Core.UnicodeScript,
+/// and Std.Core.UnicodeBlock (scripts/generate-unicode-tables.py).
+///
+/// Each byte of a table holds six bits as its value minus 48 ('0' through 'o'). A range table holds five-digit
+/// words: a range's first code point shifted left 9 bits, or'ed with the range's value. The first range starts
+/// at 0 and each range reaches the next one's start. A boundary table holds the four-digit boundaries of an
+/// inversion list. Both are searched by bisection, so a lookup reads about log2(ranges) words.
+export let UnicodeLookup = module (
+    /// @brief The value of the range holding a code point at most 0x10FFFF.
+    #[Pure, ThreadSafe]
+    export let range_value = func(table: string, code_point: uint32) -> int {
+        last key = (code_point << 9) | 511;
+        let low = 0;
+        let high = table.byte_length / 5;
+        while (low < high) {
+            last middle = low + (high - low) / 2;
+            if (word5(table, middle * 5) <= key) {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        return (word5(table, (low - 1) * 5) & 511) as int;
+    };
+
+    /// @brief Tests membership in a boundary table: an odd number of boundaries at or below the code point.
+    #[Pure, ThreadSafe]
+    export let contains = func(table: string, code_point: uint32) -> bool {
+        let low = 0;
+        let high = table.byte_length / 4;
+        while (low < high) {
+            last middle = low + (high - low) / 2;
+            if (word4(table, middle * 4) <= code_point) {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        return (low & 1) != 0;
+    };
+
+    /// @brief The unsigned word of `width` digits starting at a byte offset.
+    #[Pure, ThreadSafe]
+    export let word = func(table: string, offset: int, width: int) -> uint64 {
+        let value: uint64 = 0;
+        for (let i in 0 .. width) {
+            value = (value << 6) | ((table.byte_at(offset + i) - 48) as uint64);
+        }
+        return value;
+    };
+
+    /// @brief Text number `index` of a joined list: `offsets` holds the three-digit start of each text and then
+    /// the joined length.
+    #[Pure, ThreadSafe]
+    export let entry = func(texts: string, offsets: string, index: int) -> string =>
+        texts.slice(word(offsets, index * 3, 3) as int, word(offsets, index * 3 + 3, 3) as int);
+
+    /// @brief The index of the text of a sorted joined list of loose names (UAX #44 LM3: lowercase ASCII
+    /// without spaces, underscores, or hyphens) that equals the loose form of `text`, or -1.
+    #[Pure, ThreadSafe]
+    export let find_loose = func(names: string, offsets: string, text: string) -> int {
+        last key = loose(text);
+        let low = 0;
+        let high = offsets.byte_length / 3 - 1;
+        while (low < high) {
+            last middle = low + (high - low) / 2;
+            last name = entry(names, offsets, middle);
+            if (name == key) {
+                return middle;
+            }
+            if (before(name, key)) {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        return -1;
+    };
+
+    /// @brief The text with ASCII letters lowercased and every space, tab, LF, CR, underscore, and hyphen
+    /// removed.
+    #Pure
+    let loose = func(text: string) -> string {
+        let bytes: uint8[list] = new;
+        for (let i in 0 .. text.byte_length) {
+            last byte = text.byte_at(i);
+            if (byte == 32 || byte == 9 || byte == 10 || byte == 13 || byte == 95 || byte == 45) {
+                continue;
+            }
+            bytes.append(byte >= 65 && byte <= 90 ? byte + 32 : byte);
+        }
+        let [valid, result] = string.from_utf8(bytes);
+        return result;
+    };
+
+    /// @brief Byte-wise order of two strings.
+    #Pure
+    let before = func(left: string, right: string) -> bool {
+        last count = left.byte_length < right.byte_length ? left.byte_length : right.byte_length;
+        for (let i in 0 .. count) {
+            if (left.byte_at(i) != right.byte_at(i)) {
+                return left.byte_at(i) < right.byte_at(i);
+            }
+        }
+        return left.byte_length < right.byte_length;
+    };
+
+    /// @brief The five-digit word at a byte offset.
+    #Pure
+    let word5 = func(table: string, offset: int) -> uint32 =>
+        (((table.byte_at(offset) - 48) as uint32) << 24) | (((table.byte_at(offset + 1) - 48) as uint32) << 18) |
+        (((table.byte_at(offset + 2) - 48) as uint32) << 12) | (((table.byte_at(offset + 3) - 48) as uint32) << 6) |
+        ((table.byte_at(offset + 4) - 48) as uint32);
+
+    /// @brief The four-digit word at a byte offset.
+    #Pure
+    let word4 = func(table: string, offset: int) -> uint32 =>
+        (((table.byte_at(offset) - 48) as uint32) << 18) | (((table.byte_at(offset + 1) - 48) as uint32) << 12) |
+        (((table.byte_at(offset + 2) - 48) as uint32) << 6) | ((table.byte_at(offset + 3) - 48) as uint32);
+);

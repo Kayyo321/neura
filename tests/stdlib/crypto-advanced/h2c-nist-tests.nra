@@ -1,0 +1,49 @@
+// test-options: --gpu=off --deny-all --max-steps 1200000000
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let ecdsa = import:Std.Crypto.Asymmetric.Ecdsa;
+let h2c = import:Std.Crypto.Advanced.HashToCurve;
+let hex = import:Std.Encoding.Hex;
+let test = import:Std.Test;
+let vectors = import:H2cNistVectors;
+
+let H2cNistTests = module (
+    let bytes = func(value: string) -> uint8[list] => test.assert_ok(hex.decode(value));
+
+    export let test_p384_rfc_and_long_domain_vectors = func {
+        last rows = vectors.p384;
+        for (let i = 0; i < rows.length; i += 4) {
+            last message = bytes(rows[i]);
+            last dst = bytes(rows[i + 1]);
+            last uncompressed = h2c.hash_to_p384(message, dst);
+            last compressed = h2c.hash_to_p384(message, dst, true);
+            test.assert_equal_string(rows[i + 2], hex.encode(uncompressed));
+            test.assert_equal_string(rows[i + 3], hex.encode(compressed));
+            last point = test.assert_ok(ecdsa.parse_public_key(ecdsa.Curve.P384, uncompressed));
+            test.assert(point.equals(test.assert_ok(ecdsa.parse_public_key(ecdsa.Curve.P384, compressed))));
+        }
+    };
+
+    export let test_p521_rfc_and_long_domain_vectors = func {
+        last rows = vectors.p521;
+        for (let i = 0; i < rows.length; i += 4) {
+            last message = bytes(rows[i]);
+            last dst = bytes(rows[i + 1]);
+            last uncompressed = h2c.hash_to_p521(message, dst);
+            last compressed = h2c.hash_to_p521(message, dst, true);
+            test.assert_equal_string(rows[i + 2], hex.encode(uncompressed));
+            test.assert_equal_string(rows[i + 3], hex.encode(compressed));
+            last point = test.assert_ok(ecdsa.parse_public_key(ecdsa.Curve.P521, uncompressed));
+            test.assert(point.equals(test.assert_ok(ecdsa.parse_public_key(ecdsa.Curve.P521, compressed))));
+        }
+    };
+
+    export let test_current_fips_policy_enables_both_curves = func {
+        last prior = crypto_policy.policy();
+        crypto_policy.set_policy(crypto_policy.Policy.Fips140_3);
+        last p384 = h2c.hash_to_p384(new, bytes(vectors.p384[1]), true);
+        last p521 = h2c.hash_to_p521(new, bytes(vectors.p521[1]), true);
+        crypto_policy.set_policy(prior);
+        test.assert_equal_string(vectors.p384[3], hex.encode(p384));
+        test.assert_equal_string(vectors.p521[3], hex.encode(p521));
+    };
+);

@@ -1,0 +1,117 @@
+// Postfix `?` (docs/design/Matching030.md, edge cases 86, 89, 90 and 92 to 98).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let.promote _ = import:Std.Core.Result;
+let.promote errors = import:Std.Core.Error;
+
+let failure = errors.custom("E1", "bad input");
+
+let parse = func(text: string) -> Result<int> {
+    if (text == "bad") {
+        return Result<int>.Err(failure);
+    }
+    return Result<int>.Ok(text == "one" ? 1 : 2);
+};
+
+let check = func(ok: bool) -> Result<bool> => ok ? Result<bool>.Ok(true) : Result<bool>.Err(failure);
+
+let trace = func(text: string) -> int {
+    console.print_line("evaluated " + text);
+    return 0;
+};
+
+let pair = func(left: string, right: string) -> Result<int> {
+    let a = parse(left)?;
+    let b = parse(right)? + 1;
+    return Result<int>.Ok(a + b);
+};
+
+let add = func(a: int, b: int) -> int => a + b;
+
+let named = func(left: string) -> Result<int> => Result<int>.Ok(add(a: parse(left)?, b: trace("b")));
+
+let choose = func(ok: bool) -> Result<int> {
+    let value = ok ? parse("one")? : parse("bad")?;
+    return Result<int>.Ok(value);
+};
+
+let nested = func(inner: Result<int>) -> Result<Result<int>> => Result<Result<int>>.Ok(inner);
+
+let twice = func(inner: Result<int>) -> Result<int> {
+    let a = nested(inner)? ?;
+    let b = (nested(inner)?)?;
+    return Result<int>.Ok(a + b);
+};
+
+let negate = func(ok: bool) -> Result<bool> => Result<bool>.Ok(!check(ok)?);
+
+let looped = func() -> Result<int> {
+    let total = 0;
+    for (let i = 0; i < 5; i += 1) {
+        total += parse(i == 3 ? "bad" : "one")?;
+    }
+    return Result<int>.Ok(total);
+};
+
+let scoped = func() -> Result<int> {
+    scope {
+        let task = spawn trace("task");
+        let value = parse("bad")?;
+        return Result<int>.Ok(value);
+    }
+};
+
+let text = func(left: string) -> Result<string> => Result<string>.Ok($"value {parse(left)?}");
+
+let write = func(ok: bool) -> Result<bool> {
+    check(ok)?;
+    return Result<bool>.Ok(true);
+};
+
+let lambda = func(left: string) -> Result<int> {
+    let run: func(string) -> Result<int> = func(text: string) -> Result<int> => Result<int>.Ok(parse(text)? * 10);
+    let inner = run(left);
+    return Result<int>.Ok(match (inner) {
+        Result.Ok(v) => v,
+        Result.Err(_) => -1,
+    });
+};
+
+let show = func(result: Result<int>) -> string => match (result) {
+    Result.Ok(v) => "Ok(" + v.to_string() + ")",
+    Result.Err(e) => "Err(" + errors.message(e) + ")",
+};
+
+let same = func(result: Result<int>) -> string => match (result) {
+    Result.Ok(_) => "ok",
+    Result.Err(e) => errors.message(e) == errors.message(failure) ? "same error" : "other error",
+};
+
+let top = func() -> Result<int> => Result<int>.Ok(pair("bad", "one")? + 1);
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(show(pair("one", "two")) + " " + show(pair("bad", "two")) + " " + show(pair("one", "bad")));
+        console.print_line(show(named("one")));
+        console.print_line(show(named("bad")));
+        console.print_line(show(choose(true)) + " " + show(choose(false)));
+        console.print_line(show(twice(Result<int>.Ok(4))) + " " + show(twice(Result<int>.Err(failure))));
+        console.print_line(show(looped()));
+        console.print_line(show(scoped()));
+        console.print_line(match (text("one")) {
+            Result.Ok(t) => t,
+            Result.Err(_) => "error",
+        });
+        console.print_line(match (negate(true)) {
+            Result.Ok(b) => b ? "true" : "false",
+            Result.Err(_) => "error",
+        });
+        console.print_line(match (write(false)) {
+            Result.Ok(_) => "written",
+            Result.Err(_) => "not written",
+        });
+        console.print_line(show(lambda("one")) + " " + show(lambda("bad")));
+        console.print_line(same(top()));
+        return program.ExitCode.Ok;
+    };
+);

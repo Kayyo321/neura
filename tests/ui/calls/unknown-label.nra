@@ -1,0 +1,3 @@
+// A label that names no parameter, with the nearest unfilled name (edge case 5).
+let schedule = func(job: string, retries: int) -> string => job;
+let first = schedule("backup", retrys: 3);

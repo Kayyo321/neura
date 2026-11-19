@@ -8,7 +8,7 @@ let BitSetTests = module (
     export let test_members_across_words = func() -> void {
         let items = bit_set.create();
         test.assert(items.is_empty());
-        let values: int[list] = [0, 31, 32, 63, 64, 1000, 5];
+        let values: int[list] = new([0, 31, 32, 63, 64, 1000, 5]);
         for (let value in values) {
             test.assert(items.add(value));
         }
@@ -27,7 +27,7 @@ let BitSetTests = module (
     };
 
     export let test_flip_and_next_set = func() -> void {
-        let items = bit_set.of([3, 40]);
+        let items = bit_set.of(new([3, 40]));
         items.flip(3);
         items.flip(95);
         test.assert_equal_string("{40, 95}", items.to_string());
@@ -42,39 +42,39 @@ let BitSetTests = module (
     };
 
     export let test_set_algebra = func() -> void {
-        let a = bit_set.of([1, 2, 3, 64]);
-        let b = bit_set.of([3, 4, 200]);
+        let a = bit_set.of(new([1, 2, 3, 64]));
+        let b = bit_set.of(new([3, 4, 200]));
         test.assert_equal_string("{1, 2, 3, 4, 64, 200}", a.union(b).to_string());
         test.assert_equal_string("{3}", a.intersection(b).to_string());
         test.assert_equal_string("{1, 2, 64}", a.difference(b).to_string());
         test.assert_equal_string("{4, 200}", b.difference(a).to_string());
         test.assert_equal_string("{1, 2, 3, 64}", a.to_string());
         test.assert(!a.is_subset_of(b));
-        test.assert(bit_set.of([3]).is_subset_of(b));
+        test.assert(bit_set.of(new([3])).is_subset_of(b));
         test.assert(bit_set.create().is_subset_of(b));
         test.assert(!a.is_disjoint_from(b));
-        test.assert(bit_set.of([5, 300]).is_disjoint_from(a));
-        let c = bit_set.of([1, 2, 3, 64]);
+        test.assert(bit_set.of(new([5, 300])).is_disjoint_from(a));
+        let c = bit_set.of(new([1, 2, 3, 64]));
         c.symmetric_difference_with(b);
         test.assert_equal_string("{1, 2, 4, 64, 200}", c.to_string());
         test.assert_equal_int32(5, c.size());
-        c.intersect_with(bit_set.of([2, 4]));
+        c.intersect_with(bit_set.of(new([2, 4])));
         test.assert_equal_string("{2, 4}", c.to_string());
-        c.union_with(bit_set.of([0]));
-        c.subtract(bit_set.of([4, 9]));
+        c.union_with(bit_set.of(new([0])));
+        c.subtract(bit_set.of(new([4, 9])));
         test.assert_equal_string("{0, 2}", c.to_string());
         test.assert_equal_int32(2, c.size());
     };
 
     // Equality ignores trailing zero words.
     export let test_equality_hash_and_text = func() -> void {
-        let a = bit_set.of([1, 2]);
-        let b = bit_set.of([2, 1, 500]);
+        let a = bit_set.of(new([1, 2]));
+        let b = bit_set.of(new([2, 1, 500]));
         test.assert(!a.equals(b));
         b.remove(500);
         test.assert(a.equals(b));
         test.assert(b.equals(a));
-        test.assert(!a.equals(bit_set.of([1])));
+        test.assert(!a.equals(bit_set.of(new([1]))));
         test.assert(!a.equals(nil));
         test.assert(!a.equals(cell.of<int>(1)));
         test.assert_equal_int64(3, a.hash_code() as int64);
@@ -85,7 +85,7 @@ let BitSetTests = module (
     };
 
     export let test_clear_and_iteration = func() -> void {
-        let items = bit_set.of([7, 70, 700]);
+        let items = bit_set.of(new([7, 70, 700]));
         let walk = items.iterator();
         test.assert(walk.has_next());
         test.assert(walk.has_next());
@@ -93,7 +93,7 @@ let BitSetTests = module (
         test.assert_equal_int32(70, walk.next());
         test.assert_equal_int32(700, walk.next());
         test.assert(!walk.has_next());
-        let seen: int[list] = [];
+        let seen: int[list] = new;
         for (let value in items) {
             seen.append(value);
         }
@@ -115,8 +115,8 @@ let BitSetTests = module (
     };
 
     export let test_callbacks = func() -> void {
-        let items = bit_set.of([1, 2, 3, 4, 5, 6]);
-        let seen: int[list] = [];
+        let items = bit_set.of(new([1, 2, 3, 4, 5, 6]));
+        let seen: int[list] = new;
         test.assert_equal_int32(3, items.remove_if(func(value: int) -> bool {
             seen.append(value);
             return value % 2 == 0;
@@ -133,8 +133,8 @@ let BitSetTests = module (
         let items: mutable_set.MutableSet<int> = bit_set.create();
         test.assert(items.add(4));
         test.assert(!items.add(4));
-        items.add_all([1, 9]);
-        test.assert(items.contains_all([1, 4, 9]));
+        items.add_all(new([1, 9]));
+        test.assert(items.contains_all(new([1, 4, 9])));
         test.assert(items.remove(9));
         let view: collection.Collection<int> = items;
         test.assert_equal_int32(2, view.size());

@@ -1,0 +1,71 @@
+// test-options: --allow-net
+let config = import:Std.Net.Tls.TlsConfig;
+let duration = import:Std.Time.Duration;
+let error = import:Std.Core.Error;
+let socket_addr = import:Std.Net.Core.SocketAddr;
+let tcp_socket = import:Std.Net.Socket.TcpSocket;
+let test = import:Std.Test;
+let tls_acceptor = import:Std.Net.Tls.TlsAcceptor;
+let tls_connector = import:Std.Net.Tls.TlsConnector;
+let tls_stream = import:Std.Net.Tls.TlsStream;
+let unit = import:Std.Core.Unit;
+
+// The TLS endpoints on the loopback interface. A handshake needs neura.net.tls.*, which only a build configured
+// with NEURA_ENABLE_SERVER_TLS has, and its connect and accept services block every task, so one program cannot
+// be both peers: these tests check what fails the same way in every build (tests/backend/host_tests.cpp runs a
+// real handshake between two threads).
+let AcceptorTests = module (
+    let server_config = func -> config.TlsConfig {
+        last builder = config.builder();
+        builder.set_certificate("server.pem", "server.key");
+        return test.assert_ok<config.TlsConfig>(builder.build_server());
+    };
+
+    export let test_acceptor_binds_and_closes = func {
+        last loopback = test.assert_ok<socket_addr.SocketAddr>(socket_addr.parse("127.0.0.1:0"));
+        last acceptor = test.assert_ok<tls_acceptor.TlsAcceptor>(tls_acceptor.bind(loopback, server_config()));
+        test.assert(acceptor.address().port > 0);
+        test.assert_equal_string("TlsAcceptor(" + acceptor.address().to_string() + ")", acceptor.to_string());
+        // A plain TCP client reaches the listening socket.
+        last client = test.assert_ok<tcp_socket.TcpSocket>(tcp_socket.connect(acceptor.address(), duration.of_seconds(5)));
+        test.assert_ok<unit.Unit>(client.close());
+        test.assert_ok<unit.Unit>(acceptor.close());
+        test.assert_ok<unit.Unit>(acceptor.close());
+        last failure = test.assert_err<tls_stream.TlsStream>(acceptor.accept());
+        last kind = match (failure) {
+            error.Error.Io { kind, message, path } => kind,
+            _ => error.IoErrorKind.Other,
+        };
+        test.assert(kind == error.IoErrorKind.Closed);
+    };
+
+    export let test_connect_to_a_closed_port_fails = func {
+        last loopback = test.assert_ok<socket_addr.SocketAddr>(socket_addr.parse("127.0.0.1:0"));
+        last acceptor = test.assert_ok<tls_acceptor.TlsAcceptor>(tls_acceptor.bind(loopback, server_config()));
+        last target = acceptor.address();
+        test.assert_ok<unit.Unit>(acceptor.close());
+        last client = test.assert_ok<config.TlsConfig>(config.builder().build_client());
+        // Refused in a TLS build, Unsupported in another: an error either way, never a trap.
+        test.assert_err<tls_stream.TlsStream>(new tls_connector.TlsConnector(target, client).connect());
+    };
+
+    export let test_accept_fails_for_a_client_without_tls = func {
+        last loopback = test.assert_ok<socket_addr.SocketAddr>(socket_addr.parse("127.0.0.1:0"));
+        last acceptor = test.assert_ok<tls_acceptor.TlsAcceptor>(tls_acceptor.bind(loopback, server_config()));
+        last client = test.assert_ok<tcp_socket.TcpSocket>(tcp_socket.connect(acceptor.address(), duration.of_seconds(5)));
+        test.assert_ok<unit.Unit>(client.close());
+        // The plain client has gone (and the certificate files do not exist) in a TLS build; Unsupported in
+        // another.
+        test.assert_err<tls_stream.TlsStream>(acceptor.accept());
+        test.assert_ok<unit.Unit>(acceptor.close());
+    };
+
+    export let test_connector_holds_its_target = func {
+        last target = test.assert_ok<socket_addr.SocketAddr>(socket_addr.parse("[::1]:8443"));
+        last connector = new tls_connector.TlsConnector(target, test.assert_ok<config.TlsConfig>(config.builder().build_client()));
+        test.assert(connector.address().equals(target));
+        test.assert_equal_string("TlsConnector([::1]:8443)", connector.to_string());
+        test.assert_equal<int>(12, tls_connector.version_code(config.TlsVersion.Tls12));
+        test.assert_equal<int>(13, tls_connector.version_code(config.TlsVersion.Tls13));
+    };
+);

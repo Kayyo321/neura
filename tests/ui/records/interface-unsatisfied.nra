@@ -1,0 +1,5 @@
+// A record has no methods to implement a requirement (edge case 37).
+let Shape = interface (
+    export let area = func() -> int;
+);
+let P = record implements Shape (x: int);

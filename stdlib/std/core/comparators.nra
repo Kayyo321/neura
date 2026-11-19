@@ -7,7 +7,7 @@ let.promote _ = import:Std.Core.Ordering;
 export let Comparators = module (
     /// @brief The opposite order of `c`.
     export let reversed = func<T>(c: func(T, T) -> Ordering) -> func(T, T) -> Ordering {
-        return func(a: T, b: T) -> Ordering {
+        return new func(a: T, b: T) -> Ordering {
             return reverse(c(a, b));
         };
     };
@@ -16,7 +16,7 @@ export let Comparators = module (
     /// each comparison.
     export let by_key = func<T, K>(key: func(T) -> K, c: func(K, K) -> Ordering)
         -> func(T, T) -> Ordering {
-        return func(a: T, b: T) -> Ordering {
+        return new func(a: T, b: T) -> Ordering {
             return c(key(a), key(b));
         };
     };
@@ -24,12 +24,9 @@ export let Comparators = module (
     /// @brief `first`, and `second` only where `first` finds the values equal.
     export let then = func<T>(first: func(T, T) -> Ordering, second: func(T, T) -> Ordering)
         -> func(T, T) -> Ordering {
-        return func(a: T, b: T) -> Ordering {
+        return new func(a: T, b: T) -> Ordering {
             last order = first(a, b);
-            if (order != Ordering.Equal) {
-                return order;
-            }
-            return second(a, b);
+            return if (order != Ordering.Equal) -> order else -> second(a, b);
         };
     };
 );

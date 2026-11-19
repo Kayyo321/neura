@@ -1,0 +1,9 @@
+error[E0411]: match.is cannot test a value of type Light
+  --> $DIR/is-enum-subject.nra:15:55
+   |
+15 | let classify = func(value: Light) -> int => match.is (value) {
+   |                                                       ^^^^^ the subject has type Light
+   |
+   = help: use 'match' for an enum
+
+For more information about this error, try `neura explain E0411`.

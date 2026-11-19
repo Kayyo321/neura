@@ -1,0 +1,8 @@
+error[E0245]: malformed or repeated attribute
+ --> $DIR/template-duplicate-property.nra:1:38
+  |
+1 | let view = html() { <input value="x" prop:value={y}> };
+  |                                      ^^^^^^^^^^ this attribute or binding is written more than once
+  |                            ----- first written here
+
+For more information about this error, try `neura explain E0245`.

@@ -33,10 +33,12 @@ The following public declarations are taken from the module source; each links t
   The scope shared with the arena's segments, for library code. Tagged `#Pure`.
 - **Arena.Arena** · [`export let close = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L73)
   Frees the arena's memory and unloads its libraries. Closing twice, or closing the global arena, traps.
-- **Arena** · [`export let of_confined = func -> Arena`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L80)
+- **Arena.Arena** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L78)
+  Names the arena.
+- **Arena** · [`export let of_confined = func -> Arena`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L83)
   A new arena that frees its memory when closed (Java's Arena.ofConfined). Tagged `#Pure`.
-- **Arena** · [`export let of_shared = func -> Arena`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L84)
+- **Arena** · [`export let of_shared = func -> Arena`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L87)
   The same as of_confined: Neura runs on one thread (Java's Arena.ofShared). Tagged `#Pure`.
-- **Arena** · [`export let global = func -> Arena`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L87)
+- **Arena** · [`export let global = func -> Arena`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L90)
   The arena whose memory lives until the end of the run (Java's Arena.global).
 <!-- END SOURCE API -->

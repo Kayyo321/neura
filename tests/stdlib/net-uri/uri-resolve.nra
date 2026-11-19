@@ -1,0 +1,97 @@
+let test = import:Std.Test;
+let uris = import:Std.Net.Core.Uri;
+
+// Reference resolution (RFC 3986 section 5.2) and remove_dot_segments (section 5.2.4).
+let UriResolveTests = module (
+    // RFC 3986 section 5.4: the base of every example.
+    const Base: string = "http://a/b/c/d;p?q";
+
+    let check = func(reference: string, expected: string) {
+        last base = test.assert_ok<uris.Uri>(uris.parse(Base));
+        last parsed = test.assert_ok<uris.Uri>(uris.parse(reference));
+        last target = test.assert_ok<uris.Uri>(base.resolve(parsed));
+        test.assert_equal_string(expected, target.to_string());
+        // The module function gives the same target.
+        test.assert_equal_string(expected, test.assert_ok<uris.Uri>(uris.resolve(base, parsed)).to_string());
+    };
+
+    // RFC 3986 section 5.4.1 (23 examples), extracted mechanically from the RFC text.
+    export let test_rfc3986_normal_examples = func {
+        check("g:h", "g:h");
+        check("g", "http://a/b/c/g");
+        check("./g", "http://a/b/c/g");
+        check("g/", "http://a/b/c/g/");
+        check("/g", "http://a/g");
+        check("//g", "http://g");
+        check("?y", "http://a/b/c/d;p?y");
+        check("g?y", "http://a/b/c/g?y");
+        check("#s", "http://a/b/c/d;p?q#s");
+        check("g#s", "http://a/b/c/g#s");
+        check("g?y#s", "http://a/b/c/g?y#s");
+        check(";x", "http://a/b/c/;x");
+        check("g;x", "http://a/b/c/g;x");
+        check("g;x?y#s", "http://a/b/c/g;x?y#s");
+        check("", "http://a/b/c/d;p?q");
+        check(".", "http://a/b/c/");
+        check("./", "http://a/b/c/");
+        check("..", "http://a/b/");
+        check("../", "http://a/b/");
+        check("../g", "http://a/b/g");
+        check("../..", "http://a/");
+        check("../../", "http://a/");
+        check("../../g", "http://a/g");
+    };
+
+    // RFC 3986 section 5.4.2 (19 examples), extracted mechanically from the RFC text;
+    // "http:g" takes the answer "for strict parsers".
+    export let test_rfc3986_abnormal_examples = func {
+        check("../../../g", "http://a/g");
+        check("../../../../g", "http://a/g");
+        check("/./g", "http://a/g");
+        check("/../g", "http://a/g");
+        check("g.", "http://a/b/c/g.");
+        check(".g", "http://a/b/c/.g");
+        check("g..", "http://a/b/c/g..");
+        check("..g", "http://a/b/c/..g");
+        check("./../g", "http://a/b/g");
+        check("./g/.", "http://a/b/c/g/");
+        check("g/./h", "http://a/b/c/g/h");
+        check("g/../h", "http://a/b/c/h");
+        check("g;x=1/./y", "http://a/b/c/g;x=1/y");
+        check("g;x=1/../y", "http://a/b/c/y");
+        check("g?y/./x", "http://a/b/c/g?y/./x");
+        check("g?y/../x", "http://a/b/c/g?y/../x");
+        check("g#s/./x", "http://a/b/c/g#s/./x");
+        check("g#s/../x", "http://a/b/c/g#s/../x");
+        check("http:g", "http:g");
+    };
+
+    // RFC 3986 section 5.2.4, the two worked examples.
+    export let test_remove_dot_segments_examples = func {
+        test.assert_equal_string("/a/g", uris.remove_dot_segments("/a/b/c/./../../g"));
+        test.assert_equal_string("mid/6", uris.remove_dot_segments("mid/content=5/../6"));
+        test.assert_equal_string("", uris.remove_dot_segments(""));
+        test.assert_equal_string("/", uris.remove_dot_segments("/.."));
+        test.assert_equal_string("", uris.remove_dot_segments("../.."));
+    };
+
+    export let test_base_must_be_absolute = func {
+        last relative = test.assert_ok<uris.Uri>(uris.parse("/a/b"));
+        test.assert_err<uris.Uri>(relative.resolve(test.assert_ok<uris.Uri>(uris.parse("c"))));
+    };
+
+    export let test_base_without_path_or_authority = func {
+        // merge with an authority and an empty base path (section 5.2.3, first case).
+        last host_only = test.assert_ok<uris.Uri>(uris.parse("http://a"));
+        test.assert_equal_string("http://a/g", test.assert_ok<uris.Uri>(host_only.resolve(test.assert_ok<uris.Uri>(uris.parse("g")))).to_string());
+        // A base fragment is ignored, a base query kept only for an empty reference.
+        last with_fragment = test.assert_ok<uris.Uri>(uris.parse("http://a/b?q#f"));
+        test.assert_equal_string("http://a/b?q", test.assert_ok<uris.Uri>(with_fragment.resolve(test.assert_ok<uris.Uri>(uris.parse("")))).to_string());
+        // A result path that would start with "//" without an authority keeps its components through "/.".
+        last opaque = test.assert_ok<uris.Uri>(uris.parse("x:/a"));
+        last odd = test.assert_ok<uris.Uri>(opaque.resolve(test.assert_ok<uris.Uri>(uris.parse("/.//g"))));
+        test.assert_equal_string("x:/.//g", odd.to_string());
+        test.assert(!odd.has_authority());
+        test.assert(test.assert_ok<uris.Uri>(uris.parse(odd.to_string())).equals(odd));
+    };
+);

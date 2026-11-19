@@ -1,0 +1,13 @@
+error[E0471]: a deferred call returns nothing, and this one returns 'int32'
+ --> $DIR/defer-int.nra:6:11
+  |
+2 | let compute = func() -> int {
+  |                         --- the callee returns 'int32'
+...
+6 |     defer compute();
+  |           ^^^^^^^^^
+  |
+  = note: a deferred call's result would be lost when its block is left
+  = help: defer a function that handles the result
+
+For more information about this error, try `neura explain E0471`.

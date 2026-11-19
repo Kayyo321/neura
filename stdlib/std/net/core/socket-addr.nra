@@ -1,0 +1,156 @@
+let.promote _ = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let ips = import:Std.Net.Core.IpAddr;
+let v4 = import:Std.Net.Core.Ipv4Addr;
+let v6 = import:Std.Net.Core.Ipv6Addr;
+let.promote _ = import:Std.Net.Core.NetAddress;
+let.promote _ = import:Std.Core.Result;
+
+/// @brief An IP address and a port: the address of a TCP or UDP socket.
+///
+/// Text forms: `192.0.2.1:80`, and for IPv6 the bracketed form of RFC 5952 section 6, `[2001:db8::1]:443`;
+/// a zone stays inside the brackets as written by `Ipv6Addr` (`[fe80::1%eth0]:80`, not the `%25` of URIs).
+/// A `SocketAddr` is an immutable class, so each value is one heap object; this runtime does not provide
+/// zero-allocation value types.
+/// @see [Std.Net.Core.SocketAddr](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Core-SocketAddr)
+#Since("0.3.0")
+export let SocketAddr = module (
+    /// @brief An IP address and a port number 0 to 65535.
+    #[Final, NoDiscard, Immutable, ThreadSafe, Since("0.3.0")]
+    export let SocketAddr = class implements NetAddress (
+        /// @brief The IP address.
+        export last ip: ips.IpAddr;
+        /// @brief The port, 0 to 65535.
+        export last port: int;
+
+        /// @brief Constructs the socket address; traps when the port is outside 0 to 65535.
+        export let init = func(address: ips.IpAddr, port_number: int) {
+            if (port_number < 0 || port_number > 65535) {
+                trap_with_message("SocketAddr: port outside 0 to 65535");
+            }
+            ip = address;
+            port = port_number;
+        };
+
+        /// @brief The IP text without brackets (with any IPv6 zone), as `TcpStream.connect` takes a host.
+        #Pure
+        export let host_text = func -> string => ips.to_string(ip);
+
+        /// @brief The family of the IP address.
+        #Pure
+        export let family = func -> AddressFamily => ips.family(ip);
+
+        /// @brief Tests whether another object is a `SocketAddr` with an equal address and the same port.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not address: SocketAddr) {
+                return false;
+            }
+            return port == address.port && ips.equals(ip, address.ip);
+        };
+
+        /// @brief Combines the address hash with the port.
+        #Pure
+        export let.override hash_code = func -> uint32 => hashing.combine(ips.hash(ip), port as uint32);
+
+        /// @brief `a.b.c.d:port` or `[ipv6]:port`.
+        #Pure
+        export let.override to_string = func -> string => match (ip) {
+            ips.IpAddr.V4(a) => a.to_string() .. ":" .. port.to_string(),
+            ips.IpAddr.V6(a) => "[" .. a.to_string() .. "]:" .. port.to_string(),
+        };
+    );
+
+    /// @brief The socket address of an IPv4 address and a port; traps when the port is outside 0 to 65535.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let of_v4 = func(ip: v4.Ipv4Addr, port: int) -> SocketAddr => new SocketAddr(ips.IpAddr.V4(ip), port);
+
+    /// @brief The socket address of an IPv6 address and a port; traps when the port is outside 0 to 65535.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let of_v6 = func(ip: v6.Ipv6Addr, port: int) -> SocketAddr => new SocketAddr(ips.IpAddr.V6(ip), port);
+
+    /// @brief Parses `a.b.c.d:port` or `[ipv6]:port` (the IPv6 text may carry `%zone`). The port is 1 to 5
+    /// decimal digits, 0 to 65535, with no leading zero except a lone `0`.
+    ///
+    /// Errors: Empty for ""; the address parser's error (offsets in the whole text); Syntax when the `:port`
+    /// part or the closing `]` is missing (at the length or after the `]`); UnexpectedEnd for an empty port;
+    /// InvalidCharacter at a byte of the port that is not a digit or at the byte after a leading zero;
+    /// OutOfRange at the port's start when it exceeds 65535.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let parse = func(text: string) -> Result<SocketAddr> {
+        last length = text.byte_length;
+        if (length == 0) {
+            return failed(ParseErrorKind.Empty, 0, "empty input");
+        }
+        let ip = ips.IpAddr.V4(v4.unspecified());
+        let colon = -1;
+        if (text.byte_at(0) == 91) {
+            let close = -1;
+            for (let i = 1; i < length; i++) {
+                if (text.byte_at(i) == 93) {
+                    close = i;
+                    break;
+                }
+            }
+            if (close < 0) {
+                return failed(ParseErrorKind.Syntax, length, "missing ']'");
+            }
+            match (v6.parse(text.slice(1, close))) {
+                Result.Ok(address) => {
+                    ip = ips.IpAddr.V6(address);
+                },
+                Result.Err(e) => {
+                    return shifted(e, 1);
+                },
+            }
+            if (close + 1 >= length || text.byte_at(close + 1) != 58) {
+                return failed(ParseErrorKind.Syntax, close + 1, "expected ':' and a port after ']'");
+            }
+            colon = close + 1;
+        } else {
+            for (let i = 0; i < length; i++) {
+                if (text.byte_at(i) == 58) {
+                    colon = i;
+                    break;
+                }
+            }
+            if (colon < 0) {
+                return failed(ParseErrorKind.Syntax, length, "expected ':' and a port");
+            }
+            match (v4.parse(text.slice(0, colon))) {
+                Result.Ok(address) => {
+                    ip = ips.IpAddr.V4(address);
+                },
+                Result.Err(e) => {
+                    return shifted(e, 0);
+                },
+            }
+        }
+        last start = colon + 1;
+        if (start >= length) {
+            return failed(ParseErrorKind.UnexpectedEnd, length, "expected a port");
+        }
+        let port = 0;
+        for (let i = start; i < length; i++) {
+            last b = text.byte_at(i) as int;
+            if (b < 48 || b > 57 || (i > start && text.byte_at(start) == 48)) {
+                return failed(ParseErrorKind.InvalidCharacter, i, "expected a decimal port");
+            }
+            if (i - start >= 5) {
+                return failed(ParseErrorKind.OutOfRange, start, "port above 65535");
+            }
+            port = port * 10 + b - 48;
+        }
+        return if (port > 65535) -> failed(ParseErrorKind.OutOfRange, start, "port above 65535")
+            else -> Result<SocketAddr>.Ok(new SocketAddr(ip, port));
+    };
+
+    /// @brief Creates a socket-address parse error at a UTF-8 byte offset.
+    let failed = func(kind: ParseErrorKind, offset: int, message: string) -> Result<SocketAddr> =>
+        Result<SocketAddr>.Err(Error.Parse { kind: kind, offset: offset, message: message });
+
+    /// @brief Moves an address parse error to its offset in the whole text.
+    let shifted = func(e: Error, start: int) -> Result<SocketAddr> => match (e) {
+        Error.Parse { kind, offset, message } => failed(kind, start + offset, message),
+        _ => Result<SocketAddr>.Err(e),
+    };
+);

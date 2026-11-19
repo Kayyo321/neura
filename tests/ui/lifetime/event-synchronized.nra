@@ -1,0 +1,12 @@
+// Edge case 85: an event is not emitted in a #Synchronized method.
+let events = import:Std.Events.Event;
+
+#Synchronized
+let Account = class (
+    let balance: int = 0;
+    let changed = new events.Event<int>();
+    export let deposit = func(amount: int) {
+        balance = balance + amount;
+        changed.emit(balance);
+    };
+);

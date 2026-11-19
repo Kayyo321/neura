@@ -1,0 +1,20 @@
+// Literal folding in string chains (docs/design/Expressions030.md, String
+// chains, edge case 35), built against string-folding.expanded.nra, where
+// each folded chain is written as the one literal it folds to.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let greeting = func() -> string => "hi " .. "there" .. "!";
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("a" .. "b" .. "c");
+        console.print_line(("a" .. "b") .. "c");
+        console.print_line("" .. "");
+        console.print_line("é" .. "\n" .. "€");
+        console.print_line(greeting());
+        let text = "x" .. ("y" .. "z");
+        console.print_line(text);
+        return program.ExitCode.Ok;
+    };
+);

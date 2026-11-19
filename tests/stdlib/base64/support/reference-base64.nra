@@ -33,13 +33,13 @@ export let ReferenceBase64 = module (
     const UrlAlphabet: string = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
     /// @brief Byte to digit value, 255 outside the alphabet. Built on first use.
-    let standard_values: uint8[list] = [];
+    let standard_values: uint8[list] = new;
     /// @brief The lazily initialized URL-safe byte-to-digit lookup table.
-    let url_values: uint8[list] = [];
+    let url_values: uint8[list] = new;
 
     /// @brief Builds a byte-to-digit lookup table for the selected alphabet.
     let values_of = func(alphabet: string) -> uint8[list] {
-        let values: uint8[list] = [];
+        let values: uint8[list] = new;
         for (let b = 0; b < 256; b++) {
             values.append(255);
         }
@@ -97,7 +97,7 @@ export let ReferenceBase64 = module (
 
     /// @brief Packs each group of bytes into six-bit digits and adds padding when requested.
     let encode_with = func(bytes: uint8[list], alphabet: string, padded: bool) -> string {
-        let chars: uint8[list] = [];
+        let chars: uint8[list] = new;
         let count = bytes.length;
         let i = 0;
         while (i + 3 <= count) {
@@ -137,7 +137,7 @@ export let ReferenceBase64 = module (
     /// unused bits.
     let decode_with = func(text: string, values: uint8[list], padded: bool) -> Result<uint8[list]> {
         let count = text.byte_length;
-        let bytes: uint8[list] = [];
+        let bytes: uint8[list] = new;
         // Whole groups of four alphabet characters.
         let i = 0;
         while (i + 4 <= count) {

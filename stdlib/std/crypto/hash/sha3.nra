@@ -1,0 +1,470 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Algorithm;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let.promote _ = import:Std.Crypto.ExtendableOutput;
+let keccak = import:Std.Crypto.Internal.Keccak;
+let sp800_185 = import:Std.Crypto.Internal.Sp800185;
+let.promote _ = import:Std.Crypto.StreamingDigest;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief SHA-3 and its extendable-output functions: SHA3-224, SHA3-256, SHA3-384 and SHA3-512, SHAKE128 and
+/// SHAKE256 (FIPS 202), cSHAKE128 and cSHAKE256 (SP 800-185), and TurboSHAKE128 and TurboSHAKE256 (RFC 9861)
+/// (Stdlib.md section 21.4).
+///
+/// Every function is the Keccak-p[1600] sponge in Neura code, with no hardware acceleration. Each digest checks the
+/// current Std.Crypto.Core.CryptoPolicy when it is created.
+/// @see [Std.Crypto.Hash.Sha3](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Hash-Sha3)
+#Since("0.3.0")
+export let Sha3 = module (
+    /// @brief A running SHA3-224 digest: 28 bytes of output, 144-byte rate.
+    #[Final, Since("0.3.0")]
+    export let Sha3_224 = class implements StreamingDigest<Sha3_224> (
+        /// @brief The sponge.
+        last sponge: keccak.Sponge = new(144, 6, 24);
+
+        /// @brief Checks the policy.
+        export let init = func {
+            crypto_policy.require(Algorithm.Sha3_224);
+        };
+
+        /// @brief A new digest with no bytes added.
+        export static let create = func() -> Sha3_224 => new Sha3_224();
+        /// @brief 28.
+        export static let output_length = func() -> int => 28;
+        /// @brief The rate, 144.
+        export static let block_length = func() -> int => 144;
+        /// @brief `Algorithm.Sha3_224`.
+        export let algorithm = func -> Algorithm => Algorithm.Sha3_224;
+
+        /// @brief Adds the bytes to the message.
+        export let update = func(bytes: uint8[list]) {
+            sponge.absorb(bytes);
+        };
+
+        /// @brief Ends the digest and returns the 28-byte hash. A second call traps.
+        export let finish = func -> uint8[list] {
+            if (sponge.is_squeezing()) {
+                trap_with_message("invalid state: digest finished");
+            }
+            return sponge.squeeze(28);
+        };
+
+        export let.override to_string = func -> string => "SHA3-224";
+    );
+
+    /// @brief The SHA3-224 hash of the bytes.
+    #[NoDiscard, Since("0.3.0")]
+    export let sha3_224 = func(bytes: uint8[list]) -> uint8[list] {
+        let digest = new Sha3_224();
+        digest.update(bytes);
+        return digest.finish();
+    };
+
+    /// @brief A running SHA3-256 digest: 32 bytes of output, 136-byte rate.
+    #[Final, Since("0.3.0")]
+    export let Sha3_256 = class implements StreamingDigest<Sha3_256> (
+        /// @brief The sponge.
+        last sponge: keccak.Sponge = new(136, 6, 24);
+
+        /// @brief Checks the policy.
+        export let init = func {
+            crypto_policy.require(Algorithm.Sha3_256);
+        };
+
+        /// @brief A new digest with no bytes added.
+        export static let create = func() -> Sha3_256 => new Sha3_256();
+        /// @brief 32.
+        export static let output_length = func() -> int => 32;
+        /// @brief The rate, 136.
+        export static let block_length = func() -> int => 136;
+        /// @brief `Algorithm.Sha3_256`.
+        export let algorithm = func -> Algorithm => Algorithm.Sha3_256;
+
+        /// @brief Adds the bytes to the message.
+        export let update = func(bytes: uint8[list]) {
+            sponge.absorb(bytes);
+        };
+
+        /// @brief Ends the digest and returns the 32-byte hash. A second call traps.
+        export let finish = func -> uint8[list] {
+            if (sponge.is_squeezing()) {
+                trap_with_message("invalid state: digest finished");
+            }
+            return sponge.squeeze(32);
+        };
+
+        export let.override to_string = func -> string => "SHA3-256";
+    );
+
+    /// @brief The SHA3-256 hash of the bytes.
+    #[NoDiscard, Since("0.3.0")]
+    export let sha3_256 = func(bytes: uint8[list]) -> uint8[list] {
+        let digest = new Sha3_256();
+        digest.update(bytes);
+        return digest.finish();
+    };
+
+    /// @brief A running SHA3-384 digest: 48 bytes of output, 104-byte rate.
+    #[Final, Since("0.3.0")]
+    export let Sha3_384 = class implements StreamingDigest<Sha3_384> (
+        /// @brief The sponge.
+        last sponge: keccak.Sponge = new(104, 6, 24);
+
+        /// @brief Checks the policy.
+        export let init = func {
+            crypto_policy.require(Algorithm.Sha3_384);
+        };
+
+        /// @brief A new digest with no bytes added.
+        export static let create = func() -> Sha3_384 => new Sha3_384();
+        /// @brief 48.
+        export static let output_length = func() -> int => 48;
+        /// @brief The rate, 104.
+        export static let block_length = func() -> int => 104;
+        /// @brief `Algorithm.Sha3_384`.
+        export let algorithm = func -> Algorithm => Algorithm.Sha3_384;
+
+        /// @brief Adds the bytes to the message.
+        export let update = func(bytes: uint8[list]) {
+            sponge.absorb(bytes);
+        };
+
+        /// @brief Ends the digest and returns the 48-byte hash. A second call traps.
+        export let finish = func -> uint8[list] {
+            if (sponge.is_squeezing()) {
+                trap_with_message("invalid state: digest finished");
+            }
+            return sponge.squeeze(48);
+        };
+
+        export let.override to_string = func -> string => "SHA3-384";
+    );
+
+    /// @brief The SHA3-384 hash of the bytes.
+    #[NoDiscard, Since("0.3.0")]
+    export let sha3_384 = func(bytes: uint8[list]) -> uint8[list] {
+        let digest = new Sha3_384();
+        digest.update(bytes);
+        return digest.finish();
+    };
+
+    /// @brief A running SHA3-512 digest: 64 bytes of output, 72-byte rate.
+    #[Final, Since("0.3.0")]
+    export let Sha3_512 = class implements StreamingDigest<Sha3_512> (
+        /// @brief The sponge.
+        last sponge: keccak.Sponge = new(72, 6, 24);
+
+        /// @brief Checks the policy.
+        export let init = func {
+            crypto_policy.require(Algorithm.Sha3_512);
+        };
+
+        /// @brief A new digest with no bytes added.
+        export static let create = func() -> Sha3_512 => new Sha3_512();
+        /// @brief 64.
+        export static let output_length = func() -> int => 64;
+        /// @brief The rate, 72.
+        export static let block_length = func() -> int => 72;
+        /// @brief `Algorithm.Sha3_512`.
+        export let algorithm = func -> Algorithm => Algorithm.Sha3_512;
+
+        /// @brief Adds the bytes to the message.
+        export let update = func(bytes: uint8[list]) {
+            sponge.absorb(bytes);
+        };
+
+        /// @brief Ends the digest and returns the 64-byte hash. A second call traps.
+        export let finish = func -> uint8[list] {
+            if (sponge.is_squeezing()) {
+                trap_with_message("invalid state: digest finished");
+            }
+            return sponge.squeeze(64);
+        };
+
+        export let.override to_string = func -> string => "SHA3-512";
+    );
+
+    /// @brief The SHA3-512 hash of the bytes.
+    #[NoDiscard, Since("0.3.0")]
+    export let sha3_512 = func(bytes: uint8[list]) -> uint8[list] {
+        let digest = new Sha3_512();
+        digest.update(bytes);
+        return digest.finish();
+    };
+
+    /// @brief SHAKE128. An extendable-output function: `squeeze` and `read` continue the output stream.
+    #[Final, Since("0.3.0")]
+    export let Shake128 = class implements ExtendableOutput<Shake128> (
+        /// @brief The sponge.
+        let sponge: keccak.Sponge;
+
+        /// @brief Checks the policy.
+        export let init = func {
+            crypto_policy.require(Algorithm.Shake128);
+            sponge = new(168, 31, 24);
+        };
+
+        /// @brief A new function with no bytes added.
+        export static let create = func() -> Shake128 => new Shake128();
+        /// @brief The length of `finish`'s result, 32: the output at the function's security strength.
+        export static let output_length = func() -> int => 32;
+        /// @brief The rate, 168.
+        export static let block_length = func() -> int => 168;
+        /// @brief `Algorithm.Shake128`.
+        export let algorithm = func -> Algorithm => Algorithm.Shake128;
+
+        /// @brief Adds the bytes to the input. Traps with "invalid state: digest finished" once output was read.
+        export let update = func(bytes: uint8[list]) {
+            sponge.absorb(bytes);
+        };
+
+        /// @brief The first 32 bytes of output (or the next 32, if output was already read).
+        export let finish = func -> uint8[list] => sponge.squeeze(32);
+
+        /// @brief The next `count` bytes of output.
+        export let squeeze = func(count: int) -> uint8[list] => sponge.squeeze(count);
+
+        export let.override to_string = func -> string => "SHAKE128";
+    );
+
+    /// @brief The first `length` bytes of SHAKE128 of the bytes.
+    #[NoDiscard, Since("0.3.0")]
+    export let shake128 = func(bytes: uint8[list], length: int) -> uint8[list] {
+        let xof = new Shake128();
+        xof.update(bytes);
+        return xof.squeeze(length);
+    };
+
+    /// @brief SHAKE256. An extendable-output function: `squeeze` and `read` continue the output stream.
+    #[Final, Since("0.3.0")]
+    export let Shake256 = class implements ExtendableOutput<Shake256> (
+        /// @brief The sponge.
+        let sponge: keccak.Sponge;
+
+        /// @brief Checks the policy.
+        export let init = func {
+            crypto_policy.require(Algorithm.Shake256);
+            sponge = new(136, 31, 24);
+        };
+
+        /// @brief A new function with no bytes added.
+        export static let create = func() -> Shake256 => new Shake256();
+        /// @brief The length of `finish`'s result, 64: the output at the function's security strength.
+        export static let output_length = func() -> int => 64;
+        /// @brief The rate, 136.
+        export static let block_length = func() -> int => 136;
+        /// @brief `Algorithm.Shake256`.
+        export let algorithm = func -> Algorithm => Algorithm.Shake256;
+
+        /// @brief Adds the bytes to the input. Traps with "invalid state: digest finished" once output was read.
+        export let update = func(bytes: uint8[list]) {
+            sponge.absorb(bytes);
+        };
+
+        /// @brief The first 64 bytes of output (or the next 64, if output was already read).
+        export let finish = func -> uint8[list] => sponge.squeeze(64);
+
+        /// @brief The next `count` bytes of output.
+        export let squeeze = func(count: int) -> uint8[list] => sponge.squeeze(count);
+
+        export let.override to_string = func -> string => "SHAKE256";
+    );
+
+    /// @brief The first `length` bytes of SHAKE256 of the bytes.
+    #[NoDiscard, Since("0.3.0")]
+    export let shake256 = func(bytes: uint8[list], length: int) -> uint8[list] {
+        let xof = new Shake256();
+        xof.update(bytes);
+        return xof.squeeze(length);
+    };
+
+    /// @brief cSHAKE128 (SP 800-185, section 3). With an empty function name N and customization S it is SHAKE128; otherwise the sponge first absorbs bytepad(encode_string(N) || encode_string(S)) and pads with 0x04.
+    #[Final, Since("0.3.0")]
+    export let CShake128 = class implements ExtendableOutput<CShake128> (
+        /// @brief The sponge.
+        let sponge: keccak.Sponge;
+
+        /// @brief cSHAKE128 with empty function name and customization.
+        export let init = func {
+            crypto_policy.require(Algorithm.CShake128);
+            sponge = start(168, new, new);
+        } or func(function_name: uint8[list], customization: uint8[list]) {
+            crypto_policy.require(Algorithm.CShake128);
+            sponge = start(168, function_name, customization);
+        };
+
+        /// @brief A new function with no bytes added, with empty function name and customization (then it equals SHAKE128).
+        export static let create = func() -> CShake128 => new CShake128();
+        /// @brief The length of `finish`'s result, 32: the output at the function's security strength.
+        export static let output_length = func() -> int => 32;
+        /// @brief The rate, 168.
+        export static let block_length = func() -> int => 168;
+        /// @brief `Algorithm.CShake128`.
+        export let algorithm = func -> Algorithm => Algorithm.CShake128;
+
+        /// @brief Adds the bytes to the input. Traps with "invalid state: digest finished" once output was read.
+        export let update = func(bytes: uint8[list]) {
+            sponge.absorb(bytes);
+        };
+
+        /// @brief The first 32 bytes of output (or the next 32, if output was already read).
+        export let finish = func -> uint8[list] => sponge.squeeze(32);
+
+        /// @brief The next `count` bytes of output.
+        export let squeeze = func(count: int) -> uint8[list] => sponge.squeeze(count);
+
+        export let.override to_string = func -> string => "cSHAKE128 (SP 800-185, section 3)";
+    );
+
+    /// @brief The first `length` bytes of cSHAKE128(bytes, length, function_name, customization).
+    #[NoDiscard, Since("0.3.0")]
+    export let cshake128 = func(bytes: uint8[list], length: int, function_name: uint8[list], customization: uint8[list])
+        -> uint8[list] {
+        let xof = new CShake128(function_name, customization);
+        xof.update(bytes);
+        return xof.squeeze(length);
+    };
+
+    /// @brief cSHAKE256 (SP 800-185, section 3). With an empty function name N and customization S it is SHAKE256; otherwise the sponge first absorbs bytepad(encode_string(N) || encode_string(S)) and pads with 0x04.
+    #[Final, Since("0.3.0")]
+    export let CShake256 = class implements ExtendableOutput<CShake256> (
+        /// @brief The sponge.
+        let sponge: keccak.Sponge;
+
+        /// @brief cSHAKE256 with empty function name and customization.
+        export let init = func {
+            crypto_policy.require(Algorithm.CShake256);
+            sponge = start(136, new, new);
+        } or func(function_name: uint8[list], customization: uint8[list]) {
+            crypto_policy.require(Algorithm.CShake256);
+            sponge = start(136, function_name, customization);
+        };
+
+        /// @brief A new function with no bytes added, with empty function name and customization (then it equals SHAKE256).
+        export static let create = func() -> CShake256 => new CShake256();
+        /// @brief The length of `finish`'s result, 64: the output at the function's security strength.
+        export static let output_length = func() -> int => 64;
+        /// @brief The rate, 136.
+        export static let block_length = func() -> int => 136;
+        /// @brief `Algorithm.CShake256`.
+        export let algorithm = func -> Algorithm => Algorithm.CShake256;
+
+        /// @brief Adds the bytes to the input. Traps with "invalid state: digest finished" once output was read.
+        export let update = func(bytes: uint8[list]) {
+            sponge.absorb(bytes);
+        };
+
+        /// @brief The first 64 bytes of output (or the next 64, if output was already read).
+        export let finish = func -> uint8[list] => sponge.squeeze(64);
+
+        /// @brief The next `count` bytes of output.
+        export let squeeze = func(count: int) -> uint8[list] => sponge.squeeze(count);
+
+        export let.override to_string = func -> string => "cSHAKE256 (SP 800-185, section 3)";
+    );
+
+    /// @brief The first `length` bytes of cSHAKE256(bytes, length, function_name, customization).
+    #[NoDiscard, Since("0.3.0")]
+    export let cshake256 = func(bytes: uint8[list], length: int, function_name: uint8[list], customization: uint8[list])
+        -> uint8[list] {
+        let xof = new CShake256(function_name, customization);
+        xof.update(bytes);
+        return xof.squeeze(length);
+    };
+
+    /// @brief A cSHAKE sponge of the rate: SHAKE's when N and S are empty, otherwise primed with
+    /// bytepad(encode_string(N) || encode_string(S), rate) and padded with 0x04. Also used by TupleHash and KMAC.
+    #[Internal, Since("0.3.0")]
+    export let start = func(rate: int, function_name: uint8[list], customization: uint8[list]) -> keccak.Sponge {
+        if (function_name.length == 0 && customization.length == 0) {
+            return new keccak.Sponge(rate, 31, 24);
+        }
+        let sponge = new keccak.Sponge(rate, 4, 24);
+        last prefix = words.concat(sp800_185.encode_string(function_name), sp800_185.encode_string(customization));
+        sponge.absorb(sp800_185.bytepad(prefix, rate));
+        return sponge;
+    };
+
+    /// @brief TurboSHAKE128 (RFC 9861). The Keccak-p[1600, 12] sponge with a domain byte D from 0x01 to 0x7F (0x1F by default).
+    #[Final, Since("0.3.0")]
+    export let TurboShake128 = class implements ExtendableOutput<TurboShake128> (
+        /// @brief The sponge.
+        let sponge: keccak.Sponge;
+
+        /// @brief TurboSHAKE128 with the domain byte 0x1F.
+        export let init = func {
+            crypto_policy.require(Algorithm.TurboShake128);
+            sponge = new(168, 31, 12);
+        } or func(domain: uint8) {
+            crypto_policy.require(Algorithm.TurboShake128);
+            if (domain < 1 || domain > 127) {
+                trap_with_message("invalid argument: TurboSHAKE domain byte must be from 1 to 127");
+            }
+            sponge = new(168, domain, 12);
+        };
+
+        /// @brief A new function with no bytes added, with the domain byte 0x1F.
+        export static let create = func() -> TurboShake128 => new TurboShake128();
+        /// @brief The length of `finish`'s result, 32: the output at the function's security strength.
+        export static let output_length = func() -> int => 32;
+        /// @brief The rate, 168.
+        export static let block_length = func() -> int => 168;
+        /// @brief `Algorithm.TurboShake128`.
+        export let algorithm = func -> Algorithm => Algorithm.TurboShake128;
+
+        /// @brief Adds the bytes to the input. Traps with "invalid state: digest finished" once output was read.
+        export let update = func(bytes: uint8[list]) {
+            sponge.absorb(bytes);
+        };
+
+        /// @brief The first 32 bytes of output (or the next 32, if output was already read).
+        export let finish = func -> uint8[list] => sponge.squeeze(32);
+
+        /// @brief The next `count` bytes of output.
+        export let squeeze = func(count: int) -> uint8[list] => sponge.squeeze(count);
+
+        export let.override to_string = func -> string => "TurboSHAKE128 (RFC 9861)";
+    );
+
+    /// @brief TurboSHAKE256 (RFC 9861). The Keccak-p[1600, 12] sponge with a domain byte D from 0x01 to 0x7F (0x1F by default).
+    #[Final, Since("0.3.0")]
+    export let TurboShake256 = class implements ExtendableOutput<TurboShake256> (
+        /// @brief The sponge.
+        let sponge: keccak.Sponge;
+
+        /// @brief TurboSHAKE256 with the domain byte 0x1F.
+        export let init = func {
+            crypto_policy.require(Algorithm.TurboShake256);
+            sponge = new(136, 31, 12);
+        } or func(domain: uint8) {
+            crypto_policy.require(Algorithm.TurboShake256);
+            if (domain < 1 || domain > 127) {
+                trap_with_message("invalid argument: TurboSHAKE domain byte must be from 1 to 127");
+            }
+            sponge = new(136, domain, 12);
+        };
+
+        /// @brief A new function with no bytes added, with the domain byte 0x1F.
+        export static let create = func() -> TurboShake256 => new TurboShake256();
+        /// @brief The length of `finish`'s result, 64: the output at the function's security strength.
+        export static let output_length = func() -> int => 64;
+        /// @brief The rate, 136.
+        export static let block_length = func() -> int => 136;
+        /// @brief `Algorithm.TurboShake256`.
+        export let algorithm = func -> Algorithm => Algorithm.TurboShake256;
+
+        /// @brief Adds the bytes to the input. Traps with "invalid state: digest finished" once output was read.
+        export let update = func(bytes: uint8[list]) {
+            sponge.absorb(bytes);
+        };
+
+        /// @brief The first 64 bytes of output (or the next 64, if output was already read).
+        export let finish = func -> uint8[list] => sponge.squeeze(64);
+
+        /// @brief The next `count` bytes of output.
+        export let squeeze = func(count: int) -> uint8[list] => sponge.squeeze(count);
+
+        export let.override to_string = func -> string => "TurboSHAKE256 (RFC 9861)";
+    );
+);

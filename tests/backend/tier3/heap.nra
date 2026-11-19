@@ -116,7 +116,7 @@ let Tier3Heap = module:program.Entry (
     // Objects allocated in a loop through a constructor, their fields read
     // and written, kept in a list and read back by index.
     let objects = func(n: int32) -> int64 {
-        let cells: Cell[list] = [];
+        let cells: Cell[list] = new;
         for (let i = 0; i < n; i = i + 1) {
             let cell = new Cell(i as int64);
             cell.next = cell.value * 2 + 1;
@@ -131,8 +131,8 @@ let Tier3Heap = module:program.Entry (
 
     // Appends to lists of two widths in a loop, and reads them back.
     let append = func(n: int32) -> int64 {
-        let bytes: uint8[list] = [];
-        let words: int64[list] = [];
+        let bytes: uint8[list] = new;
+        let words: int64[list] = new;
         for (let i = 0; i < n; i = i + 1) {
             bytes.append((i % 251) as uint8);
             words.append((i * 7) as int64);
@@ -156,7 +156,7 @@ let Tier3Heap = module:program.Entry (
     };
 
     let wide = func(n: int32) -> int64 {
-        let items: Base[list] = [new Base(), new Wide(), new Small()];
+        let items: Base[list] = new([new Base(), new Wide(), new Small()]);
         let sum: int64 = 0;
         for (let i = 0; i < n; i = i + 1) {
             sum = (sum + poke(items[i % 3], i as int64)) & Mask;
@@ -184,7 +184,7 @@ let Tier3Heap = module:program.Entry (
     // element storage are read again after each.
     let around = func(n: int32) -> int64 {
         let cell = new Cell(3);
-        let values: int64[list] = [];
+        let values: int64[list] = new;
         let sum: int64 = 0;
         for (let i = 0; i < n; i = i + 1) {
             values.append(cell.value + (i as int64));
@@ -211,7 +211,7 @@ let Tier3Heap = module:program.Entry (
     };
 
     let inlined = func(n: int32) -> int64 {
-        let values: int64[list] = [];
+        let values: int64[list] = new;
         let total: int64 = 0;
         let step: int64 = 7;
         for (let i = 0; i < n; i = i + 1) {
@@ -233,7 +233,7 @@ let Tier3Heap = module:program.Entry (
 
     // Class tests and casts on a list of mixed entries.
     let classes = func(n: int32) -> int64 {
-        let items: Base[list] = [new Base(), new Wide(), new Small(), new Wide()];
+        let items: Base[list] = new([new Base(), new Wide(), new Small(), new Wide()]);
         let sum: int64 = 0;
         for (let i = 0; i < n; i = i + 1) {
             let item = items[i % 4];
@@ -250,7 +250,7 @@ let Tier3Heap = module:program.Entry (
 
     // A cast that fails after some iterations.
     let bad_cast = func(n: int32) -> int64 {
-        let items: Base[list] = [new Wide(), new Wide(), new Small()];
+        let items: Base[list] = new([new Wide(), new Wide(), new Small()]);
         let sum: int64 = 0;
         for (let i = 0; i < n; i = i + 1) {
             sum = sum + (items[i % 3] as Wide).w1;
@@ -260,7 +260,7 @@ let Tier3Heap = module:program.Entry (
 
     // Enum names.
     let names = func(n: int32) -> int64 {
-        let colors: Color[list] = [Color.Red, Color.Green, Color.Blue, Color.Violet];
+        let colors: Color[list] = new([Color.Red, Color.Green, Color.Blue, Color.Violet]);
         let sum: int64 = 0;
         for (let i = 0; i < n; i = i + 1) {
             sum = sum + (colors[i % 4].to_string().byte_length as int64);

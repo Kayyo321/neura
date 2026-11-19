@@ -1,0 +1,549 @@
+let channels = import:Std.Concurrent.Channel;
+let error = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Error;
+let host = import:Std.Ui.Internal.Host;
+let reconcile = import:Std.Ui.Internal.Reconcile;
+let result = import:Std.Core.Result;
+let scope = import:Std.Concurrent.Scope;
+let ui = import:Std.Ui;
+
+/// @brief Mounting components in a browser document, over the `neura.ui.*` host services of the browser
+/// runtime (docs/runtime/Providers.md, "UI services"). `mount` opens a root on an element, reconciles each turn's
+/// renders into the commit encoding and decodes the browser's events into the records of `Std.Ui`.
+#Since("0.3.0")
+export let Web = module (
+    /// @brief Reads the event encoding, version 1.
+    #[Final, NotThreadSafe]
+    let Reader = class (
+        last bytes: uint8[list];
+        let at: int = 0;
+
+        export let init = func(bytes: uint8[list]) => set;
+
+        let need = func(count: int) {
+            if (at + count > bytes.length) {
+                trap_with_message("invalid UI event batch: truncated");
+            }
+        };
+
+        export let u8 = func -> uint8 {
+            need(1);
+            last value = bytes[at];
+            at += 1;
+            return value;
+        };
+
+        export let u32 = func -> uint32 {
+            need(4);
+            last value = (bytes[at] as uint32) | ((bytes[at + 1] as uint32) << 8) | ((bytes[at + 2] as uint32) << 16)
+                | ((bytes[at + 3] as uint32) << 24);
+            at += 4;
+            return value;
+        };
+
+        export let i32 = func -> int32 {
+            last raw = u32();
+            if (raw >= 2147483648) {
+                return ((raw as int64) - 4294967296) as int32;
+            }
+            return raw as int32;
+        };
+
+        export let u64 = func -> uint64 {
+            last low = u32() as uint64;
+            last high = u32() as uint64;
+            return low | (high << 32);
+        };
+
+        export let f64 = func -> float64 => float64.from_bits(u64());
+
+        export let flag = func -> bool => u8() != 0;
+
+        export let text = func -> string {
+            last count = u32() as int;
+            need(count);
+            last part: uint8[list] = new;
+            for (let i = 0; i < count; i++) {
+                part.append(bytes[at + i]);
+            }
+            at += count;
+            last decoded = string.from_utf8(part);
+            if (not decoded[0]) {
+                trap_with_message("invalid UI event batch: text is not UTF-8");
+            }
+            return decoded[1];
+        };
+
+        export let modifiers = func -> ui.Modifiers {
+            last bits = u8();
+            return new ui.Modifiers((bits & 1) != 0, (bits & 2) != 0, (bits & 4) != 0, (bits & 8) != 0);
+        };
+
+        export let done = func -> bool => at == bytes.length;
+
+        /// @brief `Reader(` the position and the length `)`.
+        export let.override to_string = func -> string =>
+            "Reader(" .. at.to_string() .. " of " .. bytes.length.to_string() .. ")";
+    );
+
+    /// @brief What the browser host keeps for one root.
+    #[Final, NotThreadSafe]
+    let Mounted = class (
+        export last selector: string;
+        /// The handle the browser issued; it changes when a reset reopens the root.
+        export let provider: int64;
+        export let reconciler: reconcile.Reconciler = new reconcile.Reconciler();
+        /// Set when the browser's event wait failed with an error other than a cancellation: no event will come.
+        export let failed: bool = false;
+        /// How many of the reconciler's template descriptors the browser has registered for this handle.
+        export let registered: int = 0;
+        export let open: bool = true;
+
+        export let init = func(selector: string, provider: int64) => set;
+
+        /// @brief `Mounted(` the selector and the browser's handle `)`.
+        export let.override to_string = func -> string =>
+            "Mounted(" .. selector .. ", " .. provider.to_string() .. (open ? ")" : ", closed)");
+    );
+
+    // The most event records one wait takes from the browser; below the root's queue limit, so the root never
+    // drops what the browser delivered.
+    let BatchLimit: int = 64;
+
+    let host_error = func(service: string, code: uint32) -> Error {
+        let reason = "host error " .. code.to_string();
+        if (code == 1) {
+            reason = "no element matches the selector";
+        } else if (code == 3) {
+            reason = "the element is inside, or contains, another root";
+        } else if (code == 4) {
+            reason = "the host refused the request";
+        } else if (code == 14) {
+            reason = "the ui capability is not granted: run the image in a browser page";
+        } else if (code == 15) {
+            reason = "the request was cancelled";
+        } else if (code == 100) {
+            reason = "the browser failed, or U-9 roots are open";
+        }
+        return error.custom("ui.web", service .. ": " .. reason .. " (" .. code.to_string() .. ")");
+    };
+
+    // The browser's next events for a root, as a function a race can spawn.
+    let next_events_of = func(provider: int64, max: int) -> host.BytesOutcome => host.next_events(provider, max);
+
+    // A navigation wait in a race: the page's next navigation when the root listens for one, and otherwise a wait
+    // that only the race's cancellation ends. Spawned, so it calls nothing but the host and the channel.
+    let next_path_or_nothing = func(listen: bool, gate: channels.Receiver<int>) -> host.PathOutcome {
+        if (listen) {
+            return host.next_path();
+        }
+        gate.receive();
+        return host.PathOutcome.Error(15);
+    };
+
+    // What one race saw. `posted` events or a navigation, a `completed` command ticket, a `failed` event wait or a
+    // closed root, or nothing (a navigation wait that ended without a navigation): the caller races again.
+    #[Final, NotThreadSafe]
+    let RaceResult = class (
+        export let posted: bool = false;
+        export let completed: bool = false;
+        export let ticket: uint64 = 0;
+        export let failed: bool = false;
+
+        /// @brief `RaceResult(` what the race saw `)`.
+        export let.override to_string = func -> string =>
+            "RaceResult(" .. (posted ? "posted" : "") .. (completed ? " completed " .. ticket.to_string() : "")
+            .. (failed ? " failed" : "") .. ")";
+    );
+
+    /// @brief The `ui.Host` of a browser page. Each instance serves the roots it opened; `mount` makes one per root.
+    /// It is also the page's `ui.HistoryHost` over `neura.history.*`, in the routing mode the page chose (hash
+    /// routing, `#/parts/7`, or history routing, `/parts/7`), its `ui.FocusHost` over `neura.ui.focus`, and a
+    /// `ui.TaskHost`: a root waits for the browser's events, the page's navigations (back, forward, an edited
+    /// address) and command completions together, so neither a running command nor a pending navigation holds
+    /// the others.
+    #[Final, NotThreadSafe]
+    export let Host = class implements ui.Host, ui.HistoryHost, ui.FocusHost, ui.TaskHost (
+        let roots: Mounted[list] = new;
+        // Set when the page refused a navigation wait (no history service, or another root of the page already
+        // waits): this host's roots stop listening for navigations.
+        let history_off: bool = false;
+
+        let path_of = func(outcome: host.PathOutcome, fallback: string) -> string {
+            match (outcome) {
+                host.PathOutcome.Ok(path) => {
+                    return path;
+                },
+                host.PathOutcome.Error(_) => {
+                    return fallback;
+                },
+            }
+        };
+
+        /// @brief The page's current path, or `/` when the page keeps no history.
+        export let location = func -> string => path_of(host.current_path(), "/");
+
+        /// @brief Adds a history entry for `path` without loading a page; returns the current path.
+        export let push_location = func(path: string) -> string => path_of(host.push_path(path), path);
+
+        /// @brief Replaces the current history entry with `path`; returns the current path.
+        export let replace_location = func(path: string) -> string => path_of(host.replace_path(path), path);
+
+        /// @brief The `href` of a link to `path` in the page's routing mode (`neura.history.link`): `#/parts/7`
+        /// with hash routing, `/parts/7` below the bundle's base with history routing; the hash form when the page
+        /// keeps no history.
+        export let link = func(path: string) -> string => path_of(host.link_path(path), "#" .. path);
+
+        /// @brief Moves the keyboard focus to the element of the root whose `id` is `element_id`
+        /// (`neura.ui.focus`); false when the root is closed or holds no such element.
+        export let focus = func(root: uint64, element_id: string) -> bool {
+            last mounted = entry(root);
+            if (not mounted.open) {
+                return false;
+            }
+            match (host.focus(mounted.provider, element_id)) {
+                host.DoneOutcome.Ok => {
+                    return true;
+                },
+                host.DoneOutcome.Error(_) => {
+                    return false;
+                },
+            }
+        };
+
+        let entry = func(root: uint64) -> Mounted {
+            last index = (root as int) - 1;
+            if (index < 0 || index >= roots.length) {
+                trap_with_message("invalid argument: not a root of this host");
+            }
+            return roots[index];
+        };
+
+        /// @brief Opens a root on the first element `target` (a CSS selector) matches.
+        export let open = func(target: string) -> result.Result<uint64> {
+            match (host.open_root(target)) {
+                host.HandleOutcome.Ok(handle) => {
+                    roots.append(new Mounted(target, handle));
+                    return result.Result<uint64>.Ok(roots.length as uint64);
+                },
+                host.HandleOutcome.Error(code) => {
+                    return result.Result<uint64>.Err(host_error("open " .. target, code));
+                },
+            }
+        };
+
+        /// @brief Reconciles the turn's renders with the mounted tree, registers new templates, and applies the
+        /// encoded operations. A refused tree changes nothing; a browser failure faults the root.
+        export let commit = func(root: uint64, batch: ui.Commit) -> result.Result<ui.RenderOutcome> {
+            last mounted = entry(root);
+            if (not mounted.open) {
+                return result.Result<ui.RenderOutcome>.Err(error.custom("ui.web", "the root is closed"));
+            }
+            last plan = mounted.reconciler.prepare_turn(batch.top, batch.rendered);
+            if (plan.diagnostic != nil) {
+                return result.Result<ui.RenderOutcome>.Ok(ui.RenderOutcome.Invalid(plan.diagnostic));
+            }
+            while (mounted.registered < mounted.reconciler.template_count()) {
+                last descriptor = mounted.reconciler.template_at(mounted.registered);
+                mounted.registered += 1;
+                match (host.register_template(mounted.provider, descriptor)) {
+                    host.HandleOutcome.Ok(_) => {},
+                    host.HandleOutcome.Error(code) => {
+                        last refusal = new ui.Diagnostic(ui.DiagnosticKind.LimitExceeded,
+                            "U-1 to U-3: the browser refused a template (error " .. code.to_string() .. ")", 0, -1, "");
+                        return result.Result<ui.RenderOutcome>.Ok(ui.RenderOutcome.Invalid(refusal));
+                    },
+                }
+            }
+            match (host.commit(mounted.provider, plan.encode())) {
+                host.DoneOutcome.Ok => {
+                    mounted.reconciler.accept(plan);
+                    return result.Result<ui.RenderOutcome>.Ok(ui.RenderOutcome.Committed);
+                },
+                host.DoneOutcome.Error(code) => {
+                    return result.Result<ui.RenderOutcome>.Err(host_error("commit", code));
+                },
+            }
+        };
+
+        /// @brief Waits for the browser's next events, decodes them and posts each to its listener's component.
+        /// A root whose router listens for navigations waits for the page's next navigation at the same time and
+        /// posts it with `post_navigation`. False when the root was closed or the wait failed.
+        export let wait = func(root: ui.Root) -> bool {
+            last mounted = entry(root.host_handle());
+            if (not mounted.open || mounted.failed) {
+                return false;
+            }
+            if (history_off || not root.listens_for_navigation()) {
+                match (host.next_events(mounted.provider, BatchLimit)) {
+                    host.BytesOutcome.Ok(bytes) => {
+                        return post_batch(root, mounted, bytes) > 0;
+                    },
+                    host.BytesOutcome.Error(_) => {
+                        mounted.failed = true;
+                        return false;
+                    },
+                }
+            }
+            // No command completes here: a channel that nothing sends on stands in for the completions.
+            const [_, nothing, _] = channels.open<uint64>(1);
+            while (true) {
+                last seen = race(root, mounted, nothing);
+                if (seen.posted) {
+                    return true;
+                }
+                if (seen.failed || seen.completed) {
+                    return false;
+                }
+            }
+            return false;
+        };
+
+        /// @brief Waits for the browser's events, the page's navigations (when the root listens for them) and
+        /// the next completion on `completions`, whichever comes first: `Events` after posting events or a
+        /// navigation, `Completed(ticket)`, or `Idle` when the event wait failed and only completions remain.
+        /// Each wait is a cancellable host request in a scope of its own; the losers are cancelled, and an answer
+        /// that arrived meanwhile is posted too, so no event is lost.
+        export let wait_with = func(root: ui.Root, completions: channels.Receiver<uint64>) -> ui.Wake {
+            last mounted = entry(root.host_handle());
+            if (not mounted.open || mounted.failed) {
+                return ui.Wake.Idle;
+            }
+            while (true) {
+                last seen = race(root, mounted, completions);
+                if (seen.completed) {
+                    return ui.Wake.Completed(seen.ticket);
+                }
+                if (seen.posted) {
+                    return ui.Wake.Events;
+                }
+                if (seen.failed) {
+                    return ui.Wake.Idle;
+                }
+            }
+            return ui.Wake.Idle;
+        };
+
+        // One race between the root's event wait, a navigation wait and `completions`.
+        let race = func(root: ui.Root, mounted: Mounted, completions: channels.Receiver<uint64>) -> RaceResult {
+            last seen = new RaceResult();
+            last listen = not history_off && root.listens_for_navigation();
+            last provider = mounted.provider;
+            // Nothing is sent on the gate: the race's cancellation ends a navigation wait that does not listen.
+            const [_, gate, _] = channels.open<int>(0);
+            let events_taken = false;
+            let path_taken = false;
+            scope (waits) {
+                let events = spawn next_events_of(provider, BatchLimit);
+                let paths = spawn next_path_or_nothing(listen, gate);
+                select {
+                    let got = events.join() => {
+                        events_taken = true;
+                        take_events(root, mounted, got, seen);
+                    },
+                    let moved = paths.join() => {
+                        path_taken = true;
+                        take_path(root, moved, seen);
+                    },
+                    let received = completions.receive() => {
+                        match (received) {
+                            channels.Received.Value(ticket) => {
+                                seen.completed = true;
+                                seen.ticket = ticket;
+                            },
+                            _ => {
+                                seen.failed = true;
+                            },
+                        }
+                    },
+                }
+                waits.cancel();
+                // A wait that the browser answered before its cancellation keeps its answer.
+                if (not events_taken) {
+                    take_events(root, mounted, events.join(), seen);
+                }
+                if (not path_taken) {
+                    take_path(root, paths.join(), seen);
+                }
+            }
+            return seen;
+        };
+
+        let take_events = func(root: ui.Root, mounted: Mounted, got: host.BytesOutcome, seen: RaceResult) {
+            match (got) {
+                host.BytesOutcome.Ok(bytes) => {
+                    if (post_batch(root, mounted, bytes) > 0) {
+                        seen.posted = true;
+                    } else {
+                        // An empty batch: the root was closed.
+                        seen.failed = true;
+                    }
+                },
+                host.BytesOutcome.Error(code) => {
+                    if (code != 15) {
+                        mounted.failed = true;
+                        seen.failed = true;
+                    }
+                },
+            }
+        };
+
+        let take_path = func(root: ui.Root, moved: host.PathOutcome, seen: RaceResult) {
+            match (moved) {
+                host.PathOutcome.Ok(path) => {
+                    root.post_navigation(path);
+                    seen.posted = true;
+                },
+                host.PathOutcome.Error(code) => {
+                    if (code != 15) {
+                        history_off = true;
+                    }
+                },
+            }
+        };
+
+        /// @brief Nothing to do: the browser queues the changed inputs after its overflow record.
+        export let resynchronize = func(root: ui.Root) {};
+
+        /// @brief Empties a faulted root by closing it and opening a new one on the same element.
+        export let reset = func(root: uint64) {
+            last mounted = entry(root);
+            if (not mounted.open) {
+                return;
+            }
+            host.close_root(mounted.provider);
+            mounted.reconciler.reset();
+            mounted.registered = 0;
+            match (host.open_root(mounted.selector)) {
+                host.HandleOutcome.Ok(handle) => {
+                    mounted.provider = handle;
+                },
+                host.HandleOutcome.Error(_) => {
+                    mounted.open = false;
+                },
+            }
+        };
+
+        /// @brief Closes the root: the browser empties its element and detaches its listeners.
+        export let close = func(root: uint64) {
+            last mounted = entry(root);
+            if (not mounted.open) {
+                return;
+            }
+            mounted.open = false;
+            host.close_root(mounted.provider);
+            mounted.reconciler = new reconcile.Reconciler();
+        };
+
+        /// @brief The browser's counts for the root (`neura.ui.stats`); zeros once it is closed.
+        export let stats = func(root: uint64) -> ui.HostStats {
+            last mounted = entry(root);
+            if (mounted.open) {
+                match (host.stats(mounted.provider)) {
+                    host.StatsOutcome.Ok(counts) => {
+                        return new ui.HostStats(counts[0], counts[1], counts[2], counts[3]);
+                    },
+                    host.StatsOutcome.Error(_) => {},
+                }
+            }
+            return new ui.HostStats(0, 0, 0, 0);
+        };
+
+        let deliver = func<E>(root: ui.Root, mounted: Mounted, handler: uint64, coalesce: bool, event: E) {
+            last target = mounted.reconciler.target_of(handler);
+            if (target == nil) {
+                // The listener was removed by a commit after the browser queued the event.
+                return;
+            }
+            last reconciler = mounted.reconciler;
+            root.post(handler, target, coalesce, new func() {
+                reconciler.deliver<E>(handler, event);
+            });
+        };
+
+        // Posts the records of one event batch in order; returns the number of records.
+        let post_batch = func(root: ui.Root, mounted: Mounted, bytes: uint8[list]) -> int {
+            last reader = new Reader(bytes);
+            if (reader.u8() != 1) {
+                trap_with_message("invalid UI event batch: unknown encoding");
+            }
+            last count = reader.u32() as int;
+            for (let i = 0; i < count; i++) {
+                last kind = reader.u8();
+                reader.u32();
+                last handler = reader.u64();
+                if (kind == 1 || kind == 2) {
+                    last button = reader.u8();
+                    last x = reader.f64();
+                    last y = reader.f64();
+                    last modifiers = reader.modifiers();
+                    last detail = reader.i32();
+                    deliver<ui.ClickEvent>(root, mounted, handler, false, new ui.ClickEvent(button, x, y, modifiers, detail));
+                } else if (kind == 3) {
+                    last value = reader.text();
+                    last checked = reader.flag();
+                    last composing = reader.flag();
+                    deliver<ui.InputEvent>(root, mounted, handler, false, new ui.InputEvent(value, checked, composing));
+                } else if (kind == 4) {
+                    last value = reader.text();
+                    last checked = reader.flag();
+                    deliver<ui.ChangeEvent>(root, mounted, handler, false, new ui.ChangeEvent(value, checked));
+                } else if (kind == 5) {
+                    deliver<ui.SubmitEvent>(root, mounted, handler, false, new ui.SubmitEvent(reader.text()));
+                } else if (kind == 6 || kind == 7) {
+                    last key = reader.text();
+                    last code = reader.text();
+                    last modifiers = reader.modifiers();
+                    last repeat = reader.flag();
+                    deliver<ui.KeyEvent>(root, mounted, handler, false, new ui.KeyEvent(key, code, modifiers, repeat));
+                } else if (kind == 8 || kind == 9) {
+                    deliver<ui.FocusEvent>(root, mounted, handler, false, new ui.FocusEvent());
+                } else if (kind >= 10 && kind <= 12) {
+                    last x = reader.f64();
+                    last y = reader.f64();
+                    last button = reader.u8();
+                    last device = reader.u8();
+                    let pointer = ui.PointerKind.Other;
+                    if (device == 0) {
+                        pointer = ui.PointerKind.Mouse;
+                    } else if (device == 1) {
+                        pointer = ui.PointerKind.Pen;
+                    } else if (device == 2) {
+                        pointer = ui.PointerKind.Touch;
+                    }
+                    last modifiers = reader.modifiers();
+                    deliver<ui.PointerEvent>(root, mounted, handler, kind == 12,
+                        new ui.PointerEvent(x, y, button, pointer, modifiers));
+                } else if (kind == 13) {
+                    last top = reader.f64();
+                    last left = reader.f64();
+                    deliver<ui.ScrollEvent>(root, mounted, handler, true, new ui.ScrollEvent(top, left));
+                } else if (kind == 14) {
+                    deliver<ui.ToggleEvent>(root, mounted, handler, false, new ui.ToggleEvent(reader.flag()));
+                } else if (kind == 15) {
+                    deliver<ui.CloseEvent>(root, mounted, handler, false, new ui.CloseEvent(reader.text()));
+                } else if (kind == 16) {
+                    root.post_overflow(reader.u32());
+                } else {
+                    trap_with_message("invalid UI event batch: unknown event kind " .. kind.to_string());
+                }
+            }
+            if (not reader.done()) {
+                trap_with_message("invalid UI event batch: trailing bytes");
+            }
+            return count;
+        };
+
+        /// @brief `WebHost(` the number of roots opened `)`.
+        export let.override to_string = func -> string => "WebHost(" .. roots.length.to_string() .. " roots)";
+    );
+
+    /// @brief Mounts `component` on the first element that `selector` matches and commits its first render.
+    /// `Err` when no element matches, the element is inside or contains another root, U-9 roots are open, the
+    /// component is mounted, or the page did not grant the `ui` services (a native `neura run`). Call `run` on the
+    /// root for its event loop, or `Std.Ui.Commands.run(root)` when its components run commands; either returns
+    /// when the root is closed. `tasks` is the enclosing scope's handle. The root starts no long-lived task in
+    /// 0.3.0: each wait for events, navigations and completions runs in a scope of its own.
+    export let mount = func(selector: string, component: ui.Component, tasks: scope.Scope) -> result.Result<ui.Root> =>
+        ui.mount(new Host(), selector, component);
+);

@@ -1,0 +1,4 @@
+// Edge case 59: 'yield' in an ordinary function.
+let plain = func(value: int) -> void {
+    yield value;
+};

@@ -1,0 +1,156 @@
+/// @brief The router's tree of path segments (library-internal).
+///
+/// Each edge is one whole path segment: a node has literal children keyed by their segment text and at most
+/// one parameter child, which matches any non-empty segment. A route is stored at the node its pattern ends at,
+/// with its method and an index into the router's route list. Lookup walks the segments depth first, trying the
+/// literal child before the parameter child and backtracking, so a literal segment beats a parameter at every
+/// depth and matching is exact on segment count.
+/// @see [Std.Net.Http](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http)
+#Since("0.3.0")
+export let RouteTree = module (
+    /// @brief One node: the routes ending here and the children below.
+    #[Final, NotThreadSafe]
+    export let Node = class (
+        /// @brief The segment texts of the literal children.
+        last literal_keys: string[list] = new;
+        /// @brief The literal children, parallel to `literal_keys`.
+        last literal_children: Node[list] = new;
+        /// @brief Zero or one parameter child.
+        last parameter_child: Node[list] = new;
+        /// @brief The methods of the routes ending here.
+        last methods: string[list] = new;
+        /// @brief The route indices, parallel to `methods`.
+        last routes: int[list] = new;
+
+        /// @brief An empty node.
+        export let init = func {
+        };
+
+        /// @brief The literal child for `segment`, created when absent.
+        export let literal = func(segment: string) -> Node {
+            for (let i = 0; i < literal_keys.length; i++) {
+                if (literal_keys[i] == segment) {
+                    return literal_children[i];
+                }
+            }
+            last child = new Node();
+            literal_keys.append(segment);
+            literal_children.append(child);
+            return child;
+        };
+
+        /// @brief The parameter child, created when absent.
+        export let parameter = func -> Node {
+            if (parameter_child.length == 0) {
+                parameter_child.append(new Node());
+            }
+            return parameter_child[0];
+        };
+
+        /// @brief Stores a route; returns the index of an existing route with the same method, or -1.
+        export let put = func(method: string, route: int) -> int {
+            for (let i = 0; i < methods.length; i++) {
+                if (methods[i] == method) {
+                    return routes[i];
+                }
+            }
+            methods.append(method);
+            routes.append(route);
+            return -1;
+        };
+
+        /// @brief The route index stored for `method`, or -1.
+        export let route_for = func(method: string) -> int {
+            for (let i = 0; i < methods.length; i++) {
+                if (methods[i] == method) {
+                    return routes[i];
+                }
+            }
+            return -1;
+        };
+
+        /// @brief The route index of the deepest match for `method` from segment `depth`, appending the
+        /// parameter values on the way; -1 when nothing matches (the values list is then as on entry).
+        export let find = func(segments: string[list], depth: int, method: string, values: string[list]) -> int {
+            if (depth == segments.length) {
+                return route_for(method);
+            }
+            last segment = segments[depth];
+            for (let i = 0; i < literal_keys.length; i++) {
+                if (literal_keys[i] == segment) {
+                    last found = literal_children[i].find(segments, depth + 1, method, values);
+                    if (found >= 0) {
+                        return found;
+                    }
+                    break;
+                }
+            }
+            if (parameter_child.length == 1 && segment.byte_length > 0) {
+                values.append(segment);
+                last found = parameter_child[0].find(segments, depth + 1, method, values);
+                if (found >= 0) {
+                    return found;
+                }
+                values.remove_at(values.length - 1);
+            }
+            return -1;
+        };
+
+        /// @brief Appends to `found` every method of every route whose pattern matches the segments from
+        /// `depth`, without duplicates.
+        export let collect_methods = func(segments: string[list], depth: int, found: string[list]) {
+            if (depth == segments.length) {
+                for (let m in methods) {
+                    let present = false;
+                    for (let other in found) {
+                        if (other == m) {
+                            present = true;
+                        }
+                    }
+                    if (not present) {
+                        found.append(m);
+                    }
+                }
+                return;
+            }
+            last segment = segments[depth];
+            for (let i = 0; i < literal_keys.length; i++) {
+                if (literal_keys[i] == segment) {
+                    literal_children[i].collect_methods(segments, depth + 1, found);
+                }
+            }
+            if (parameter_child.length == 1 && segment.byte_length > 0) {
+                parameter_child[0].collect_methods(segments, depth + 1, found);
+            }
+        };
+
+        /// @brief The number of routes stored at and below this node.
+        export let count = func -> int {
+            let total = routes.length;
+            for (let child in literal_children) {
+                total += child.count();
+            }
+            if (parameter_child.length == 1) {
+                total += parameter_child[0].count();
+            }
+            return total;
+        };
+
+        /// @brief The text "Node(N routes)".
+        export let.override to_string = func -> string => "Node(" .. count().to_string() .. " routes)";
+    );
+
+    /// @brief Inserts a route along `pattern_segments`, where a segment `{}` stands for a parameter; returns
+    /// the index of an existing route with the same method and shape, or -1.
+    export let insert = func(root: Node, pattern_segments: string[list], method: string, route: int) -> int {
+        let node = root;
+        for (let segment in pattern_segments) {
+            if (segment == "{}") {
+                node = node.parameter();
+            } else {
+                node = node.literal(segment);
+            }
+        }
+        return node.put(method, route);
+    };
+);

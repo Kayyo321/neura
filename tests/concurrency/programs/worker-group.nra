@@ -47,7 +47,7 @@ let drain_on_close = func -> void {
 
 // A job that waits at a gate nobody opens, so cancellation finds the worker parked in the job.
 let blocked = func(gate: channels.Receiver<int>) -> func(int) -> void {
-    return func(job: int) -> void {
+    return new func(job: int) -> void {
         console.print_line("job " + job.to_string() + " starts");
         gate.receive();
         console.print_line("job " + job.to_string() + " ends");
@@ -78,7 +78,7 @@ let stop_on_cancellation = func -> void {
 };
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line("== shedding overload");
         shed_overload();
         console.print_line("== draining on close");

@@ -1,0 +1,11 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: X25519 private key must be 32 bytes
+let program = import:Std.Program;
+let x25519 = import:Std.Crypto.Asymmetric.X25519;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = new x25519.X25519PrivateKey(new([1, 2, 3]));
+        return program.ExitCode.Ok;
+    };
+);

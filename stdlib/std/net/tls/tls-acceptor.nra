@@ -1,0 +1,116 @@
+let bytes = import:Std.Io.Internal.Bytes;
+let host = import:Std.Net.Socket.Internal.HostCalls;
+let host_error = import:Std.Core.Internal.HostError;
+let.promote _ = import:Std.Net.Listener;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let socket = import:Std.Net.Internal.Socket;
+let.promote _ = import:Std.Net.Core.SocketAddr;
+let support = import:Std.Net.Socket.Internal.Support;
+let.promote _ = import:Std.Net.Tls.TlsConfig;
+let tls_connector = import:Std.Net.Tls.TlsConnector;
+let.promote _ = import:Std.Net.Tls.TlsStream;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief A `Std.Net.Listener` of TLS server streams: a TCP listener whose accepted connections complete a TLS
+/// handshake with the configuration's certificate and key. Needs the net and fs capabilities.
+///
+/// `bind` listens with the base runtime's TCP service and works today; the server picks the first of its ALPN
+/// protocols that the client offers. Each `accept` uses the host's `neura.net.tls.accept`, which a build
+/// configured with `NEURA_ENABLE_SERVER_TLS` has; in another build it fails with Unsupported. Requiring client certificates (a client-CA file) or a
+/// narrower version range needs an extended host service that no runtime offers yet. For certificate rotation,
+/// build a new acceptor from `DynamicCertResolver.current()`; streams already accepted keep their certificate.
+/// @see [Std.Net.Tls.TlsAcceptor](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Tls-TlsAcceptor)
+#Since("0.3.0")
+export let TlsAcceptor = module (
+    /// @brief A listening socket that accepts TLS streams.
+    #[Final, NoDiscard(reason: "an acceptor must be closed"), NotThreadSafe]
+    export let TlsAcceptor = class implements Listener<SocketAddr, TlsStream> (
+        /// @brief The host's listener ID.
+        last id: int64;
+        /// @brief The bound address with the chosen port.
+        last bound: SocketAddr;
+        /// @brief The server configuration.
+        export last config: TlsConfig;
+        /// @brief Tracks whether the acceptor may still use the host ID.
+        let open_now: bool = true;
+
+        /// @brief Use `bind`; the handle comes from the library.
+        export let init = func(opened: socket.Handle, address: SocketAddr, server: TlsConfig) {
+            id = opened.id;
+            bound = address;
+            config = server;
+        };
+
+        /// @brief The bound address; its port is the one the host chose for a bind to port 0.
+        export let address = func -> SocketAddr => bound;
+
+        /// @brief Accepts one connection and completes the TLS handshake (`neura.net.tls.accept`); fails with
+        /// Unsupported in a build without TLS, and with Closed after close.
+        #NoDiscard
+        export let accept = func -> Result<TlsStream> {
+            return Result<TlsStream>.Err(bytes.closed("listener", bound.to_string())) unless open_now;
+            last nanos = support.timeout_nanos(config.handshake_timeout);
+            last outcome = config.is_mutual() || not config.allows_both_versions()
+                ? host.tls_accept_mutual(id, config.certificate_file, config.key_file, config.alpn(), nanos,
+                tls_connector.version_code(config.min_version), tls_connector.version_code(config.max_version),
+                config.client_ca_file)
+                : host.tls_accept(id, config.certificate_file, config.key_file, config.alpn(), nanos);
+            return match (outcome) {
+                host.TlsOutcome.Ok(opened) => Result<TlsStream>.Ok(stream_of(opened, bound)),
+                host.TlsOutcome.Error(code) => Result<TlsStream>.Err(
+                    host_error.io(code, "TLS accept failed", bound.to_string())),
+            };
+        };
+
+        /// @brief Releases the listener. Closing again returns Ok.
+        export let close = func -> Result<Unit> {
+            return bytes.ok() unless open_now;
+            open_now = false;
+            return match (host.close(id)) {
+                host.DoneOutcome.Ok => bytes.ok(),
+                host.DoneOutcome.Error(code) => Result<Unit>.Err(
+                    host_error.io(code, "listener close failed", bound.to_string())),
+            };
+        };
+
+        /// @brief Text such as "TlsAcceptor(127.0.0.1:8443)".
+        export let.override to_string = func -> string => "TlsAcceptor(" .. bound.to_string() .. ")";
+    );
+
+    /// @brief Listens on `address` (port 0 asks for a free port) for TLS connections with a server
+    /// configuration; a client configuration traps with "invalid argument: a TLS acceptor needs a server
+    /// configuration". Works today; accepting does not.
+    #NoDiscard
+    export let bind = func(address: SocketAddr, server: TlsConfig) -> Result<TlsAcceptor> {
+        if (server.role != TlsRole.Server) {
+            trap_with_message("invalid argument: a TLS acceptor needs a server configuration");
+        }
+        last text = address.to_string();
+        let id: int64 = 0;
+        match (host.listen(address.host_text(), address.port)) {
+            host.IdOutcome.Ok(opened) => {
+                id = opened;
+            },
+            host.IdOutcome.Error(code) => {
+                return Result<TlsAcceptor>.Err(host_error.io(code, "bind failed", text));
+            },
+        }
+        match (host.local_port(id)) {
+            host.CountOutcome.Ok(port) => {
+                return Result<TlsAcceptor>.Ok(new TlsAcceptor(new socket.Handle(id, text),
+                    new SocketAddr(address.ip, port), server));
+            },
+            host.CountOutcome.Error(code) => {
+                host.close(id);
+                return Result<TlsAcceptor>.Err(host_error.io(code, "bind failed", text));
+            },
+        }
+    };
+
+    /// @brief A stream from the host's [ID, ALPN].
+    let stream_of = func(opened: [int64, string], bound: SocketAddr) -> TlsStream {
+        let [id, alpn] = opened;
+        return new TlsStream(new socket.Handle(id, bound.to_string()), Optional<SocketAddr>.None, alpn);
+    };
+);

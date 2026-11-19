@@ -1,0 +1,2 @@
+// An empty list literal becomes a bare `new`.
+let empty: int[list] = new;

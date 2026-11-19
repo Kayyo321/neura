@@ -1,0 +1,12 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: hash-to-curve XMD output length
+// run-options: --gpu=off
+let hash_to_curve = import:Std.Crypto.Advanced.HashToCurve;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = hash_to_curve.expand_message_xmd_sha512(new, new([1]), 16321);
+        return program.ExitCode.Ok;
+    };
+);

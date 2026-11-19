@@ -4,7 +4,7 @@ Each error that the compiler reports has a code: `E` and four digits, whose hund
 
 A page states the rule, shows a program that breaks it with the error it gets, and shows the program fixed. The examples are compiled by the `doc-examples` test: a failing example must fail with its code, and a fixed one must compile. A few errors cannot be caused by a single source file; their pages say why, and show only the fix.
 
-E0923 to E0929 are free for later tags, and W0006 to W0009 for later warnings.
+E0924 to E0929 are free for later tags, and W0006 to W0009 for later warnings.
 
 ## E01xx: Lexer
 
@@ -37,6 +37,36 @@ Errors about the grammar.
 | [E0211](E0211.md) | malformed scope statement |
 | [E0212](E0212.md) | braces that do not enclose a range |
 | [E0213](E0213.md) | malformed binding clause |
+| [E0214](E0214.md) | parameter without a type |
+| [E0215](E0215.md) | malformed class hook clause |
+| [E0216](E0216.md) | class hook outside a declared class |
+| [E0217](E0217.md) | malformed startup block |
+| [E0218](E0218.md) | misplaced startup block |
+| [E0219](E0219.md) | malformed defer statement |
+| [E0220](E0220.md) | malformed using statement |
+| [E0221](E0221.md) | malformed generator or yield |
+| [E0222](E0222.md) | yield outside a generator |
+| [E0225](E0225.md) | positional argument after a named argument |
+| [E0226](E0226.md) | default value on a parameter that takes none |
+| [E0227](E0227.md) | malformed interpolated string |
+| [E0228](E0228.md) | malformed extension declaration or extension import |
+| [E0240](E0240.md) | malformed html factory |
+| [E0241](E0241.md) | unterminated template or stylesheet |
+| [E0242](E0242.md) | mismatched or unclosed element |
+| [E0243](E0243.md) | nesting a browser would repair |
+| [E0244](E0244.md) | malformed tag |
+| [E0245](E0245.md) | malformed or repeated attribute |
+| [E0246](E0246.md) | unknown or malformed character reference |
+| [E0247](E0247.md) | malformed hole |
+| [E0248](E0248.md) | stray brace or control word in text |
+| [E0249](E0249.md) | malformed control block |
+| [E0250](E0250.md) | malformed binding directive |
+| [E0251](E0251.md) | not allowed in a template |
+| [E0252](E0252.md) | malformed css declaration |
+| [E0253](E0253.md) | malformed stylesheet |
+| [E0254](E0254.md) | malformed from clause |
+| [E0255](E0255.md) | html or css form not allowed here |
+| [E0256](E0256.md) | malformed CSS module construct |
 
 ## E03xx: Names
 
@@ -44,6 +74,21 @@ Errors about declarations, scopes, and name resolution.
 
 | Code | Error |
 | --- | --- |
+| [E0230](E0230.md) | malformed match.is |
+| [E0231](E0231.md) | pattern form that is not supported |
+| [E0232](E0232.md) | postfix ? that needs parentheses |
+| [E0233](E0233.md) | malformed optional access |
+| [E0260](E0260.md) | character literal that is not one byte |
+| [E0261](E0261.md) | malformed character literal |
+| [E0262](E0262.md) | ..= statement whose destination is not a string |
+| [E0263](E0263.md) | range or chain of the wrong shape |
+| [E0264](E0264.md) | malformed return if |
+| [E0265](E0265.md) | narrowing binding outside the condition of an if |
+| [E0266](E0266.md) | is not narrowing inside an && chain |
+| [E0267](E0267.md) | typeof without a value or a type |
+| [E0268](E0268.md) | invalid Unicode escape |
+| [E0269](E0269.md) | Unicode escape that is not a scalar value |
+| [E0270](E0270.md) | string literal escapes that are not valid UTF-8 |
 | [E0301](E0301.md) | duplicate local binding |
 | [E0302](E0302.md) | duplicate declaration |
 | [E0303](E0303.md) | duplicate parameter or field name |
@@ -55,6 +100,10 @@ Errors about declarations, scopes, and name resolution.
 | [E0309](E0309.md) | cyclic declaration |
 | [E0310](E0310.md) | misuse of the discard name '_' |
 | [E0311](E0311.md) | reserved name |
+| [E0315](E0315.md) | ambiguous extension function |
+| [E0316](E0316.md) | extension function used without a call |
+| [E0318](E0318.md) | derivation mapping names no reachable member |
+| [E0319](E0319.md) | invalid or repeated wire name |
 
 ## E04xx: Types and bindings
 
@@ -108,6 +157,30 @@ Errors about types, values, calls, and statements.
 | [E0446](E0446.md) | a constructor that does not assign a 'last' field |
 | [E0447](E0447.md) | a deferred 'last' binding that is not a local or an instance field |
 | [E0448](E0448.md) | a value type that contains itself |
+| [E0449](E0449.md) | a value type larger than its inline limit |
+| [E0450](E0450.md) | a list literal without new |
+| [E0451](E0451.md) | an array escapes its owner |
+| [E0452](E0452.md) | a primitive borrow escapes its owner |
+| [E0453](E0453.md) | an escaping closure requires explicit construction |
+| [E0470](E0470.md) | return in a startup block |
+| [E0471](E0471.md) | deferred call with a result |
+| [E0472](E0472.md) | defer or using outside a function |
+| [E0473](E0473.md) | using in a function that cannot return a close error |
+| [E0474](E0474.md) | using resource that cannot be closed |
+| [E0475](E0475.md) | scoped resource leaves its using block |
+| [E0476](E0476.md) | yield with cleanup pending |
+| [E0477](E0477.md) | storage that cannot outlive a suspension |
+| [E0478](E0478.md) | return with a value in a generator |
+| [E0479](E0479.md) | escaping capturing generator without new |
+| [E0480](E0480.md) | conflicting inferred type arguments |
+| [E0481](E0481.md) | lambda does not fit its callable context |
+| [E0482](E0482.md) | unknown argument label |
+| [E0483](E0483.md) | argument supplied twice |
+| [E0484](E0484.md) | labels are not available for this call |
+| [E0485](E0485.md) | default value is not a constant |
+| [E0486](E0486.md) | invalid format specification in an interpolated string |
+| [E0487](E0487.md) | invalid nameof operand |
+| [E0488](E0488.md) | invalid extension function |
 
 ## E05xx: Classes and lifecycle
 
@@ -115,6 +188,15 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 
 | Code | Error |
 | --- | --- |
+| [E0490](E0490.md) | pattern that cannot match |
+| [E0491](E0491.md) | unreachable match arm |
+| [E0492](E0492.md) | value cannot be held in any |
+| [E0493](E0493.md) | operation is not defined for any |
+| [E0494](E0494.md) | optional access on a receiver that is never absent |
+| [E0495](E0495.md) | invalid operands of ?? |
+| [E0496](E0496.md) | ? on a value that is not a Result |
+| [E0497](E0497.md) | ? outside a function that returns a Result |
+| [E0498](E0498.md) | any at a boundary that would box it |
 | [E0501](E0501.md) | invalid static member |
 | [E0502](E0502.md) | invalid override |
 | [E0503](E0503.md) | invalid inheritance |
@@ -145,6 +227,32 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0533](E0533.md) | new without the field initializers of an anonymous class |
 | [E0534](E0534.md) | untyped field in a fields-only anonymous class |
 | [E0536](E0536.md) | destructuring declared with last |
+| [E0537](E0537.md) | constructor shorthand names no instance field |
+| [E0538](E0538.md) | duplicate class hook clause |
+| [E0539](E0539.md) | class hook replaces an inherited one without `.override` |
+| [E0540](E0540.md) | `.override` on a class hook that overrides nothing |
+| [E0541](E0541.md) | class hook on a class with synchronized methods |
+| [E0542](E0542.md) | class hook that does not yield its class |
+| [E0543](E0543.md) | class hook that returns a new object |
+| [E0544](E0544.md) | class hook that may suspend |
+| [E0545](E0545.md) | hooked class storage without an initializer |
+| [E0546](E0546.md) | hooked class reference at a bodyless function |
+| [E0550](E0550.md) | event emitted under a monitor guard |
+| [E0560](E0560.md) | parameter names differ from the overridden method |
+| [E0561](E0561.md) | defaults differ from the overridden method |
+| [E0570](E0570.md) | invalid record declaration |
+| [E0571](E0571.md) | record field of a type a record cannot hold |
+| [E0572](E0572.md) | copy construction of a value that is not a record |
+| [E0573](E0573.md) | invalid interface property |
+| [E0574](E0574.md) | invalid virtual accessor |
+| [E0575](E0575.md) | invalid accessor override |
+| [E0576](E0576.md) | invalid static requirement or call of one |
+| [E0577](E0577.md) | ambiguous static requirement |
+| [E0578](E0578.md) | conformance declared by a module |
+| [E0579](E0579.md) | unknown or misplaced derivation |
+| [E0590](E0590.md) | unsupported JSON codec shape |
+| [E0580](E0580.md) | type is not deeply immutable |
+| [E0581](E0581.md) | frozen storage is exposed or changed |
 
 ## E06xx: Concurrency
 
@@ -229,6 +337,61 @@ Errors about `#` tags before declarations ([Tags](../lang/Tags.md)).
 | [E0920](E0920.md) | #Immutable class with a base or subclass that is not #Immutable |
 | [E0921](E0921.md) | #Synchronized on a method without a body to guard |
 | [E0922](E0922.md) | override of a synchronized method that is not synchronized |
+| [E0923](E0923.md) | #HostEffects on a function that is not a host binding without a body |
+| [E1100](E1100.md) | string chain operand that is not a string |
+
+## E10xx: Applications
+
+Errors about application forms and their build limits.
+
+| Code | Error |
+| --- | --- |
+| [E1001](E1001.md) | unknown element |
+| [E1002](E1002.md) | unknown attribute, property or event |
+| [E1003](E1003.md) | modifier not valid for this event |
+| [E1004](E1004.md) | value cannot be rendered |
+| [E1005](E1005.md) | attribute or property value of the wrong type |
+| [E1006](E1006.md) | handler does not match the event |
+| [E1007](E1007.md) | URL not allowed |
+| [E1008](E1008.md) | value cannot be iterated by a template |
+| [E1009](E1009.md) | key of the wrong type |
+| [E1010](E1010.md) | effect not allowed while rendering |
+| [E1011](E1011.md) | template or stylesheet file cannot be used |
+| [E1012](E1012.md) | not a class of the CSS module |
+| [E1013](E1013.md) | stylesheet import or asset cannot be resolved |
+| [E1014](E1014.md) | invalid static document structure |
+| [E1015](E1015.md) | template or stylesheet exceeds a limit |
+
+## E10xx: Application projects
+
+Errors about projects and their artifacts.
+
+| Code | Error |
+| --- | --- |
+| [E1020](E1020.md) | malformed project manifest |
+| [E1021](E1021.md) | unsupported manifest schema or language version |
+| [E1022](E1022.md) | lock file missing or out of date |
+| [E1023](E1023.md) | invalid target |
+| [E1024](E1024.md) | entry module without the required entry |
+| [E1025](E1025.md) | path outside the project |
+| [E1026](E1026.md) | content does not match its digest |
+| [E1027](E1027.md) | capability used but not declared |
+| [E1028](E1028.md) | limit out of range |
+| [E1029](E1029.md) | bundle cannot be written |
+| [E1030](E1030.md) | module not available to this package or target |
+| [E1031](E1031.md) | unknown or incompatible provider |
+| [E1032](E1032.md) | dependency not pinned or not found |
+| [E1033](E1033.md) | package cannot be built here |
+
+## E13xx: Reflection
+
+Codes reported for `Std.Reflect` ([design](../design/Reflect030.md)).
+
+| Code | Error |
+| --- | --- |
+| [E1300](E1300.md) | a type that Std.Reflect.Proxy cannot proxy |
+| [E1301](E1301.md) | a value a Std.Reflect dynamic value cannot hold |
+| [E1302](E1302.md) | a class with two reflection policies |
 
 ## Warnings
 

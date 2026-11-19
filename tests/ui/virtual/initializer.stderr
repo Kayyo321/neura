@@ -1,0 +1,10 @@
+error[E0575]: invalid accessor override
+ --> $DIR/initializer.nra:7:41
+  |
+7 |     export let.override label: string = "x";
+  |                                         ^^^ an accessor override has no initializer
+  |                         ----- 'label' declares no field; the base class holds the value
+  |
+  = help: remove the initializer
+
+For more information about this error, try `neura explain E0575`.

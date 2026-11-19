@@ -38,7 +38,7 @@ export let Console = module (
     let read_stream = func(max: int) -> BytesOutcome host("neura.console.read", 2);
 
     /// @brief Input read ahead of the caller: pending[pending_start] onwards.
-    let pending: uint8[list] = [];
+    let pending: uint8[list] = new;
     /// @brief The index of the next unread byte in the pending input.
     let pending_start: int = 0;
 
@@ -64,6 +64,9 @@ export let Console = module (
     export let Formatter = class (
         /// @brief Formats variadic arguments into text with the console grammar. Invalid formats trap.
         export static let format = func(pattern: string, args: ...) -> string => vformat(pattern, args);
+
+        /// @brief Names the formatter.
+        export let.override to_string = func -> string => "Formatter";
     );
 
     /// @brief Writes the text and one LF. A failed write traps with "console write failed".
@@ -144,14 +147,14 @@ export let Console = module (
     /// @brief Writes raw text and one LF to stderr, returning any write error.
     #NoDiscard
     export let try_error_line = func(s: string) -> result.Result<Unit> =>
-        write_all(2, bytes.of_string(s + "\n"));
+        write_all(2, bytes.of_string(s .. "\n"));
 
     /// @brief The next line of input without its LF or a CR before it; None at the end of input.
     ///
     /// A final line without an LF is returned. Invalid UTF-8 fails with InvalidData and consumes the line.
     #NoDiscard
     export let read_line = func -> result.Result<Optional<string>> {
-        last line: uint8[list] = [];
+        last line: uint8[list] = new;
         do {
             if (pending_start < pending.length) {
                 last end = bytes.index_of(pending, pending_start, 10 as uint8);
@@ -220,7 +223,7 @@ export let Console = module (
 
     /// @brief Clears the console's read-ahead buffer and resets its cursor.
     let discard_pending = func {
-        last empty: uint8[list] = [];
+        last empty: uint8[list] = new;
         pending = empty;
         pending_start = 0;
     };
@@ -231,9 +234,7 @@ export let Console = module (
             line.remove_at(line.length - 1);
         }
         let [valid, text] = string.from_utf8(line);
-        if (!valid) {
-            return result.Result<Optional<string>>.Err(bytes.invalid_utf8(""));
-        }
+        return result.Result<Optional<string>>.Err(bytes.invalid_utf8("")) unless valid;
         return result.Result<Optional<string>>.Ok(Optional<string>.Some(text));
     };
 
@@ -266,9 +267,11 @@ export let Console = module (
             result.Result.Err(problem) => {
                 match (problem) {
                     errors.Error.Parse { kind: _, offset: _, message: _ } => {
-                        failure.trap("invalid format: " + errors.message(problem));
+                        failure.trap("invalid format: " .. errors.message(problem));
                     },
-                    _ => { failure.trap("console write failed"); },
+                    _ => {
+                        failure.trap("console write failed");
+                    },
                 }
             },
         }

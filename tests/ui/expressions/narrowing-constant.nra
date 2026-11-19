@@ -1,0 +1,16 @@
+// Edge case 15 of docs/design/Expressions030.md: the binding is a constant; it hides the subject.
+let Shape = class (
+    export let sides: int = 0;
+);
+let Circle = class : Shape (
+    export let radius: int = 1;
+);
+let Other = class (
+    export let value: int = 0;
+);
+let check = func(shape: Shape) -> int {
+    if (shape is shape: Circle) {
+        shape = new Circle();
+    }
+    return 0;
+};

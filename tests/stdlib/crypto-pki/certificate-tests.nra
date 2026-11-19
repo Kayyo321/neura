@@ -1,0 +1,342 @@
+let algorithm_ids = import:Std.Crypto.Pki.AlgorithmIdentifier;
+let certificate = import:Std.Crypto.Pki.Certificate;
+let instant = import:Std.Time.Instant;
+let der = import:Std.Crypto.Pki.Der;
+let hex = import:Std.Encoding.Hex;
+let int64s = import:Std.Core.Int64;
+let name = import:Std.Crypto.Pki.Name;
+let oid = import:Std.Crypto.Pki.Oid;
+let oids = import:Std.Crypto.Pki.Oids;
+let pem = import:Std.Crypto.Pki.Pem;
+let public_keys = import:Std.Crypto.Pki.PublicKeyInfo;
+let test = import:Std.Test;
+let vectors = import:CertVectors;
+let writer = import:Std.Crypto.Pki.DerWriter;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Pki.Certificate;
+let.promote _ = import:Std.Crypto.Pki.GeneralName;
+
+// X.509 certificates and SubjectPublicKeyInfo against the fields Python `cryptography` reads from the recorded
+// openssl material (support/cert-vectors.nra, scripts/crypto-vectors/gen-pki.py).
+let CertificateTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    export let test_name_equality_matches_each_rdn_attribute_once = func {
+        last cn = writer.oid(oid.of(oids.CommonName));
+        last lower_a = writer.sequence(new([cn, writer.utf8_string("a")]));
+        last upper_a = writer.sequence(new([cn, writer.utf8_string("A")]));
+        last lower_b = writer.sequence(new([cn, writer.utf8_string("b")]));
+        last upper_b = writer.sequence(new([cn, writer.utf8_string("B")]));
+        last repeated = test.assert_ok(name.parse_der(writer.sequence(new([writer.set(new([lower_a, upper_a]))]))));
+        last first = test.assert_ok(name.parse_der(writer.sequence(new([writer.set(new([upper_a, lower_b]))]))));
+        last second = test.assert_ok(name.parse_der(writer.sequence(new([writer.set(new([lower_a, upper_b]))]))));
+        test.assert(!repeated.equals(first) && !first.equals(repeated));
+        test.assert(!repeated.starts_with(first) && !first.starts_with(repeated));
+        test.assert(first.equals(second) && second.equals(first));
+        test.assert(first.hash_code() == second.hash_code());
+    };
+
+    export let test_attribute_values_keep_text_and_der_equality_separate = func {
+        last cn = oid.of(oids.CommonName);
+        last utf8 = new name.AttributeTypeAndValue(cn, writer.utf8_string("foo"), der.TagUtf8String, "foo", true);
+        last printable = new name.AttributeTypeAndValue(cn, writer.printable_string("FOO"), der.TagPrintableString, "FOO", true);
+        last raw = new name.AttributeTypeAndValue(cn, utf8.value_der, der.TagUtf8String, "", false);
+        test.assert(utf8.equals(printable) && utf8.hash_code() == printable.hash_code());
+        test.assert(!utf8.equals(raw) && !raw.equals(utf8));
+    };
+
+    export let test_pss_parameters_hash_negative_salt_without_trapping = func {
+        last hash = oid.of(oids.Sha256);
+        last mask = oid.of(oids.Mgf1);
+        last first = new algorithm_ids.RsaPssParameters(hash, mask, hash, -1, 1);
+        last second = new algorithm_ids.RsaPssParameters(hash, mask, hash, -1, 1);
+        test.assert(first.equals(second) && first.hash_code() == second.hash_code());
+    };
+
+    let names_text = func(items: GeneralName[list]) -> string {
+        let text = "";
+        for (let item in items) {
+            text += (text.byte_length > 0 ? "|" : "") + item.to_string();
+        }
+        return text;
+    };
+
+    let kind_text = func(kind: public_keys.KeyAlgorithm) -> string {
+        match (kind) {
+            public_keys.KeyAlgorithm.Rsa => {
+                return "Rsa";
+            },
+            public_keys.KeyAlgorithm.RsaPss => {
+                return "RsaPss";
+            },
+            public_keys.KeyAlgorithm.Ec => {
+                return "Ec";
+            },
+            public_keys.KeyAlgorithm.Ed25519 => {
+                return "Ed25519";
+            },
+            public_keys.KeyAlgorithm.Ed448 => {
+                return "Ed448";
+            },
+            public_keys.KeyAlgorithm.X25519 => {
+                return "X25519";
+            },
+            public_keys.KeyAlgorithm.X448 => {
+                return "X448";
+            },
+            public_keys.KeyAlgorithm.MlDsa44 => {
+                return "MlDsa44";
+            },
+            public_keys.KeyAlgorithm.MlDsa65 => {
+                return "MlDsa65";
+            },
+            public_keys.KeyAlgorithm.MlDsa87 => {
+                return "MlDsa87";
+            },
+            public_keys.KeyAlgorithm.MlKem512 => {
+                return "MlKem512";
+            },
+            public_keys.KeyAlgorithm.MlKem768 => {
+                return "MlKem768";
+            },
+            public_keys.KeyAlgorithm.MlKem1024 => {
+                return "MlKem1024";
+            },
+            public_keys.KeyAlgorithm.SlhDsa => {
+                return "SlhDsa";
+            },
+            _ => {
+                return "Unknown";
+            },
+        }
+        return "";
+    };
+
+    /// @brief The certificate's field in the generator's text form.
+    let field_text = func(c: Certificate, field: string) -> string {
+        if (field == "der") {
+            return hex.encode(c.der_bytes);
+        }
+        if (field == "tbs") {
+            return hex.encode(c.tbs_bytes);
+        }
+        if (field == "version") {
+            return c.version.to_string();
+        }
+        if (field == "serial") {
+            return c.serial_hex();
+        }
+        if (field == "issuer") {
+            return c.issuer.to_string();
+        }
+        if (field == "subject") {
+            return c.subject.to_string();
+        }
+        if (field == "not_before") {
+            return c.not_before.epoch_seconds.to_string();
+        }
+        if (field == "not_after") {
+            return c.not_after.epoch_seconds.to_string();
+        }
+        if (field == "spki") {
+            return hex.encode(c.public_key.der_bytes);
+        }
+        if (field == "key_algorithm") {
+            return kind_text(c.public_key.key_algorithm);
+        }
+        if (field == "parameter_set") {
+            return c.public_key.parameter_set;
+        }
+        if (field == "signature_algorithm") {
+            return c.signature_algorithm.oid.dotted;
+        }
+        if (field == "signature") {
+            return hex.encode(c.signature);
+        }
+        if (field == "extensions") {
+            let text = "";
+            for (let e in c.extensions) {
+                text += (text.byte_length > 0 ? "|" : "") + e.oid.dotted + (e.critical ? ":c" : ":n");
+            }
+            return text;
+        }
+        if (field == "basic_constraints") {
+            last b = test.assert_some(c.basic_constraints);
+            return (b.ca ? "true" : "false") + "," + b.path_length.to_string();
+        }
+        if (field == "key_usage") {
+            last k = test.assert_some(c.key_usage);
+            let text = "";
+            for (let i = 0; i < 9; i++) {
+                if (k.has(i)) {
+                    text += (text.byte_length > 0 ? "," : "") + i.to_string();
+                }
+            }
+            return text;
+        }
+        if (field == "extended_key_usage") {
+            let text = "";
+            for (let p in test.assert_some(c.extended_key_usage).purposes) {
+                text += (text.byte_length > 0 ? "," : "") + p.dotted;
+            }
+            return text;
+        }
+        if (field == "subject_alt_names") {
+            return names_text(test.assert_some(c.subject_alt_names));
+        }
+        if (field == "permitted" || field == "excluded") {
+            last nc = test.assert_some(c.name_constraints);
+            let text = "";
+            for (let s in field == "permitted" ? nc.permitted : nc.excluded) {
+                text += (text.byte_length > 0 ? "|" : "") + s.base.to_string();
+            }
+            return text;
+        }
+        if (field == "authority_key_identifier") {
+            return hex.encode(test.assert_some(c.authority_key_identifier).key_identifier);
+        }
+        if (field == "subject_key_identifier") {
+            return hex.encode(test.assert_some(c.subject_key_identifier));
+        }
+        if (field == "policies") {
+            let text = "";
+            for (let info in test.assert_some(c.policies)) {
+                let part = info.policy.dotted + ";";
+                for (let i = 0; i < info.qualifiers.length; i++) {
+                    part += (i > 0 ? ";" : "") + info.qualifiers[i].text;
+                }
+                text += (text.byte_length > 0 ? "|" : "") + part;
+            }
+            return text;
+        }
+        if (field == "policy_mappings") {
+            let text = "";
+            for (let m in test.assert_some(c.policy_mappings)) {
+                text += (text.byte_length > 0 ? "|" : "") + m.issuer_domain.dotted + "->" + m.subject_domain.dotted;
+            }
+            return text;
+        }
+        if (field == "policy_constraints") {
+            last pc = test.assert_some(c.policy_constraints);
+            return pc.require_explicit_policy.to_string() + "," + pc.inhibit_policy_mapping.to_string();
+        }
+        if (field == "inhibit_any_policy") {
+            return test.assert_some(c.inhibit_any_policy).to_string();
+        }
+        if (field == "crl_distribution_points") {
+            let text = "";
+            for (let point in test.assert_some(c.crl_distribution_points)) {
+                for (let n in point.full_name) {
+                    text += (text.byte_length > 0 ? "|" : "") + n.to_string();
+                }
+            }
+            return text;
+        }
+        if (field == "authority_info_access") {
+            let text = "";
+            for (let a in test.assert_some(c.authority_info_access)) {
+                text += (text.byte_length > 0 ? "|" : "") + a.method.dotted + "=" + a.location.to_string();
+            }
+            return text;
+        }
+        test.fail("unknown field " + field);
+        return "";
+    };
+
+    export let test_every_field_matches_cryptography = func {
+        last rows = vectors.certificates;
+        let current = "";
+        let parsed: Optional<Certificate> = Optional<Certificate>.None;
+        let checked = 0;
+        for (let i = 0; i < rows.length; i += 3) {
+            if (rows[i] != current) {
+                current = rows[i];
+                test.assert_equal_string("der", rows[i + 1]);
+                parsed = Optional<Certificate>.Some(test.assert_ok(certificate.parse(decode(rows[i + 2]))));
+            }
+            last c = test.assert_some(parsed);
+            test.assert_equal_string(rows[i + 2], field_text(c, rows[i + 1]));
+            checked++;
+        }
+        test.assert(checked > 200);
+    };
+
+    let certificate_named = func(wanted: string) -> Certificate {
+        last rows = vectors.certificates;
+        for (let i = 0; i < rows.length; i += 3) {
+            if (rows[i] == wanted && rows[i + 1] == "der") {
+                return test.assert_ok(certificate.parse(decode(rows[i + 2])));
+            }
+        }
+        test.fail("no certificate " + wanted);
+        return test.assert_ok(certificate.parse(new));
+    };
+
+    export let test_value_semantics_and_helpers = func {
+        last leaf = certificate_named("leaf");
+        last again = test.assert_ok(certificate.parse(leaf.der_bytes));
+        test.assert(leaf.equals(again) && leaf.hash_code() == again.hash_code());
+        test.assert(!leaf.equals(certificate_named("root")));
+        test.assert_equal_string("Certificate(CN=www.example.com,O=Neura Test,C=US, serial 0102030405060708090a0b0c0d0e0f1011121314)",
+            leaf.to_string());
+        test.assert(certificate_named("root").is_self_issued() && !leaf.is_self_issued());
+        test.assert(certificate_named("root").is_ca() && !leaf.is_ca());
+        // The unknown extension stays raw, with its criticality.
+        last unknown = test.assert_some(leaf.extension("1.3.6.1.4.1.55555.9.1"));
+        test.assert(!unknown.critical);
+        test.assert_equal_string("0c086b65707420726177", hex.encode(unknown.value));
+        // The leaf's notAfter (2051) is a GeneralizedTime; validity bounds are inclusive.
+        test.assert(leaf.is_valid_at(leaf.not_after) && leaf.is_valid_at(leaf.not_before));
+        test.assert(!leaf.is_valid_at(instant.of_epoch_seconds(leaf.not_after.epoch_seconds + 1, 0)));
+        test.assert_equal_int32(32, leaf.fingerprint_sha256().length);
+        // PEM.
+        last text = pem.encode("CERTIFICATE", leaf.der_bytes) + pem.encode("CERTIFICATE", certificate_named("inter").der_bytes);
+        last both = test.assert_ok(certificate.parse_pem(text));
+        test.assert_equal_int32(2, both.length);
+        test.assert(both[0].equals(leaf));
+        // The PSS parameters of the RSA-PSS signature.
+        last pss = test.assert_ok(certificate_named("rsa-pss-leaf").signature_algorithm.pss_parameters());
+        test.assert_equal_string(oids.Sha256, pss.hash.dotted);
+        test.assert_equal_string(oids.Sha256, pss.mask_hash.dotted);
+        test.assert_equal_int32(32, pss.salt_length);
+    };
+
+    export let test_public_key_zoo = func {
+        last rows = vectors.public_keys;
+        for (let i = 0; i < rows.length; i += 7) {
+            last key = test.assert_ok(public_keys.parse_der(decode(rows[i + 1])));
+            test.assert_equal_string(rows[i + 2], kind_text(key.key_algorithm));
+            if (rows[i + 3].byte_length > 0) {
+                test.assert_equal_string(rows[i + 3], key.parameter_set);
+            }
+            test.assert_equal_string(rows[i + 4], hex.encode(key.key));
+            test.assert_equal_string(rows[i + 5], hex.encode(key.rsa_modulus));
+            test.assert_equal_string(rows[i + 6], hex.encode(key.rsa_exponent));
+            test.assert_equal_string(rows[i + 1], hex.encode(key.der_bytes));
+            test.assert(key.equals(test.assert_ok(public_keys.of(key.algorithm, key.key))));
+            let _ = test.assert_some(key.policy_algorithm());
+        }
+        test.assert_equal_int32(18 * 7, rows.length);
+    };
+
+    export let test_public_key_rejections = func {
+        last rows = vectors.public_keys;
+        for (let i = 0; i < rows.length; i += 7) {
+            last key = test.assert_ok(public_keys.parse_der(decode(rows[i + 1])));
+            if (rows[i + 2] == "Ed25519") {
+                // One byte short, and parameters where none are allowed.
+                let short: uint8[list] = der.copy_range(key.key, 0, 31);
+                let _ = test.assert_err(public_keys.of(key.algorithm, short));
+                let _ = test.assert_err(public_keys.of(new algorithm_ids.AlgorithmIdentifier(key.algorithm.oid,
+                    writer.null()), key.key));
+            }
+            if (rows[i + 3] == "P-256") {
+                // A point with a bad prefix byte.
+                let bad = der.copy_range(key.key, 0, key.key.length);
+                bad[0] = 5;
+                let _ = test.assert_err(public_keys.of(key.algorithm, bad));
+            }
+        }
+    };
+);

@@ -1,0 +1,4 @@
+// Edge case 54: a generator declares its element type.
+let count = iterator(limit: int) {
+    yield limit;
+};

@@ -1,0 +1,2 @@
+// Each nested list needs its own `new`; the fix is applied outside in.
+let rows: int[list][list] = [[1, 2], [3]];

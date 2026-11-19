@@ -1,0 +1,7 @@
+// Case 22: storage of a class with a 'set' hook needs an initializer: a
+// static field here. A global or a local without one is already E0404.
+let Session = class (
+    | set: value;
+
+    export static let current: Session;
+);

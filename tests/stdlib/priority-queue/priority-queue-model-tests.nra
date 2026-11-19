@@ -32,7 +32,7 @@ let PriorityQueueModelTests = module (
         actual.validate();
         test.assert_equal_int32(size, actual.size());
         test.assert_equal_bool(size == 0, actual.is_empty());
-        let remaining: int[list] = [];
+        let remaining: int[list] = new;
         for (let count in counts) {
             remaining.append(count);
         }
@@ -54,7 +54,7 @@ let PriorityQueueModelTests = module (
     let run = func(seed: uint64, operations: int) -> void {
         let random = model_random.seeded(seed);
         let actual = priority_queue.create<int>(compare);
-        let counts: int[list] = [];
+        let counts: int[list] = new;
         let v = 0;
         while (v < Values) {
             counts.append(0);
@@ -121,7 +121,7 @@ let PriorityQueueModelTests = module (
                 }
                 size = 0;
             } else if (choice < 98) {
-                let seen: int[list] = [];
+                let seen: int[list] = new;
                 actual.for_each(func(element: int) -> void {
                     seen.append(element);
                 });
@@ -147,7 +147,7 @@ let PriorityQueueModelTests = module (
         let random = model_random.seeded(12);
         let round = 0;
         while (round < 50) {
-            let items: int[list] = [];
+            let items: int[list] = new;
             let count = random.below(80);
             let i = 0;
             while (i < count) {

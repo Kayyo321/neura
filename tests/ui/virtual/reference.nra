@@ -1,0 +1,8 @@
+// A property with accessors has no addressable storage (edge case 93).
+let Shape = class (
+    export let label: string = "shape";
+        | get.virtual: label;
+);
+let refer = func(shape: Shape) {
+    let r: &string = shape.label;
+};

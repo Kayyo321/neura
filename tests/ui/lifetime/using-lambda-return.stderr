@@ -1,0 +1,12 @@
+error[E0475]: 'source' is closed at the end of its 'using' block and cannot be returned
+  --> $DIR/using-lambda-return.nra:13:16
+   |
+ 9 |     using (source = new Resource()) {
+   |     ----- 'source' is bound here, and closed when this block is left
+...
+13 |         return Result<Resource>.Ok(get());
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: use the resource inside the block, or keep what it produced instead of the resource
+
+For more information about this error, try `neura explain E0475`.

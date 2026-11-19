@@ -43,14 +43,14 @@ section "NAME" 0300000000...
 | --- | --- |
 | `nvr 1.M profile P` | Header: the minor version the image declares and the graph profile. Must be first. |
 | `entry F` | The entry function. |
-| `type I KIND [WIDTH or REFERENCE]` | Kinds `void bool unsigned signed text bytes object array list float bfloat`. |
+| `type I KIND [WIDTH or REFERENCE]` | Kinds `void bool unsigned signed text bytes object array list float bfloat aggregate`; the reference of an `aggregate` (NVR 1.7) is a layout whose fields are its component types. |
 | `layout I parent P\|- fields [ T... ]` | Parent layout and field types, inherited fields first. |
 | `constant I type T bytes HEX` | Payload bytes in hex, `-` when empty. A comment after `;` shows the value. |
 | `global I type T initializer C\|-` | |
 | `graph I inputs N outputs [ W... ]` | Followed by its nodes. |
 | `node I identity\|relu BIAS [ SOURCE*WEIGHT... ]` | One neuron of the preceding graph. |
 | `import I "NAME" version V parameters [ T... ] success T error T` | |
-| `function I parameters N result T frame [ T... ]` | Followed by its blocks. |
+| `function I parameters N result T [more [ T... ]] frame [ T... ]` | Followed by its blocks. `more` lists the result words after the first (NVR 1.7) and appears only for a function that has them. |
 | `block I graph G selector S inputs [ VALUE... ]` | Followed by its exits. |
 | `exit KIND FIELDS assign [ SLOT = VALUE... ]` | Kinds `continue call return state host trap`, with the fields of [NVR](runtime/NVR.md#graphs-functions-and-exits). State operations are named, such as `read-field` and `read-version`. |
 | `source-map`, then `location F B "PATH" LINE COLUMN` | The optional source map. |
@@ -72,7 +72,7 @@ A value is `slot:TYPE:INDEX`, `constant:TYPE:INDEX`, or `lanes:TYPE:FIRST-LANE`.
 | `[circuit]` | Not lifted. The block's graph, its inputs, and its exits are shown, and the values its exits read are shown as output lanes. |
 | `[reconstructed: …]` | Structure recovered from the block graph rather than read from a table: loop headers (blocks that are the target of an edge from a block they dominate) and the pairing of a scope-enter exit with its scope-exit (`[reconstructed: scope bN.eM]`; `[scope pair unresolved]` when no pair is found). |
 
-Exits are always decoded: `goto bN`, calls, returns, state operations (`new L0`, `s1.field2`, `version(s3)`, `append(s2, v)`), host calls by import name and version, and traps with their reasons. A lifted block shows the operations that feed its exits as expressions over its inputs (`(s4 + 1)`, `((s2 % 2) == 0)`, `(s1 as float64)`), the condition that selects between two exits as `if … then … else …`, and the checks whose failures select its trap exits. A dispatch block shows the layouts that select each call. Names come from the `NAME` section and source locations from the source map, as comments marked `provenance`.
+Exits are always decoded: `goto bN`, calls, returns, state operations (`new L0`, `s1.field2`, `version(s3)`, `append(s2, v)`; for an array or list of aggregates (NVR 1.7), `s1[s2].c1`, `s1[s2].c1 = v`, `append(s2, v0, v1)`, and the aggregate type as `(T0, T1)`, or `agg L3` for the aggregate itself inside a component that is a collection of it; for storage regions (NVR 1.7), `enter_region()`, `release_region(t)`, `new L1 in t`, `T [a, b] in t`, `T repeat(n, v) in t`, and `move e to t`), host calls by import name and version, and traps with their reasons. A lifted block shows the operations that feed its exits as expressions over its inputs (`(s4 + 1)`, `((s2 % 2) == 0)`, `(s1 as float64)`), the condition that selects between two exits as `if … then … else …`, and the checks whose failures select its trap exits. A dispatch block shows the layouts that select each call. Names come from the `NAME` section and source locations from the source map, as comments marked `provenance`. A tuple's or payload enum's words carry the names of [Backend](Backend.md#tuples-and-enums-are-words), such as `point.0` and `r.tag`, beside the frame slots that hold them.
 
 This is `sum_to` from `tests/backend/programs/computation.nra`:
 

@@ -1,0 +1,19 @@
+// A counted uint32 `..=` range over the whole domain fails before its first
+// iteration with the length failure of the built range
+// (docs/lang/CoreLanguage.md, Loops). The body prints and leaves, so a
+// missing length check shows as output instead of a long loop.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("before");
+        let low: uint32 = 0;
+        for (let value in low ..= 4294967295) {
+            console.print_line(value.to_string());
+            break;
+        }
+        console.print_line("after");
+        return program.ExitCode.Ok;
+    };
+);

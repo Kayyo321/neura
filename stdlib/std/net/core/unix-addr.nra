@@ -1,0 +1,119 @@
+let.promote _ = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let.promote _ = import:Std.Net.Core.NetAddress;
+let.promote _ = import:Std.Core.Result;
+
+/// @brief Unix-domain socket addresses: a filesystem path, or a name in the Linux abstract namespace
+/// (unix(7)).
+///
+/// On Linux `sockaddr_un.sun_path` is 108 bytes. A path may hold at most 107 bytes, leaving room for the
+/// terminating NUL, and may not contain NUL. An abstract name is stored in `sun_path` after a leading NUL
+/// byte, so it may hold at most 107 bytes; this type keeps the name without that NUL and writes it `@name`
+/// (the `ss` and `systemd` convention). The abstract namespace is Linux-only: on other systems a runtime
+/// reports it as unsupported when the address is used. Both kinds must be non-empty here; the empty
+/// abstract name (Linux autobind) is not modelled. A `UnixAddr` is an immutable class, so each value is one
+/// heap object; this runtime does not provide zero-allocation value types.
+/// @see [Std.Net.Core.UnixAddr](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Core-UnixAddr)
+#Since("0.3.0")
+export let UnixAddr = module (
+    /// @brief The most bytes a path or an abstract name may hold (108-byte `sun_path` less one).
+    const MaxNameBytes: int = 107;
+
+    /// @brief A Unix-domain socket address.
+    #[Final, NoDiscard, Immutable, ThreadSafe, Since("0.3.0")]
+    export let UnixAddr = class implements NetAddress (
+        /// @brief The filesystem path, or the abstract name without its leading NUL.
+        export last path: string;
+        /// @brief True for a Linux abstract-namespace name.
+        export last is_abstract: bool;
+
+        /// @brief Constructs the address; traps when the name is empty or longer than 107 bytes, or when a path
+        /// contains a NUL byte.
+        export let init = func(name: string, abstract_namespace: bool) {
+            last problem = check(name, abstract_namespace);
+            if (problem != "") {
+                trap_with_message("UnixAddr: " .. problem);
+            }
+            path = name;
+            is_abstract = abstract_namespace;
+        };
+
+        /// @brief Always `AddressFamily.Unix`.
+        #Pure
+        export let family = func -> AddressFamily => AddressFamily.Unix;
+
+        /// @brief Tests whether another object is a `UnixAddr` of the same kind and name.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not address: UnixAddr) {
+                return false;
+            }
+            return is_abstract == address.is_abstract && path == address.path;
+        };
+
+        /// @brief Combines the kind with the name's hash.
+        #Pure
+        export let.override hash_code = func -> uint32 =>
+            hashing.combine(hashing.of_bool(is_abstract), path.hash_code());
+
+        /// @brief The path, or `@` followed by the abstract name.
+        #Pure
+        export let.override to_string = func -> string => is_abstract ? "@" .. path : path;
+    );
+
+    /// @brief The address of a filesystem path; traps when the path is empty, longer than 107 bytes, or
+    /// contains NUL.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let of_path = func(path: string) -> UnixAddr => new UnixAddr(path, false);
+
+    /// @brief The address of a Linux abstract-namespace name (given without the leading NUL); traps when the
+    /// name is empty or longer than 107 bytes.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let abstract_name = func(name: string) -> UnixAddr => new UnixAddr(name, true);
+
+    /// @brief Parses `@name` as an abstract name and any other text as a path.
+    ///
+    /// Errors: Empty for "" or a lone `@`; OutOfRange at offset 107 (108 for `@name`) when the name is too
+    /// long; InvalidCharacter at a NUL byte in a path.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let parse = func(text: string) -> Result<UnixAddr> {
+        last abstract_namespace = text.byte_length > 0 && text.byte_at(0) == 64;
+        last start = abstract_namespace ? 1 : 0;
+        last name = text.slice(start, text.byte_length);
+        if (name.byte_length == 0) {
+            return failed(ParseErrorKind.Empty, text.byte_length, "empty Unix socket name");
+        }
+        if (name.byte_length > MaxNameBytes) {
+            return failed(ParseErrorKind.OutOfRange, start + MaxNameBytes, "Unix socket name longer than 107 bytes");
+        }
+        if (not abstract_namespace) {
+            for (let i = 0; i < name.byte_length; i++) {
+                if (name.byte_at(i) == 0) {
+                    return failed(ParseErrorKind.InvalidCharacter, i, "NUL byte in a Unix socket path");
+                }
+            }
+        }
+        return Result<UnixAddr>.Ok(new UnixAddr(name, abstract_namespace));
+    };
+
+    /// @brief Why a name cannot be used, or "" when it can.
+    let check = func(name: string, abstract_namespace: bool) -> string {
+        if (name.byte_length == 0) {
+            return "empty name";
+        }
+        if (name.byte_length > MaxNameBytes) {
+            return "name longer than 107 bytes";
+        }
+        if (not abstract_namespace) {
+            for (let i = 0; i < name.byte_length; i++) {
+                if (name.byte_at(i) == 0) {
+                    return "NUL byte in a path";
+                }
+            }
+        }
+        return "";
+    };
+
+    /// @brief Creates a Unix-address parse error at a UTF-8 byte offset.
+    let failed = func(kind: ParseErrorKind, offset: int, message: string) -> Result<UnixAddr> =>
+        Result<UnixAddr>.Err(Error.Parse { kind: kind, offset: offset, message: message });
+);

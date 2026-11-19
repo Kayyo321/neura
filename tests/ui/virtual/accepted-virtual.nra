@@ -1,0 +1,43 @@
+// Virtual accessors that compile (docs/design/Records030.md, edge cases 78,
+// 79, 81, 86, 87, 88 and 94).
+let Shape = class (
+    export let label: string = "shape";
+        | get.virtual: label;
+        | set.virtual: label = value;
+);
+// Cases 78 and 79: the override reads the base getter, statically.
+let Circle = class : Shape (
+    export let.override label: string;
+        | get.override: "circle of " + label;
+    // Case 88: elsewhere in the subclass the name dispatches.
+    export let describe = func() -> string => "a " + label;
+);
+// Case 81: only the setter is overridden; the getter is inherited.
+let Quiet = class : Shape (
+    export let.override label: string;
+        | set.override: label = value + ".";
+);
+// Case 86: spaces and a comment between the words.
+let Spaced = class (
+    export let name: string = "s";
+        | get .
+            // the slot
+            virtual : name;
+);
+// Case 87: a third class overrides the override.
+let Ring = class : Circle (
+    export let.override label: string;
+        | get.override: "ring, " + label;
+);
+// Case 94: '.virtual' in a #Final class, and an override of a #Final class's
+// base.
+#Final
+let Sealed = class (
+    export let size: int = 1;
+        | get.virtual: size;
+);
+#Final
+let Disc = class : Shape (
+    export let.override label: string;
+        | get.override: "disc";
+);

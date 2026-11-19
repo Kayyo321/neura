@@ -17,7 +17,7 @@ export let ImmutableList = module (
 
         /// @brief Copies `values`.
         export let init = func(values: T[list]) {
-            last copy: T[list] = [];
+            last copy: T[list] = new;
             last count = values.length;
             let i = 0;
             while (i < count) {
@@ -128,7 +128,7 @@ export let ImmutableList = module (
             if (start < 0 || start > end || end > storage.length) {
                 trap_with_message("invalid argument: range");
             }
-            last part: T[list] = [];
+            last part: T[list] = new;
             let i = start;
             while (i < end) {
                 part.append(storage[i]);
@@ -144,7 +144,7 @@ export let ImmutableList = module (
 
         /// @brief A new built-in list in order.
         export let to_list = func -> T[list] {
-            last result: T[list] = [];
+            last result: T[list] = new;
             last count = storage.length;
             let i = 0;
             while (i < count) {
@@ -160,16 +160,15 @@ export let ImmutableList = module (
         /// @brief Another ImmutableList with the same element type, size, and equal
         /// elements at each index.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is ImmutableList<T>)) {
+            if (other is not that: ImmutableList<T>) {
                 return false;
             }
-            last that = other as ImmutableList<T>;
             last count = storage.length;
             if (that.size() != count) {
                 return false;
             }
             for (let i = 0; i < count; i++) {
-                if (!(storage[i] === that.get(i))) {
+                if (not (storage[i] === that.get(i))) {
                     return false;
                 }
             }
@@ -208,6 +207,10 @@ export let ImmutableList = module (
             position += 1;
             return value;
         };
+
+        /// @brief Names the iterator and its position.
+        export let.override to_string = func -> string =>
+            "ImmutableListIterator(position " .. position.to_string() .. ")";
     );
 
     /// @brief Copies `items`.

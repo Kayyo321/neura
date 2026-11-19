@@ -1,10 +1,13 @@
 #include "specialize.hpp"
+#include "any.hpp"
 
 #include "attributes.hpp"
+#include "type_of.hpp"
+#include "reflect.hpp"
+#include "class_hooks.hpp"
 
 #include "monitors.hpp"
 #include "purity.hpp"
-#include "tags.hpp"
 #include "task_analysis.hpp"
 #include "nominal.hpp"
 
@@ -57,6 +60,20 @@ struct Context {
     bool copying = false;
 };
 
+std::string type_text(const IrType& type) {
+    if ((type.kind == TypeKind::Array || type.kind == TypeKind::List) && type.arguments.size() == 1)
+        return type_text(type.arguments.front()) + (type.kind == TypeKind::Array ? "[]" : "[list]");
+    if (type.kind == TypeKind::Tuple) {
+        std::string text = "[";
+        for (std::size_t i = 0; i < type.arguments.size(); ++i) text += (i ? ", " : "") + type_text(type.arguments[i]);
+        return text + "]";
+    }
+    if (type.arguments.empty()) return type.name;
+    std::string text = type.name + "<";
+    for (std::size_t i = 0; i < type.arguments.size(); ++i) text += (i ? ", " : "") + type_text(type.arguments[i]);
+    return text + ">";
+}
+
 bool concrete(const IrType& type) {
     if (type.kind == TypeKind::TypeParameter) {
         return false;
@@ -101,6 +118,11 @@ std::string display(const std::vector<IrType>& arguments) {
 }
 
 class Specializer {
+    // Static requirements (docs/design/Records030.md): by requirement and
+    // type key, the function that implements it.
+    bool implementations_built_ = false;
+    std::map<std::pair<SymbolId, std::string>, SymbolId> implementations_;
+
 public:
     Specializer(IrProgram& program, const SpecializationLimits& limits)
         : program_(program), limits_(limits), original_symbols_(program.symbols.size()),
@@ -176,18 +198,53 @@ private:
 
     // True for a declaration inside a generic class or function, including
     // the generic declaration itself and its parameters and locals.
+    // Whether `id` is a static requirement of an interface, or one of its
+    // parameters, and `scope` the interface's static scope.
+    bool requirement_signature(SymbolId id, const IrSymbol& scope) const {
+        if (scope.owner == no_symbol || program_.symbols[scope.owner].kind != SymbolKind::Interface) return false;
+        auto function = id;
+        if (program_.symbols[function].kind == SymbolKind::Parameter) function = program_.symbols[function].owner;
+        const auto& item = program_.symbols[function];
+        return item.kind == SymbolKind::Function && !item.has_body && !item.external &&
+               &program_.symbols[item.owner] == &scope;
+    }
+
     bool in_template(SymbolId id) const {
+        bool hook = false;
         for (auto scope = id; scope != no_symbol && scope < original_symbols_;
              scope = program_.symbols[scope].owner) {
             const auto& item = program_.symbols[scope];
             if (!item.generics.empty() || item.kind == SymbolKind::TypeParameter) {
                 return true;
             }
+            hook = hook || has_attribute(item, AttributeId::HookOf);
             // Class static members are shared across all instances and
-            // cannot refer to the containing class's type parameters.
-            if (is_static_scope(item)) return false;
+            // Static interface requirements and hook functions specialize
+            // with their declaring type.
+            if (is_static_scope(item) && !hook && !requirement_signature(id, item)) return false;
         }
         return false;
+    }
+
+    // The hook function of `generic`'s class hook clause, cloned for
+    // `instance` with the instance as its class.
+    void clone_hooks(SymbolId generic, SymbolId instance, const Substitution& substitution, const Context& context) {
+        for (const auto kind : {HookKind::Get, HookKind::Set}) {
+            const auto function = declared_hook(program_.symbols[generic], kind);
+            if (function == no_symbol || function >= original_symbols_) continue;
+            const auto copy = clone_function(function, program_.symbols[function].owner, substitution,
+                                             program_.symbols[function].name, context);
+            set_attribute(symbol(copy), AttributeId::HookOf,
+                          attribute_list({attribute_symbol(instance),
+                                          attribute_unsigned(kind == HookKind::Set ? 1 : 0)}));
+            member_map_[instance][function] = copy;
+        }
+    }
+
+    bool generic_hook(SymbolId id) const {
+        if (id == no_symbol || id >= original_symbols_) return false;
+        const auto cls = hook_owner(program_.symbols[id]);
+        return cls != no_symbol && cls < original_symbols_ && !program_.symbols[cls].generics.empty();
     }
 
     std::size_t depth(const IrType& type) const {
@@ -273,7 +330,8 @@ private:
                     return;
                 }
             }
-            if (context.instance != no_symbol && owned_by_generic_class(item)) item = member_of(item, context.instance);
+            if (context.instance != no_symbol && (owned_by_generic_class(item) || generic_hook(item)))
+                item = member_of(item, context.instance);
         });
         return attributes;
     }
@@ -399,6 +457,7 @@ private:
                 }
             }
         }
+        if (symbol(generic).kind == SymbolKind::Class) clone_hooks(generic, instance, substitution, inner);
         // Every eager member exists now, so links between members resolve.
         specialize_attributes(instance, inner);
         std::vector<SymbolId> copies;
@@ -586,6 +645,50 @@ private:
         for (const auto& argument : node.type_arguments) {
             result.type_arguments.push_back(type(argument, context, node.span));
         }
+        // A function value has become an object layout of a callable type,
+        // which an any does not take for a reference.
+        const auto function_layout = [&](const IrType& item) {
+            if (item.kind != TypeKind::Object) return false;
+            for (auto scope = item.symbol; scope != no_symbol && scope < program_.symbols.size();
+                 scope = program_.symbols[scope].base)
+                if (callable_methods_.contains(scope)) return true;
+            return false;
+        };
+        if (node.op == IrOp::AnyPack && !result.operands.empty() &&
+            (!any_holdable(result.operands.front().type) || function_layout(result.operands.front().type))) {
+            // What an `any` holds is checked on the specialized program
+            // (docs/design/Matching030.md, E0492).
+            auto error = Diagnostic(node.span, "a value of type " + type_text(result.operands.front().type) +
+                                                   " cannot be held in any")
+                .with_code("E0492").label("packed here in a generic body");
+            if (!context.origin.span.file.empty()) error.label(context.origin.span, "instantiated here");
+            error.help("hold it in a class and pack the reference");
+            throw error;
+        }
+        if (node.op == IrOp::Reflect) {
+            // What Std.Reflect can hold and proxy is checked on the specialized
+            // types (docs/design/Reflect030.md, E1300 and E1301), at the call
+            // that instantiated the library function when there is one.
+            const auto at = context.origin.span.file.empty() ? node.span : context.origin.span;
+            if (node.text == "pack" || node.text == "unpack") {
+                std::vector<IrType> held;
+                for (const auto& operand : result.operands) held.push_back(operand.type);
+                for (const auto& argument : result.type_arguments) held.push_back(argument);
+                for (const auto& item : held) {
+                    const auto problem = reflection_hold_problem(program_, item);
+                    if (!problem) continue;
+                    throw Diagnostic(at, *problem + " cannot be held by a Std.Reflect dynamic value")
+                        .with_code("E1301").label("reflects a value of type " + type_text(item))
+                        .help("reflect a value that can be copied out of its scope; copy an array into a list");
+                }
+            }
+            if (node.text == "proxy" && !result.type_arguments.empty()) {
+                const auto& face = result.type_arguments.front();
+                if (const auto problem = reflection_proxy_problem(program_, face))
+                    throw Diagnostic(at, "the type " + type_text(face) + " cannot be proxied").with_code("E1300")
+                        .label(*problem).help("proxy an interface whose requirements are non-generic instance methods");
+            }
+        }
         if (node.op == IrOp::CallClosure) {
             result.op = IrOp::VirtualCall;
             result.symbol = callable_methods_.at(result.operands.front().type.symbol);
@@ -619,6 +722,15 @@ private:
             }
         }
         switch (node.op) {
+        case IrOp::ConformanceCall:
+            // docs/design/Records030.md: the direct call of the implementation
+            // for the type the call now goes through, once it is concrete.
+            if (concrete(result.type_arguments.front())) {
+                result.op = IrOp::Call;
+                result.symbol = implementation(node.symbol, result.type_arguments.front(), node.span);
+                result.type_arguments.clear();
+            }
+            break;
         case IrOp::Reference:
         case IrOp::EnumConstruct:
             if (result.type.kind == TypeKind::Enum) {
@@ -690,6 +802,40 @@ private:
         return result;
     }
 
+    // The function that implements static requirement `requirement` for
+    // `type`: the one whose static.implements names the requirement and the
+    // type, or the nearest base of a class type that has one. A class
+    // instance is looked up as its generic class.
+    SymbolId implementation(SymbolId requirement, const IrType& type, const Span& span) {
+        if (!implementations_built_) {
+            implementations_built_ = true;
+            for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
+                for (const auto* attribute : find_attributes(program_.symbols[id], AttributeId::StaticImplements)) {
+                    const auto& items = attribute->value.items;
+                    implementations_.emplace(std::pair{items[0].symbol, key(items[1].type)}, id);
+                }
+            }
+        }
+        const auto lookup = [&](const IrType& item) -> SymbolId {
+            const auto found = implementations_.find({requirement, key(item)});
+            return found == implementations_.end() ? no_symbol : found->second;
+        };
+        if (type.kind == TypeKind::Object) {
+            std::set<SymbolId> seen;
+            for (auto cls = type.symbol; cls < program_.symbols.size() && seen.insert(cls).second;
+                 cls = program_.symbols[cls].base) {
+                auto generic = cls;
+                if (const auto instance = instance_of_.find(cls); instance != instance_of_.end())
+                    generic = instance->second.first;
+                if (const auto found = lookup(program_.symbols[generic].type); found != no_symbol) return found;
+            }
+        } else if (const auto found = lookup(type); found != no_symbol) {
+            return found;
+        }
+        throw Diagnostic(span, "no implementation of the static requirement '" + program_.symbols[requirement].name +
+                                   "' for " + display(type)).with_code("E0899");
+    }
+
     void check_type(const IrType& type, const std::string& where) const {
         if (!concrete(type)) {
             throw std::logic_error("specialization left a type parameter in " + where);
@@ -701,7 +847,7 @@ private:
             check_type(node.type, where);
             // A type test names its target, and a typed scheduler operation its
             // element type, as a concrete type argument.
-            if (node.op == IrOp::SchedulerCall) {
+            if (node.op == IrOp::SchedulerCall || node.op == IrOp::TypeOf || node.op == IrOp::Reflect) {
                 for (const auto& argument : node.type_arguments) check_type(argument, where);
             } else if (!node.type_arguments.empty() && node.op != IrOp::ClassIs) {
                 throw std::logic_error("specialization left type arguments in " + where);
@@ -753,7 +899,14 @@ private:
 } // namespace
 
 void specialize(IrProgram& program, const SpecializationLimits& limits) {
+    // Std.Reflect (docs/design/Reflect030.md): calls of the trusted
+    // intrinsics become Reflect nodes, which specialization makes concrete.
+    const bool reflects = prepare_reflection(program);
     Specializer(program, limits).run();
+    // typeof (docs/design/Expressions030.md) needs the concrete types and
+    // the program's classes, which exist only now.
+    expand_type_of(program);
+    if (reflects) expand_reflection(program);
     // Polls are a property of the whole program, and the isolation rules of
     // Concurrency.md section 5 need the concrete types that exist only now:
     // a generic function is checked at each specialization.
@@ -763,18 +916,13 @@ void specialize(IrProgram& program, const SpecializationLimits& limits) {
     // program is checked, so a function whose callee is a specialization, or
     // an implementation in another module, is checked with it too.
     check_pure_tags(program, {}, true);
+    check_render_factories(program, {}, true);
     // Synchronized methods take their receiver's guard only in a program that
     // spawns; the guard operations are then part of what the isolation
     // checks see.
     lower_synchronized(program);
-    const bool thread_safe_tags = std::ranges::any_of(program.symbols, [](const IrSymbol& item) {
-        return has_tag(item, TagId::ThreadSafe);
-    });
-    if (uses_tasks(program) || thread_safe_tags) {
-        const TaskAnalysis analysis(program);
-        analysis.check_tags();
-        if (uses_tasks(program)) analysis.check();
-    }
+    // Hooked programs get their implicit calls during hook elaboration.
+    if (!has_class_hooks(program)) check_task_safety(program);
 }
 
 } // namespace neura

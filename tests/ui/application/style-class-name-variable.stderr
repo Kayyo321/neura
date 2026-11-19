@@ -1,0 +1,7 @@
+error[E1012]: not a class of the CSS module
+ --> $DIR/style-class-name-variable.nra:3:61
+  |
+3 | let pick = func(name: string) -> string => Local.class_name(name);
+  |                                                             ^^^^ the argument must be one string literal naming a class of the module
+
+For more information about this error, try `neura explain E1012`.

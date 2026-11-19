@@ -1,0 +1,17 @@
+// A property read through a nil interface reference traps (edge case 75).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Named = interface (
+    let name: string;
+        | get;
+);
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let nobody: Named = nil;
+        console.print_line("before");
+        console.print_line(nobody.name);
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,118 @@
+let base64 = import:Std.Encoding.Base64;
+let errors = import:Std.Core.Error;
+let http = import:Std.Net.Http;
+let messages = import:Std.Net.Dns.Message;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let transports = import:Std.Net.Dns.DnsTransport;
+
+/// @brief DNS over HTTPS (RFC 8484) over `Std.Net.Http.Client`.
+///
+/// A query is sent with DNS ID 0 (section 4.1) either as a POST whose body is the wire message with
+/// `Content-Type: application/dns-message`, or as a GET whose `dns` parameter is the message in base64url without
+/// padding (section 4.1); both send `Accept: application/dns-message`. A response must be a 2xx status with that
+/// content type (section 4.2) and decode as a DNS message; its ID is then set back to the query's own ID so the
+/// resolver's matching works. The request building, encoding and response checks are real and tested with an
+/// injected `Std.Net.Http.Transport`; the client's default transport is the host's `neura.http.fetch`, a stub until
+/// the A4 runtime lane provides it (`Std.Net.Http.host_fetch`).
+/// @see [Std.Net.Dns.DohTransport](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-DohTransport)
+#Since("0.3.0")
+export let DohTransport = module (
+    /// @brief The media type of DNS messages over HTTP (RFC 8484 section 6).
+    export const MediaType = "application/dns-message";
+
+    /// @brief A DoH transport: an HTTP client, the endpoint URL (for example "https://dns.example/dns-query"), and
+    /// the method.
+    #[Final, NotThreadSafe]
+    export let DohTransport = class implements transports.DnsTransport (
+        /// @brief The HTTP client.
+        last client: http.Client;
+        /// @brief The endpoint URL without the `dns` parameter.
+        export last url: string;
+        /// @brief Whether GET is used instead of POST.
+        export last use_get: bool;
+
+        /// @brief A transport over `carrier` to `endpoint`, with GET when `get` is true.
+        export let init = func(carrier: http.Client, endpoint: string, get: bool) {
+            client = carrier;
+            url = endpoint;
+            use_get = get;
+        };
+
+        /// @brief A stream transport (HTTP responses are never truncated for size).
+        export let is_stream = func -> bool => true;
+
+        /// @brief One DoH exchange.
+        export let exchange = func(query: messages.Message) -> Result<messages.Message> {
+            last request = use_get ? get_request(url, query)? : post_request(url, query)?;
+            last response = decode_response(client.send(request)?)?;
+            response.header.id = query.header.id;
+            return Result<messages.Message>.Ok(response);
+        };
+
+        /// @brief Text such as "DohTransport(POST https://dns.example/dns-query)".
+        export let.override to_string = func -> string =>
+            "DohTransport(" .. (use_get ? "GET " : "POST ") .. url .. ")";
+    );
+
+    /// @brief The query's wire form with DNS ID 0 (RFC 8484 section 4.1).
+    #NoDiscard
+    export let wire_query = func(query: messages.Message) -> Result<uint8[list]> {
+        last bytes = messages.encode(query)?;
+        bytes[0] = 0;
+        bytes[1] = 0;
+        return Result<uint8[list]>.Ok(bytes);
+    };
+
+    /// @brief The GET URL: `endpoint` plus `?dns=` (or `&dns=` when it has a query) and the base64url text.
+    #NoDiscard
+    export let get_url = func(endpoint: string, query: messages.Message) -> Result<string> {
+        last text = base64.encode_url_unpadded(wire_query(query)?);
+        last separator = strings.contains(endpoint, "?") ? "&" : "?";
+        return Result<string>.Ok(endpoint .. separator .. "dns=" .. text);
+    };
+
+    /// @brief The GET request.
+    #NoDiscard
+    export let get_request = func(endpoint: string, query: messages.Message) -> Result<http.ClientRequest> {
+        last request = new http.ClientRequest("GET", get_url(endpoint, query)?);
+        request.headers.set("Accept", MediaType);
+        return Result<http.ClientRequest>.Ok(request);
+    };
+
+    /// @brief The POST request.
+    #NoDiscard
+    export let post_request = func(endpoint: string, query: messages.Message) -> Result<http.ClientRequest> {
+        last request = new http.ClientRequest("POST", endpoint);
+        request.headers.set("Accept", MediaType);
+        request.headers.set("Content-Type", MediaType);
+        request.set_body(wire_query(query)?);
+        return Result<http.ClientRequest>.Ok(request);
+    };
+
+    /// @brief The DNS message of a DoH response. Err (Custom `dns.doh_status`) for a status outside 200-299,
+    /// (`dns.doh_media_type`) for another content type, or the decode error.
+    #NoDiscard
+    export let decode_response = func(response: http.Response) -> Result<messages.Message> {
+        if (response.status < 200 || response.status > 299) {
+            return Result<messages.Message>.Err(errors.custom("dns.doh_status", "DoH server answered status "
+                .. response.status.to_string()));
+        }
+        last kind = strings.to_ascii_lower(strings.trim(content_type(response)));
+        if (kind != MediaType && not strings.starts_with(kind, MediaType .. ";")) {
+            return Result<messages.Message>.Err(errors.custom("dns.doh_media_type", "DoH response is not "
+                .. MediaType));
+        }
+        return messages.decode(response.body());
+    };
+
+    /// @brief The Content-Type field, or "".
+    let content_type = func(response: http.Response) -> string {
+        for (let i = 0; i < response.headers.size(); i++) {
+            if (strings.equals_ignore_ascii_case(response.headers.name_at(i), "Content-Type")) {
+                return response.headers.value_at(i);
+            }
+        }
+        return "";
+    };
+);

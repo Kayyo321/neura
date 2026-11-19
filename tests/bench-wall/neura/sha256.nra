@@ -78,7 +78,7 @@ export let Sha256 = module:program.Entry (
 
     export let.override main = func(args: string[]) -> program.ExitCode {
         let n = result.value_or<int32>(int32s.parse(args[0]), 0);
-        let message: uint8[list] = [];
+        let message: uint8[list] = new;
         for (let i = 0; i < n; i = i + 1) {
             message.append((i % 251) as uint8);
         }

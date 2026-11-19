@@ -1,0 +1,4 @@
+// int32 conforms to Additive<int32>, not to Additive<int64>.
+let.promote _ = import:Std.Core.Arithmetic;
+let start = func<T: Additive<int64>>() -> int64 => T.zero();
+let x = start<int32>();

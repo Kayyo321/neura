@@ -1,0 +1,7 @@
+error[E1007]: URL not allowed
+ --> $DIR/bad-static-url.nra:1:29
+  |
+1 | let view = html() { <a href="javascript:run()">Bad</a> };
+  |                             ^^^^^^^^^^^^^^^^^^ use a relative URL or the https, http, mailto or tel scheme
+
+For more information about this error, try `neura explain E1007`.

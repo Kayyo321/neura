@@ -1,0 +1,22 @@
+// Prints each named environment variable as NAME=value, or NAME unset.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+export let Environment = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        for (let name in args) {
+            match (program.Environment.get(name)) {
+                program.Environment.Lookup.Found(value) => {
+                    console.print_line(name + "=" + value);
+                },
+                program.Environment.Lookup.Missing => {
+                    console.print_line(name + " unset");
+                },
+                program.Environment.Lookup.Failed(_) => {
+                    console.print_line(name + " denied");
+                },
+            }
+        }
+        return program.ExitCode.Ok;
+    };
+);

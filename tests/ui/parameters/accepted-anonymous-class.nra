@@ -1,0 +1,5 @@
+// The type of a group is written once, so an anonymous class in a group is
+// one class, and the second argument is the first one's type.
+let same = func(a, b: class (export let count: int; export let sum: int;)) {
+    a.count = b.count;
+};

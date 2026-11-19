@@ -1,0 +1,141 @@
+let atomics = import:Std.Concurrent.AtomicInt64;
+let.promote _ = import:Std.Crypto.Algorithm;
+
+/// @brief The process-wide policy that every primitive of Std.Crypto consults (Stdlib.md section 21.2).
+///
+/// A primitive calls `require` with its algorithm when it is created, so a denied algorithm traps with
+/// "denied: <Algorithm> is not allowed under the <Policy> policy" before it processes any data. Enforcement is
+/// at run time only; checking a policy at compile time is outside 0.3.0. The policy is held in one
+/// Std.Concurrent.AtomicInt64, so primitives can be created in spawned tasks; set it at startup, because a
+/// change while tasks run takes effect for each task at its next creation of a primitive.
+/// @see [Std.Crypto.Core.CryptoPolicy](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Core-CryptoPolicy)
+#Since("0.3.0")
+export let CryptoPolicy = module (
+    /// @brief The policies. `Modern` (the default) allows everything Std.Crypto implements and denies MD5,
+    /// SHA-1 and RSA-1024. `Fips140_3` allows only FIPS-approved algorithms. `Cnsa2_0` allows only the
+    /// CNSA 2.0 suite (AES-256, SHA-384 and SHA-512, ML-KEM-1024 and ML-DSA-87) and the constructions over it.
+    #Since("0.3.0")
+    export let Policy = enum (Modern, Fips140_3, Cnsa2_0);
+
+    /// @brief The current policy's code: 0 Modern, 1 Fips140_3, 2 Cnsa2_0.
+    last current: atomics.AtomicInt64 = atomics.create(0);
+
+    /// @brief Replaces the process-wide policy.
+    #Since("0.3.0")
+    export let set_policy = func(policy: Policy) {
+        current.store(match (policy) {
+            Policy.Modern => 0,
+            Policy.Fips140_3 => 1,
+            Policy.Cnsa2_0 => 2,
+        });
+    };
+
+    /// @brief The process-wide policy.
+    #[NoDiscard, Since("0.3.0")]
+    export let policy = func -> Policy {
+        last code = current.load();
+        if (code == 1) {
+            return Policy.Fips140_3;
+        }
+        return if (code == 2) -> Policy.Cnsa2_0 else -> Policy.Modern;
+    };
+
+    /// @brief Whether the policy allows the algorithm.
+    #[NoDiscard, Pure, Since("0.3.0")]
+    export let allowed_by = func(policy: Policy, algorithm: Algorithm) -> bool => match (policy) {
+        Policy.Modern => modern(algorithm),
+        Policy.Fips140_3 => fips(algorithm),
+        Policy.Cnsa2_0 => cnsa(algorithm),
+    };
+
+    /// @brief Whether the current policy allows the algorithm.
+    #[NoDiscard, Since("0.3.0")]
+    export let allows = func(algorithm: Algorithm) -> bool => allowed_by(policy(), algorithm);
+
+    /// @brief Traps with "denied: <Algorithm> is not allowed under the <Policy> policy" unless the current
+    /// policy allows the algorithm.
+    #Since("0.3.0")
+    export let require = func(algorithm: Algorithm) {
+        last active = policy();
+        if (not allowed_by(active, algorithm)) {
+            trap_with_message("denied: " .. algorithm.to_string() .. " is not allowed under the " .. active.to_string()
+                .. " policy");
+        }
+    };
+
+    let modern = func(algorithm: Algorithm) -> bool => match (algorithm) {
+        Algorithm.Md5 => false,
+        Algorithm.Sha1 => false,
+        Algorithm.Rsa1024 => false,
+        _ => true,
+    };
+
+    // FIPS 180-4, FIPS 202, SP 800-185, FIPS 198-1, SP 800-38B/D/G, FIPS 197, SP 800-56C (HKDF),
+    // SP 800-132 (PBKDF2), FIPS 186-5 (including PKCS #1 v1.5 signatures), FIPS 203 to 205, and approved entropy
+    // sources.
+    let fips = func(algorithm: Algorithm) -> bool => match (algorithm) {
+        Algorithm.Sha224 => true,
+        Algorithm.Sha256 => true,
+        Algorithm.Sha384 => true,
+        Algorithm.Sha512 => true,
+        Algorithm.Sha512_256 => true,
+        Algorithm.Sha3_224 => true,
+        Algorithm.Sha3_256 => true,
+        Algorithm.Sha3_384 => true,
+        Algorithm.Sha3_512 => true,
+        Algorithm.Shake128 => true,
+        Algorithm.Shake256 => true,
+        Algorithm.CShake128 => true,
+        Algorithm.CShake256 => true,
+        Algorithm.TupleHash128 => true,
+        Algorithm.TupleHash256 => true,
+        Algorithm.MerkleTree => true,
+        Algorithm.Hmac => true,
+        Algorithm.Kmac128 => true,
+        Algorithm.Kmac256 => true,
+        Algorithm.AesCmac => true,
+        Algorithm.Aes128 => true,
+        Algorithm.Aes192 => true,
+        Algorithm.Aes256 => true,
+        Algorithm.Aes128Gcm => true,
+        Algorithm.Aes192Gcm => true,
+        Algorithm.Aes256Gcm => true,
+        Algorithm.Ff1 => true,
+        Algorithm.Hkdf => true,
+        Algorithm.Pbkdf2 => true,
+        Algorithm.OsEntropy => true,
+        Algorithm.Ed25519 => true,
+        Algorithm.Ed448 => true,
+        Algorithm.P256 => true,
+        Algorithm.P384 => true,
+        Algorithm.P521 => true,
+        Algorithm.RsaPss => true,
+        Algorithm.RsaOaep => true,
+        Algorithm.RsaPkcs1v15 => true,
+        Algorithm.MlKem512 => true,
+        Algorithm.MlKem768 => true,
+        Algorithm.MlKem1024 => true,
+        Algorithm.MlDsa44 => true,
+        Algorithm.MlDsa65 => true,
+        Algorithm.MlDsa87 => true,
+        Algorithm.SlhDsa => true,
+        _ => false,
+    };
+
+    // CNSA 2.0: AES-256, SHA-384/512, ML-KEM-1024, ML-DSA-87, and HMAC, HKDF, PBKDF2 and Merkle trees over
+    // those hashes (each underlying hash is checked when it is created).
+    let cnsa = func(algorithm: Algorithm) -> bool => match (algorithm) {
+        Algorithm.Sha384 => true,
+        Algorithm.Sha512 => true,
+        Algorithm.MerkleTree => true,
+        Algorithm.Hmac => true,
+        Algorithm.Aes256 => true,
+        Algorithm.Aes256Gcm => true,
+        Algorithm.Hkdf => true,
+        Algorithm.Pbkdf2 => true,
+        Algorithm.OsEntropy => true,
+        Algorithm.MlKem1024 => true,
+        Algorithm.MlDsa87 => true,
+        _ => false,
+    };
+);

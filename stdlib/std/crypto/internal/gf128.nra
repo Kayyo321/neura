@@ -1,0 +1,111 @@
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief GHASH of NIST SP 800-38D and POLYVAL of RFC 8452 over GF(2^128). Internal.
+///
+/// A field element is two uint64 halves in GCM's bit order (the first byte's most significant bit is the
+/// coefficient of x^0). The multiplication runs 128 steps that each select with a mask, never with a branch on
+/// the data. POLYVAL is computed through GHASH as RFC 8452, Appendix A shows: POLYVAL(H, X) =
+/// ByteReverse(GHASH(mulX_GHASH(ByteReverse(H)), ByteReverse(X))).
+#Since("0.3.0")
+export let Gf128 = module (
+    /// @brief A running GHASH or POLYVAL: absorb blocks, then read the 16-byte result.
+    export let Hasher = class (
+        let hh: uint64;
+        let hl: uint64;
+        let yh: uint64 = 0;
+        let yl: uint64 = 0;
+        last polyval: bool;
+        let pending: uint8[list] = new;
+
+        /// @brief GHASH under the 16-byte key H, or POLYVAL when `use_polyval` is true.
+        export let init = func(h: uint8[list], use_polyval: bool) {
+            polyval = use_polyval;
+            if (use_polyval) {
+                last reversed = reverse(h, 0);
+                hh = words.load64_be(reversed, 0);
+                hl = words.load64_be(reversed, 8);
+                // mulX_GHASH: one shift step of the multiplication.
+                last lsb = hl & 1;
+                hl = (hl >> 1) | (hh << 63);
+                hh = (hh >> 1) ^ (lsb * 16212958658533785600);
+            } else {
+                hh = words.load64_be(h, 0);
+                hl = words.load64_be(h, 8);
+            }
+        };
+
+        /// @brief Absorbs the bytes, zero padded to a multiple of 16 (the padding the AEADs apply to each
+        /// field). Bytes are buffered only within one call.
+        export let update_padded = func(bytes: uint8[list]) {
+            let i = 0;
+            while (i + 16 <= bytes.length) {
+                block(bytes, i);
+                i += 16;
+            }
+            if (i < bytes.length) {
+                let tail: uint8[list] = new;
+                while (i < bytes.length) {
+                    tail.append(bytes[i]);
+                    i++;
+                }
+                while (tail.length < 16) {
+                    tail.append(0);
+                }
+                block(tail, 0);
+            }
+        };
+
+        /// @brief Absorbs one 16-byte block at the offset.
+        export let block = func(bytes: uint8[list], offset: int) {
+            let xh: uint64 = 0;
+            let xl: uint64 = 0;
+            if (polyval) {
+                last reversed = reverse(bytes, offset);
+                xh = words.load64_be(reversed, 0);
+                xl = words.load64_be(reversed, 8);
+            } else {
+                xh = words.load64_be(bytes, offset);
+                xl = words.load64_be(bytes, offset + 8);
+            }
+            multiply(yh ^ xh, yl ^ xl);
+        };
+
+        /// @brief Y = X * H.
+        let multiply = func(xh: uint64, xl: uint64) {
+            let zh: uint64 = 0;
+            let zl: uint64 = 0;
+            let vh = hh;
+            let vl = hl;
+            for (let i = 0; i < 128; i++) {
+                last bit = i < 64 ? (xh >> (63 - i)) & 1 : (xl >> (127 - i)) & 1;
+                last mask = bit * 18446744073709551615;
+                zh = zh ^ (vh & mask);
+                zl = zl ^ (vl & mask);
+                last lsb = vl & 1;
+                vl = (vl >> 1) | (vh << 63);
+                vh = (vh >> 1) ^ (lsb * 16212958658533785600);
+            }
+            yh = zh;
+            yl = zl;
+        };
+
+        /// @brief The 16-byte result so far.
+        export let digest = func -> uint8[list] {
+            let out: uint8[list] = new;
+            words.append64_be(out, yh);
+            words.append64_be(out, yl);
+            return polyval ? reverse(out, 0) : out;
+        };
+
+        export let.override to_string = func -> string => "Gf128.Hasher(<redacted>)";
+    );
+
+    /// @brief The 16 bytes at the offset in reverse order.
+    let reverse = func(bytes: uint8[list], offset: int) -> uint8[list] {
+        let out: uint8[list] = new;
+        for (let i in 15 ..= 0 : -1) {
+            out.append(bytes[offset + i]);
+        }
+        return out;
+    };
+);

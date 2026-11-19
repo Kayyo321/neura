@@ -1,0 +1,11 @@
+error[E0907]: #Final conflicts with #Sealed
+ --> $DIR/sealed.nra:3:9
+  |
+2 | #Sealed
+  | ------- #Sealed given here
+3 | let P = record (x: int);
+  |         ^^^^^^ #Final given here
+  |
+  = help: keep one of them
+
+For more information about this error, try `neura explain E0907`.

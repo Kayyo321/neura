@@ -1,0 +1,405 @@
+let alpn = import:Std.Net.Http.Alpn;
+let cc = import:Std.Net.Http.CacheControl;
+let.promote _ = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let header_map = import:Std.Net.Http.Headers;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+
+/// @brief The `Alt-Svc` field (RFC 7838 section 3): alternative services an origin advertises, and choosing
+/// the preferred one a client supports.
+///
+/// A field value is either `clear` (exactly, case-sensitive) or a comma-separated list of alternatives
+/// `protocol-id="[host]:port"` with `;`-separated parameters. The protocol-id is a percent-encoded ALPN name
+/// and is kept both as written and decoded to bytes (uppercase and lowercase hex digits are both accepted on
+/// input; output uses uppercase, as section 3 requires). `ma` (default 86400 seconds) is delta-seconds, with
+/// the 2147483648 clamp of RFC 9111 section 1.2.2; `persist` counts only with the value `1` (section 3.1);
+/// other parameters are kept in order and otherwise ignored. A list that contains `clear` among alternatives
+/// means `clear` (section 3: all alternatives are invalidated, including those in the same field). `parse`
+/// returns Err for any element that does not fit the grammar, for an invalid percent-escape, an empty host
+/// port, a port outside 1 through 65535, or an invalid `ma`. Header order is the server's preference order.
+/// @see [Std.Net.Http.AltSvc](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-AltSvc)
+#Since("0.3.0")
+export let AltSvc = module (
+    /// @brief The freshness of an advertisement without `ma`: 24 hours (section 3.1).
+    export const DefaultMaxAge: int64 = 86400;
+
+    /// @brief One alternative service: a protocol, an optional host, a port and the parameters.
+    #[Final, NotThreadSafe]
+    export let Alternative = class (
+        /// @brief The protocol-id as written (percent-encoded).
+        export last protocol_id: string;
+        /// @brief The decoded ALPN protocol name.
+        export last protocol: uint8[list];
+        /// @brief The host, or "" for the origin's own host.
+        export last host: string;
+        /// @brief The port, 1 through 65535.
+        export last port: int;
+        /// @brief The `ma` parameter in seconds, 86400 when absent.
+        export last max_age: int64;
+        /// @brief Whether `persist=1` is present.
+        export last persist: bool;
+        /// @brief The names of the other parameters, in order.
+        export last parameter_names: string[list] = new;
+        /// @brief The values of the other parameters (unquoted), parallel to `parameter_names`.
+        export last parameter_values: string[list] = new;
+
+        /// @brief Stores the fields; the parameter lists are copied.
+        export let init = func(written_id: string, decoded: uint8[list], alt_host: string, alt_port: int, ma: int64,
+            keep: bool, names: string[list], values: string[list]) {
+            protocol_id = written_id;
+            protocol = new;
+            for (let b in decoded) {
+                protocol.append(b);
+            }
+            host = alt_host;
+            port = alt_port;
+            max_age = ma;
+            persist = keep;
+            for (let i = 0; i < names.length; i++) {
+                parameter_names.append(names[i]);
+                parameter_values.append(values[i]);
+            }
+        };
+
+        /// @brief The alternative as written in a field value, with `ma` only when it is not the default.
+        export let.override to_string = func -> string {
+            let text = protocol_id .. "=" .. cc.quote(host .. ":" .. port.to_string());
+            if (max_age != DefaultMaxAge) {
+                text ..= "; ma=" .. max_age.to_string();
+            }
+            if (persist) {
+                text ..= "; persist=1";
+            }
+            for (let i = 0; i < parameter_names.length; i++) {
+                last value = parameter_values[i];
+                text ..= "; " .. parameter_names[i] .. "=" .. (header_map.is_token(value) ? value : cc.quote(value));
+            }
+            return text;
+        };
+
+        /// @brief Equal written forms.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: Alternative) {
+                return false;
+            }
+            return to_string() == that.to_string();
+        };
+
+        /// @brief The hash of the written form.
+        export let.override hash_code = func -> uint32 => hashing.combine(17, strings.hash(to_string()));
+    );
+
+    /// @brief A parsed `Alt-Svc` field: `clear`, or the alternatives in preference order.
+    #[Final, NotThreadSafe]
+    export let AltSvc = class (
+        /// @brief Whether the field is `clear`.
+        export last clear: bool;
+        /// @brief The alternatives (empty when `clear`).
+        last alternatives: Alternative[list] = new;
+
+        /// @brief A `clear` value or an empty list of alternatives.
+        export let init = func(is_clear: bool) {
+            clear = is_clear;
+        };
+
+        /// @brief Appends an alternative; traps with "invalid argument: clear" on a `clear` value.
+        export let add = func(alternative: Alternative) {
+            if (clear) {
+                trap_with_message("invalid argument: clear");
+            }
+            alternatives.append(alternative);
+        };
+
+        /// @brief The number of alternatives.
+        export let size = func -> int => alternatives.length;
+
+        /// @brief Alternative `index`.
+        export let at = func(index: int) -> Alternative => alternatives[index];
+
+        /// @brief The field value: `clear`, or the alternatives joined with ", ".
+        export let.override to_string = func -> string {
+            if (clear) {
+                return "clear";
+            }
+            last parts: string[list] = new;
+            for (let a in alternatives) {
+                parts.append(a.to_string());
+            }
+            return strings.join(parts, ", ");
+        };
+
+        /// @brief Equal field values.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: AltSvc) {
+                return false;
+            }
+            return to_string() == that.to_string();
+        };
+
+        /// @brief The hash of the field value.
+        export let.override hash_code = func -> uint32 => hashing.combine(17, strings.hash(to_string()));
+    );
+
+    /// @brief Parses an `Alt-Svc` field value (section 3); see the module description for the errors.
+    #[NoDiscard]
+    export let parse = func(text: string) -> Result<AltSvc> {
+        last elements = header_map.split_list(text);
+        if (elements.length == 0) {
+            return Result<AltSvc>.Err(failure(ParseErrorKind.Empty, 0, "empty Alt-Svc value"));
+        }
+        for (let element in elements) {
+            if (element == "clear") {
+                return Result<AltSvc>.Ok(new AltSvc(true));
+            }
+        }
+        last value = new AltSvc(false);
+        for (let element in elements) {
+            value.add(parse_alternative(element)?);
+        }
+        return Result<AltSvc>.Ok(value);
+    };
+
+    /// @brief The first alternative, in the server's preference order, whose protocol is one of `supported`;
+    /// None for `clear` or when none matches.
+    #[NoDiscard]
+    export let preferred = func(value: AltSvc, supported: uint8[list][list]) -> Optional<Alternative> {
+        for (let i = 0; i < value.size(); i++) {
+            last candidate = value.at(i);
+            for (let protocol in supported) {
+                if (alpn.same(candidate.protocol, protocol)) {
+                    return Optional<Alternative>.Some(candidate);
+                }
+            }
+        }
+        return Optional<Alternative>.None;
+    };
+
+    /// @brief The protocol-id of an ALPN name (section 3): token characters other than `%` stay, every other
+    /// byte becomes `%XX` with uppercase hex digits.
+    #[Pure, ThreadSafe]
+    export let encode_protocol_id = func(name: uint8[list]) -> string {
+        last digits = "0123456789ABCDEF";
+        let text = "";
+        for (let b in name) {
+            if (b < 128 && b != 37 && header_map.is_tchar(b)) {
+                text ..= ascii(b);
+            } else {
+                last high = (b / 16) as int;
+                last low = (b % 16) as int;
+                text ..= "%" .. digits.slice(high, high + 1) .. digits.slice(low, low + 1);
+            }
+        }
+        return text;
+    };
+
+    /// @brief The ALPN name of a protocol-id: `%XX` escapes (either case) decoded, other bytes kept. Err
+    /// (InvalidCharacter) at a byte that is not a token character or at a broken escape.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let decode_protocol_id = func(text: string) -> Result<uint8[list]> {
+        last bytes: uint8[list] = new;
+        if (text.byte_length == 0) {
+            return Result<uint8[list]>.Err(failure(ParseErrorKind.Empty, 0, "empty protocol-id"));
+        }
+        let i = 0;
+        while (i < text.byte_length) {
+            last b = text.byte_at(i);
+            if (not header_map.is_tchar(b)) {
+                return Result<uint8[list]>.Err(
+                    failure(ParseErrorKind.InvalidCharacter, i, "protocol-id is not a token"));
+            }
+            if (b == 37) {
+                if (i + 2 >= text.byte_length) {
+                    return Result<uint8[list]>.Err(
+                        failure(ParseErrorKind.InvalidCharacter, i, "broken percent-escape"));
+                }
+                last high = hex_value(text.byte_at(i + 1));
+                last low = hex_value(text.byte_at(i + 2));
+                if (high < 0 || low < 0) {
+                    return Result<uint8[list]>.Err(
+                        failure(ParseErrorKind.InvalidCharacter, i, "broken percent-escape"));
+                }
+                bytes.append((high * 16 + low) as uint8);
+                i += 3;
+            } else {
+                bytes.append(b);
+                i++;
+            }
+        }
+        return Result<uint8[list]>.Ok(bytes);
+    };
+
+    /// @brief One alt-value: alternative *( OWS ";" OWS parameter ).
+    let parse_alternative = func(element: string) -> Result<Alternative> {
+        last parts = split_semicolons(element);
+        last head = parts[0];
+        last equals_at = strings.index_of(head, "=");
+        if (equals_at <= 0) {
+            return Result<Alternative>.Err(failure(ParseErrorKind.Syntax, 0, "expected protocol-id=\"host:port\""));
+        }
+        last written_id = head.slice(0, equals_at);
+        last protocol = decode_protocol_id(written_id)?;
+        let authority_text = "";
+        match (unquote(head.slice(equals_at + 1, head.byte_length))) {
+            Optional.Some(inner) => {
+                authority_text = inner;
+            },
+            Optional.None => {
+                return Result<Alternative>.Err(
+                    failure(ParseErrorKind.Syntax, equals_at + 1, "alt-authority must be a quoted-string"));
+            },
+        }
+        last colon = strings.last_index_of(authority_text, ":");
+        if (colon < 0) {
+            return Result<Alternative>.Err(failure(ParseErrorKind.Syntax, equals_at + 1, "alt-authority needs a port"));
+        }
+        last port = port_of(authority_text.slice(colon + 1, authority_text.byte_length));
+        if (port < 1) {
+            return Result<Alternative>.Err(
+                failure(ParseErrorKind.OutOfRange, equals_at + 1, "port outside 1 through 65535"));
+        }
+        let max_age = DefaultMaxAge;
+        let persist = false;
+        last names: string[list] = new;
+        last values: string[list] = new;
+        for (let p = 1; p < parts.length; p++) {
+            last parameter = parts[p];
+            last at = strings.index_of(parameter, "=");
+            if (at <= 0 || not header_map.is_token(parameter.slice(0, at))) {
+                return Result<Alternative>.Err(failure(ParseErrorKind.Syntax, 0, "expected parameter=value"));
+            }
+            last name = strings.to_ascii_lower(parameter.slice(0, at));
+            last raw = parameter.slice(at + 1, parameter.byte_length);
+            last parsed = header_map.is_token(raw) ? Optional<string>.Some(raw) : unquote(raw);
+            let value = "";
+            match (parsed) {
+                Optional.Some(v) => {
+                    value = v;
+                },
+                Optional.None => {
+                    return Result<Alternative>.Err(
+                        failure(ParseErrorKind.Syntax, 0, "parameter value must be a token or quoted-string"));
+                },
+            }
+            if (name == "ma") {
+                match (cc.parse_delta_seconds(value)) {
+                    Optional.Some(seconds) => {
+                        max_age = seconds;
+                    },
+                    Optional.None => {
+                        return Result<Alternative>.Err(
+                            failure(ParseErrorKind.InvalidCharacter, 0, "ma is not delta-seconds"));
+                    },
+                }
+            } else if (name == "persist") {
+                if (value == "1") {
+                    persist = true;
+                }
+            } else {
+                names.append(name);
+                values.append(value);
+            }
+        }
+        return Result<Alternative>.Ok(new Alternative(written_id, protocol, authority_text.slice(0, colon), port,
+            max_age, persist, names, values));
+    };
+
+    /// @brief The trimmed `;`-separated parts of an element; semicolons inside quoted-strings do not separate.
+    let split_semicolons = func(text: string) -> string[list] {
+        last parts: string[list] = new;
+        let start = 0;
+        let quoted = false;
+        let i = 0;
+        while (i < text.byte_length) {
+            last b = text.byte_at(i);
+            if (quoted) {
+                if (b == 92) {
+                    i++;
+                } else if (b == 34) {
+                    quoted = false;
+                }
+            } else if (b == 34) {
+                quoted = true;
+            } else if (b == 59) {
+                parts.append(header_map.trim_value(text.slice(start, i)));
+                start = i + 1;
+            }
+            i++;
+        }
+        parts.append(header_map.trim_value(text.slice(start, text.byte_length)));
+        return parts;
+    };
+
+    /// @brief The content of a quoted-string that spans all of `text`, with quoted-pairs resolved; None
+    /// otherwise.
+    let unquote = func(text: string) -> Optional<string> {
+        if (text.byte_length < 2 || text.byte_at(0) != 34) {
+            return Optional<string>.None;
+        }
+        let out = "";
+        let segment = 1;
+        let i = 1;
+        while (i < text.byte_length) {
+            last b = text.byte_at(i);
+            if (b == 92) {
+                if (i + 1 >= text.byte_length) {
+                    return Optional<string>.None;
+                }
+                out ..= text.slice(segment, i);
+                segment = i + 1;
+                i += 2;
+                continue;
+            }
+            if (b == 34) {
+                return if (i + 1 != text.byte_length) -> Optional<string>.None
+                    else -> Optional<string>.Some(out .. text.slice(segment, i));
+            }
+            i++;
+        }
+        return Optional<string>.None;
+    };
+
+    /// @brief A port of one to five digits from 1 through 65535, or -1.
+    let port_of = func(text: string) -> int {
+        if (text.byte_length == 0 || text.byte_length > 5) {
+            return -1;
+        }
+        let value = 0;
+        for (let i = 0; i < text.byte_length; i++) {
+            last b = text.byte_at(i);
+            if (b < 48 || b > 57) {
+                return -1;
+            }
+            value = value * 10 + ((b - 48) as int);
+        }
+        return value >= 1 && value <= 65535 ? value : -1;
+    };
+
+    /// @brief The value of a hex digit (either case), or -1.
+    #[Pure, ThreadSafe]
+    let hex_value = func(b: uint8) -> int {
+        if (b >= 48 && b <= 57) {
+            return (b - 48) as int;
+        }
+        if (b >= 65 && b <= 70) {
+            return (b - 55) as int;
+        }
+        return if (b >= 97 && b <= 102) -> (b - 87) as int
+            else -> -1;
+    };
+
+    /// @brief The one-character string of an ASCII byte.
+    #[Pure, ThreadSafe]
+    let ascii = func(b: uint8) -> string {
+        last bytes: uint8[list] = new;
+        bytes.append(b);
+        let [_, text] = string.from_utf8(bytes);
+        return text;
+    };
+
+    /// @brief A Parse error.
+    #[Pure, ThreadSafe]
+    let failure = func(kind: ParseErrorKind, offset: int, message: string) -> Error =>
+        Error.Parse { kind: kind, offset: offset, message: message };
+);

@@ -1,0 +1,1 @@
+let view = html(x: int) -> ui.View { <p></p> };

@@ -1,4 +1,5 @@
 #include "jit.hpp"
+#include "nvm/environment.hpp"
 
 #include "assembler.hpp"
 
@@ -48,6 +49,7 @@ const char* mode_name(Mode mode) {
 Mode environment_mode() {
     static const Mode mode = [] {
         Mode parsed = Mode::Auto;
+        nvm::require_bound_environment("NEURA_JIT");
         const char* text = std::getenv("NEURA_JIT");
         if (text && !parse_mode(text, parsed)) parsed = Mode::Auto;
         return parsed;

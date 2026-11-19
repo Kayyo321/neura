@@ -1,0 +1,584 @@
+let cc = import:Std.Net.Http.CacheControl;
+let.promote _ = import:Std.Time.Clock;
+let dates = import:Std.Net.Http.Date;
+let hashing = import:Std.Core.Hash;
+let header_map = import:Std.Net.Http.Headers;
+let instant = import:Std.Time.Instant;
+let methods = import:Std.Net.Http.Method;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let statuses = import:Std.Net.Http.Status;
+let strings = import:Std.Text.Strings;
+
+/// @brief HTTP caching (RFC 9111): stored responses, the freshness and age calculations of section 4.2, the
+/// storage rules of section 3, and an in-memory `ResponseCache`.
+///
+/// Times are counted in whole seconds: each instant contributes its epoch second (a fraction of a second is
+/// dropped, rounding toward the past). Every age and lifetime term saturates at plus or minus 2147483648 seconds
+/// (section 1.2.2), so no header value can make the arithmetic trap. Header handling: the first `Date`,
+/// `Expires`, `Age` and `Last-Modified` field line counts; dates are parsed with `Std.Net.Http.Date`, ignoring
+/// case (section 4.2), with the response time as the reference for two-digit years. A missing or invalid `Date`
+/// is replaced by the response time (RFC 9110 section 6.6.1); an invalid `Expires` (for example "0") means
+/// "already expired" and gives a lifetime of 0 (section 5.3); an invalid `Age` is ignored (section 5.1), and
+/// only the first member of a list-valued `Age` counts. Directive conflicts resolve to the most restrictive
+/// reading: a qualified `no-cache` or `private` is treated like the unqualified directive. `Vary: *` responses
+/// are not stored; other `Vary` responses are stored with the nominated request fields, and a lookup whose
+/// fields differ is a miss (section 4.1).
+/// @see [Std.Net.Http.Cache](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-Cache)
+#Since("0.3.0")
+export let Cache = module (
+    /// @brief The saturation bound of age and lifetime arithmetic, in seconds (RFC 9111 section 1.2.2).
+    export const Infinity: int64 = 2147483648;
+
+    /// @brief The percentage of the time since Last-Modified used as a heuristic lifetime (section 4.2.2).
+    export const HeuristicPercent: int64 = 10;
+
+    /// @brief A response as a cache keeps it: status, header fields, content, and the times of the request and
+    /// of the response's arrival (section 4.2.3).
+    #[Final, NotThreadSafe]
+    export let StoredResponse = class (
+        /// @brief The status code.
+        export last status: int;
+        /// @brief The response header fields (a copy owned by the stored response).
+        export last fields: header_map.Headers;
+        /// @brief The response content (a copy owned by the stored response).
+        export last body: uint8[list];
+        /// @brief The clock reading when the request was sent ("request_time").
+        export last request_time: instant.Instant;
+        /// @brief The clock reading when the response was received ("response_time").
+        export last response_time: instant.Instant;
+
+        /// @brief Copies the header fields and the content.
+        export let init = func(code: int, response_fields: header_map.Headers, content: uint8[list],
+            requested: instant.Instant, received: instant.Instant) {
+            status = code;
+            fields = response_fields.copy();
+            body = new;
+            for (let b in content) {
+                body.append(b);
+            }
+            request_time = requested;
+            response_time = received;
+        };
+
+        /// @brief Equal status, fields, content and times.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: StoredResponse) {
+                return false;
+            }
+            if (status != that.status || not fields.equals(that.fields) || body.length != that.body.length
+                || not request_time.equals(that.request_time) || not response_time.equals(that.response_time)) {
+                return false;
+            }
+            for (let i = 0; i < body.length; i++) {
+                if (body[i] != that.body[i]) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        /// @brief Combines the status, fields, content and times.
+        export let.override hash_code = func -> uint32 {
+            let hash = hashing.combine(17, status.hash_code());
+            hash = hashing.combine(hash, fields.hash_code());
+            for (let b in body) {
+                hash = hashing.combine(hash, b as uint32);
+            }
+            hash = hashing.combine(hash, request_time.hash_code());
+            return hashing.combine(hash, response_time.hash_code());
+        };
+
+        /// @brief The status, the number of fields and content bytes, and the two times.
+        export let.override to_string = func -> string =>
+            "StoredResponse{status=" .. status.to_string() .. ", fields=" .. fields.size().to_string() .. ", body="
+            .. body.length.to_string() .. " bytes, request_time=" .. request_time.to_string() .. ", response_time="
+            .. response_time.to_string() .. "}";
+    );
+
+    /// @brief Every term of the age calculation of RFC 9111 section 4.2.3, in seconds.
+    #[Final, Immutable, ThreadSafe]
+    export let AgeTerms = class (
+        /// @brief The Age field value, or 0 when absent or invalid.
+        export last age_value: int64;
+        /// @brief The Date field value as epoch seconds (the response time when absent or invalid).
+        export last date_value: int64;
+        /// @brief max(0, response_time - date_value).
+        export last apparent_age: int64;
+        /// @brief response_time - request_time.
+        export last response_delay: int64;
+        /// @brief age_value + response_delay.
+        export last corrected_age_value: int64;
+        /// @brief max(apparent_age, corrected_age_value).
+        export last corrected_initial_age: int64;
+        /// @brief now - response_time.
+        export last resident_time: int64;
+        /// @brief corrected_initial_age + resident_time.
+        export last current_age: int64;
+
+        /// @brief Stores the eight terms.
+        export let init = func(age: int64, date: int64, apparent: int64, delay: int64, corrected: int64,
+            initial: int64, resident: int64, current: int64) {
+            age_value = age;
+            date_value = date;
+            apparent_age = apparent;
+            response_delay = delay;
+            corrected_age_value = corrected;
+            corrected_initial_age = initial;
+            resident_time = resident;
+            current_age = current;
+        };
+
+        /// @brief Equal terms.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: AgeTerms) {
+                return false;
+            }
+            return to_string() == that.to_string();
+        };
+
+        /// @brief The hash of the text form.
+        export let.override hash_code = func -> uint32 => hashing.combine(17, strings.hash(to_string()));
+
+        /// @brief The terms by name.
+        export let.override to_string = func -> string =>
+            "AgeTerms{age_value=" .. age_value.to_string() .. ", date_value=" .. date_value.to_string()
+            .. ", apparent_age=" .. apparent_age.to_string() .. ", response_delay=" .. response_delay.to_string()
+            .. ", corrected_age_value=" .. corrected_age_value.to_string() .. ", corrected_initial_age="
+            .. corrected_initial_age.to_string() .. ", resident_time=" .. resident_time.to_string()
+            .. ", current_age=" .. current_age.to_string() .. "}";
+    );
+
+    /// @brief Which rule of RFC 9111 section 4.2.1 gave the freshness lifetime, with the lifetime in seconds.
+    export let Lifetime = enum (SharedMaxAge(int64), MaxAge(int64), Expires(int64), Heuristic(int64), Unknown);
+
+    /// @brief The result of a cache lookup. `Fresh`: the stored response may be used without contacting the
+    /// origin (it is fresh and meets the request's max-age and min-fresh, or it is stale within the request's
+    /// max-stale where the response allows that). `Stale`: a stored response exists but must be validated
+    /// (section 4.3) before use. `Miss`: nothing usable is stored. The payload is the cache's own stored
+    /// response: treat it as read-only and copy its fields (`fields.copy()`) before changing them, for example
+    /// to replace `Age` (section 4), or the stored entry changes too.
+    export let Lookup = enum (Fresh(StoredResponse), Stale(StoredResponse), Miss);
+
+    /// @brief The age terms of section 4.2.3 at `now`.
+    #NoDiscard
+    export let age_terms = func(stored: StoredResponse, now: instant.Instant) -> AgeTerms {
+        last response_time = stored.response_time.epoch_seconds;
+        last age_value = age_field(stored.fields);
+        last date_value = date_field(stored, "Date", response_time);
+        last apparent_age = maximum(0, difference(response_time, date_value));
+        last response_delay = difference(response_time, stored.request_time.epoch_seconds);
+        last corrected_age_value = saturate(age_value + response_delay);
+        last corrected_initial_age = maximum(apparent_age, corrected_age_value);
+        last resident_time = difference(now.epoch_seconds, response_time);
+        last current_age = saturate(corrected_initial_age + resident_time);
+        return new AgeTerms(age_value, date_value, apparent_age, response_delay, corrected_age_value,
+            corrected_initial_age, resident_time, current_age);
+    };
+
+    /// @brief current_age of section 4.2.3 in seconds.
+    export let current_age = func(stored: StoredResponse, now: instant.Instant) -> int64 =>
+        age_terms(stored, now).current_age;
+
+    /// @brief The freshness lifetime by the first matching rule of section 4.2.1: s-maxage (shared caches
+    /// only), max-age, Expires minus Date, then, when `heuristic` is true and the status is heuristically
+    /// cacheable or the response is `public`, 10% of Date minus Last-Modified (section 4.2.2; never negative).
+    /// `Unknown` when no rule applies.
+    #NoDiscard
+    export let lifetime = func(stored: StoredResponse, shared: bool, heuristic: bool) -> Lifetime {
+        last directives = cc.of_headers(stored.fields);
+        if (shared) {
+            match (directives.s_maxage()) {
+                Optional.Some(seconds) => {
+                    return Lifetime.SharedMaxAge(seconds);
+                },
+                Optional.None => {},
+            }
+        }
+        match (directives.max_age()) {
+            Optional.Some(seconds) => {
+                return Lifetime.MaxAge(seconds);
+            },
+            Optional.None => {},
+        }
+        last response_time = stored.response_time.epoch_seconds;
+        match (stored.fields.get("Expires")) {
+            Optional.Some(text) => {
+                last expires = dates.parse_ignoring_case(text, stored.response_time);
+                return match (expires) {
+                    Result.Ok(moment) => Lifetime.Expires(
+                        difference(moment.epoch_seconds, date_field(stored, "Date", response_time))),
+                    Result.Err(_) => Lifetime.Expires(0),
+                };
+            },
+            Optional.None => {},
+        }
+        if (not heuristic || not (statuses.is_heuristically_cacheable(stored.status) || directives.is_public())) {
+            return Lifetime.Unknown;
+        }
+        return Lifetime.Unknown unless stored.fields.contains("Last-Modified");
+        last date_value = date_field(stored, "Date", response_time);
+        // An invalid Last-Modified counts as the Date value, which gives a lifetime of 0.
+        last modified = date_field(stored, "Last-Modified", date_value);
+        last since = maximum(0, difference(date_value, modified));
+        return Lifetime.Heuristic(since * HeuristicPercent / 100);
+    };
+
+    /// @brief The seconds of a lifetime; 0 for `Unknown`.
+    #[Pure, ThreadSafe]
+    export let lifetime_seconds = func(value: Lifetime) -> int64 => match (value) {
+        Lifetime.SharedMaxAge(seconds) => seconds,
+        Lifetime.MaxAge(seconds) => seconds,
+        Lifetime.Expires(seconds) => seconds,
+        Lifetime.Heuristic(seconds) => seconds,
+        Lifetime.Unknown => 0,
+    };
+
+    /// @brief freshness_lifetime of section 4.2.1 in seconds (0 when no rule applies); see `lifetime`.
+    export let freshness_lifetime = func(stored: StoredResponse, shared: bool, heuristic: bool) -> int64 =>
+        lifetime_seconds(lifetime(stored, shared, heuristic));
+
+    /// @brief response_is_fresh = (freshness_lifetime > current_age) (section 4.2). A negative current_age
+    /// (`now` before the response time) counts as 0, so a lifetime of 0 or less is never fresh.
+    export let is_fresh = func(stored: StoredResponse, now: instant.Instant, shared: bool, heuristic: bool) -> bool =>
+        freshness_lifetime(stored, shared, heuristic) > maximum(0, current_age(stored, now));
+
+    /// @brief Whether a cache may store the response (section 3, with section 3.5 and the request no-store
+    /// directive of section 5.2.1.5); see `refusal`.
+    export let is_storable = func(method: string, request_fields: header_map.Headers, status: int,
+        response_fields: header_map.Headers, shared: bool) -> bool =>
+            refusal(method, request_fields, status, response_fields, shared) == "";
+
+    /// @brief Why a cache must not store the response, or "" when it may. The reasons, checked in this order:
+    /// "method" (only GET and HEAD are understood), "status" (not final), "status not understood" (206 or 304,
+    /// or any status that is not final under must-understand), "request no-store", "no-store" (ignored with
+    /// must-understand, section 5.2.2.3), "private" (shared caches), "authorization" (shared caches, a request
+    /// with Authorization and no must-revalidate, public or s-maxage, section 3.5), "vary *", and "no freshness
+    /// information" (none of public, private in a private cache, Expires, max-age, s-maxage in a shared cache,
+    /// or a heuristically cacheable status).
+    #NoDiscard
+    export let refusal = func(method: string, request_fields: header_map.Headers, status: int,
+        response_fields: header_map.Headers, shared: bool) -> string {
+        if (method != "GET" && method != "HEAD") {
+            return "method";
+        }
+        if (status < 200 || status > 599) {
+            return "status";
+        }
+        last response = cc.of_headers(response_fields);
+        last understood = status != 206 && status != 304;
+        return "status not understood" unless understood;
+        if (cc.of_headers(request_fields).no_store()) {
+            return "request no-store";
+        }
+        if (response.no_store() && not response.must_understand()) {
+            return "no-store";
+        }
+        if (shared && response.is_private()) {
+            return "private";
+        }
+        if (shared && request_fields.contains("Authorization") && not response.must_revalidate() && not response.is_public()
+            && not response.has("s-maxage")) {
+            return "authorization";
+        }
+        for (let name in response_fields.list_elements("Vary")) {
+            if (name == "*") {
+                return "vary *";
+            }
+        }
+        last explicit = response.is_public() || (not shared && response.is_private())
+            || response_fields.contains("Expires") || response.has("max-age") || (shared && response.has("s-maxage"))
+            || statuses.is_heuristically_cacheable(status);
+        return "no freshness information" unless explicit;
+        return "";
+    };
+
+    /// @brief One stored response with its key, the request fields its Vary names, and its last use.
+    #[Final, NotThreadSafe]
+    let Entry = class (
+        /// @brief The request method.
+        export last method: string;
+        /// @brief The target URI text.
+        export last uri: string;
+        /// @brief The stored response.
+        export last stored: StoredResponse;
+        /// @brief The lowercase field names that Vary nominates.
+        export last vary_names: string[list] = new;
+        /// @brief The joined request values of `vary_names` ("" when absent), parallel to it.
+        export last vary_values: string[list] = new;
+        /// @brief Whether each nominated field was present in the request, parallel to `vary_names`.
+        export last vary_present: bool[list] = new;
+        /// @brief The use counter value of the last store or lookup hit.
+        export let used: int64 = 0;
+
+        /// @brief Records the response and the request fields Vary nominates.
+        export let init = func(request_method: string, target: string, response: StoredResponse,
+            request_fields: header_map.Headers, tick: int64) {
+            method = request_method;
+            uri = target;
+            stored = response;
+            used = tick;
+            for (let name in response.fields.list_elements("Vary")) {
+                last key = strings.to_ascii_lower(name);
+                vary_names.append(key);
+                match (request_fields.joined(key)) {
+                    Optional.Some(value) => {
+                        vary_values.append(value);
+                        vary_present.append(true);
+                    },
+                    Optional.None => {
+                        vary_values.append("");
+                        vary_present.append(false);
+                    },
+                }
+            }
+        };
+
+        /// @brief Whether the request's nominated fields equal the stored ones (section 4.1).
+        export let vary_matches = func(request_fields: header_map.Headers) -> bool {
+            for (let i = 0; i < vary_names.length; i++) {
+                last matched = match (request_fields.joined(vary_names[i])) {
+                    Optional.Some(value) => vary_present[i] && value == vary_values[i],
+                    Optional.None => not vary_present[i],
+                };
+                return false unless matched;
+            }
+            return true;
+        };
+
+        /// @brief The method and URI.
+        export let.override to_string = func -> string => "Entry{" .. method .. " " .. uri .. "}";
+    );
+
+    /// @brief An in-memory HTTP cache keyed by request method and target URI text, holding responses to GET and
+    /// HEAD only, at most `capacity` of them.
+    ///
+    /// Storing a new key into a full cache evicts the least recently used entry (by a counter that each store
+    /// and each Fresh or Stale lookup advances, so eviction is deterministic); storing a key that is already
+    /// present replaces its response in place and evicts nothing. A shared cache applies the shared-cache rules
+    /// (s-maxage, private, proxy-revalidate, Authorization). Heuristic freshness is on by default. The cache does
+    /// not validate, collapse requests or serve `only-if-cached` itself: a Miss for an only-if-cached request is
+    /// the caller's 504 (section 5.2.1.7).
+    #[Final, NotThreadSafe]
+    export let ResponseCache = class (
+        /// @brief Whether the cache is shared (a proxy) rather than private (one user agent).
+        export last shared: bool;
+        /// @brief The maximum number of stored responses.
+        export last capacity: int;
+        /// @brief Whether heuristic freshness (section 4.2.2) is used.
+        let heuristic: bool = true;
+        /// @brief The entries, in insertion order.
+        last entries: Entry[list] = new;
+        /// @brief The use counter.
+        let tick: int64 = 0;
+
+        /// @brief An empty cache. Traps with "invalid argument: capacity" when `max_entries` is below 1.
+        export let init = func(is_shared: bool, max_entries: int) {
+            if (max_entries < 1) {
+                trap_with_message("invalid argument: capacity");
+            }
+            shared = is_shared;
+            capacity = max_entries;
+        };
+
+        /// @brief Turns heuristic freshness on or off.
+        export let set_heuristic = func(enabled: bool) {
+            heuristic = enabled;
+        };
+
+        /// @brief The number of stored responses.
+        export let size = func -> int => entries.length;
+
+        /// @brief Whether a response is stored for `method` and `uri`.
+        export let contains = func(method: string, uri: string) -> bool => find(method, uri) >= 0;
+
+        /// @brief Stores the response to a `method` request for `uri` when section 3 allows it (see
+        /// `refusal`); returns whether it was stored.
+        export let store = func(method: string, uri: string, request_fields: header_map.Headers,
+            response: StoredResponse) -> bool {
+            if (refusal(method, request_fields, response.status, response.fields, shared) != "") {
+                return false;
+            }
+            tick++;
+            last entry = new Entry(method, uri, response, request_fields, tick);
+            last at = find(method, uri);
+            if (at >= 0) {
+                entries[at] = entry;
+                return true;
+            }
+            if (entries.length >= capacity) {
+                entries.remove_at(least_recent());
+            }
+            entries.append(entry);
+            return true;
+        };
+
+        /// @brief Looks up a stored response for a `method` request for `uri` at `now`, applying the request's
+        /// no-cache, max-age, min-fresh and max-stale directives (section 5.2.1) and the response's no-cache,
+        /// must-revalidate, proxy-revalidate and s-maxage limits on serving stale responses (section 4.2.4).
+        #NoDiscard
+        export let lookup = func(method: string, uri: string, request_fields: header_map.Headers,
+            now: instant.Instant) -> Lookup {
+            last at = find(method, uri);
+            if (at < 0) {
+                return Lookup.Miss;
+            }
+            last entry = entries[at];
+            return Lookup.Miss unless entry.vary_matches(request_fields);
+            tick++;
+            entry.used = tick;
+            last stored = entry.stored;
+            last request = cc.of_headers(request_fields);
+            last response = cc.of_headers(stored.fields);
+            if (request.no_cache() || response.no_cache()) {
+                return Lookup.Stale(stored);
+            }
+            last life = freshness_lifetime(stored, shared, heuristic);
+            // A negative age (a clock that went back) counts as 0.
+            last age = maximum(0, current_age(stored, now));
+            last too_old = match (request.max_age()) {
+                Optional.Some(limit) => age > limit,
+                Optional.None => false,
+            };
+            if (too_old) {
+                return Lookup.Stale(stored);
+            }
+            if (life > age) {
+                last enough = match (request.min_fresh()) {
+                    Optional.Some(margin) => life - age >= margin,
+                    Optional.None => true,
+                };
+                return enough ? Lookup.Fresh(stored) : Lookup.Stale(stored);
+            }
+            last forbidden = response.must_revalidate()
+                || (shared && (response.proxy_revalidate() || response.has("s-maxage")));
+            last tolerated = match (request.max_stale()) {
+                Optional.Some(limit) => not forbidden && age - life <= limit,
+                Optional.None => false,
+            };
+            return tolerated ? Lookup.Fresh(stored) : Lookup.Stale(stored);
+        };
+
+        /// @brief `lookup` at the clock's current time; the clock's error, if any, is returned.
+        #NoDiscard
+        export let lookup_with = func(clock: Clock, method: string, uri: string,
+            request_fields: header_map.Headers) -> Result<Lookup> {
+            last now = clock.now()?;
+            return Result<Lookup>.Ok(lookup(method, uri, request_fields, now));
+        };
+
+        /// @brief Removes every stored response for `uri` (any method); returns how many were removed.
+        export let invalidate = func(uri: string) -> int {
+            let removed = 0;
+            let i = entries.length - 1;
+            while (i >= 0) {
+                if (entries[i].uri == uri) {
+                    entries.remove_at(i);
+                    removed++;
+                }
+                i--;
+            }
+            return removed;
+        };
+
+        /// @brief Section 4.4: after a non-error (2xx or 3xx) response to a request whose method is not safe
+        /// (unknown methods included), invalidates `uri`; returns how many responses were removed.
+        export let record_response = func(method: string, uri: string, status: int) -> int {
+            return if (methods.is_safe_name(method) || status < 200 || status > 399) -> 0
+                else -> invalidate(uri);
+        };
+
+        /// @brief Removes the response stored for `method` and `uri`; returns whether one was stored.
+        export let remove = func(method: string, uri: string) -> bool {
+            last at = find(method, uri);
+            if (at < 0) {
+                return false;
+            }
+            entries.remove_at(at);
+            return true;
+        };
+
+        /// @brief Removes every stored response.
+        export let clear = func {
+            while (entries.length > 0) {
+                entries.remove_at(entries.length - 1);
+            }
+        };
+
+        /// @brief The kind of cache, the number of entries and the capacity.
+        export let.override to_string = func -> string =>
+            "ResponseCache{" .. (shared ? "shared" : "private") .. ", " .. entries.length.to_string() .. "/"
+            .. capacity.to_string() .. "}";
+
+        /// @brief The index of the entry for `method` and `uri`, or -1.
+        let find = func(method: string, uri: string) -> int {
+            for (let i = 0; i < entries.length; i++) {
+                if (entries[i].method == method && entries[i].uri == uri) {
+                    return i;
+                }
+            }
+            return -1;
+        };
+
+        /// @brief The index of the entry with the smallest use counter.
+        let least_recent = func -> int {
+            let best = 0;
+            for (let i = 1; i < entries.length; i++) {
+                if (entries[i].used < entries[best].used) {
+                    best = i;
+                }
+            }
+            return best;
+        };
+    );
+
+    /// @brief The first member of the first Age field line as delta-seconds, or 0 when absent or invalid.
+    let age_field = func(fields: header_map.Headers) -> int64 {
+        last text = match (fields.get("Age")) {
+            Optional.Some(value) => value,
+            Optional.None => "",
+        };
+        last members = header_map.split_list(text);
+        if (members.length == 0) {
+            return 0;
+        }
+        return match (cc.parse_delta_seconds(members[0])) {
+            Optional.Some(seconds) => seconds,
+            Optional.None => 0,
+        };
+    };
+
+    /// @brief The epoch seconds of the first `name` field line as an HTTP-date, or `fallback` when absent or
+    /// invalid.
+    let date_field = func(stored: StoredResponse, name: string, fallback: int64) -> int64 {
+        return match (stored.fields.get(name)) {
+            Optional.Some(text) => match (dates.parse_ignoring_case(text, stored.response_time)) {
+                Result.Ok(moment) => moment.epoch_seconds,
+                Result.Err(_) => fallback,
+            },
+            Optional.None => fallback,
+        };
+    };
+
+    /// @brief later - earlier, saturated.
+    let difference = func(later: int64, earlier: int64) -> int64 {
+        // Each operand is first brought within 2^62 - 1 of zero so the subtraction cannot overflow.
+        last bound: int64 = 4611686018427387903;
+        return saturate(clamp(later, bound) - clamp(earlier, bound));
+    };
+
+    /// @brief `value` limited to plus or minus `bound`.
+    let clamp = func(value: int64, bound: int64) -> int64 {
+        if (value > bound) {
+            return bound;
+        }
+        return if (value < -bound) -> -bound
+            else -> value;
+    };
+
+    /// @brief `value` limited to plus or minus 2147483648 (section 1.2.2).
+    let saturate = func(value: int64) -> int64 => clamp(value, Infinity);
+
+    /// @brief The larger of two values.
+    let maximum = func(a: int64, b: int64) -> int64 => a > b ? a : b;
+);

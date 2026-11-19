@@ -178,7 +178,8 @@ Every message and code below was produced by `neura check --error-format=short` 
 | `E0433` `duplicate overload parameter signature for 'f'` | `int` and `int32` are the same type. |
 | `E0423` `expression is not callable` | Calling a field: `buffer.size()` where `size` is now a field. Write `buffer.size`. |
 | `E0422` `expected a value` | A `void` call used as a value, such as `let v = list.remove_at(i);`. Read the element first, then call `remove_at`. |
-| `E0425` `empty collection literal needs an expected type` | `let xs: int[list] = [];`. |
+| `E0450` `a list is constructed with 'new'` | A bare literal or range where a list is expected, as in `let xs: int[list] = [1, 2];`. Write `new([1, 2])`, `new(0 .. n)`, or `new` for an empty list; `neura check --fix` inserts it. |
+| `E0425` `empty collection literal needs an expected type` | `let xs: int[] = [];`. |
 | `E0425` `nil requires a class reference type` | `nil` only fits class and interface types; use `Optional<T>` otherwise. |
 | `E0421` `'Store' is not a type` | Modules are not types; use an interface. |
 | `E0405` `function may exit without returning int32` | Add a `return` on every path (or an `else`). |

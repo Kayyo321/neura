@@ -25,7 +25,7 @@ let FsDeniedTests = module (
         let q = path.of("other.txt");
         denied<uint8[list]>(fs.read_bytes(p));
         denied<string>(fs.read_text(p));
-        let empty: uint8[list] = [];
+        let empty: uint8[list] = new;
         denied<unit.Unit>(fs.write_bytes(p, empty));
         denied<unit.Unit>(fs.write_text(p, "x"));
         denied<unit.Unit>(fs.append_text(p, "x"));

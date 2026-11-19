@@ -105,7 +105,7 @@ if __name__ == "__main__":
             ms = find_all(p, s)
             values = flatten(s, ms, p.groups)
             full = p.fullmatch(s) is not None
-            lines.append('        check(%s, %d, %s, %s, [%s]);' % (
+            lines.append('        check(%s, %d, %s, %s, %s);' % (
                 neura_string(pattern), flags, neura_string(s), 'true' if full else 'false',
-                ', '.join(str(v) for v in values)))
+                ('new([%s])' % ', '.join(str(v) for v in values)) if values else 'new'))
     print('\n'.join(lines))

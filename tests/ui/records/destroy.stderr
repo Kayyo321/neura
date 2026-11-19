@@ -1,0 +1,10 @@
+error[E0514]: a record cannot be destroyed
+ --> $DIR/destroy.nra:4:13
+  |
+4 |     destroy p;
+  |             ^ 'P' is a record
+  |
+  = note: a copy shares the values of its source, so the collector owns every record
+  = help: remove the 'destroy'; the record is collected when nothing refers to it
+
+For more information about this error, try `neura explain E0514`.

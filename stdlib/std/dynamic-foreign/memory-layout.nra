@@ -39,15 +39,15 @@ export let MemoryLayout = module (
         /// @brief The optional name, empty when unnamed.
         let label: string = "";
         /// @brief Struct and union members, or the one element layout of a sequence.
-        last parts: MemoryLayout[list] = [];
+        last parts: MemoryLayout[list] = new;
         /// @brief The byte offset of each part: member offsets, or 0 for a sequence element.
-        last offsets: int64[list] = [];
+        last offsets: int64[list] = new;
         /// @brief The element count of a sequence.
         last count: int64;
 
         /// @brief Use the module functions; this constructor stores precomputed fields.
         export let init = func(shape: Shape, carrier: Carrier, byte_size: int64, byte_alignment: int64,
-                               members: MemoryLayout[list], member_offsets: int64[list], elements: int64) {
+            members: MemoryLayout[list], member_offsets: int64[list], elements: int64) {
             kind = shape;
             value_carrier = carrier;
             size = byte_size;
@@ -107,7 +107,7 @@ export let MemoryLayout = module (
         /// @brief The members of a struct or union in order, or the element of a sequence.
         #Pure
         export let member_layouts = func -> MemoryLayout[list] {
-            last copy: MemoryLayout[list] = [];
+            last copy: MemoryLayout[list] = new;
             for (let part in parts) {
                 copy.append(part);
             }
@@ -117,7 +117,7 @@ export let MemoryLayout = module (
         /// @brief The offsets of the members of a struct or union, in the order of member_layouts.
         #Pure
         export let member_offsets = func -> int64[list] {
-            last copy: int64[list] = [];
+            last copy: int64[list] = new;
             for (let offset in offsets) {
                 copy.append(offset);
             }
@@ -171,16 +171,15 @@ export let MemoryLayout = module (
                     return i;
                 }
             }
-            trap_with_message("invalid argument: no member " + member_name);
+            trap_with_message("invalid argument: no member " .. member_name);
         };
 
         /// @brief Layouts compare by shape, carrier, size, alignment, name, and members.
-        #Pure
+        /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is MemoryLayout)) {
+            if (other is not that: MemoryLayout) {
                 return false;
             }
-            last that = other as MemoryLayout;
             return to_string() == that.to_string() && alignment == that.alignment;
         };
 
@@ -193,12 +192,12 @@ export let MemoryLayout = module (
         export let.override to_string = func -> string {
             last text = match (kind) {
                 Shape.Value => carrier_name(value_carrier),
-                Shape.Padding => "x" + size.to_string(),
-                Shape.Sequence => count.to_string() + ":" + parts[0].to_string(),
-                Shape.Struct => "[" + joined(parts, "") + "]",
-                Shape.Union => "[" + joined(parts, "|") + "]",
+                Shape.Padding => "x" .. size.to_string(),
+                Shape.Sequence => count.to_string() .. ":" .. parts[0].to_string(),
+                Shape.Struct => "[" .. joined(parts, "") .. "]",
+                Shape.Union => "[" .. joined(parts, "|") .. "]",
             };
-            return (label == "") ? text : text + "(" + label + ")";
+            return (label == "") ? text : text .. "(" .. label .. ")";
         };
     );
 
@@ -252,7 +251,7 @@ export let MemoryLayout = module (
     #Pure
     export let value = func(carrier: Carrier) -> MemoryLayout {
         last size = carrier_size(carrier);
-        return new(Shape.Value, carrier, size, size, [], [], 0);
+        return new(Shape.Value, carrier, size, size, new, new, 0);
     };
 
     /// @brief A scalar layout with an explicit size and alignment, for C types whose size the runner reports.
@@ -261,7 +260,7 @@ export let MemoryLayout = module (
         if (size != carrier_size(carrier) || alignment < 1 || (alignment & (alignment - 1)) != 0) {
             trap_with_message("invalid argument: value layout size or alignment");
         }
-        return new(Shape.Value, carrier, size, alignment, [], [], 0);
+        return new(Shape.Value, carrier, size, alignment, new, new, 0);
     };
 
     /// @brief `bytes` bytes of padding with alignment 1.
@@ -270,17 +269,17 @@ export let MemoryLayout = module (
         if (bytes < 1) {
             trap_with_message("invalid argument: padding size");
         }
-        return new(Shape.Padding, Carrier.Bool, bytes, 1, [], [], 0);
+        return new(Shape.Padding, Carrier.Bool, bytes, 1, new, new, 0);
     };
 
     /// @brief A struct with C's natural layout: each member at the next offset aligned for it, the size rounded
     /// up to the largest member alignment. Traps when two members share a nonempty name.
     export let struct_layout = func(members: ...MemoryLayout) -> MemoryLayout {
         check_names(members);
-        last offsets: int64[list] = [];
+        last offsets: int64[list] = new;
         let offset: int64 = 0;
         let alignment: int64 = 1;
-        last list_members: MemoryLayout[list] = [];
+        last list_members: MemoryLayout[list] = new;
         for (let member in members) {
             offset = align_up(offset, member.byte_alignment());
             offsets.append(offset);
@@ -291,17 +290,17 @@ export let MemoryLayout = module (
             list_members.append(member);
         }
         return new(Shape.Struct, Carrier.Bool, align_up(offset, alignment), alignment, list_members,
-                   offsets, 0);
+            offsets, 0);
     };
 
     /// @brief A union: every member at offset 0, the size the largest member's rounded up to the largest
     /// alignment.
     export let union_layout = func(members: ...MemoryLayout) -> MemoryLayout {
         check_names(members);
-        last offsets: int64[list] = [];
+        last offsets: int64[list] = new;
         let size: int64 = 0;
         let alignment: int64 = 1;
-        last list_members: MemoryLayout[list] = [];
+        last list_members: MemoryLayout[list] = new;
         for (let member in members) {
             offsets.append(0);
             if (member.byte_size() > size) {
@@ -313,7 +312,7 @@ export let MemoryLayout = module (
             list_members.append(member);
         }
         return new(Shape.Union, Carrier.Bool, align_up(size, alignment), alignment, list_members,
-                   offsets, 0);
+            offsets, 0);
     };
 
     /// @brief `elements` consecutive copies of `element`, a C array.
@@ -325,7 +324,7 @@ export let MemoryLayout = module (
             trap_with_message("invalid argument: element size is not a multiple of its alignment");
         }
         return new(Shape.Sequence, Carrier.Bool, elements * element.byte_size(),
-                   element.byte_alignment(), [element], [0], elements);
+            element.byte_alignment(), new([element]), new([0]), elements);
     };
 
     /// @brief `offset` rounded up to a multiple of `alignment`.
@@ -338,7 +337,7 @@ export let MemoryLayout = module (
         for (let i = 0; i < members.length; i++) {
             for (let j = i + 1; j < members.length; j++) {
                 if (members[i].name() != "" && members[i].name() == members[j].name()) {
-                    trap_with_message("invalid argument: duplicate member name " + members[i].name());
+                    trap_with_message("invalid argument: duplicate member name " .. members[i].name());
                 }
             }
         }

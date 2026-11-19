@@ -1,0 +1,6 @@
+// A record has no deconstruction (edge case 29).
+let P = record (x: int, y: int);
+let f = func(p: P) -> int {
+    let [a, b] = p;
+    return a;
+};

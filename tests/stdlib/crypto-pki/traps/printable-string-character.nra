@@ -1,0 +1,11 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: PrintableString character
+let program = import:Std.Program;
+let writer = import:Std.Crypto.Pki.DerWriter;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = writer.printable_string("a*b");
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,12 @@
+error[E0473]: 'using' cannot carry the returned 'Result<int32[]>' through its close
+  --> $DIR/using-generic-array-result.nra:15:5
+   |
+14 | let read = func<T>(make: func() -> T) -> Result<T> {
+   | ----------------------------------------------------... 'read<int32[]>' returns 'Result<int32[]>' with the type arguments it is called with
+15 |     using (source = new Resource()) {
+   |     ^^^^^
+   |
+   = note: a return inside 'using' passes its value to the close, which may replace it with the close error
+   = help: return a list, which the result can hold, or close the resource before building the array
+
+For more information about this error, try `neura explain E0473`.

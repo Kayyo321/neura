@@ -1,0 +1,13 @@
+error[E0450]: a list is constructed with 'new', and this list literal is not
+ --> $DIR/field.nra:3:35
+  |
+3 |     export let items: int[list] = [1, 2, 3]; // keep
+  |                                   ^^^^^^^^^ the expected type is int32[list]
+  |
+  = note: a bare literal or range is an array; a list needs 'new'
+help: construct the list with 'new'
+  |
+3 |     export let items: int[list] = new([1, 2, 3]); // keep
+  |                                   ++++         +
+
+For more information about this error, try `neura explain E0450`.

@@ -1,0 +1,5 @@
+// A member that is not accessible from outside its class (edge case 87).
+let Invoice = class (
+    let hidden: int = 0;
+);
+let text = nameof(Invoice.hidden);

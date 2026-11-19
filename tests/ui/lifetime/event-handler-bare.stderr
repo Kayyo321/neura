@@ -1,0 +1,12 @@
+error[E0453]: escaping closure requires new func
+ --> $DIR/event-handler-bare.nra:9:28
+  |
+9 |     return event.subscribe(func(value: int) {
+  |                            ^^^^^^^^^^^^^^^^^^...
+  |
+help: construct an owned closure
+  |
+9 |     return event.subscribe(new func(value: int) {
+  |                            ++++
+
+For more information about this error, try `neura explain E0453`.

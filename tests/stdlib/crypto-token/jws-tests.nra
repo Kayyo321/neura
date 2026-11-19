@@ -1,0 +1,125 @@
+// test-options: --gpu=off --max-steps 5000000000
+let ecdsa = import:Std.Crypto.Asymmetric.Ecdsa;
+let ed25519 = import:Std.Crypto.Asymmetric.Ed25519;
+let hex = import:Std.Encoding.Hex;
+let jwk = import:Std.Crypto.Token.Jwk;
+let jws = import:Std.Crypto.Token.Jws;
+let test = import:Std.Test;
+let utf8 = import:Std.Encoding.Utf8;
+let vectors = import:JwsVectors;
+let.promote _ = import:Std.Core.Result;
+
+let JwsTests = module (
+    let example = func(source: string) -> [string, string, string, string] {
+        last rows = vectors.examples;
+        for (let i = 0; i < rows.length; i += 5) {
+            if (rows[i] == source) {
+                return [rows[i + 1], rows[i + 2], rows[i + 3], rows[i + 4]];
+            }
+        }
+        test.fail("missing JWS vector " + source);
+        trap_with_message("missing JWS vector");
+    };
+
+    let key_text = func(encoded: string) -> string =>
+        test.assert_ok(utf8.decode(test.assert_ok(hex.decode(encoded))));
+
+    let payload = func(expected: string, actual: Result<uint8[list]>) {
+        test.assert_equal_string(expected, hex.encode(test.assert_ok(actual)));
+    };
+
+    export let test_hs256_examples = func {
+        for (let source in ["RFC 7515 A.1", "RFC 7520 4.4"]) {
+            let [_, key, compact, expected] = example(source);
+            last hmac = test.assert_ok(jwk.parse_hmac(key_text(key), jwk.HmacAlgorithm.Hs256));
+            payload(expected, jws.verify<jwk.HmacKey>(compact, hmac));
+        }
+    };
+
+    export let test_rsa_examples = func {
+        for (let source in ["RFC 7515 A.2", "RFC 7520 4.1", "RFC 7520 4.2"]) {
+            let [algorithm, key, compact, expected] = example(source);
+            last selected = algorithm == "RS256" ? jwk.RsaAlgorithm.Rs256 : jwk.RsaAlgorithm.Ps384;
+            last rsa = test.assert_ok(jwk.parse_rsa(key_text(key), selected));
+            payload(expected, jws.verify<jwk.RsaKey>(compact, rsa));
+        }
+    };
+
+    export let test_ecdsa_examples = func {
+        for (let source in ["RFC 7515 A.3", "RFC 7515 A.4", "RFC 7520 4.3"]) {
+            let [algorithm, key, compact, expected] = example(source);
+            last curve = algorithm == "ES256" ? ecdsa.Curve.P256 : ecdsa.Curve.P521;
+            last ec = test.assert_ok(jwk.parse_ec(key_text(key), curve));
+            payload(expected, jws.verify<jwk.EcKey>(compact, ec));
+        }
+    };
+
+    export let test_ed25519_example = func {
+        let [_, key, compact, expected] = example("RFC 8037 A.2/A.4");
+        last ed = test.assert_ok(jwk.parse_ed25519(key_text(key)));
+        payload(expected, jws.verify<jwk.Ed25519Key>(compact, ed));
+        test.assert_equal_string(vectors.ed25519[1], hex.encode(ed.thumbprint()));
+        last seed = test.assert_ok(hex.decode(vectors.ed25519[0]));
+        let private_key: ed25519.Ed25519PrivateKey = new(seed);
+        test.assert_equal_string(compact, jws.sign_ed25519(test.assert_ok(hex.decode(expected)), private_key));
+        private_key.wipe();
+    };
+
+    export let test_algorithm_bound_to_key = func {
+        let [_, mac_key, mac_token, expected] = example("RFC 7515 A.1");
+        let [_, rsa_key, rsa_token, _] = example("RFC 7515 A.2");
+        let [_, _, none_token, _] = example("RFC 7515 A.5");
+        last hmac = test.assert_ok(jwk.parse_hmac(key_text(mac_key), jwk.HmacAlgorithm.Hs256));
+        last rsa = test.assert_ok(jwk.parse_rsa(key_text(rsa_key), jwk.RsaAlgorithm.Rs256));
+        let _ = test.assert_err(jws.verify<jwk.HmacKey>(none_token, hmac));
+        let _ = test.assert_err(jws.verify<jwk.RsaKey>(mac_token, rsa));
+        let _ = test.assert_err(jws.verify<jwk.HmacKey>(rsa_token, hmac));
+
+        last wrong_algorithm = test.assert_ok(jwk.parse_hmac(key_text(mac_key), jwk.HmacAlgorithm.Hs384));
+        let _ = test.assert_err(jws.verify<jwk.HmacKey>(mac_token, wrong_algorithm));
+
+        // The independent HMAC tag is valid under the explicitly octet-typed key.
+        last controls = vectors.header_controls;
+        let _ = test.assert_err(jws.verify<jwk.RsaKey>(controls[1], rsa));
+        last octets = test.assert_ok(jwk.parse_hmac(key_text(controls[2]), jwk.HmacAlgorithm.Hs256));
+        payload(expected, jws.verify<jwk.HmacKey>(controls[1], octets));
+    };
+
+    export let test_jwk_type_and_curve_mismatches = func {
+        let [_, hmac, _, _] = example("RFC 7515 A.1");
+        let [_, rsa, _, _] = example("RFC 7515 A.2");
+        let [_, ec, _, _] = example("RFC 7515 A.3");
+        let _ = test.assert_err(jwk.parse_hmac(key_text(rsa), jwk.HmacAlgorithm.Hs256));
+        let _ = test.assert_err(jwk.parse_rsa(key_text(hmac), jwk.RsaAlgorithm.Rs256));
+        let _ = test.assert_err(jwk.parse_ec(key_text(ec), ecdsa.Curve.P521));
+        let _ = test.assert_err(jwk.parse_ed25519(key_text(ec)));
+    };
+
+    export let test_rfc_7517_key_restrictions = func {
+        last keys = vectors.jwk_examples;
+        last encryption_ec = key_text(keys[2]);
+        last signing_rsa = key_text(keys[5]);
+        last encryption_octets = key_text(keys[8]);
+        last mac_octets = key_text(keys[11]);
+        let _ = test.assert_err(jwk.parse_ec(encryption_ec, ecdsa.Curve.P256));
+        let _ = test.assert_ok(jwk.parse_rsa(signing_rsa, jwk.RsaAlgorithm.Rs256));
+        let _ = test.assert_err(jwk.parse_rsa(signing_rsa, jwk.RsaAlgorithm.Ps384));
+        let _ = test.assert_err(jwk.parse_hmac(encryption_octets, jwk.HmacAlgorithm.Hs256));
+        let _ = test.assert_ok(jwk.parse_hmac(mac_octets, jwk.HmacAlgorithm.Hs256));
+    };
+
+    export let test_header_validation_and_altered_tag = func {
+        let [_, key, _, expected] = example("RFC 7515 A.1");
+        last hmac = test.assert_ok(jwk.parse_hmac(key_text(key), jwk.HmacAlgorithm.Hs256));
+        last rejected = vectors.negative;
+        for (let i = 0; i < rejected.length; i += 2) {
+            match (jws.verify<jwk.HmacKey>(rejected[i + 1], hmac)) {
+                Result.Err(_) => {},
+                Result.Ok(_) => {
+                    test.fail("accepted " + rejected[i]);
+                },
+            }
+        }
+        payload(expected, jws.verify<jwk.HmacKey>(vectors.header_controls[0], hmac));
+    };
+);

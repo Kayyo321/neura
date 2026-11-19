@@ -1,0 +1,15 @@
+let.promote _ = import:Std.Crypto.CryptographicPrimitive;
+
+/// @brief The contract of a signature verifier (Stdlib.md section 21.1).
+/// @see [Std.Crypto.Verifier](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Verifier)
+#Since("0.3.0")
+export let Verifier = module (
+    /// @brief Verifies `Sig` signatures against a public key of type `PubKey`. The primitive is named by `Sig`.
+    #Since("0.3.0")
+    export let Verifier = interface<PubKey, Sig>:CryptographicPrimitive<Sig> (
+        /// @brief The public key.
+        let public_key = func -> PubKey;
+        /// @brief Whether the signature is valid for the message.
+        let verify = func(message: uint8[list], signature: Sig) -> bool;
+    );
+);

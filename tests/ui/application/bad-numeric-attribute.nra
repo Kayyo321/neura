@@ -1,0 +1,1 @@
+let view = html(ratio: float64) { <table><tbody><tr><td colspan={ratio}></td></tr></tbody></table> };

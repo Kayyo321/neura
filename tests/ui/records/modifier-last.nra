@@ -1,0 +1,2 @@
+// A component takes no modifier (edge case 7).
+let P = record (last x: int);

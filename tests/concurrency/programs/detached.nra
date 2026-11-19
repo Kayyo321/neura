@@ -10,7 +10,7 @@ let note = func(index: int) {
 };
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         scope {
             for (let i: int = 0; i < 20000; i++) {
                 spawn note(i);

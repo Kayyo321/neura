@@ -2,8 +2,11 @@
 
 #include "assembler.hpp"
 #include "backend/converter.hpp"
+#include "decompiler/assembly.hpp"
+#include "lift/hints.hpp"
 
 #include <algorithm>
+#include <fstream>
 
 namespace neura::testing {
 
@@ -270,6 +273,69 @@ std::vector<std::uint8_t> logic_bytes() {
         {"GRPH", 1, graphs.bytes},    {"IMPT", 1, imports.bytes},   {"LAYO", 1, layouts.bytes},
         {"META", 1, meta.bytes},      {"SMAP", 0, source_map.bytes}, {"TYPE", 1, types.bytes},
     });
+}
+
+namespace {
+
+// Assembles tests/backend/tier/<name>.nvra and attaches the lift hints of its
+// compare, increment and add graphs.
+nvr::Image hinted_image(const Environment& environment, const char* name) {
+    std::ifstream file(backend_dir(environment) / "tier" / name);
+    const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    auto image = decompiler::assemble(text);
+    // The blocks with graphs would stay on tier 0 without LIFT hints (a search
+    // for checked 64-bit arithmetic is out of reach of a test's thresholds),
+    // and then tiers 2 and 3 would never see the multi-word calls. The
+    // hand-written graphs are the compiler's graphs for add, compare and
+    // increment, so a program compiled from the same operations supplies the
+    // forms, re-keyed to this image's blocks by the graph each block uses.
+    const auto twin = nvr::load(nvr::encode(backend::build(
+        lower_files({backend_dir(environment) / "tier" / "multi-result-forms.nra"},
+                    {backend_dir(environment) / "tier"}),
+        backend::BuildOptions{.optimize = false}).image));
+    const auto forms = lift::decode_hints(twin);
+    std::vector<lift::BlockHint> hints;
+    for (const auto& [key, form] : forms) {
+        const auto& source = twin.graphs[twin.functions[key.first].blocks[key.second].graph];
+        for (std::uint32_t f = 0; f < image.functions.size(); ++f) {
+            for (std::uint32_t b = 0; b < image.functions[f].blocks.size(); ++b) {
+                const auto& graph = image.graphs[image.functions[f].blocks[b].graph];
+                if (!graph.nodes.empty() && graph == source) hints.push_back({f, b, *form});
+            }
+        }
+    }
+    image.other_sections.push_back(lift::encode_hints(std::move(hints)));
+    return image;
+}
+
+} // namespace
+
+nvr::Image multi_result_image(const Environment& environment) {
+    return hinted_image(environment, "multi-result.nvra");
+}
+
+nvr::Image aggregate_image(const Environment& environment) {
+    return hinted_image(environment, "aggregates.nvra");
+}
+
+nvr::Image region_image(const Environment& environment) {
+    return hinted_image(environment, "region-storage.nvra");
+}
+
+nvr::Image region_tiers_image(const Environment& environment) {
+    return hinted_image(environment, "region-tiers.nvra");
+}
+
+nvr::Image region_tasks_image(const Environment& environment, bool token_variant) {
+    std::ifstream file(backend_dir(environment) / "tier" / (token_variant ? "region-tasks-token.nvra" : "region-tasks.nvra"));
+    const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    return decompiler::assemble(text);
+}
+
+nvr::Image aggregate_cells_image(const Environment& environment) {
+    std::ifstream file(backend_dir(environment) / "tier" / "aggregate-cells.nvra");
+    const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    return decompiler::assemble(text);
 }
 
 const std::vector<CorpusImage>& image_corpus(const Environment& environment) {

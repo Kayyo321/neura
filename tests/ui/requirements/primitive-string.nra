@@ -1,0 +1,11 @@
+// string has no companion conformance to Additive (edge case 100).
+let.promote _ = import:Std.Core.Arithmetic;
+let sum = func<T: Additive<T>>(items: T[]) -> T {
+    let total = T.zero();
+    for (let item in items) {
+        total = T.add(total, item);
+    }
+    return total;
+};
+let words: string[] = ["a", "b"];
+let joined = sum<string>(words);

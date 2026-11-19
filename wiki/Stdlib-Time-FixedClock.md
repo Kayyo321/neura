@@ -31,7 +31,9 @@ The following public declarations are taken from the module source; each links t
   Replaces the instant; the monotonic reading does not change.
 - **FixedClock.FixedClock** · [`export let advance = func(span: Duration)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L49)
   Moves the instant and the monotonic reading forward. A negative duration traps with "invalid argument: negative duration", since the monotonic reading never decreases.
-- **FixedClock** · [`export let of = func(start: instant.Instant) -> FixedClock`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L60)
+- **FixedClock.FixedClock** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L58)
+  Names the clock and its current reading.
+- **FixedClock** · [`export let of = func(start: instant.Instant) -> FixedClock`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/fixed-clock.nra#L63)
   Creates a clock starting at the supplied instant. Tagged `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 

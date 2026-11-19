@@ -1,0 +1,11 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: OID 3\.1
+let oid = import:Std.Crypto.Pki.Oid;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = oid.of("3.1");
+        return program.ExitCode.Ok;
+    };
+);

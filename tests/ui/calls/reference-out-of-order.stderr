@@ -1,0 +1,9 @@
+error[E0484]: labels are not available for a '&T' argument out of parameter order
+ --> $DIR/reference-out-of-order.nra:8:17
+  |
+8 |     bump(by: 2, target: count);
+  |                 ^^^^^^^^^^^^^ 'target' takes a primitive reference
+  |
+  = help: pass the arguments in parameter order
+
+For more information about this error, try `neura explain E0484`.

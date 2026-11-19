@@ -1,0 +1,3 @@
+// The second '"' begins a nested literal, which the line ends (edge case 75).
+let a = 1;
+let text = $"{a";

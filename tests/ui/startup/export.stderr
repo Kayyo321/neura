@@ -1,0 +1,12 @@
+error[E0217]: a startup block takes no tags (no 'export')
+ --> $DIR/export.nra:2:1
+  |
+2 | export static scope { }
+  | ^^^^^^ a startup block is not exported
+  |
+help: remove 'export'
+  |
+2 | export static scope { }
+  | -------
+
+For more information about this error, try `neura explain E0217`.

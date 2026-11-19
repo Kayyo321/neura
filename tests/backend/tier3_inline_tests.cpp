@@ -217,6 +217,41 @@ NEURA_TEST(tier3, a_dispatch_whose_receivers_change_after_compilation_misses_int
     }
 }
 
+NEURA_TEST(tier3, property_dispatch_through_adapters_accessors_and_overrides_is_inlined_like_a_method) {
+    // docs/design/Records030.md, Lowering and artifacts: an interface property
+    // read is a dispatch site of the hidden getter, a generated field adapter
+    // reads one field, and a virtual accessor dispatches to its override, so
+    // tier 3's guarded inlining applies under its existing limits. Every case
+    // matches tier 0, natively and on the tier 3 interpreter, at every step
+    // limit; a nil receiver traps where tier 0 traps.
+    if (!programs_run()) return;
+    const auto image = build_program({backend_dir(environment) / "tier3" / "properties.nra"});
+    const auto reference = run_captured(image, limits_at(0), std::nullopt, {"all", "30"});
+    check_equal(reference.output, std::string{"adapter 930\nmixed 495930\nvirtual 3870\n"}, "tier 0 output");
+    for (const bool interpreted : {false, true}) {
+        for (const char* kind : {"adapter", "mixed", "virtual", "nil", "all"}) {
+            auto options = inline_options();
+            if (interpreted) options.tier3 = nvm::TierOptions::Tier3::Interp;
+            nvm::TierCache cache(image, options);
+            const std::string label = std::string(kind) + (interpreted ? " on the interpreter" : "");
+            compare_with_tier_0(image, cache, label, {kind, "40"});
+            for (std::uint64_t limit = 1; limit <= 600; limit += 37) {
+                compare_with_tier_0(image, cache, label + " with " + std::to_string(limit) + " steps", {kind, "40"},
+                                    [&](nvm::RunLimits& limits) { limits.max_steps = limit; });
+            }
+        }
+    }
+    if (!thresholds_kept()) return;
+    nvm::TierCache cache(image, inline_options());
+    compare_with_tier_0(image, cache, "adapter", {"adapter", "40"});
+    const auto* ir = native_ir(cache, function_named(image, "measure"));
+    check(ir != nullptr, "measure is a native program");
+    if (ir != nullptr) {
+        check(inlines(*ir, function_named(image, "Box.$get_size")), "the generated getter adapter is inlined");
+        check(inlines(*ir, function_named(image, "Box.$set_size")), "the generated setter adapter is inlined");
+    }
+}
+
 NEURA_TEST(tier3, a_closure_call_and_a_single_implementation_are_inlined) {
     if (!programs_run()) return;
     const auto image = inline_image(environment);
@@ -784,6 +819,289 @@ NEURA_TEST(tier3, the_verifier_rejects_an_inlined_frame_not_called_at_its_caller
         hand->program.ir.states[3].flags.push_back({});
         check(reports(hand->program.ir), "an inlined frame of a function its caller does not call there");
     }
+}
+
+// --- Multi-word results and aggregate components (NVR 1.7) ------------------------
+
+namespace {
+
+std::uint64_t count_ops(const t3::Function& ir, t3::Op op) {
+    std::uint64_t count = 0;
+    for (const auto& block : ir.blocks) {
+        for (const auto id : block.insts) count += ir.insts[id].op == op;
+    }
+    return count;
+}
+
+// Compares native runs of `image` with tier 0 under every step limit up to
+// `steps` (in steps of `stride` after the first hundred), and frame limits.
+void sweep_limits(const nvr::Image& image, nvm::TierCache& cache, const std::string& label, std::uint64_t steps,
+                  std::uint64_t stride) {
+    for (std::uint64_t limit = 1; limit <= steps + 1; limit += limit < 100 ? 1 : stride) {
+        compare_with_tier_0(image, cache, label + " with " + std::to_string(limit) + " steps", {},
+                            [&](nvm::RunLimits& limits) { limits.max_steps = limit; });
+    }
+    for (std::uint64_t frames = 1; frames <= 12; ++frames) {
+        compare_with_tier_0(image, cache, label + " with " + std::to_string(frames) + " frames", {},
+                            [&](nvm::RunLimits& limits) { limits.max_frames = frames; });
+    }
+}
+
+} // namespace
+
+NEURA_TEST(tier3, multi_word_returns_run_through_inlined_and_native_calls_like_tier_0) {
+    // tests/backend/tier/multi-result.nvra: F1 loops over add3 (F2), a leaf
+    // that returns three words (int64, float64, text), which is inlined; F4
+    // rec returns two words and calls itself, and F0 calls it and discards
+    // another call's words.
+    if (!programs_run()) return;
+    const auto image = multi_result_image(environment);
+    const auto reference = run_captured(image, limits_at(0));
+    check(reference.result.completed, "the image runs at tier 0");
+    nvm::TierCache cache(image, inline_options());
+    for (int run = 0; run < 4; ++run) {
+        check_same(run_captured(image, limits_at(2, &cache)), reference, "run " + std::to_string(run));
+    }
+    if (thresholds_kept()) {
+        const auto* loop = native_ir(cache, 1);
+        check(loop != nullptr, "the loop is a native program");
+        if (loop != nullptr) {
+            check(inlines(*loop, 2), "add3, which returns three words, is inlined into the loop");
+            check(count_ops(*loop, t3::Op::Call) == 0 && count_ops(*loop, t3::Op::ResultWord) == 0,
+                  "an inlined call has phis for its words, not result words");
+        }
+        const auto* rec = native_ir(cache, 4);
+        check(rec != nullptr, "the recursive function is a native program");
+        if (rec != nullptr) {
+            check(!inlines(*rec, 4), "rec is not inlined into itself");
+            check(count_ops(*rec, t3::Op::Call) >= 1 && count_ops(*rec, t3::Op::ResultWord) >= 1,
+                  "rec calls itself and reads the second word of the result");
+            const bool returns_two = std::any_of(rec->insts.begin(), rec->insts.end(), [](const t3::Inst& in) {
+                return in.op == t3::Op::Return && in.count == 1;
+            });
+            check(returns_two, "rec returns a second word");
+        }
+        const auto* entry = native_ir(cache, 0);
+        if (entry != nullptr) {
+            // F0 discards the words of its second call: the Call has no result
+            // words, and the first call's both words are read.
+            check(count_ops(*entry, t3::Op::ResultWord) <= 2, "an entry that reads two words");
+        }
+    }
+    if (programs_run() && jit::native::supported() && thresholds_kept()) {
+        const auto statistics = cache.statistics();
+        check_equal(statistics.native_mode, std::string("native"), "machine code ran");
+        check(statistics.region_counts.calls > 0 && statistics.region_counts.returns > 0,
+              "calls and returns ran in machine code");
+    }
+    // Deoptimizations inside the callees that return several words, at every
+    // step limit, and frame limits through the recursion.
+    sweep_limits(image, cache, "multi-word", reference.result.steps, 41);
+    // --profile inlines nothing and keeps every frame the reference's.
+    nvm::TierCache profiled(image, inline_options());
+    for (int run = 0; run < 3; ++run) {
+        auto limits = limits_at(2, &profiled, true);
+        auto expected = limits_at(0, nullptr, true);
+        check_same(run_captured(image, limits), run_captured(image, expected), "profile run " + std::to_string(run));
+    }
+    nvm::TierShadowHooks hooks;
+    std::vector<std::string> reports;
+    hooks.report = [&](const std::string& text) { reports.push_back(text); };
+    hooks.notice = [&](const std::string& text) { reports.push_back(text); };
+    nvm::TierCache checked(image, inline_options());
+    auto limits = limits_at(2, &checked);
+    limits.tier_shadow = &hooks;
+    check_same(run_captured(image, limits), reference, "under the oracle");
+    check(reports.empty(), "the oracle saw no difference" + (reports.empty() ? "" : ": " + reports[0]));
+}
+
+NEURA_TEST(tier3, aggregate_components_are_inline_heap_accesses_in_native_programs) {
+    // tests/backend/tier/aggregates.nvra: component reads and writes, lengths
+    // and versions of collections of aggregates run as heap accesses in the IR
+    // (checked against the length in elements), the allocations, appends and
+    // removals as helpers; traps are tier 0's.
+    if (!programs_run()) return;
+    const auto image = aggregate_image(environment);
+    const auto reference = run_captured(image, limits_at(0));
+    check(reference.result.completed, "the image runs at tier 0");
+    nvm::TierCache cache(image, inline_options(1));
+    // A program waits for its callees' programs (F7 has none) up to 16 arrivals.
+    for (int run = 0; run < 80; ++run) {
+        check_same(run_captured(image, limits_at(2, &cache)), reference, "run " + std::to_string(run));
+    }
+    if (thresholds_kept()) {
+        std::uint64_t loads = 0;
+        std::uint64_t stores = 0;
+        std::uint64_t helpers = 0;
+        std::uint64_t state_calls = 0;
+        for (std::uint32_t function = 0; function < image.functions.size(); ++function) {
+            const auto* ir = native_ir(cache, function);
+            if (ir == nullptr) continue;
+            for (const auto& in : ir->insts) {
+                // A component access names its component in `aux`.
+                loads += in.op == t3::Op::LoadElement && in.aux != t3::none;
+                stores += in.op == t3::Op::StoreElement && in.aux != t3::none;
+                helpers += in.op == t3::Op::Helper && in.aux < ir->exits.size() &&
+                           (ir->exits[in.aux]->operation == nvr::StateOp::AppendElement ||
+                            ir->exits[in.aux]->operation == nvr::StateOp::RemoveElement ||
+                            ir->exits[in.aux]->operation == nvr::StateOp::AllocateCollection ||
+                            ir->exits[in.aux]->operation == nvr::StateOp::RepeatCollection);
+                state_calls += in.op == t3::Op::StateCall && (in.flags & t3::CheckReference) == 0 &&
+                               (ir->exits[in.aux]->operation == nvr::StateOp::ReadComponent ||
+                                ir->exits[in.aux]->operation == nvr::StateOp::WriteComponent);
+            }
+        }
+        check(loads > 0 && stores > 0, "components are loaded and stored inline: " + std::to_string(loads) + " loads, " +
+                                           std::to_string(stores) + " stores");
+        check(helpers > 0, "collections of aggregates are built and changed by helpers");
+        check_equal(state_calls, std::uint64_t{0}, "no component access is a reference state call");
+    }
+    {
+        // The shadow oracle compares frames and the heap, which it reads word by
+        // word for collections of aggregates, on the warmed cache.
+        nvm::TierShadowHooks hooks;
+        std::vector<std::string> reports;
+        hooks.report = [&](const std::string& text) { reports.push_back(text); };
+        hooks.notice = [&](const std::string& text) { reports.push_back(text); };
+        auto limits = limits_at(2, &cache);
+        limits.tier_shadow = &hooks;
+        check_same(run_captured(image, limits), reference, "under the oracle");
+        check(reports.empty(), "the oracle saw no difference" + (reports.empty() ? "" : ": " + reports[0]));
+    }
+    sweep_limits(image, cache, "aggregates", reference.result.steps, 53);
+    for (const auto count : {1, 2, 3, 4}) {
+        const std::vector<std::string> arguments(count, "x");
+        const auto expected = run_captured(image, limits_at(0), std::nullopt, arguments);
+        check(!expected.result.completed, "case " + std::to_string(count) + " traps at tier 0");
+        nvm::TierCache trapping(image, inline_options(1));
+        for (int run = 0; run < 40; ++run) {
+            check_same(run_captured(image, limits_at(2, &trapping), std::nullopt, arguments), expected,
+                       "case " + std::to_string(count) + " run " + std::to_string(run));
+        }
+        // Case 1 reads and case 3 writes a component past the end: the
+        // check is against the length in elements, so index 1 of one element
+        // traps, as it does at tier 0, and it trapped in machine code (tier 3
+        // counts the deoptimization of a failed check as a state trap, and
+        // tier 1 then raises the trap).
+        if (thresholds_kept() && jit::native::supported() && (count == 1 || count == 3)) {
+            const auto counts = trapping.statistics();
+            check(counts.native.state_traps >= 40,
+                  "case " + std::to_string(count) + ": the bounds check failed in machine code");
+        }
+    }
+    // Heap limits land inside the aggregate allocations and appends.
+    for (std::uint64_t cells = 1; cells <= reference.result.peak_heap_cells + 1; cells += cells < 40 ? 1 : 11) {
+        compare_with_tier_0(image, cache, "heap limit " + std::to_string(cells), {},
+                            [&](nvm::RunLimits& limits) { limits.max_heap_cells = cells; });
+    }
+}
+
+// --- Storage regions (NVR 1.7) ------------------------------------------------------
+
+NEURA_TEST(tier3, storage_regions_run_as_helpers_and_their_callees_are_not_inlined) {
+    // tests/backend/tier/region-tiers.nvra: region operations are helpers of the native programs,
+    // which run them through the reference state; a callee that enters a region (F3, F7, F9) is
+    // called, never inlined, though F3 is small enough, while F2 is inlined beside an open region;
+    // and a program of a function with EnterRegion returns through the return helper, which
+    // releases its regions, instead of popping its frame in place.
+    if (!programs_run()) return;
+    const auto image = region_tiers_image(environment);
+    const auto reference = run_captured(image, limits_at(0));
+    check(reference.result.completed && reference.result.peak_stack_cells == 303, "the image runs at tier 0");
+    nvm::TierCache cache(image, inline_options());
+    for (int run = 0; run < 4; ++run) {
+        check_same(run_captured(image, limits_at(2, &cache)), reference, "run " + std::to_string(run));
+    }
+    if (thresholds_kept()) {
+        const auto region_helpers = [&](const t3::Function& ir) {
+            std::uint64_t count = 0;
+            for (const auto& block : ir.blocks) {
+                for (const auto id : block.insts) {
+                    const auto& in = ir.insts[id];
+                    count += in.op == t3::Op::Helper && in.aux < ir.exits.size() &&
+                             nvr::is_region_operation(ir.exits[in.aux]->operation);
+                }
+            }
+            return count;
+        };
+        for (const std::uint32_t function : {3U, 5U, 6U, 7U, 9U, 10U}) {
+            const auto* ir = native_ir(cache, function);
+            check(ir != nullptr, "F" + std::to_string(function) + " is a native program");
+            if (ir == nullptr) continue;
+            check(region_helpers(*ir) > 0, "F" + std::to_string(function) + " runs its region operations as helpers");
+            check(ir->enters_region, "F" + std::to_string(function) + " is marked as entering a region");
+            check(t3::verify(image, *ir).empty(), "F" + std::to_string(function) + " passes the verifier");
+        }
+        const auto* loop = native_ir(cache, 4);
+        check(loop != nullptr, "the loop over open(i) is a native program");
+        if (loop != nullptr) {
+            check(!loop->enters_region, "the loop enters no region itself");
+            check(!inlines(*loop, 3), "open(i), which enters a region, is not inlined");
+            check(std::any_of(loop->insts.begin(), loop->insts.end(),
+                              [](const t3::Inst& in) { return in.op == t3::Op::Call && in.imm == 3; }),
+                  "the loop calls open(i)");
+            check(inlines(*loop, 2), "add, which has no region, is inlined");
+        }
+        const auto* moves = native_ir(cache, 10);
+        check(moves != nullptr && !inlines(*moves, 9), "make, which enters a region, is not inlined");
+        const auto* around = native_ir(cache, 6);
+        check(around != nullptr && inlines(*around, 2), "add is inlined while the caller's region is open");
+        if (jit::native::supported()) {
+            const auto statistics = cache.statistics();
+            check_equal(statistics.native_mode, std::string("native"), "machine code ran");
+            check(statistics.region_counts.helpers > 0 && statistics.region_counts.returns > 0,
+                  "helpers and returns ran in machine code");
+        }
+        // V11: a program that enters a region and is not marked, or runs a region operation inside
+        // an inlined frame, is refused.
+        if (const auto* ir = native_ir(cache, 3)) {
+            auto unmarked = *ir;
+            unmarked.enters_region = false;
+            const auto violations = t3::verify(image, unmarked);
+            check(std::any_of(violations.begin(), violations.end(),
+                              [](const std::string& v) { return v.starts_with("V11") && v.find("not marked") != std::string::npos; }),
+                  "the verifier refuses an unmarked program that enters a region");
+        }
+    }
+    // Deoptimizations with regions open, inside inlined add and around the calls to open(i) and
+    // make, at every step limit; frame limits through rec.
+    sweep_limits(image, cache, "regions", reference.result.steps, 29);
+    for (const std::uint32_t frames : {50U, 100U, 101U, 102U, 103U}) {
+        compare_with_tier_0(image, cache, "regions with " + std::to_string(frames) + " frames", {},
+                            [&](nvm::RunLimits& limits) { limits.max_frames = frames; });
+    }
+    for (std::uint64_t cells = 1; cells <= 305; cells += cells < 16 ? 1 : 9) {
+        compare_with_tier_0(image, cache, "regions with " + std::to_string(cells) + " stack cells", {},
+                            [&](nvm::RunLimits& limits) { limits.max_stack_cells = cells; });
+    }
+    for (const auto count : {1, 2}) {
+        const std::vector<std::string> arguments(count, "x");
+        const auto expected = run_captured(image, limits_at(0), std::nullopt, arguments);
+        check(!expected.result.completed && expected.result.live_stack_cells == 0,
+              "case " + std::to_string(count) + " traps and releases every region");
+        nvm::TierCache trapping(image, inline_options(1));
+        for (int run = 0; run < 20; ++run) {
+            check_same(run_captured(image, limits_at(2, &trapping), std::nullopt, arguments), expected,
+                       "case " + std::to_string(count) + " run " + std::to_string(run));
+        }
+        if (count == 1 && thresholds_kept() && jit::native::supported()) {
+            // The read after the release, in the program that released, failed in machine code.
+            check(trapping.statistics().native.state_traps > 0, "case 1: the released read failed in machine code");
+        }
+        if (count == 2 && thresholds_kept()) {
+            // The overflow is in add, inlined into the loop that holds the region.
+            const auto* loop = native_ir(trapping, 12);
+            check(loop != nullptr && inlines(*loop, 2), "case 2: add is inlined into the loop with the open region");
+        }
+    }
+    nvm::TierShadowHooks hooks;
+    std::vector<std::string> reports;
+    hooks.report = [&](const std::string& text) { reports.push_back(text); };
+    hooks.notice = [&](const std::string& text) { reports.push_back(text); };
+    auto limits = limits_at(2, &cache);
+    limits.tier_shadow = &hooks;
+    check_same(run_captured(image, limits), reference, "under the oracle");
+    check(reports.empty(), "the oracle saw no difference" + (reports.empty() ? "" : ": " + reports[0]));
 }
 
 } // namespace neura::testing

@@ -1,0 +1,11 @@
+error[E0476]: a generator cannot suspend while a deferred call is pending
+ --> $DIR/generator-yield-defer.nra:5:5
+  |
+4 |     defer cleanup();
+  |     ---------------- this call runs when its block is left, after the 'yield'
+5 |     yield 1;
+  |     ^^^^^
+  |
+  = help: end the block before the 'yield', or move the work into a function
+
+For more information about this error, try `neura explain E0476`.

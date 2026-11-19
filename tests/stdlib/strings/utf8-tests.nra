@@ -34,71 +34,71 @@ let Utf8Tests = module (
     };
 
     export let test_python_vectors = func() -> void {
-        check_bytes([], [], -1, "");
-        check_bytes([65], [65], -1, "");
-        check_bytes([0], [0], -1, "");
-        check_bytes([127], [127], -1, "");
-        check_bytes([128], [65533], 0, "invalid start byte");
-        check_bytes([191], [65533], 0, "invalid start byte");
-        check_bytes([192], [65533], 0, "invalid start byte");
-        check_bytes([193], [65533], 0, "invalid start byte");
-        check_bytes([192, 128], [65533, 65533], 0, "invalid start byte");
-        check_bytes([193, 191], [65533, 65533], 0, "invalid start byte");
-        check_bytes([194], [65533], 0, "unexpected end of data");
-        check_bytes([194, 128], [128], -1, "");
-        check_bytes([194, 127], [65533, 127], 0, "invalid continuation byte");
-        check_bytes([223, 191], [2047], -1, "");
-        check_bytes([223, 192], [65533, 65533], 0, "invalid continuation byte");
-        check_bytes([224], [65533], 0, "unexpected end of data");
-        check_bytes([224, 128], [65533, 65533], 0, "invalid continuation byte");
-        check_bytes([224, 159, 191], [65533, 65533, 65533], 0, "invalid continuation byte");
-        check_bytes([224, 160], [65533], 0, "unexpected end of data");
-        check_bytes([224, 160, 128], [2048], -1, "");
-        check_bytes([224, 160, 127], [65533, 127], 0, "invalid continuation byte");
-        check_bytes([225, 128, 128], [4096], -1, "");
-        check_bytes([236, 191, 191], [53247], -1, "");
-        check_bytes([237, 128, 128], [53248], -1, "");
-        check_bytes([237, 159, 191], [55295], -1, "");
-        check_bytes([237, 160, 128], [65533, 65533, 65533], 0, "invalid continuation byte");
-        check_bytes([237, 191, 191], [65533, 65533, 65533], 0, "invalid continuation byte");
-        check_bytes([238, 128, 128], [57344], -1, "");
-        check_bytes([239, 191, 191], [65535], -1, "");
-        check_bytes([239, 191], [65533], 0, "unexpected end of data");
-        check_bytes([240], [65533], 0, "unexpected end of data");
-        check_bytes([240, 128, 128, 128], [65533, 65533, 65533, 65533], 0, "invalid continuation byte");
-        check_bytes([240, 143, 191, 191], [65533, 65533, 65533, 65533], 0, "invalid continuation byte");
-        check_bytes([240, 144], [65533], 0, "unexpected end of data");
-        check_bytes([240, 144, 128], [65533], 0, "unexpected end of data");
-        check_bytes([240, 144, 128, 128], [65536], -1, "");
-        check_bytes([240, 144, 128, 127], [65533, 127], 0, "invalid continuation byte");
-        check_bytes([241, 128, 128, 128], [262144], -1, "");
-        check_bytes([243, 191, 191, 191], [1048575], -1, "");
-        check_bytes([244, 143, 191, 191], [1114111], -1, "");
-        check_bytes([244, 144, 128, 128], [65533, 65533, 65533, 65533], 0, "invalid continuation byte");
-        check_bytes([245, 128, 128, 128], [65533, 65533, 65533, 65533], 0, "invalid start byte");
-        check_bytes([248, 136, 128, 128, 128], [65533, 65533, 65533, 65533, 65533], 0, "invalid start byte");
-        check_bytes([254], [65533], 0, "invalid start byte");
-        check_bytes([255], [65533], 0, "invalid start byte");
-        check_bytes([254, 255], [65533, 65533], 0, "invalid start byte");
-        check_bytes([97, 255, 98], [97, 65533, 98], 1, "invalid start byte");
-        check_bytes([97, 226, 130, 98], [97, 65533, 98], 1, "invalid continuation byte");
-        check_bytes([226, 130, 172, 226, 130], [8364, 65533], 3, "unexpected end of data");
-        check_bytes([226, 130, 172, 255, 226, 130, 172], [8364, 65533, 8364], 3, "invalid start byte");
-        check_bytes([240, 159, 153, 130, 240, 159, 153], [128578, 65533], 4, "unexpected end of data");
-        check_bytes([240, 159, 153, 65], [65533, 65], 0, "invalid continuation byte");
-        check_bytes([195, 169, 195], [233, 65533], 2, "unexpected end of data");
-        check_bytes([195, 169, 195, 195, 169], [233, 65533, 233], 2, "invalid continuation byte");
-        check_bytes([97, 241, 128, 128, 225, 128, 194, 98, 128, 99, 128, 191, 100], [97, 65533, 65533, 65533, 98, 65533, 99, 65533, 65533, 100], 1, "invalid continuation byte");
-        check_bytes([224, 128, 175], [65533, 65533, 65533], 0, "invalid continuation byte");
-        check_bytes([244, 145, 146, 147, 255, 65, 128, 191, 66], [65533, 65533, 65533, 65533, 65533, 65, 65533, 65533, 66], 0, "invalid continuation byte");
-        check_bytes([225, 128, 226, 240, 145, 146, 241, 191, 65], [65533, 65533, 65533, 65533, 65], 0, "invalid continuation byte");
-        check_bytes([237, 160, 128, 237, 191, 191], [65533, 65533, 65533, 65533, 65533, 65533], 0, "invalid continuation byte");
-        check_bytes([128, 128, 128], [65533, 65533, 65533], 0, "invalid start byte");
-        check_bytes([194, 194, 128], [65533, 128], 0, "invalid continuation byte");
+        check_bytes(new, new, -1, "");
+        check_bytes(new([65]), new([65]), -1, "");
+        check_bytes(new([0]), new([0]), -1, "");
+        check_bytes(new([127]), new([127]), -1, "");
+        check_bytes(new([128]), new([65533]), 0, "invalid start byte");
+        check_bytes(new([191]), new([65533]), 0, "invalid start byte");
+        check_bytes(new([192]), new([65533]), 0, "invalid start byte");
+        check_bytes(new([193]), new([65533]), 0, "invalid start byte");
+        check_bytes(new([192, 128]), new([65533, 65533]), 0, "invalid start byte");
+        check_bytes(new([193, 191]), new([65533, 65533]), 0, "invalid start byte");
+        check_bytes(new([194]), new([65533]), 0, "unexpected end of data");
+        check_bytes(new([194, 128]), new([128]), -1, "");
+        check_bytes(new([194, 127]), new([65533, 127]), 0, "invalid continuation byte");
+        check_bytes(new([223, 191]), new([2047]), -1, "");
+        check_bytes(new([223, 192]), new([65533, 65533]), 0, "invalid continuation byte");
+        check_bytes(new([224]), new([65533]), 0, "unexpected end of data");
+        check_bytes(new([224, 128]), new([65533, 65533]), 0, "invalid continuation byte");
+        check_bytes(new([224, 159, 191]), new([65533, 65533, 65533]), 0, "invalid continuation byte");
+        check_bytes(new([224, 160]), new([65533]), 0, "unexpected end of data");
+        check_bytes(new([224, 160, 128]), new([2048]), -1, "");
+        check_bytes(new([224, 160, 127]), new([65533, 127]), 0, "invalid continuation byte");
+        check_bytes(new([225, 128, 128]), new([4096]), -1, "");
+        check_bytes(new([236, 191, 191]), new([53247]), -1, "");
+        check_bytes(new([237, 128, 128]), new([53248]), -1, "");
+        check_bytes(new([237, 159, 191]), new([55295]), -1, "");
+        check_bytes(new([237, 160, 128]), new([65533, 65533, 65533]), 0, "invalid continuation byte");
+        check_bytes(new([237, 191, 191]), new([65533, 65533, 65533]), 0, "invalid continuation byte");
+        check_bytes(new([238, 128, 128]), new([57344]), -1, "");
+        check_bytes(new([239, 191, 191]), new([65535]), -1, "");
+        check_bytes(new([239, 191]), new([65533]), 0, "unexpected end of data");
+        check_bytes(new([240]), new([65533]), 0, "unexpected end of data");
+        check_bytes(new([240, 128, 128, 128]), new([65533, 65533, 65533, 65533]), 0, "invalid continuation byte");
+        check_bytes(new([240, 143, 191, 191]), new([65533, 65533, 65533, 65533]), 0, "invalid continuation byte");
+        check_bytes(new([240, 144]), new([65533]), 0, "unexpected end of data");
+        check_bytes(new([240, 144, 128]), new([65533]), 0, "unexpected end of data");
+        check_bytes(new([240, 144, 128, 128]), new([65536]), -1, "");
+        check_bytes(new([240, 144, 128, 127]), new([65533, 127]), 0, "invalid continuation byte");
+        check_bytes(new([241, 128, 128, 128]), new([262144]), -1, "");
+        check_bytes(new([243, 191, 191, 191]), new([1048575]), -1, "");
+        check_bytes(new([244, 143, 191, 191]), new([1114111]), -1, "");
+        check_bytes(new([244, 144, 128, 128]), new([65533, 65533, 65533, 65533]), 0, "invalid continuation byte");
+        check_bytes(new([245, 128, 128, 128]), new([65533, 65533, 65533, 65533]), 0, "invalid start byte");
+        check_bytes(new([248, 136, 128, 128, 128]), new([65533, 65533, 65533, 65533, 65533]), 0, "invalid start byte");
+        check_bytes(new([254]), new([65533]), 0, "invalid start byte");
+        check_bytes(new([255]), new([65533]), 0, "invalid start byte");
+        check_bytes(new([254, 255]), new([65533, 65533]), 0, "invalid start byte");
+        check_bytes(new([97, 255, 98]), new([97, 65533, 98]), 1, "invalid start byte");
+        check_bytes(new([97, 226, 130, 98]), new([97, 65533, 98]), 1, "invalid continuation byte");
+        check_bytes(new([226, 130, 172, 226, 130]), new([8364, 65533]), 3, "unexpected end of data");
+        check_bytes(new([226, 130, 172, 255, 226, 130, 172]), new([8364, 65533, 8364]), 3, "invalid start byte");
+        check_bytes(new([240, 159, 153, 130, 240, 159, 153]), new([128578, 65533]), 4, "unexpected end of data");
+        check_bytes(new([240, 159, 153, 65]), new([65533, 65]), 0, "invalid continuation byte");
+        check_bytes(new([195, 169, 195]), new([233, 65533]), 2, "unexpected end of data");
+        check_bytes(new([195, 169, 195, 195, 169]), new([233, 65533, 233]), 2, "invalid continuation byte");
+        check_bytes(new([97, 241, 128, 128, 225, 128, 194, 98, 128, 99, 128, 191, 100]), new([97, 65533, 65533, 65533, 98, 65533, 99, 65533, 65533, 100]), 1, "invalid continuation byte");
+        check_bytes(new([224, 128, 175]), new([65533, 65533, 65533]), 0, "invalid continuation byte");
+        check_bytes(new([244, 145, 146, 147, 255, 65, 128, 191, 66]), new([65533, 65533, 65533, 65533, 65533, 65, 65533, 65533, 66]), 0, "invalid continuation byte");
+        check_bytes(new([225, 128, 226, 240, 145, 146, 241, 191, 65]), new([65533, 65533, 65533, 65533, 65]), 0, "invalid continuation byte");
+        check_bytes(new([237, 160, 128, 237, 191, 191]), new([65533, 65533, 65533, 65533, 65533, 65533]), 0, "invalid continuation byte");
+        check_bytes(new([128, 128, 128]), new([65533, 65533, 65533]), 0, "invalid start byte");
+        check_bytes(new([194, 194, 128]), new([65533, 128]), 0, "invalid continuation byte");
     };
 
     export let test_error_message = func() -> void {
-        let e = test.assert_err<string>(strings.from_bytes([97, 98, 255]));
+        let e = test.assert_err<string>(strings.from_bytes(new([97, 98, 255])));
         test.assert_equal_string("invalid encoding at 2: invalid start byte", error.message(e));
     };
 
@@ -109,7 +109,7 @@ let Utf8Tests = module (
     // the NVM accepts the candidate alone. The lossy totals are python3's.
     let check_candidate = func(candidate: uint8[list]) -> void {
         let [valid, _] = string.from_utf8(candidate);
-        let probe: uint8[list] = [];
+        let probe: uint8[list] = new;
         for (let b in candidate) {
             probe.append(b);
         }
@@ -132,7 +132,7 @@ let Utf8Tests = module (
     };
 
     let add_lossy = func(candidate: uint8[list], totals: int[]) -> void {
-        let probe: uint8[list] = [];
+        let probe: uint8[list] = new;
         for (let b in candidate) {
             probe.append(b);
         }
@@ -152,7 +152,7 @@ let Utf8Tests = module (
             let totals: int[] = [0, 0];
             let b = 0;
             while (b < 256) {
-                let candidate: uint8[list] = [a as uint8, b as uint8];
+                let candidate: uint8[list] = new([a as uint8, b as uint8]);
                 check_candidate(candidate);
                 add_lossy(candidate, totals);
                 b = b + 1;
@@ -176,7 +176,7 @@ let Utf8Tests = module (
             let b = 0;
             while (b < 256) {
                 for (let c in thirds) {
-                    let candidate: uint8[list] = [a as uint8, b as uint8, c, 128];
+                    let candidate: uint8[list] = new([a as uint8, b as uint8, c, 128]);
                     check_candidate(candidate);
                     add_lossy(candidate, totals);
                 }
@@ -192,11 +192,11 @@ let Utf8Tests = module (
 
     export let test_scalars_and_offsets = func() -> void {
         let text = "Aé€🙂";
-        let expected: uint32[list] = [65, 233, 8364, 128578];
+        let expected: uint32[list] = new([65, 233, 8364, 128578]);
         test.assert_equal<uint32[list]>(expected, strings.scalars(text));
-        let offsets: [int, uint32][list] = [[0, 65], [1, 233], [3, 8364], [6, 128578]];
+        let offsets: [int, uint32][list] = new([[0, 65], [1, 233], [3, 8364], [6, 128578]]);
         test.assert_equal<[int, uint32][list]>(offsets, strings.scalar_offsets(text));
-        let none: uint32[list] = [];
+        let none: uint32[list] = new;
         test.assert_equal<uint32[list]>(none, strings.scalars(""));
         test.assert_equal_int32(0, strings.scalar_offsets("").length);
         test.assert_equal_int32(4, strings.scalar_count(text));
@@ -230,15 +230,15 @@ let Utf8Tests = module (
     };
 
     export let test_from_scalars = func() -> void {
-        let values: uint32[list] = [0, 127, 128, 2047, 2048, 55295, 57344, 65535, 65536, 1114111];
+        let values: uint32[list] = new([0, 127, 128, 2047, 2048, 55295, 57344, 65535, 65536, 1114111]);
         let text = strings.from_scalars(values);
         test.assert_equal<uint32[list]>(values, strings.scalars(text));
-        let bytes: uint8[list] = [0, 127, 194, 128, 223, 191, 224, 160, 128, 237, 159, 191, 238, 128, 128, 239, 191, 191,
-            240, 144, 128, 128, 244, 143, 191, 191];
+        let bytes: uint8[list] = new([0, 127, 194, 128, 223, 191, 224, 160, 128, 237, 159, 191, 238, 128, 128, 239, 191, 191,
+            240, 144, 128, 128, 244, 143, 191, 191]);
         test.assert_equal<uint8[list]>(bytes, strings.to_bytes(text));
-        let empty: uint32[list] = [];
+        let empty: uint32[list] = new;
         test.assert_equal_string("", strings.from_scalars(empty));
-        test.assert_equal_string("é🙂", strings.from_scalars([233, 128578]));
+        test.assert_equal_string("é🙂", strings.from_scalars(new([233, 128578])));
     };
 
     export let test_to_bytes_is_a_copy = func() -> void {

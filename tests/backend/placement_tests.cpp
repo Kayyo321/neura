@@ -221,7 +221,7 @@ NEURA_TEST(placement, prospect_budget_giveup_and_verdict) {
     });
     check(no_prospect.state() == AutoDevice::State::Rejected && no_prospect.batch_hint() == 1 &&
           no_prospect.reason() == "no graph can gain at this batch size" && no_prospect.device_name().empty() &&
-          opens == 0, "no single job can repay opening a device");
+          opens == 0 && no_prospect.declines_every_job(), "no single job can repay opening a device");
 
     // Both verdicts see the same 1,024-node graph and fixed CPU estimate.
     // The RTX model wins at width 512; llvmpipe's per-job cost alone
@@ -236,15 +236,17 @@ NEURA_TEST(placement, prospect_budget_giveup_and_verdict) {
             ++opens;
             return nvm::Opened{std::make_unique<nvm::ModelDevice>(verdict_image), model, fixed_cpu, "fixed models"};
         }, {batch_size, {}});
-        check(automatic.batch_hint() == batch_size && automatic.device_name().empty(), "gated device has no name yet");
+        check(automatic.batch_hint() == batch_size && automatic.device_name().empty() &&
+              !automatic.declines_every_job(), "gated device has no name yet and may still be opened");
         offer_opening_work(automatic);
         check(automatic.device_name() == "fixed models", "an opened device keeps its name");
         if (accept) {
             check(automatic.state() == AutoDevice::State::Active && automatic.batch_hint() == batch_size &&
-                  automatic.reason().empty(), "the RTX 5080 parameters pass the verdict");
+                  automatic.reason().empty() && !automatic.declines_every_job(), "the RTX 5080 parameters pass the verdict");
         } else {
             check(automatic.state() == AutoDevice::State::Rejected && automatic.batch_hint() == 1 &&
-                  automatic.reason() == "the device cannot beat the CPU", "llvmpipe parameters fail the same verdict");
+                  automatic.reason() == "the device cannot beat the CPU" && automatic.declines_every_job(),
+                  "llvmpipe parameters fail the same verdict");
         }
     }
     check_equal(opens, std::size_t{3}, "one open per run, on the same call on both repeated runs");
@@ -255,7 +257,8 @@ NEURA_TEST(placement, prospect_budget_giveup_and_verdict) {
     }, {batch_size, {}});
     offer_opening_work(unavailable);
     check(unavailable.state() == AutoDevice::State::Rejected && unavailable.device_name().empty() &&
-          unavailable.reason() == "unavailable: probe failed", "opening failure is reported and stays rejected");
+          unavailable.reason() == "unavailable: probe failed" && unavailable.declines_every_job(),
+          "opening failure is reported and stays rejected");
 
     AutoDevice no_gain(image, [&](std::string&) -> std::optional<nvm::Opened> {
         ++opens;
@@ -265,11 +268,13 @@ NEURA_TEST(placement, prospect_budget_giveup_and_verdict) {
     // 8 jobs * (0.08 + (0.0008 + 0.002) * 20,000) = 448.64 per call.
     // Their estimated gain is zero, and work reaches 3,000,000 on 6,687.
     for (std::size_t call = 1; call <= 6'687; ++call) {
-        check(no_gain.state() == AutoDevice::State::Gated, "work remained below the give-up threshold");
+        check(no_gain.state() == AutoDevice::State::Gated && !no_gain.declines_every_job(),
+              "work remained below the give-up threshold");
         no_gain.evaluate(expensive.jobs);
     }
     check(no_gain.state() == AutoDevice::State::Rejected && no_gain.reason() == "the workload cannot gain" &&
-          no_gain.statistics().declined_placement == 6'687 * 8 && opens == 3, "the give-up call rejects without opening");
+          no_gain.statistics().declined_placement == 6'687 * 8 && opens == 3 && no_gain.declines_every_job(),
+          "the give-up call rejects without opening, and the device declines every later job");
 }
 
 NEURA_TEST(placement, mixed_graph_gate_opens_on_fixed_call) {
@@ -354,8 +359,8 @@ NEURA_TEST(placement, active_state_statistics_and_correction) {
     scripted->fail_next = true;
     automatic.evaluate(shallow.jobs);
     check(!shallow.jobs[0].evaluated && automatic.state() == AutoDevice::State::Rejected && automatic.batch_hint() == 1 &&
-          automatic.reason() == "device failed: injected failure" && automatic.device_name() == "scripted model",
-          "inner device failure rejects while preserving its name");
+          automatic.reason() == "device failed: injected failure" && automatic.device_name() == "scripted model" &&
+          automatic.declines_every_job(), "inner device failure rejects while preserving its name");
     const auto counts = automatic.statistics();
     check(counts.evaluated == evaluated && counts.declined_placement == batch_size * opening_call + 1 &&
           counts.declined_ineligible == 1 && counts.escaped == 1 && counts.declined_failed == 1 &&
@@ -633,7 +638,8 @@ private:
 void check_retired(AutoDevice& device, const std::string& label) {
     check(device.state() == AutoDevice::State::Rejected && device.retired() &&
           device.reason() == "the device stopped gaining" && device.batch_hint() == 1 &&
-          device.failure_reason().empty() && device.device_name() == "model", label + ": retired, not failed");
+          device.failure_reason().empty() && device.device_name() == "model" && device.declines_every_job(),
+          label + ": retired, not failed, and declines every later job");
 }
 
 } // namespace

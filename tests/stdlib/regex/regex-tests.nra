@@ -48,7 +48,7 @@ let RegexTests = module (
     };
 
     let texts = func(matches: regex.RegexMatch[list]) -> string[list] {
-        let values: string[list] = [];
+        let values: string[list] = new;
         for (let m in matches) {
             values.append(m.text());
         }
@@ -280,20 +280,20 @@ let RegexTests = module (
 
     export let test_find_all = func() -> void {
         let words = compiled("\\w+");
-        test.assert(texts(words.find_all("hi, you 2")).equals(["hi", "you", "2"]));
+        test.assert(texts(words.find_all("hi, you 2")).equals(new(["hi", "you", "2"])));
         test.assert_equal_int32(0, words.find_all("").length);
         test.assert_equal_int32(0, words.find_all(" ,.").length);
         // After an empty match the search resumes one scalar later.
-        let starts: int[list] = [];
+        let starts: int[list] = new;
         for (let m in compiled("").find_all("aé🙂")) {
             starts.append(m.start);
         }
-        test.assert(starts.equals([0, 1, 3, 7]));
-        test.assert(texts(compiled("\\w*").find_all("ab cd")).equals(["ab", "", "cd", ""]));
-        test.assert(texts(compiled("a|").find_all("aab")).equals(["a", "a", "", ""]));
+        test.assert(starts.equals(new([0, 1, 3, 7])));
+        test.assert(texts(compiled("\\w*").find_all("ab cd")).equals(new(["ab", "", "cd", ""])));
+        test.assert(texts(compiled("a|").find_all("aab")).equals(new(["a", "a", "", ""])));
         // Non-overlapping, left to right.
-        test.assert(texts(compiled("aa").find_all("aaaaa")).equals(["aa", "aa"]));
-        test.assert(texts(compiled("aba").find_all("ababababa")).equals(["aba", "aba"]));
+        test.assert(texts(compiled("aa").find_all("aaaaa")).equals(new(["aa", "aa"])));
+        test.assert(texts(compiled("aba").find_all("ababababa")).equals(new(["aba", "aba"])));
     };
 
     export let test_replace = func() -> void {
@@ -325,13 +325,13 @@ let RegexTests = module (
 
     export let test_split = func() -> void {
         let comma = compiled("\\s*,\\s*");
-        test.assert(comma.split("a , b,c").equals(["a", "b", "c"]));
-        test.assert(comma.split(",a,,b,").equals(["", "a", "", "b", ""]));
-        test.assert(comma.split("").equals([""]));
-        test.assert(comma.split("abc").equals(["abc"]));
-        test.assert(compiled("x*").split("ab").equals(["", "a", "b", ""]));
-        test.assert(compiled("x*").split("").equals(["", ""]));
-        test.assert(compiled("é").split("aébéc").equals(["a", "b", "c"]));
+        test.assert(comma.split("a , b,c").equals(new(["a", "b", "c"])));
+        test.assert(comma.split(",a,,b,").equals(new(["", "a", "", "b", ""])));
+        test.assert(comma.split("").equals(new([""])));
+        test.assert(comma.split("abc").equals(new(["abc"])));
+        test.assert(compiled("x*").split("ab").equals(new(["", "a", "b", ""])));
+        test.assert(compiled("x*").split("").equals(new(["", ""])));
+        test.assert(compiled("é").split("aébéc").equals(new(["a", "b", "c"])));
     };
 
     export let test_flags = func() -> void {
@@ -347,24 +347,24 @@ let RegexTests = module (
         let folded = regex_check.compile_flags("é[a-z]", 1);
         test.assert(folded.is_match("éQ"));
         test.assert(!folded.is_match("ÉQ"));
-        test.assert(!regex_check.compile_flags("k", 1).is_match(strings.from_scalars([8490])));
+        test.assert(!regex_check.compile_flags("k", 1).is_match(strings.from_scalars(new([8490]))));
         let dot = regex_check.compile_flags("a.b", 4);
         test.assert(dot.is_match("a\nb"));
         test.assert(!compiled("a.b").is_match("a\nb"));
         test.assert(compiled("a.b").is_match("a\rb"));
         let lines = regex_check.compile_flags("^\\w+$", 2);
-        test.assert(texts(lines.find_all("one\ntwo\n\nthree\n")).equals(["one", "two", "three"]));
+        test.assert(texts(lines.find_all("one\ntwo\n\nthree\n")).equals(new(["one", "two", "three"])));
     };
 
     export let test_escapes_and_classes = func() -> void {
         test.assert(compiled("\\u{1F642}").matches_fully("🙂"));
-        test.assert(compiled("\\u{0}").matches_fully(strings.from_scalars([0])));
-        test.assert(compiled("[\\u{10FFFE}-\\u{10FFFF}]").matches_fully(strings.from_scalars([1114111])));
+        test.assert(compiled("\\u{0}").matches_fully(strings.from_scalars(new([0]))));
+        test.assert(compiled("[\\u{10FFFE}-\\u{10FFFF}]").matches_fully(strings.from_scalars(new([1114111]))));
         test.assert(compiled("\\t\\n\\r").matches_fully("\t\n\r"));
-        test.assert(compiled("\\s").matches_fully(strings.from_scalars([11])));
-        test.assert(compiled("\\s").matches_fully(strings.from_scalars([12])));
-        test.assert(!compiled("\\s").matches_fully(strings.from_scalars([160])));
-        test.assert(!compiled("\\d").matches_fully(strings.from_scalars([1635])));
+        test.assert(compiled("\\s").matches_fully(strings.from_scalars(new([11]))));
+        test.assert(compiled("\\s").matches_fully(strings.from_scalars(new([12]))));
+        test.assert(!compiled("\\s").matches_fully(strings.from_scalars(new([160]))));
+        test.assert(!compiled("\\d").matches_fully(strings.from_scalars(new([1635]))));
         test.assert(!compiled("\\w").matches_fully("é"));
         test.assert(compiled("\\W").matches_fully("é"));
         test.assert(compiled("[^a]").matches_fully("🙂"));
@@ -375,7 +375,7 @@ let RegexTests = module (
         test.assert(compiled("\\/\\#").matches_fully("/#"));
         test.assert(!compiled("[α-ω]+").matches_fully("λόγος"));
         test.assert(compiled("[α-ω]+").matches_fully("λογος"));
-        test.assert(compiled(".").matches_fully(strings.from_scalars([1114111])));
+        test.assert(compiled(".").matches_fully(strings.from_scalars(new([1114111]))));
     };
 
     // Where the library knowingly differs from python3's re or ECMAScript.
@@ -388,20 +388,20 @@ let RegexTests = module (
         test.assert(compiled("\\B").is_match(""));
         // After an empty match find_all resumes one scalar later; Python
         // also allows a non-empty match at the same position.
-        regex_check.check("|a", 0, "a", true, [0, 0, 1, 1]);
+        regex_check.check("|a", 0, "a", true, new([0, 0, 1, 1]));
         // An iteration beyond a quantifier's minimum that matches empty fails
         // (ECMAScript's rule); Python accepts one such iteration.
-        regex_check.check("(a*)*", 0, "b", false, [0, 0, -1, -1, 1, 1, -1, -1]);
-        regex_check.check("(a?){1,3}", 0, "a", true, [0, 1, 0, 1, 1, 1, 1, 1]);
-        regex_check.check("(a*)+", 0, "b", false, [0, 0, 0, 0, 1, 1, 1, 1]);
-        regex_check.check("(a|b*)*", 0, "ab", true, [0, 2, 1, 2, 2, 2, -1, -1]);
+        regex_check.check("(a*)*", 0, "b", false, new([0, 0, -1, -1, 1, 1, -1, -1]));
+        regex_check.check("(a?){1,3}", 0, "a", true, new([0, 1, 0, 1, 1, 1, 1, 1]));
+        regex_check.check("(a*)+", 0, "b", false, new([0, 0, 0, 0, 1, 1, 1, 1]));
+        regex_check.check("(a|b*)*", 0, "ab", true, new([0, 2, 1, 2, 2, 2, -1, -1]));
         // Captures inside a repeated group keep their last value (as in
         // Python); ECMAScript resets them at each iteration.
-        regex_check.check("(?:(a)|b)*", 0, "ab", true, [0, 2, 0, 1, 2, 2, -1, -1]);
+        regex_check.check("(?:(a)|b)*", 0, "ab", true, new([0, 2, 0, 1, 2, 2, -1, -1]));
         // With one thread per instruction and position, a new iteration of a
         // loop whose body can match empty can merge with the unfinished
         // previous iteration. Here ECMAScript finds [0, 2) and Python [0, 0).
-        regex_check.check("(?:a*?)*", 0, "aa", true, [0, 1, 1, 2, 2, 2]);
+        regex_check.check("(?:a*?)*", 0, "aa", true, new([0, 1, 1, 2, 2, 2]));
     };
 
     // A 10 KB input: the machine is linear in the input.

@@ -27,9 +27,11 @@ The following public declarations are taken from the module source; each links t
   The checksum of every byte added since creation or the last reset. Reading it does not end the computation. Tagged `#Pure`.
 - **Crc32.Crc32** · [`export let reset = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/crc32.nra#L36)
   Restores the initial register and discards the previous checksum state.
-- **Crc32** · [`export let create = func -> Crc32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/crc32.nra#L43)
+- **Crc32.Crc32** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/crc32.nra#L41)
+  Names the hasher.
+- **Crc32** · [`export let create = func -> Crc32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/crc32.nra#L46)
   A new checksum with no bytes added. Tagged `#Pure`, `#ThreadSafe`.
-- **Crc32** · [`export let of = func(bytes: uint8[list]) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/crc32.nra#L47)
+- **Crc32** · [`export let of = func(bytes: uint8[list]) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/digest/crc32.nra#L50)
   The checksum of the bytes. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 

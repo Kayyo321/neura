@@ -55,6 +55,14 @@ struct TierShadowHooks {
         ListVersion,
         // The live heap cells: one more.
         LiveCells,
+        // The live stack cells (NVR 1.7): one more.
+        StackCells,
+        // The innermost open storage region of the running task (NVR 1.7):
+        // owned by the next frame depth.
+        RegionDepth,
+        // The released handles (NVR 1.7): one more, the next handle to be
+        // assigned.
+        ReleasedHandles,
         // The step count: one more.
         Steps,
         // The first channel, by handle, holding a value: the lowest bit of
@@ -90,6 +98,14 @@ struct RunLimits {
     // Heap storage after reclaiming unreachable entries: one cell per entry
     // plus one per object field, collection element, and text or bytes byte.
     std::uint64_t max_heap_cells = std::uint64_t{1} << 26;
+    // Live cells of region entries (NVR 1.7, docs/runtime/NVM.md, "Storage
+    // regions"): one per entry plus one per field or element. They are stack
+    // cells: they do not count against max_heap_cells.
+    std::uint64_t max_stack_cells = std::uint64_t{1} << 24;
+    // Tooling only: a run that ends leaves the regions it had open in place
+    // for the debugger to inspect, and the execution's end frees them. The
+    // result's live stack cells are then those the run ended with.
+    bool keep_regions_at_end = false;
     // Reference handles assigned during the run. Handles are never reused.
     std::uint64_t max_handles = std::uint64_t{1} << 32;
     // Count the steps of each function, for `neura run --profile`. Counting
@@ -271,6 +287,18 @@ enum class TrapKind {
     Deadlock,
     MessageLimit,
     RequestLimit,
+    // NVR 1.7 storage regions: the region cells of the run passed
+    // RunLimits::max_stack_cells; an access to an entry its region released;
+    // a region operation on a token or entry that is not valid here.
+    StackLimit,
+    ReleasedStorage,
+    InvalidRegion,
+    // Class hooks (docs/design/Hooks030.md, Recursion): an event equal to an
+    // open one; more than nvr::max_hook_events open; a HookLeave with no event
+    // of its frame open, or a frame that returns or suspends with one open.
+    HookRecursion,
+    HookLimit,
+    InvalidHook,
 };
 
 struct Trap {
@@ -417,6 +445,12 @@ public:
     // exit. A host request suspends the run until complete() supplies its
     // response. Advancing a finished run returns its final event again.
     Event advance();
+#ifdef NEURA_WASM_RUNTIME
+    // Stops at the first safe point after `budget` charged steps or at an
+    // event. A kernel or joined parallel item is atomic and may charge more
+    // than the remaining budget. A host-only yield changes no VM state.
+    std::optional<Event> advance_slice(std::uint64_t budget);
+#endif
     // Snapshot of scheduler state between block steps: the task tree with
     // each task's spawn site, state, and stack. Empty for a serial image.
     std::string dump_tasks(TaskDumpFormat format = TaskDumpFormat::Text) const;
@@ -456,12 +490,14 @@ public:
         std::uint32_t next_block = 0;
         std::uint64_t blocks = 0;
     };
+#ifndef NEURA_WASM_RUNTIME
     std::vector<Tier3Frame> tier3_frames() const;
     Tier3Ending tier3_run(const tier3::Program& program, std::uint32_t entry);
     // Tests only (tests/backend/tier3_heap_tests.cpp): the heap's words
     // (Heap::snapshot) and the executor's live and peak cells and collection
     // threshold, comparable between runs word for word.
     std::vector<std::uint64_t> heap_snapshot() const;
+#endif
 
     struct GraphStep {
         std::uint32_t graph = 0;
@@ -516,6 +552,14 @@ public:
     // The largest live heap size reached so far, in the cells of
     // RunLimits::max_heap_cells.
     std::uint64_t peak_heap_cells() const;
+    // The live and the largest number of region cells (NVR 1.7); zero for a
+    // run that never entered a region.
+    std::uint64_t live_stack_cells() const;
+    std::uint64_t peak_stack_cells() const;
+    // Test-only (RunResult::text_allocations): text entries created and
+    // payload bytes copied since the constants were loaded.
+    std::uint64_t text_allocations() const;
+    std::uint64_t text_bytes_copied() const;
     // A live heap entry as the allocator recorded it: its kind (0 object, 1
     // array, 2 list, 3 text, 4 bytes), its layout or type index, and its
     // declared element width in bytes. For tests of the allocator.
@@ -586,6 +630,16 @@ struct RunResult {
     // location resolved.
     std::vector<TaskSiteProfile> task_profile{};
     std::vector<std::string> task_profile_sites{};
+    // The most region cells live at once (NVR 1.7).
+    std::uint64_t peak_stack_cells = 0;
+    // The region cells still live when the run ended: zero, since a run
+    // releases every region it leaves open, on a trap too.
+    std::uint64_t live_stack_cells = 0;
+    // Test-only: the text and bytes entries the run created after loading
+    // the image's constants, and the payload bytes copied into them
+    // (Heap::text_counters). No output shows them.
+    std::uint64_t text_allocations = 0;
+    std::uint64_t text_bytes_copied = 0;
 };
 
 // The monotonic clock a driver gives the scheduler's timers and deadlines
@@ -603,6 +657,7 @@ public:
     virtual bool virtual_time() const { return false; }
 };
 
+#ifndef NEURA_WASM_RUNTIME
 // The host's steady clock; wait_until sleeps.
 class SteadyTaskClock final : public TaskClock {
 public:
@@ -619,5 +674,6 @@ public:
 // request is answered before the run continues.
 RunResult run(const nvr::Image& image, const Bindings& bindings, std::span<const std::string> arguments,
               RunLimits limits = {}, TaskClock* clock = nullptr);
+#endif
 
 } // namespace neura::nvm

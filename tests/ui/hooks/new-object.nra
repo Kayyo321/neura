@@ -1,0 +1,4 @@
+// Case 27: a clause of a class that is not #Final returns a new object.
+let Session = class (
+    | get: new Session();
+);

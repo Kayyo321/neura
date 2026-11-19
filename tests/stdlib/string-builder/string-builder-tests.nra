@@ -65,21 +65,21 @@ let StringBuilderTests = module (
         let b = builders.create();
         b.append_scalar(0);
         test.assert_equal_int32(1, b.byte_length);
-        test.assert_equal_string(utf8([0]), b.to_string());
+        test.assert_equal_string(utf8(new([0])), b.to_string());
         b.clear();
         // The last scalar of each encoded length and the first of the next.
         b.append_scalar(127).append_scalar(128);
-        test.assert_equal_string(utf8([127, 194, 128]), b.to_string());
+        test.assert_equal_string(utf8(new([127, 194, 128])), b.to_string());
         b.clear();
         b.append_scalar(2047).append_scalar(2048);
-        test.assert_equal_string(utf8([223, 191, 224, 160, 128]), b.to_string());
+        test.assert_equal_string(utf8(new([223, 191, 224, 160, 128])), b.to_string());
         b.clear();
         // Around the surrogate range.
         b.append_scalar(55295).append_scalar(57344);
-        test.assert_equal_string(utf8([237, 159, 191, 238, 128, 128]), b.to_string());
+        test.assert_equal_string(utf8(new([237, 159, 191, 238, 128, 128])), b.to_string());
         b.clear();
         b.append_scalar(65535).append_scalar(65536).append_scalar(1114111);
-        test.assert_equal_string(utf8([239, 191, 191, 240, 144, 128, 128, 244, 143, 191, 191]), b.to_string());
+        test.assert_equal_string(utf8(new([239, 191, 191, 240, 144, 128, 128, 244, 143, 191, 191])), b.to_string());
         b.clear();
         b.append_scalar(65).append_scalar(233).append_scalar(128578);
         test.assert_equal_string("Aé🙂", b.to_string());
@@ -129,7 +129,7 @@ let StringBuilderTests = module (
         b.clear();
         b.append_value<Point>(new Point());
         test.assert_equal_string("Point(3)", b.to_string());
-        let names: string[list] = ["a", "b"];
+        let names: string[list] = new(["a", "b"]);
         b.clear();
         b.append_value<string[list]>(names);
         test.assert_equal_string("[a, b]", b.to_string());

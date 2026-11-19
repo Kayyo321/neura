@@ -1,0 +1,11 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: unknown attribute type XX
+let name = import:Std.Crypto.Pki.Name;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = name.of(["XX"], ["value"]);
+        return program.ExitCode.Ok;
+    };
+);

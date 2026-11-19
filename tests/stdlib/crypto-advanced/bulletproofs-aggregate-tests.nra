@@ -1,0 +1,87 @@
+// test-options: --gpu=off --deny-all --max-steps 20000000000
+let bulletproofs = import:Std.Crypto.Advanced.Bulletproofs;
+let hex = import:Std.Encoding.Hex;
+let merlin = import:Std.Crypto.Advanced.Merlin;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let uint64s = import:Std.Core.UInt64;
+let vectors = import:BulletproofsAggregateVectors;
+
+let BulletproofsAggregateTests = module (
+    let bytes = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let byte_rows = func(text: string) -> uint8[list][list] {
+        let result: uint8[list][list] = new;
+        for (let element in strings.split(text, ",")) {
+            result.append(bytes(element));
+        }
+        return result;
+    };
+
+    let values = func(text: string) -> uint64[list] {
+        let result: uint64[list] = new;
+        for (let element in strings.split(text, ",")) {
+            result.append(test.assert_ok(uint64s.parse(element)));
+        }
+        return result;
+    };
+
+    let check_case = func(offset, bits, count: int) {
+        last rows = vectors.aggregation_cases;
+        last label = bytes(rows[offset + 1]);
+        let transcript: merlin.Transcript = new(label);
+        let original: merlin.Transcript = new(label);
+        last expected = byte_rows(rows[offset + 5]);
+        last material = bytes(rows[offset + 4]);
+        let [commitments, proof] = test.assert_ok(bulletproofs.prove_aggregate_with(transcript, bits,
+            values(rows[offset + 2]), byte_rows(rows[offset + 3]), material));
+        test.assert_equal_int32(count, commitments.length);
+        for (let i = 0; i < count; i++) {
+            test.assert_equal_string(hex.encode(expected[i]), hex.encode(commitments[i]));
+        }
+        test.assert_equal_string(rows[offset + 6], hex.encode(proof));
+        test.assert(bulletproofs.verify_aggregate(transcript, bits, expected, bytes(rows[offset + 6])));
+        last purpose = bytes("706f73742d70726f6f66");
+        test.assert_equal_string(hex.encode(original.challenge_bytes(purpose, 32)),
+            hex.encode(transcript.challenge_bytes(purpose, 32)));
+    };
+
+    export let test_rust_two_8_bit_values = func => check_case(0, 8, 2);
+    export let test_rust_four_16_bit_values = func => check_case(9, 16, 4);
+
+    export let test_aggregate_verification_rejections = func {
+        last row = vectors.aggregation_cases;
+        let transcript: merlin.Transcript = new(bytes(row[1]));
+        last commitments = byte_rows(row[5]);
+        last proof = bytes(row[6]);
+        let reordered: uint8[list][list] = new([commitments[1], commitments[0]]);
+        test.assert(!bulletproofs.verify_aggregate(transcript, 8, reordered, proof));
+        let replaced: uint8[list][list] = new([commitments[0], bytes(row[7])]);
+        test.assert(!bulletproofs.verify_aggregate(transcript, 8, replaced, proof));
+        test.assert(!bulletproofs.verify_aggregate(transcript, 8, commitments, bytes(row[8])));
+        let wrong_transcript: merlin.Transcript = new(bytes("00"));
+        test.assert(!bulletproofs.verify_aggregate(wrong_transcript, 8, commitments, proof));
+        test.assert(!bulletproofs.verify(transcript, 16, commitments[0], proof));
+
+        let wrong_count: uint8[list][list] = new([commitments[0], commitments[1], commitments[1]]);
+        test.assert(!bulletproofs.verify_aggregate(transcript, 8, wrong_count, proof));
+        let malformed: uint8[list][list] = new([commitments[0], bytes("ff")]);
+        test.assert(!bulletproofs.verify_aggregate(transcript, 8, malformed, proof));
+        proof.append(0);
+        test.assert(!bulletproofs.verify_aggregate(transcript, 8, commitments, proof));
+    };
+
+    export let test_aggregate_proving_rejections = func {
+        last row = vectors.aggregation_cases;
+        let transcript: merlin.Transcript = new(bytes(row[1]));
+        last material = bytes(row[4]);
+        last blinds = byte_rows(row[3]);
+        let out_of_range: uint64[list] = new([0, 256]);
+        let _ = test.assert_err(bulletproofs.prove_aggregate_with(transcript, 8, out_of_range, blinds, material));
+
+        last input = values(row[2]);
+        let _ = test.assert_err(bulletproofs.prove_aggregate(transcript, 8, input, blinds));
+        blinds[0] = bytes("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+        let _ = test.assert_err(bulletproofs.prove_aggregate_with(transcript, 8, input, blinds, material));
+    };
+);

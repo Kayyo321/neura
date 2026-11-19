@@ -1,0 +1,9 @@
+// A malformed Unicode escape is E0268 at the escape (docs/design/
+// Expressions030.md, Escapes, edge case 57).
+let no_brace = "\u1F600";
+let empty = "\u{}";
+let long = "\u{1234567}";
+let bad_digit = "\u{12G}";
+let character = '\u{}';
+let interpolated = $"x\u{zz}";
+let unclosed = "\u{12";

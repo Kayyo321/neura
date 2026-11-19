@@ -1,0 +1,7 @@
+error[E1005]: attribute or property value of the wrong type
+ --> $DIR/bad-flag.nra:1:38
+  |
+1 | let view = html() { <button disabled="false">Save</button> };
+  |                                      ^^^^^^^ expected a bare flag or a bool hole, got string
+
+For more information about this error, try `neura explain E1005`.

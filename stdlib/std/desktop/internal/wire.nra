@@ -1,0 +1,224 @@
+let bytes = import:Std.Io.Internal.Bytes;
+let.promote _ = import:Std.Core.Optional;
+
+/// @brief The frames of the channel between the desktop window host and its native child
+/// (docs/design/Desktop030.md, Bridge): a four-byte little-endian length that counts the kind byte and the body,
+/// one kind byte, then the body. Integers in a body are little-endian; a text is a `uint32` byte count followed
+/// by UTF-8 bytes.
+export let Wire = module (
+    /// @brief The bridge protocol version both sides send in Hello.
+    export const Version: uint32 = 1;
+    /// @brief The default and largest frame, D-3 (C-2): 1 MiB including the length field.
+    export const FrameLimit: int = 1048576;
+
+    /// @brief Kind byte of Hello: version and the 32 SHA-256 bytes of registry.json.
+    export const Hello: uint8 = 1;
+    /// @brief Kind byte of Call (host to child): a bridge operation from a window.
+    export const Call: uint8 = 2;
+    /// @brief Kind byte of Return (child to host): the reply to a Call.
+    export const Return: uint8 = 3;
+    /// @brief Kind byte of Cancel (host to child): a Call whose caller stopped waiting.
+    export const Cancel: uint8 = 4;
+    /// @brief Kind byte of HostCall (child to host): a request for a desktop host service.
+    export const HostCall: uint8 = 5;
+    /// @brief Kind byte of HostReturn (host to child): the answer to a HostCall.
+    export const HostReturn: uint8 = 6;
+    /// @brief Kind byte of Event (host to child): a window or menu event.
+    export const Event: uint8 = 7;
+
+    /// @brief Appends `value` as four little-endian bytes.
+    export let put_u32 = func(target: uint8[list], value: uint32) {
+        target.append((value & 255) as uint8);
+        target.append(((value >> 8) & 255) as uint8);
+        target.append(((value >> 16) & 255) as uint8);
+        target.append(((value >> 24) & 255) as uint8);
+    };
+
+    /// @brief Appends `value` as eight little-endian two's-complement bytes.
+    export let put_i64 = func(target: uint8[list], value: int64) {
+        last word = value as uint64;
+        for (let i in 0 .. 8) {
+            target.append(((word >> ((i * 8) as uint64)) & 255) as uint8);
+        }
+    };
+
+    /// @brief Appends the byte count of `text` and its UTF-8 bytes.
+    export let put_text = func(target: uint8[list], text: string) {
+        put_u32(target, text.byte_length as uint32);
+        last count = text.byte_length;
+        for (let i in 0 .. count) {
+            target.append(text.byte_at(i));
+        }
+    };
+
+    /// @brief A cursor over a received body. A read past the end, or a text that is not UTF-8, marks the
+    /// cursor failed and answers zero or the empty text; the caller checks `failed` once at the end.
+    #Final
+    export let Cursor = class (
+        /// @brief The body being read.
+        last body: uint8[list];
+        /// @brief The offset of the next unread byte.
+        export let offset: int = 0;
+        /// @brief Whether any read ran past the end or met invalid UTF-8.
+        export let failed: bool = false;
+
+        /// @brief Reads `source` from its first byte.
+        export let init = func(source: uint8[list]) {
+            body = source;
+        };
+
+        /// @brief The next four bytes as a little-endian `uint32`.
+        export let u32 = func -> uint32 {
+            if (offset + 4 > body.length) {
+                failed = true;
+                offset = body.length;
+                return 0;
+            }
+            last value = (body[offset] as uint32) | ((body[offset + 1] as uint32) << 8) |
+                ((body[offset + 2] as uint32) << 16) | ((body[offset + 3] as uint32) << 24);
+            offset = offset + 4;
+            return value;
+        };
+
+        /// @brief The next eight bytes as a little-endian two's-complement `int64`.
+        export let i64 = func -> int64 {
+            if (offset + 8 > body.length) {
+                failed = true;
+                offset = body.length;
+                return 0;
+            }
+            let word: uint64 = 0;
+            for (let i in 0 .. 8) {
+                word = word | ((body[offset + i] as uint64) << ((i * 8) as uint64));
+            }
+            offset = offset + 8;
+            return word as int64;
+        };
+
+        /// @brief The next text: a `uint32` byte count and that many UTF-8 bytes.
+        export let text = func -> string {
+            last count = u32() as int;
+            if (failed || count > body.length - offset) {
+                failed = true;
+                offset = body.length;
+                return "";
+            }
+            let [valid, value] = string.from_utf8(bytes.copy_range(body, offset, offset + count));
+            offset = offset + count;
+            if (not valid) {
+                failed = true;
+                return "";
+            }
+            return value;
+        };
+
+        /// @brief Every byte not yet read.
+        export let rest = func -> uint8[list] {
+            last value = bytes.copy_range(body, offset, body.length);
+            offset = body.length;
+            return value;
+        };
+
+        /// @brief Whether every byte has been read and no read failed.
+        export let finished = func -> bool => not failed && offset == body.length;
+
+        export let.override to_string = func -> string =>
+            "Cursor(" .. offset.to_string() .. "/" .. body.length.to_string() .. ")";
+    );
+
+    /// @brief The complete frame of `kind` with `body`.
+    export let frame = func(kind: uint8, body: uint8[list]) -> uint8[list] {
+        last bytes_out: uint8[list] = new;
+        put_u32(bytes_out, (body.length + 1) as uint32);
+        bytes_out.append(kind);
+        bytes.append_range(bytes_out, body, 0, body.length);
+        return bytes_out;
+    };
+
+    /// @brief The body of Hello: the protocol version and the 32 raw digest bytes.
+    export let hello = func(registry_digest: uint8[list]) -> uint8[list] {
+        last body: uint8[list] = new;
+        put_u32(body, Version);
+        bytes.append_range(body, registry_digest, 0, registry_digest.length);
+        return body;
+    };
+
+    /// @brief One received frame.
+    #Final
+    export let Frame = class (
+        /// @brief The kind byte.
+        export last kind: uint8;
+        /// @brief The body after the kind byte.
+        export last body: uint8[list];
+
+        /// @brief A frame of `frame_kind` carrying `frame_body`.
+        export let init = func(frame_kind: uint8, frame_body: uint8[list]) {
+            kind = frame_kind;
+            body = frame_body;
+        };
+
+        export let.override to_string = func -> string =>
+            "Frame(" .. (kind as int).to_string() .. ", " .. body.length.to_string() .. " bytes)";
+    );
+
+    /// @brief Splits a byte stream into frames. It keeps only the bytes of frames not yet complete.
+    #Final
+    export let Reader = class (
+        /// @brief Received bytes not yet returned as frames.
+        let buffer: uint8[list] = new;
+        /// @brief The offset in `buffer` of the first unread byte.
+        let start: int = 0;
+        /// @brief The largest frame accepted, including its length field.
+        last limit: int;
+        /// @brief Whether a malformed or oversized frame ended the stream.
+        export let broken: bool = false;
+
+        /// @brief A reader that refuses frames larger than `frame_limit` bytes.
+        export let init = func(frame_limit: int) {
+            limit = frame_limit;
+        };
+
+        /// @brief Adds received bytes. The bytes of frames already returned are dropped first, so the buffer
+        /// holds at most one incomplete frame and the chunk.
+        export let feed = func(chunk: uint8[list]) {
+            if (start > 0) {
+                buffer = bytes.copy_range(buffer, start, buffer.length);
+                start = 0;
+            }
+            bytes.append_range(buffer, chunk, 0, chunk.length);
+        };
+
+        /// @brief The next complete frame, if the bytes received so far hold one. A length of zero, or one
+        /// beyond the limit, marks the reader broken and answers None from then on.
+        export let next = func -> Optional<Frame> {
+            if (broken || buffer.length - start < 4) {
+                return Optional<Frame>.None;
+            }
+            last length = ((buffer[start] as uint32) | ((buffer[start + 1] as uint32) << 8) |
+                ((buffer[start + 2] as uint32) << 16) | ((buffer[start + 3] as uint32) << 24)) as int64;
+            if (length == 0 || length > (limit - 4) as int64) {
+                broken = true;
+                return Optional<Frame>.None;
+            }
+            last size = length as int;
+            if (buffer.length - start - 4 < size) {
+                return Optional<Frame>.None;
+            }
+            last kind = buffer[start + 4];
+            last body = bytes.copy_range(buffer, start + 5, start + 4 + size);
+            start = start + 4 + size;
+            if (start == buffer.length) {
+                last empty: uint8[list] = new;
+                buffer = empty;
+                start = 0;
+            }
+            return Optional<Frame>.Some(new Frame(kind, body));
+        };
+
+        /// @brief Whether bytes of an incomplete frame remain.
+        export let partial = func -> bool => buffer.length > start;
+
+        export let.override to_string = func -> string =>
+            "Reader(" .. (buffer.length - start).to_string() .. " bytes pending)";
+    );
+);

@@ -1,0 +1,9 @@
+error[E0571]: field 'r' has type '&int32', which a record cannot hold
+ --> $DIR/field-reference.nra:2:20
+  |
+2 | let P = record (r: &int);
+  |                    ^^^^ '&int32' is a reference, which is not a value
+  |
+  = help: hold a record, a tuple or an enum of eligible types, or declare 'P' as an #Immutable class and not as a record
+
+For more information about this error, try `neura explain E0571`.

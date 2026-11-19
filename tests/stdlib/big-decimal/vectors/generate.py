@@ -252,10 +252,10 @@ def main():
     for name, (rows, doc) in strings.items():
         lines.append(f"    // {doc}")
         lines.append(f"    export let {name} = func() -> string[list] {{")
-        lines.append("        let cases: string[list] = [")
+        lines.append("        let cases: string[list] = new([")
         for i, value in enumerate(rows):
             lines.append(f'            "{value}"{"," if i + 1 < len(rows) else ""}')
-        lines.append("        ];")
+        lines.append("        ]);")
         lines.append("        return cases;")
         lines.append("    };")
         lines.append("")

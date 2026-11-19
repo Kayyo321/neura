@@ -13,7 +13,7 @@ export let Utf8Reader = module (
         /// @brief The underlying byte source called when more input is needed.
         last source: func(int) -> result.Result<uint8[list]>;
         /// @brief Stores the buffered bytes.
-        let buffer: uint8[list] = [];
+        let buffer: uint8[list] = new;
         /// @brief The index of the next unread byte in the buffer.
         let start: int = 0;
 
@@ -30,9 +30,7 @@ export let Utf8Reader = module (
         export let read_scalar = func -> result.Result<Optional<uint32>> {
             match (fill()) {
                 result.Result.Ok(available) => {
-                    if (!available) {
-                        return result.Result<Optional<uint32>>.Ok(Optional<uint32>.None);
-                    }
+                    return result.Result<Optional<uint32>>.Ok(Optional<uint32>.None) unless available;
                 },
                 result.Result.Err(failure) => {
                     return result.Result<Optional<uint32>>.Err(failure);
@@ -64,9 +62,7 @@ export let Utf8Reader = module (
             while (following > 0) {
                 match (fill()) {
                     result.Result.Ok(available) => {
-                        if (!available) {
-                            return invalid_scalar();
-                        }
+                        return invalid_scalar() unless available;
                     },
                     result.Result.Err(failure) => {
                         return result.Result<Optional<uint32>>.Err(failure);
@@ -90,11 +86,11 @@ export let Utf8Reader = module (
         /// without an LF is returned. Invalid UTF-8 fails with InvalidData and consumes the line.
         #NoDiscard
         export let read_line = func -> result.Result<Optional<string>> {
-            last line: uint8[list] = [];
+            last line: uint8[list] = new;
             do {
                 match (fill()) {
                     result.Result.Ok(available) => {
-                        if (!available) {
+                        if (not available) {
                             if (line.length == 0) {
                                 return result.Result<Optional<string>>.Ok(Optional<string>.None);
                             }
@@ -119,15 +115,13 @@ export let Utf8Reader = module (
         /// @brief The rest of the stream as text.
         #NoDiscard
         export let read_to_end = func -> result.Result<string> {
-            last all: uint8[list] = [];
+            last all: uint8[list] = new;
             do {
                 match (fill()) {
                     result.Result.Ok(available) => {
-                        if (!available) {
+                        if (not available) {
                             let [valid, text] = string.from_utf8(all);
-                            if (!valid) {
-                                return result.Result<string>.Err(bytes.invalid_utf8(""));
-                            }
+                            return result.Result<string>.Err(bytes.invalid_utf8("")) unless valid;
                             return result.Result<string>.Ok(text);
                         }
                     },
@@ -164,9 +158,7 @@ export let Utf8Reader = module (
                 line.remove_at(line.length - 1);
             }
             let [valid, text] = string.from_utf8(line);
-            if (!valid) {
-                return result.Result<Optional<string>>.Err(bytes.invalid_utf8(""));
-            }
+            return result.Result<Optional<string>>.Err(bytes.invalid_utf8("")) unless valid;
             return result.Result<Optional<string>>.Ok(Optional<string>.Some(text));
         };
 
@@ -177,6 +169,9 @@ export let Utf8Reader = module (
         /// @brief Creates the invalid UTF-8 result for a malformed scalar.
         let invalid_scalar = func -> result.Result<Optional<uint32>> =>
             result.Result<Optional<uint32>>.Err(bytes.invalid_utf8(""));
+
+        /// @brief Names the reader.
+        export let.override to_string = func -> string => "Utf8Reader";
     );
 
     /// @brief Creates a UTF-8 reader over the supplied byte source.

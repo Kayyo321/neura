@@ -1,0 +1,507 @@
+let.promote _ = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let headers = import:Std.Net.Http.Headers;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+
+/// @brief The `Cache-Control` field (RFC 9111 section 5.2): parsing, typed access to the request and response
+/// directives, and writing the directives back.
+///
+/// A directive is a token, compared without regard to ASCII case and kept in lowercase, with an optional
+/// argument written as a token or a quoted-string (both forms are accepted for every directive, as section 5.2
+/// asks). Directives keep their order, unknown extensions included (section 5.2.3). When a directive appears
+/// more than once the first occurrence counts (section 4.2.1). delta-seconds values above 2147483648 read as
+/// 2147483648 (section 1.2.2). Invalid freshness information makes a response stale (section 4.2.1): an
+/// invalid `max-age` or `s-maxage` argument (missing, empty, or not all digits) reads as 0. An invalid
+/// `min-fresh`, `max-stale`, `stale-while-revalidate` or `stale-if-error` argument makes that directive read
+/// as absent, which is the conservative reading for each. A directive defined without an argument still counts
+/// when it has one. `parse` never fails: an element that does not fit the grammar is recorded as malformed
+/// (`is_malformed`); an element with a valid name keeps its directive, with the raw rest of the element as its
+/// argument, so an invalid `max-age` stays visible. `parse_strict` returns Err for such a text instead.
+/// @see [Std.Net.Http.CacheControl](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-CacheControl)
+#Since("0.3.0")
+export let CacheControl = module (
+    /// @brief The value a delta-seconds that does not fit is read as: 2^31 (RFC 9111 section 1.2.2).
+    export const MaxDeltaSeconds: int64 = 2147483648;
+
+    /// @brief One cache directive: a lowercase name and an optional argument (quoted-string arguments are
+    /// stored unquoted).
+    #[Final, Immutable, ThreadSafe]
+    export let Directive = class (
+        /// @brief The directive name in lowercase.
+        export last name: string;
+        /// @brief The argument, unquoted, or None when the directive has none.
+        export last argument: Optional<string>;
+
+        /// @brief Stores a name (lowercased) and an argument.
+        export let init = func(directive_name: string, value: Optional<string>) {
+            name = strings.to_ascii_lower(directive_name);
+            argument = value;
+        };
+
+        /// @brief The directive as it is written in a field value.
+        export let.override to_string = func -> string => match (argument) {
+            Optional.Some(text) => name .. "=" .. write_argument(name, text),
+            Optional.None => name,
+        };
+
+        /// @brief Equal names and arguments.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: Directive) {
+                return false;
+            }
+            return to_string() == that.to_string();
+        };
+
+        /// @brief The hash of the written form.
+        export let.override hash_code = func -> uint32 => hashing.combine(17, strings.hash(to_string()));
+    );
+
+    /// @brief An ordered list of cache directives with typed accessors for the RFC 9111 directives.
+    #[Final, NotThreadSafe]
+    export let CacheControl = class (
+        /// @brief The directives in order.
+        last directives: Directive[list] = new;
+        /// @brief Whether a parsed element did not fit the grammar.
+        let malformed: bool = false;
+
+        /// @brief An empty list of directives.
+        export let init = func {
+        };
+
+        /// @brief Appends a directive. Traps with "invalid argument: directive name" unless `name` is a token,
+        /// and with "invalid argument: directive argument" when the argument holds CR, LF, NUL or another
+        /// control byte except tab.
+        export let add = func(name: string, argument: Optional<string>) {
+            if (not headers.is_token(name)) {
+                trap_with_message("invalid argument: directive name");
+            }
+            match (argument) {
+                Optional.Some(text) => {
+                    if (not headers.is_valid_value(text)) {
+                        trap_with_message("invalid argument: directive argument");
+                    }
+                },
+                Optional.None => {},
+            }
+            directives.append(new Directive(name, argument));
+        };
+
+        /// @brief The number of directives.
+        export let size = func -> int => directives.length;
+
+        /// @brief Directive `index`.
+        export let at = func(index: int) -> Directive => directives[index];
+
+        /// @brief Whether a parsed element did not fit the grammar (the directive was kept or dropped as the
+        /// module description says).
+        export let is_malformed = func -> bool => malformed;
+
+        /// @brief Whether `name` (any case) is present.
+        export let has = func(name: string) -> bool => find(strings.to_ascii_lower(name)) >= 0;
+
+        /// @brief The argument of the first `name` directive; None when absent or without an argument.
+        #NoDiscard
+        export let argument = func(name: string) -> Optional<string> {
+            last at = find(strings.to_ascii_lower(name));
+            return if (at < 0) -> Optional<string>.None
+                else -> directives[at].argument;
+        };
+
+        /// @brief `max-age` (request, section 5.2.1.1; response, section 5.2.2.1) in seconds; an invalid
+        /// argument reads as 0.
+        #NoDiscard
+        export let max_age = func -> Optional<int64> => strict_delta("max-age");
+
+        /// @brief `s-maxage` (section 5.2.2.10) in seconds; an invalid argument reads as 0.
+        #NoDiscard
+        export let s_maxage = func -> Optional<int64> => strict_delta("s-maxage");
+
+        /// @brief `min-fresh` (section 5.2.1.3) in seconds; None when absent or invalid.
+        #NoDiscard
+        export let min_fresh = func -> Optional<int64> => lenient_delta("min-fresh");
+
+        /// @brief `max-stale` (section 5.2.1.2) in seconds: 2147483648 (any staleness) without an argument,
+        /// None when absent or when the argument is invalid.
+        #NoDiscard
+        export let max_stale = func -> Optional<int64> {
+            last at = find("max-stale");
+            if (at < 0) {
+                return Optional<int64>.None;
+            }
+            return match (directives[at].argument) {
+                Optional.Some(text) => parse_delta_seconds(text),
+                Optional.None => Optional<int64>.Some(MaxDeltaSeconds),
+            };
+        };
+
+        /// @brief `stale-while-revalidate` (RFC 5861, kept as an extension) in seconds; None when absent or
+        /// invalid.
+        #NoDiscard
+        export let stale_while_revalidate = func -> Optional<int64> => lenient_delta("stale-while-revalidate");
+
+        /// @brief `stale-if-error` (RFC 5861, kept as an extension) in seconds; None when absent or invalid.
+        #NoDiscard
+        export let stale_if_error = func -> Optional<int64> => lenient_delta("stale-if-error");
+
+        /// @brief `no-cache`, qualified or not (sections 5.2.1.4, 5.2.2.4).
+        export let no_cache = func -> bool => has("no-cache");
+
+        /// @brief The field names of a qualified `no-cache` (section 5.2.2.4); empty when unqualified or
+        /// absent.
+        #NoDiscard
+        export let no_cache_fields = func -> string[list] => field_names("no-cache");
+
+        /// @brief `no-store` (sections 5.2.1.5, 5.2.2.5).
+        export let no_store = func -> bool => has("no-store");
+
+        /// @brief `no-transform` (sections 5.2.1.6, 5.2.2.6).
+        export let no_transform = func -> bool => has("no-transform");
+
+        /// @brief `only-if-cached` (section 5.2.1.7).
+        export let only_if_cached = func -> bool => has("only-if-cached");
+
+        /// @brief `must-revalidate` (section 5.2.2.2).
+        export let must_revalidate = func -> bool => has("must-revalidate");
+
+        /// @brief `proxy-revalidate` (section 5.2.2.8).
+        export let proxy_revalidate = func -> bool => has("proxy-revalidate");
+
+        /// @brief `must-understand` (section 5.2.2.3).
+        export let must_understand = func -> bool => has("must-understand");
+
+        /// @brief `public` (section 5.2.2.9).
+        export let is_public = func -> bool => has("public");
+
+        /// @brief `private`, qualified or not (section 5.2.2.7).
+        export let is_private = func -> bool => has("private");
+
+        /// @brief The field names of a qualified `private` (section 5.2.2.7); empty when unqualified or absent.
+        #NoDiscard
+        export let private_fields = func -> string[list] => field_names("private");
+
+        /// @brief The directives that RFC 9111 section 5.2 does not define, in order.
+        #NoDiscard
+        export let extensions = func -> Directive[list] {
+            last found: Directive[list] = new;
+            for (let d in directives) {
+                if (not is_known(d.name)) {
+                    found.append(d);
+                }
+            }
+            return found;
+        };
+
+        /// @brief The directives as a field value: joined with ", ", arguments as tokens where possible and as
+        /// quoted-strings otherwise (always quoted for the field lists of `no-cache` and `private`).
+        export let.override to_string = func -> string {
+            last parts: string[list] = new;
+            for (let d in directives) {
+                parts.append(d.to_string());
+            }
+            return strings.join(parts, ", ");
+        };
+
+        /// @brief Equal when both hold equal directives in the same order.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not list: CacheControl) {
+                return false;
+            }
+            if (list.size() != directives.length) {
+                return false;
+            }
+            for (let i = 0; i < directives.length; i++) {
+                return false unless directives[i].equals(list.at(i));
+            }
+            return true;
+        };
+
+        /// @brief Combines the directives' hashes in order.
+        export let.override hash_code = func -> uint32 {
+            let hash: uint32 = 17;
+            for (let d in directives) {
+                hash = hashing.combine(hash, d.hash_code());
+            }
+            return hash;
+        };
+
+        /// @brief Records that a parsed element did not fit the grammar.
+        export let mark_malformed = func {
+            malformed = true;
+        };
+
+        /// @brief Appends an already-built directive (used by the parser).
+        export let append_directive = func(d: Directive) {
+            directives.append(d);
+        };
+
+        /// @brief The index of the first directive named `key` (lowercase), or -1.
+        let find = func(key: string) -> int {
+            for (let i = 0; i < directives.length; i++) {
+                if (directives[i].name == key) {
+                    return i;
+                }
+            }
+            return -1;
+        };
+
+        /// @brief A delta-seconds directive whose invalid argument reads as 0.
+        let strict_delta = func(key: string) -> Optional<int64> {
+            last at = find(key);
+            if (at < 0) {
+                return Optional<int64>.None;
+            }
+            last parsed = match (directives[at].argument) {
+                Optional.Some(text) => parse_delta_seconds(text),
+                Optional.None => Optional<int64>.None,
+            };
+            return match (parsed) {
+                Optional.Some(seconds) => Optional<int64>.Some(seconds),
+                Optional.None => Optional<int64>.Some(0),
+            };
+        };
+
+        /// @brief A delta-seconds directive that reads as absent when its argument is invalid.
+        let lenient_delta = func(key: string) -> Optional<int64> {
+            last at = find(key);
+            if (at < 0) {
+                return Optional<int64>.None;
+            }
+            return match (directives[at].argument) {
+                Optional.Some(text) => parse_delta_seconds(text),
+                Optional.None => Optional<int64>.None,
+            };
+        };
+
+        /// @brief The comma-separated field names in the argument of `key`, trimmed.
+        let field_names = func(key: string) -> string[list] {
+            last names: string[list] = new;
+            match (argument(key)) {
+                Optional.Some(text) => {
+                    for (let part in headers.split_list(text)) {
+                        names.append(part);
+                    }
+                },
+                Optional.None => {},
+            }
+            return names;
+        };
+    );
+
+    /// @brief The directives of a `Cache-Control` field value (RFC 9111 section 5.2). Never fails; see the
+    /// module description for malformed elements.
+    #NoDiscard
+    export let parse = func(text: string) -> CacheControl {
+        last list = new CacheControl();
+        parse_into(list, text);
+        return list;
+    };
+
+    /// @brief The directives of every `Cache-Control` field line of `fields`, in order.
+    #NoDiscard
+    export let of_headers = func(fields: headers.Headers) -> CacheControl {
+        last list = new CacheControl();
+        for (let value in fields.get_all("Cache-Control")) {
+            parse_into(list, value);
+        }
+        return list;
+    };
+
+    /// @brief `parse`, but Err (Syntax, at the start of the offending element) when an element does not fit
+    /// `token [ "=" ( token / quoted-string ) ]`.
+    #NoDiscard
+    export let parse_strict = func(text: string) -> Result<CacheControl> {
+        last list = new CacheControl();
+        last bad = parse_into(list, text);
+        if (bad >= 0) {
+            return Result<CacheControl>.Err(Error.Parse {
+                kind: ParseErrorKind.Syntax, offset: bad, message: "malformed cache directive" });
+        }
+        return Result<CacheControl>.Ok(list);
+    };
+
+    /// @brief delta-seconds (RFC 9111 section 1.2.2): one or more ASCII digits; values above 2147483648 read as
+    /// 2147483648. None for an empty text or any other byte.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let parse_delta_seconds = func(text: string) -> Optional<int64> {
+        if (text.byte_length == 0) {
+            return Optional<int64>.None;
+        }
+        let value: int64 = 0;
+        for (let i = 0; i < text.byte_length; i++) {
+            last b = text.byte_at(i);
+            if (b < 48 || b > 57) {
+                return Optional<int64>.None;
+            }
+            if (value < MaxDeltaSeconds) {
+                value = value * 10 + ((b - 48) as int64);
+            }
+        }
+        if (value > MaxDeltaSeconds) {
+            value = MaxDeltaSeconds;
+        }
+        return Optional<int64>.Some(value);
+    };
+
+    /// @brief Whether RFC 9111 section 5.2 defines `name` (lowercase), as a request or a response directive.
+    #[Pure, ThreadSafe]
+    export let is_known = func(name: string) -> bool =>
+        name == "max-age" || name == "max-stale" || name == "min-fresh" || name == "no-cache" || name == "no-store"
+        || name == "no-transform" || name == "only-if-cached" || name == "must-revalidate"
+        || name == "must-understand" || name == "private" || name == "proxy-revalidate" || name == "public"
+        || name == "s-maxage";
+
+    /// @brief `text` as a quoted-string: in double quotes, with `"` and `\` escaped by a backslash.
+    #[Pure, ThreadSafe]
+    export let quote = func(text: string) -> string {
+        let out = "\"";
+        let start = 0;
+        for (let i = 0; i < text.byte_length; i++) {
+            last b = text.byte_at(i);
+            if (b == 34 || b == 92) {
+                out ..= text.slice(start, i) .. "\\";
+                start = i;
+            }
+        }
+        return out .. text.slice(start, text.byte_length) .. "\"";
+    };
+
+    /// @brief An argument as written: quoted for the field lists of no-cache and private and for anything that
+    /// is not a token.
+    let write_argument = func(name: string, text: string) -> string {
+        return if (name == "no-cache" || name == "private" || not headers.is_token(text)) -> quote(text)
+            else -> text;
+    };
+
+    /// @brief Parses `text` into `list`; returns the offset of the first malformed element, or -1.
+    let parse_into = func(list: CacheControl, text: string) -> int {
+        last count = text.byte_length;
+        let first_bad = -1;
+        let i = 0;
+        while (i < count) {
+            // Skips separators and whitespace before an element.
+            last b = text.byte_at(i);
+            if (b == 44 || b == 32 || b == 9) {
+                i++;
+                continue;
+            }
+            last element_start = i;
+            last element_end = element_end_of(text, i);
+            let name_end = i;
+            while (name_end < element_end && headers.is_tchar(text.byte_at(name_end))) {
+                name_end++;
+            }
+            if (name_end == element_start) {
+                // No name: the element is dropped.
+                list.mark_malformed();
+                if (first_bad < 0) {
+                    first_bad = element_start;
+                }
+                i = element_end;
+                continue;
+            }
+            last name = text.slice(element_start, name_end);
+            last rest_end = trimmed_end(text, name_end, element_end);
+            if (name_end == rest_end) {
+                list.append_directive(new Directive(name, Optional<string>.None));
+            } else {
+                last value = argument_of(text, name_end, rest_end);
+                match (value) {
+                    Optional.Some(argument) => {
+                        list.append_directive(new Directive(name, Optional<string>.Some(argument)));
+                    },
+                    Optional.None => {
+                        // Keeps the raw rest so an invalid argument stays visible.
+                        list.mark_malformed();
+                        if (first_bad < 0) {
+                            first_bad = element_start;
+                        }
+                        last raw_start = text.byte_at(name_end) == 61 ? name_end + 1 : name_end;
+                        last raw = headers.trim_value(text.slice(raw_start, rest_end));
+                        list.append_directive(new Directive(name, Optional<string>.Some(raw)));
+                    },
+                }
+            }
+            i = element_end;
+        }
+        return first_bad;
+    };
+
+    /// @brief The argument in text[start, end) when it is `"=" token` or `"=" quoted-string`, unquoted; None
+    /// otherwise.
+    let argument_of = func(text: string, start: int, end: int) -> Optional<string> {
+        if (text.byte_at(start) != 61 || start + 1 >= end) {
+            return Optional<string>.None;
+        }
+        last first = start + 1;
+        if (text.byte_at(first) == 34) {
+            return unquote(text, first, end);
+        }
+        for (let i = first; i < end; i++) {
+            return Optional<string>.None unless headers.is_tchar(text.byte_at(i));
+        }
+        return Optional<string>.Some(text.slice(first, end));
+    };
+
+    /// @brief The content of the quoted-string text[start, end) (start at the opening quote, end just after the
+    /// closing one), with quoted-pairs resolved; None when it is not exactly one valid quoted-string.
+    let unquote = func(text: string, start: int, end: int) -> Optional<string> {
+        let out = "";
+        let segment = start + 1;
+        let i = start + 1;
+        while (i < end) {
+            last b = text.byte_at(i);
+            if (b == 92) {
+                if (i + 1 >= end) {
+                    return Optional<string>.None;
+                }
+                out ..= text.slice(segment, i);
+                segment = i + 1;
+                i += 2;
+                continue;
+            }
+            if (b == 34) {
+                return if (i + 1 != end) -> Optional<string>.None
+                    else -> Optional<string>.Some(out .. text.slice(segment, i));
+            }
+            if ((b < 32 && b != 9) || b == 127) {
+                return Optional<string>.None;
+            }
+            i++;
+        }
+        return Optional<string>.None;
+    };
+
+    /// @brief The offset of the comma that ends the element starting at `start` (commas in quoted-strings do
+    /// not count), or the text's length.
+    let element_end_of = func(text: string, start: int) -> int {
+        let quoted = false;
+        let i = start;
+        while (i < text.byte_length) {
+            last b = text.byte_at(i);
+            if (quoted) {
+                if (b == 92) {
+                    i++;
+                } else if (b == 34) {
+                    quoted = false;
+                }
+            } else if (b == 34) {
+                quoted = true;
+            } else if (b == 44) {
+                return i;
+            }
+            i++;
+        }
+        return text.byte_length;
+    };
+
+    /// @brief `end` moved back over trailing spaces and tabs, not before `start`.
+    let trimmed_end = func(text: string, start: int, end: int) -> int {
+        let at = end;
+        while (at > start && (text.byte_at(at - 1) == 32 || text.byte_at(at - 1) == 9)) {
+            at--;
+        }
+        return at;
+    };
+);

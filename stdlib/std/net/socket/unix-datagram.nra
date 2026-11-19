@@ -1,0 +1,130 @@
+let bytes = import:Std.Io.Internal.Bytes;
+let.promote _ = import:Std.Net.Socket.DatagramSocket;
+let.promote _ = import:Std.Time.Duration;
+let host = import:Std.Net.Socket.Internal.HostCalls;
+let host_error = import:Std.Core.Internal.HostError;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let support = import:Std.Net.Socket.Internal.Support;
+let.promote _ = import:Std.Net.Core.UnixAddr;
+let unix_addrs = import:Std.Net.Core.UnixAddr;
+let errors = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief A Unix-domain datagram socket: a `DatagramSocket` of `Std.Net.Core.UnixAddr`, including the Linux
+/// abstract namespace. Needs the net capability.
+///
+/// `bind` names the socket and `unbound` leaves it unnamed (it can send but nobody can address a reply to it).
+/// A datagram from an unnamed sender has no sender address (`Datagram.sender` is `None`). Opening one uses the
+/// host's `neura.net.unix.datagram`.
+/// After close every operation except close fails with Closed.
+/// @see [Std.Net.Socket.UnixDatagram](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-UnixDatagram)
+#Since("0.3.0")
+export let UnixDatagram = module (
+    /// @brief One Unix-domain datagram socket.
+    #[Final, NoDiscard(reason: "a socket must be closed"), NotThreadSafe]
+    export let UnixDatagram = class implements DatagramSocket<UnixAddr> (
+        /// @brief The host's socket ID.
+        last id: int64;
+        /// @brief The bound address, if any.
+        last bound: Optional<UnixAddr>;
+        /// @brief The read timeout in nanoseconds; zero waits without limit.
+        let timeout_nanos: int64 = 0;
+        /// @brief Tracks whether the socket may still use the host ID.
+        let open_now: bool = true;
+
+        /// @brief Use `bind` or `unbound`; the ID comes from the library.
+        export let init = func(opened: int64, address: Optional<UnixAddr>) {
+            id = opened;
+            bound = address;
+        };
+
+        /// @brief The bound address. An unbound socket has none: Err with InvalidInput.
+        #NoDiscard
+        export let local_address = func -> Result<UnixAddr> {
+            return Result<UnixAddr>.Err(bytes.closed("socket", label())) unless open_now;
+            return match (bound) {
+                Optional.Some(address) => Result<UnixAddr>.Ok(address),
+                Optional.None => Result<UnixAddr>.Err(
+                    bytes.io(errors.IoErrorKind.InvalidInput, "the socket is not bound", "")),
+            };
+        };
+
+        /// @brief Sends `data` as one datagram to `target`; the count the host sent.
+        #NoDiscard
+        export let send_to = func(data: uint8[list], target: UnixAddr) -> Result<int> {
+            return Result<int>.Err(bytes.closed("socket", label())) unless open_now;
+            return match (host.unix_send_to(id, target.to_string(), data)) {
+                host.CountOutcome.Ok(count) => Result<int>.Ok(count),
+                host.CountOutcome.Error(code) => Result<int>.Err(
+                    host_error.io(code, "send failed", target.to_string())),
+            };
+        };
+
+        /// @brief One datagram of at most `max` bytes, waiting up to the read timeout. A maximum below 1 traps.
+        #NoDiscard
+        export let receive_from = func(max: int) -> Result<Datagram<UnixAddr>> {
+            bytes.check_maximum(max);
+            return Result<Datagram<UnixAddr>>.Err(bytes.closed("socket", label())) unless open_now;
+            return match (host.unix_receive_from(id, max, timeout_nanos)) {
+                host.DatagramOutcome.Ok(received) => datagram_of(received),
+                host.DatagramOutcome.Error(code) => Result<Datagram<UnixAddr>>.Err(
+                    host_error.io(code, "receive failed", label())),
+            };
+        };
+
+        /// @brief The longest a receive waits; zero waits without limit.
+        export let read_timeout = func -> Duration => of_nanos(timeout_nanos);
+
+        /// @brief Sets the read timeout. A negative timeout traps with "invalid argument: negative timeout".
+        export let set_read_timeout = func(timeout: Duration) {
+            timeout_nanos = support.timeout_nanos(timeout);
+        };
+
+        /// @brief Releases the socket. Closing again returns Ok.
+        export let close = func -> Result<Unit> {
+            return bytes.ok() unless open_now;
+            open_now = false;
+            return match (host.close(id)) {
+                host.DoneOutcome.Ok => bytes.ok(),
+                host.DoneOutcome.Error(code) => Result<Unit>.Err(host_error.io(code, "close failed", label())),
+            };
+        };
+
+        /// @brief Text such as "UnixDatagram(/run/app.sock)" or "UnixDatagram(unbound)".
+        export let.override to_string = func -> string => "UnixDatagram(" .. label() .. ")";
+
+        /// @brief The bound address text, or "unbound".
+        let label = func -> string => match (bound) {
+            Optional.Some(address) => address.to_string(),
+            Optional.None => "unbound",
+        };
+    );
+
+    /// @brief A socket bound to `address`.
+    #NoDiscard
+    export let bind = func(address: UnixAddr) -> Result<UnixDatagram> =>
+        open(address.to_string(), Optional<UnixAddr>.Some(address));
+
+    /// @brief An unnamed socket.
+    #NoDiscard
+    export let unbound = func -> Result<UnixDatagram> => open("", Optional<UnixAddr>.None);
+
+    /// @brief Opens the host socket.
+    let open = func(path: string, address: Optional<UnixAddr>) -> Result<UnixDatagram> {
+        return match (host.unix_datagram(path)) {
+            host.IdOutcome.Ok(id) => Result<UnixDatagram>.Ok(new UnixDatagram(id, address)),
+            host.IdOutcome.Error(code) => Result<UnixDatagram>.Err(host_error.io(code, "bind failed", path)),
+        };
+    };
+
+    /// @brief A datagram from the host's [bytes, path, 0]; an empty path is an unnamed sender.
+    let datagram_of = func(received: [uint8[list], string, int]) -> Result<Datagram<UnixAddr>> {
+        let [data, text, port] = received;
+        if (text.byte_length == 0) {
+            return Result<Datagram<UnixAddr>>.Ok(new Datagram<UnixAddr>(data, Optional<UnixAddr>.None));
+        }
+        last sender = unix_addrs.parse(text)?;
+        return Result<Datagram<UnixAddr>>.Ok(new Datagram<UnixAddr>(data, Optional<UnixAddr>.Some(sender)));
+    };
+);

@@ -1,0 +1,4 @@
+// Edge case 48: a list cannot be held in any.
+let.promote _ = import:Std.Core.Optional;
+let Shape = class ( export let sides: int = 0; );
+let v: any = new int[list]([1, 2]);

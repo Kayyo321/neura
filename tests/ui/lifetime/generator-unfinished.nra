@@ -1,0 +1,4 @@
+// Edge case 56: an unfinished `iterator(` is an ordinary call.
+let numbers = func() -> int {
+    return iterator(1;
+};

@@ -27,72 +27,80 @@ The following public declarations are taken from the module source; each links t
   Traps (reason 1) for Min, from the negation. Tagged `#Pure`, `#ThreadSafe`.
 - **Int32** · [`export let sign = func(v: int32) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L29)
   Returns minus one, zero, or one according to the sign of the value. Tagged `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let min = func(a: int32, b: int32) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L41)
+- **Int32** · [`export let min = func(a: int32, b: int32) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L38)
   Returns the smaller of the two operands. Tagged `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let max = func(a: int32, b: int32) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L45)
+- **Int32** · [`export let max = func(a: int32, b: int32) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L42)
   Returns the larger of the two operands. Tagged `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let clamp = func(v: int32, low: int32, high: int32) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L49)
+- **Int32** · [`export let clamp = func(v: int32, low: int32, high: int32) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L46)
   Traps with "invalid argument: low exceeds high". Tagged `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let compare = func(a: int32, b: int32) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L64)
+- **Int32** · [`export let compare = func(a: int32, b: int32) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L58)
   The natural order; usable as a comparator. Tagged `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let pow = func(base: int32, exponent: int) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L79)
+- **Int32** · [`export let pow = func(base: int32, exponent: int) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L70)
   Square-and-multiply with checked multiplication (an overflow traps with reason 1). The factor is squared only while exponent bits remain, so each intermediate divides the result. A negative exponent traps; pow(0, 0) is 1. Tagged `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let gcd = func(a: int32, b: int32) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L101)
+- **Int32** · [`export let gcd = func(a: int32, b: int32) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L92)
   Euclid's algorithm in the negative range, where every magnitude fits. gcd(0, 0) is 0. Traps (reason 1) when the result, 2^(Bits - 1), does not fit. Tagged `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let checked_add = func(a: int32, b: int32) -> Optional<int32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L120)
+- **Int32** · [`export let checked_add = func(a: int32, b: int32) -> Optional<int32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L111)
   None where the operator would trap. Each test runs before the operation, so nothing overflows. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let checked_sub = func(a: int32, b: int32) -> Optional<int32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L129)
+- **Int32** · [`export let checked_sub = func(a: int32, b: int32) -> Optional<int32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L120)
   Returns the difference in Some, or None when it falls outside the type's range. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let checked_mul = func(a: int32, b: int32) -> Optional<int32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L138)
+- **Int32** · [`export let checked_mul = func(a: int32, b: int32) -> Optional<int32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L129)
   Returns the product in Some, or None when it falls outside the type's range. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let checked_div = func(a: int32, b: int32) -> Optional<int32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L147)
+- **Int32** · [`export let checked_div = func(a: int32, b: int32) -> Optional<int32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L135)
   None for a zero divisor and for Min / -1. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let checked_rem = func(a: int32, b: int32) -> Optional<int32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L156)
+- **Int32** · [`export let checked_rem = func(a: int32, b: int32) -> Optional<int32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L144)
   None for a zero divisor. Min % -1 is 0, as for the operator. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let wrapping_add = func(a: int32, b: int32) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L166)
+- **Int32** · [`export let wrapping_add = func(a: int32, b: int32) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L151)
   The result modulo 2^Bits: the operation runs on the unsigned pattern and converts back (section 7.2). Tagged `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let wrapping_sub = func(a: int32, b: int32) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L171)
+- **Int32** · [`export let wrapping_sub = func(a: int32, b: int32) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L156)
   Subtracts modulo two raised to the type's bit width. Tagged `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let wrapping_mul = func(a: int32, b: int32) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L176)
+- **Int32** · [`export let wrapping_mul = func(a: int32, b: int32) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L161)
   Multiplies modulo two raised to the type's bit width. Tagged `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let wrapping_neg = func(a: int32) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L181)
+- **Int32** · [`export let wrapping_neg = func(a: int32) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L166)
   Min wraps to itself. Tagged `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let saturating_add = func(a: int32, b: int32) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L186)
+- **Int32** · [`export let saturating_add = func(a: int32, b: int32) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L171)
   Clamp to Min or Max instead of overflowing. Tagged `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let saturating_sub = func(a: int32, b: int32) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L198)
+- **Int32** · [`export let saturating_sub = func(a: int32, b: int32) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L180)
   Subtracts and clamps an out-of-range result to the nearest representable bound. Tagged `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let saturating_mul = func(a: int32, b: int32) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L210)
+- **Int32** · [`export let saturating_mul = func(a: int32, b: int32) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L189)
   Multiplies and clamps an out-of-range result to the nearest representable bound. Tagged `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let floor_div = func(a: int32, b: int32) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L226)
+- **Int32** · [`export let floor_div = func(a: int32, b: int32) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L202)
   The quotient rounded toward negative infinity. A zero divisor and Min / -1 trap (reason 1) in the division. The remainder is recovered by multiplication, which cannot overflow because |quotient * b| <= |a|; a multiplication circuit is several times smaller than a second divider. Tagged `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let floor_mod = func(a: int32, b: int32) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L239)
+- **Int32** · [`export let floor_mod = func(a: int32, b: int32) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L212)
   The remainder with the divisor's sign. A zero divisor traps (reason 1). Computed from the quotient, so floor_div and floor_mod share one divider circuit. A divisor of -1 always leaves 0 (Min / -1 would trap, while Min % -1 is 0). Tagged `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let count_ones = func(v: int32) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L252)
+- **Int32** · [`export let count_ones = func(v: int32) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L222)
   Bit counts and rotations over the two's complement pattern. Tagged `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let leading_zeros = func(v: int32) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L256)
+- **Int32** · [`export let leading_zeros = func(v: int32) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L226)
   Counts zero bits from the most significant end. Zero returns the full bit width. Tagged `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let trailing_zeros = func(v: int32) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L260)
+- **Int32** · [`export let trailing_zeros = func(v: int32) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L230)
   Counts zero bits from the least significant end. Zero returns the full bit width. Tagged `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let rotate_left = func(v: int32, n: int) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L264)
+- **Int32** · [`export let rotate_left = func(v: int32, n: int) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L234)
   Rotates the bits left, reducing the distance modulo the bit width. Tagged `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let rotate_right = func(v: int32, n: int) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L269)
+- **Int32** · [`export let rotate_right = func(v: int32, n: int) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L239)
   Rotates the bits right, reducing the distance modulo the bit width. Tagged `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let to_unsigned = func(v: int32) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L274)
+- **Int32** · [`export let to_unsigned = func(v: int32) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L244)
   The same-width unsigned type with the same bit pattern (section 7.2). Tagged `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let to_signed = func(v: int32) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L285)
+- **Int32** · [`export let to_signed = func(v: int32) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L255)
   The identity: every integer module has both conversions. Tagged `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let hash = func(v: int32) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L290)
+- **Int32** · [`export let hash = func(v: int32) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L260)
   Section 5.2: the two's complement pattern as a uint32; the 64-bit types fold the high half into the low half. Tagged `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let to_string = func(v: int32) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L294)
+- **Int32** · [`export let to_string = func(v: int32) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L264)
   Decimal, with `-` for negative values (section 5.2). Tagged `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let to_string_radix = func(v: int32, radix: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L299)
+- **Int32** · [`export let to_string_radix = func(v: int32, radix: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L269)
   Lowercase digits, with `-` for a negative value. A radix outside 2 through 36 traps. The neura.integer.format_i64 kernel writes the digits. Tagged `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let format = func(v: int32, radix: int, min_width: int, pad: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L305)
+- **Int32** · [`export let format = func(v: int32, radix: int, min_width: int, pad: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L275)
   to_string_radix, left-padded with copies of `pad` to `min_width` characters, sign included. A `0` pad goes after the sign. `pad` must be one scalar value. Tagged `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let parse = func(text: string) -> Result<int32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L311)
+- **Int32** · [`export let parse = func(text: string) -> Result<int32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L281)
   Parses a base-10 integer, returning an error for invalid text or a value outside the type's range. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **Int32** · [`export let parse_radix = func(text: string, radix: int) -> Result<int32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L322)
+- **Int32** · [`export let parse_radix = func(text: string, radix: int) -> Result<int32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L292)
   An optional `+` or `-`, then one or more digits of the radix in either case. Syntax errors are reported first (Empty, UnexpectedEnd at the end, InvalidCharacter at the offending byte); a well-formed value outside the type fails with OutOfRange at offset 0. A radix outside 2 through 36 traps. The neura.integer.parse_i64 kernel parses the text as int64, and the value is then checked against the type's range. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
+- **Int32** · [`export let zero = func() -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L312)
+  The additive identity, 0 (Std.Core.Arithmetic.Additive). Tagged `#Pure`, `#ThreadSafe`. Since 0.3.0.
+- **Int32** · [`export let add = func(left: int32, right: int32) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L316)
+  The sum `left + right`, at the type's width; traps (reason 1) on overflow. Tagged `#Pure`, `#ThreadSafe`. Since 0.3.0.
+- **Int32** · [`export let one = func() -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L320)
+  The multiplicative identity, 1 (Std.Core.Arithmetic.Multiplicative). Tagged `#Pure`, `#ThreadSafe`. Since 0.3.0.
+- **Int32** · [`export let multiply = func(left: int32, right: int32) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int32.nra#L324)
+  The product `left * right`, at the type's width; traps (reason 1) on overflow. Tagged `#Pure`, `#ThreadSafe`. Since 0.3.0.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

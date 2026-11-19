@@ -1,0 +1,34 @@
+// test-options: --gpu=off --max-steps 20000000000
+let.promote _ = import:Std.Crypto.Algorithm;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let hex = import:Std.Encoding.Hex;
+let rsa = import:Std.Crypto.Asymmetric.Rsa;
+let rsa_oaep = import:Std.Crypto.Asymmetric.RsaOaep;
+let rsa_pss = import:Std.Crypto.Asymmetric.RsaPss;
+let test = import:Std.Test;
+let vectors = import:RsaVectors;
+
+// RSA key generation from a seeded ChaCha20Drbg against an independent Python reference of the same
+// FIPS 186-5 A.1.3 procedure (support/rsa-vectors.nra, scripts/crypto-vectors/gen-asymmetric-rsa.py). The
+// smallest allowed size, 2048 bits, keeps the test short.
+let RsaKeygenTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    export let test_seeded_generation = func {
+        last rows = vectors.keygen;
+        last key = test.assert_ok(rsa.generate_key_pair(2048, new drbg.ChaCha20Drbg(decode(rows[1]))));
+        test.assert_equal_int32(2048, key.bits());
+        test.assert_equal_string(rows[2], hex.encode(key.public_key.modulus()));
+        test.assert_equal_string("010001", hex.encode(key.public_key.exponent()));
+        last material = hex.encode(key.expose());
+        // d (256 bytes), then p and q (128 bytes each).
+        test.assert_equal_string(rows[3] + rows[4] + rows[5], material.substring(0, 1024));
+        // The key signs, verifies and decrypts.
+        last signer = new rsa_pss.RsaPssSigner(key, Algorithm.Sha256, 32, new drbg.ChaCha20Drbg(decode(rows[1])));
+        last signature = signer.sign(new([1, 2, 3]));
+        test.assert(new rsa_pss.RsaPssVerifier(key.public_key).verify(new([1, 2, 3]), signature));
+        last oaep = new rsa_oaep.RsaOaep(Algorithm.Sha256, new drbg.ChaCha20Drbg(decode(rows[1])));
+        last ciphertext = test.assert_ok(oaep.encrypt(key.public_key, new([9, 8, 7]), new));
+        test.assert_equal_string("090807", hex.encode(test.assert_ok(oaep.decrypt(key, ciphertext, new))));
+    };
+);

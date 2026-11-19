@@ -1,0 +1,50 @@
+let messages = import:Std.Net.Dns.Message;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Net.Core.SocketAddr;
+let tcp_dns = import:Std.Net.Dns.TcpDnsTransport;
+let.promote _ = import:Std.Net.Tls.TlsConfig;
+let tls = import:Std.Net.Tls.TlsConnector;
+let transports = import:Std.Net.Dns.DnsTransport;
+
+/// @brief DNS over TLS (RFC 7858): the TCP framing of RFC 1035 section 4.2.2 inside a TLS stream to port 853.
+///
+/// The exchange logic is real and shared with `TcpDnsTransport` (`exchange_on`); the TLS stream comes from
+/// `Std.Net.Tls.TlsConnector`, whose connect calls the host service `neura.net.tls.connect` version 1. That service
+/// needs a build configured with `NEURA_ENABLE_SERVER_TLS`; in another build `exchange` fails with Unsupported. The configuration should name the
+/// server (`set_server_name`) so the certificate is checked against it; RFC 7858 itself names no ALPN token, so
+/// none is set here.
+/// @see [Std.Net.Dns.DotTransport](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-DotTransport)
+#Since("0.3.0")
+export let DotTransport = module (
+    /// @brief The DoT port (RFC 7858 section 3.1).
+    export const DotPort: int = 853;
+
+    /// @brief A DoT transport: one TLS connection per exchange.
+    #[Final, NotThreadSafe]
+    export let DotTransport = class implements transports.DnsTransport (
+        /// @brief The server.
+        export last server: SocketAddr;
+        /// @brief The TLS client configuration.
+        export last config: TlsConfig;
+
+        /// @brief A transport to `address` with a client configuration.
+        export let init = func(address: SocketAddr, client: TlsConfig) {
+            server = address;
+            config = client;
+        };
+
+        /// @brief A stream transport.
+        export let is_stream = func -> bool => true;
+
+        /// @brief Connects with TLS, sends the framed query, reads the framed response and closes.
+        export let exchange = func(query: messages.Message) -> Result<messages.Message> {
+            last stream = new tls.TlsConnector(server, config).connect()?;
+            last outcome = tcp_dns.exchange_on(stream.read, stream.write, query);
+            stream.close();
+            return outcome;
+        };
+
+        /// @brief Text such as "DotTransport(192.0.2.53:853)".
+        export let.override to_string = func -> string => "DotTransport(" .. server.to_string() .. ")";
+    );
+);

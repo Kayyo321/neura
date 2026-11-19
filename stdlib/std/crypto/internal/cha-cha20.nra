@@ -1,0 +1,98 @@
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief The ChaCha20 block function and HChaCha20 (RFC 8439, section 2.3; draft-irtf-cfrg-xchacha-03,
+/// section 2.2). Internal: Std.Crypto.Symmetric and Std.Crypto.Random build on it.
+#Since("0.3.0")
+export let ChaCha20 = module (
+    /// @brief The quarter round on state words a, b, c, d.
+    let quarter = func(s: uint32[list], a: int, b: int, c: int, d: int) {
+        s[a] = words.add32(s[a], s[b]);
+        let t = s[d] ^ s[a];
+        s[d] = (t << 16) | (t >> 16);
+        s[c] = words.add32(s[c], s[d]);
+        t = s[b] ^ s[c];
+        s[b] = (t << 12) | (t >> 20);
+        s[a] = words.add32(s[a], s[b]);
+        t = s[d] ^ s[a];
+        s[d] = (t << 8) | (t >> 24);
+        s[c] = words.add32(s[c], s[d]);
+        t = s[b] ^ s[c];
+        s[b] = (t << 7) | (t >> 25);
+    };
+
+    /// @brief The initial state: constants, the 32-byte key, then four words from `tail` (16 bytes).
+    let initial = func(key: uint8[list], tail: uint8[list]) -> uint32[list] {
+        let s: uint32[list] = new([1634760805, 857760878, 2036477234, 1797285236]);
+        for (let i in 0 .. 8) {
+            s.append(words.load32_le(key, 4 * i));
+        }
+        for (let i in 0 .. 4) {
+            s.append(words.load32_le(tail, 4 * i));
+        }
+        return s;
+    };
+
+    let rounds = func(s: uint32[list]) {
+        for (let i in 0 .. 10) {
+            quarter(s, 0, 4, 8, 12);
+            quarter(s, 1, 5, 9, 13);
+            quarter(s, 2, 6, 10, 14);
+            quarter(s, 3, 7, 11, 15);
+            quarter(s, 0, 5, 10, 15);
+            quarter(s, 1, 6, 11, 12);
+            quarter(s, 2, 7, 8, 13);
+            quarter(s, 3, 4, 9, 14);
+        }
+    };
+
+    /// @brief The 64-byte keystream block for a 32-byte key, a 32-bit block counter and a 12-byte nonce.
+    export let block = func(key: uint8[list], counter: uint32, nonce: uint8[list]) -> uint8[list] {
+        let tail: uint8[list] = new;
+        words.append32_le(tail, counter);
+        words.append_all(tail, nonce);
+        last start = initial(key, tail);
+        let s: uint32[list] = new;
+        for (let w in start) {
+            s.append(w);
+        }
+        rounds(s);
+        let out: uint8[list] = new;
+        for (let i in 0 .. 16) {
+            words.append32_le(out, words.add32(s[i], start[i]));
+        }
+        return out;
+    };
+
+    /// @brief XORs the keystream that starts at block `counter` into the bytes and returns the result. Traps
+    /// with "invalid argument: ChaCha20 block counter overflow" if the counter would pass 2^32 - 1.
+    export let xor_stream = func(key: uint8[list], counter: uint32, nonce: uint8[list], bytes: uint8[list]) -> uint8[list] {
+        let out: uint8[list] = new;
+        let block_counter = counter as uint64;
+        for (let start = 0; start < bytes.length; start += 64) {
+            if (block_counter > 4294967295) {
+                trap_with_message("invalid argument: ChaCha20 block counter overflow");
+            }
+            last stream = block(key, block_counter as uint32, nonce);
+            for (let i = 0; i < 64 && start + i < bytes.length; i++) {
+                out.append(bytes[start + i] ^ stream[i]);
+            }
+            block_counter += 1;
+        }
+        return out;
+    };
+
+    /// @brief HChaCha20: the first and last rows of the state after 20 rounds, without the final addition,
+    /// for a 32-byte key and a 16-byte nonce.
+    export let hchacha20 = func(key: uint8[list], nonce: uint8[list]) -> uint8[list] {
+        let s = initial(key, nonce);
+        rounds(s);
+        let out: uint8[list] = new;
+        for (let i in 0 .. 4) {
+            words.append32_le(out, s[i]);
+        }
+        for (let i in 12 .. 16) {
+            words.append32_le(out, s[i]);
+        }
+        return out;
+    };
+);

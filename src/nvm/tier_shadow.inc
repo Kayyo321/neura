@@ -530,7 +530,20 @@
         if (d.differs(heap_.last_handle(), other.heap_.last_handle(), [] { return std::string("last handle"); }) ||
             d.differs(live_cells_, other.live_cells_, [] { return std::string("live heap cells"); }) ||
             d.differs(peak_cells_, other.peak_cells_, [] { return std::string("peak heap cells"); }) ||
-            d.differs(next_collection_, other.next_collection_, [] { return std::string("collection threshold"); })) {
+            d.differs(next_collection_, other.next_collection_, [] { return std::string("collection threshold"); }) ||
+            d.differs(live_stack_cells_, other.live_stack_cells_, [] { return std::string("live stack cells"); }) ||
+            d.differs(peak_stack_cells_, other.peak_stack_cells_, [] { return std::string("peak stack cells"); }) ||
+            d.differs(region_serial_, other.region_serial_, [] { return std::string("regions entered"); }) ||
+            d.differs(released_handles_.size(), other.released_handles_.size(),
+                      [] { return std::string("released handle intervals"); })) {
+            return d.text;
+        }
+        if (static_handles_ != other.static_handles_) {
+            d.note("static region handles", "one set", "another");
+            return d.text;
+        }
+        if (released_handles_ != other.released_handles_) {
+            d.note("released handles", "one set", "another");
             return d.text;
         }
         if (limits_.profile) {
@@ -701,6 +714,24 @@
                 const auto slot = [&] { return item() + " slot " + std::to_string(s); };
                 if (d.differs(flags[s], other_flags[s], [&] { return slot() + " initialized"; }) ||
                     d.differs(values[s], other_values[s], slot)) {
+                    return true;
+                }
+            }
+        }
+        // The storage regions the task has open (NVR 1.7): each one's token,
+        // owning frame and the handles it owns.
+        if (d.differs(mine.regions.size(), theirs.regions.size(), [&] { return prefix() + "region count"; })) return true;
+        for (std::size_t r = 0; r < mine.regions.size(); ++r) {
+            const auto& a = mine.regions[r];
+            const auto& b = theirs.regions[r];
+            const auto item = [&] { return prefix() + "region " + std::to_string(r); };
+            if (d.differs(a.token, b.token, [&] { return item() + " token"; }) ||
+                d.differs(a.depth, b.depth, [&] { return item() + " frame depth"; }) ||
+                d.differs(a.handles.size(), b.handles.size(), [&] { return item() + " entries"; })) {
+                return true;
+            }
+            for (std::size_t h = 0; h < a.handles.size(); ++h) {
+                if (d.differs(a.handles[h], b.handles[h], [&] { return item() + " entry " + std::to_string(h); })) {
                     return true;
                 }
             }
@@ -1079,8 +1110,13 @@
             const auto handle = x;
             x = heap_.next_live(x);
             y = other.heap_.next_live(y);
-            if (Heap::same(heap_, a, other.heap_, b)) continue;
             const auto item = [&] { return "heap handle " + std::to_string(handle); };
+            // Whether a storage region owns the entry (NVR 1.7), which
+            // Heap::same does not read.
+            if (d.differs(heap_.in_region(a), other.heap_.in_region(b), [&] { return item() + " region entry"; })) {
+                return true;
+            }
+            if (Heap::same(heap_, a, other.heap_, b)) continue;
             const auto a_kind = heap_.kind(a);
             const auto b_kind = other.heap_.kind(b);
             const auto cells = shadow_cell_count(a);
@@ -1193,6 +1229,19 @@
             break;
         case Perturb::LiveCells:
             ++live_cells_;
+            done = true;
+            break;
+        case Perturb::StackCells:
+            ++live_stack_cells_;
+            done = true;
+            break;
+        case Perturb::RegionDepth:
+            if (frames_.regions.empty()) break;
+            ++frames_.regions.back().depth;
+            done = true;
+            break;
+        case Perturb::ReleasedHandles:
+            note_released(heap_.last_handle() + 1);
             done = true;
             break;
         case Perturb::Steps:

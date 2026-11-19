@@ -1,0 +1,16 @@
+registry: block, count 2
+helper: block sees count 2
+unused: block
+cycle-a: block
+cycle-b: block
+main: first global
+main: first block, local 3
+main: second global
+main: Lazy statics
+main: second block, scale 3
+main: loop 0
+main: lambda 7
+main: module member
+main: module block after module member
+main: module member after the block
+main: entry, 2 helper cycle

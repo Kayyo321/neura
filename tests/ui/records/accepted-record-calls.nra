@@ -1,0 +1,17 @@
+// With a function `record` in scope, M5's call forms stay calls wherever the
+// record lookahead does not apply: only the whole initializer of an
+// unannotated `let` or `const` declaration is read as a record
+// (docs/design/Records030.md, Grammar, and edge cases 12 and 13).
+let record = func(count: int) -> int => count;
+let limit = 3;
+let annotated: int = record(count: limit);
+last assigned_once = record(count: limit);
+let twice = func(value: int) -> int => value * 2;
+let nested = twice(record(count: limit));
+let use = func() -> int {
+    record(count: limit);
+    let local = 0;
+    local = record(count: limit);
+    let sum: int = record(count: 1) + record(count: 2);
+    return record(count: limit) + local + sum;
+};

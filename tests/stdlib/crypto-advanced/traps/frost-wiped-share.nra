@@ -1,0 +1,20 @@
+// test-options: --gpu=off
+// status: 134
+// run-options: --gpu=off --deny-entropy --max-steps 1500000000
+// stderr: explicit program failure \(trap reason 3\): invalid state: secret wiped
+let frost = import:Std.Crypto.Advanced.Frost;
+let cases = import:FrostTestCases;
+let program = import:Std.Program;
+let test = import:Std.Test;
+let vectors = import:FrostVectors;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last group = cases.trusted_group();
+        last share = cases.signer(group, 0);
+        last nonce = test.assert_ok(share.commit_with_randomness(cases.bytes(vectors.transcript[1])));
+        share.wipe();
+        let _ = share.sign_share(nonce, cases.round(group), cases.bytes(vectors.group[3]));
+        return program.ExitCode.Ok;
+    };
+);

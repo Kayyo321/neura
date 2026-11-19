@@ -1,0 +1,66 @@
+let durations = import:Std.Time.Duration;
+let hash_maps = import:Std.Collections.HashMap;
+let optional = import:Std.Core.Optional;
+let stores = import:Std.Net.Resilience.RateStore;
+let.promote _ = import:Std.Core.Result;
+
+/// @brief A `RateStore` in a hash map of the process. Compare-and-set is atomic because one task owns the map; it
+/// never fails. Keys are kept until `remove_expired` or `clear`; the `ttl` of a write is not tracked.
+/// @see [Std.Net.Resilience.InMemoryRateStore](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-InMemoryRateStore)
+#Since("0.3.0")
+export let InMemoryRateStore = module (
+    /// @brief A rate store over a hash map.
+    #[Final, NotThreadSafe]
+    export let InMemoryRateStore = class implements stores.RateStore (
+        /// @brief The arrival time of each key.
+        last values: hash_maps.HashMap<string, int64> = hash_maps.create<string, int64>();
+
+        /// @brief An empty store.
+        export let init = func {
+        };
+
+        /// @brief The value of `key`, or None.
+        export let get = func(key: string) -> Result<optional.Optional<int64>> =>
+            Result<optional.Optional<int64>>.Ok(values.get(key));
+
+        /// @brief Stores `value` when the key holds `expected`.
+        export let compare_and_set = func(key: string, expected: optional.Optional<int64>, value: int64,
+            ttl: durations.Duration) -> Result<bool> {
+            last current = values.get(key);
+            last matches = match (expected) {
+                optional.Optional.Some(want) => match (current) {
+                    optional.Optional.Some(have) => have == want,
+                    optional.Optional.None => false,
+                },
+                optional.Optional.None => match (current) {
+                    optional.Optional.Some(have) => false,
+                    optional.Optional.None => true,
+                },
+            };
+            if (matches) {
+                values.set(key, value);
+            }
+            return Result<bool>.Ok(matches);
+        };
+
+        /// @brief Removes every key whose arrival time is at or before `epoch_nanos` (such a key behaves like an
+        /// absent one) and returns how many it removed.
+        export let remove_expired = func(epoch_nanos: int64) -> int =>
+            values.remove_if(func(key: string, value: int64) -> bool => value <= epoch_nanos);
+
+        /// @brief The number of keys.
+        export let size = func -> int => values.size();
+
+        /// @brief Removes every key.
+        export let clear = func {
+            values.clear();
+        };
+
+        /// @brief Text such as "InMemoryRateStore(3 keys)".
+        export let.override to_string = func -> string => "InMemoryRateStore(" .. values.size().to_string() .. " keys)";
+    );
+
+    /// @brief An empty store.
+    #NoDiscard
+    export let create = func -> InMemoryRateStore => new;
+);

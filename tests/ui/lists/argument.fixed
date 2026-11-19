@@ -1,0 +1,8 @@
+// A bare literal passed to a list parameter.
+let total = func(values: int[list]) -> int {
+    return values.length;
+};
+
+let use = func() -> int {
+    return total(new([1, 2]));
+};

@@ -49,7 +49,7 @@ let FileTests = module (
     };
 
     let bytes_of = func(text: string) -> uint8[list] {
-        let out: uint8[list] = [];
+        let out: uint8[list] = new;
         let i = 0;
         while (i < text.byte_length) {
             out.append(text.byte_at(i));
@@ -207,7 +207,7 @@ let FileTests = module (
         let dir = fresh("streams");
         let p = dir.join("lines.txt");
         let out = open(p, file.OpenMode.Write);
-        let writer = utf8_writer.create(out.write);
+        let writer = utf8_writer.create(new bound(out.write));
         let i = 0;
         while (i < 100) {
             test.assert_ok<unit.Unit>(writer.write_line("line " + i.to_string()));
@@ -215,7 +215,7 @@ let FileTests = module (
         }
         test.assert_ok<unit.Unit>(out.close());
         let input = open(p, file.OpenMode.Read);
-        let reader = utf8_reader.create(buffered_reader.with_capacity(input.read, 64).read);
+        let reader = utf8_reader.create(new bound(buffered_reader.with_capacity(new bound(input.read), 64).read));
         let count = 0;
         while (true) {
             match (test.assert_ok<optional.Optional<string>>(reader.read_line())) {
@@ -238,7 +238,7 @@ let FileTests = module (
         let dir = fresh("limit");
         let p = dir.join("shared.txt");
         test.assert_ok<unit.Unit>(fs.write_text(p, "x"));
-        let opened: file.File[list] = [];
+        let opened: file.File[list] = new;
         while (opened.length < 1024) {
             opened.append(open(p, file.OpenMode.Read));
         }
@@ -256,7 +256,7 @@ let FileTests = module (
         let dir = fresh("released");
         let p = dir.join("again.txt");
         test.assert_ok<unit.Unit>(fs.write_text(p, "y"));
-        let opened: file.File[list] = [];
+        let opened: file.File[list] = new;
         while (opened.length < 1023) {
             opened.append(open(p, file.OpenMode.Read));
         }

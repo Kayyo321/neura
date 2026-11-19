@@ -1,0 +1,9 @@
+error[E0214]: parameter 'a' has no type
+ --> $DIR/untyped-only-names.nra:6:20
+  |
+6 |     let add = func(a, b) -> int { return a + b; };
+  |                    ^ a lambda with untyped parameters takes its types from the function type expected here
+  |
+  = help: write the parameter types, or pass the lambda where a function type is expected
+
+For more information about this error, try `neura explain E0214`.

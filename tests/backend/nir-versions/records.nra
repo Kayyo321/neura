@@ -1,0 +1,52 @@
+// NeuraIR fixture of the records milestone (docs/design/Records030.md): a
+// record (class.record, generated), an interface property with an adapter
+// (property.requirement, generated), a virtual accessor and its override
+// (accessor.virtual), and a static requirement with its implementation and a
+// conformance call (static.implements, NeuraIR 1.13).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Records = module:program.Entry (
+    let Point = record (x: int32, y: int32);
+
+    let Named = interface (
+        let name: string;
+            | get;
+    );
+
+    let Shape = class implements Named (
+        export let name: string = "shape";
+            | get.virtual: name;
+    );
+
+    let Circle = class : Shape (
+        export let.override name: string;
+            | get.override: "circle of " + name;
+    );
+
+    let Label = class implements Named (
+        export let name: string = "label";
+    );
+
+    let Additive = interface<T> (
+        static let zero = func() -> T;
+        static let add = func(left: T, right: T) -> T;
+    );
+
+    let Money = class implements Additive<Money> (
+        export last cents: int64;
+        export let init = func(cents: int64) => set;
+        export static let zero = func() -> Money => new Money(0);
+        export static let add = func(left: Money, right: Money) -> Money => new Money(left.cents + right.cents);
+    );
+
+    let twice = func<T: Additive<T>>(value: T) -> T => T.add(value, T.add(value, T.zero()));
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let point = new with(new Point(1, 2)) { y: 5 };
+        let names: Named[] = [new Circle(), new Label()];
+        console.print_line(point.to_string() + " " + names[0].name + " " + names[1].name + " " +
+                           twice<Money>(new Money(21)).cents.to_string());
+        return program.ExitCode.Ok;
+    };
+);

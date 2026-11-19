@@ -18,7 +18,7 @@ let WideOperands = module:program.Entry (
     };
 
     let wide_list = func() -> int64 {
-        let values: int64[list] = [
+        let values: int64[list] = new([
             1, 4, 7, 10, 13, 16, 19, 22, 25, 28,
             31, 34, 37, 40, 43, 46, 49, 52, 55, 58,
             61, 64, 67, 70, 73, 76, 79, 82, 85, 88,
@@ -49,7 +49,7 @@ let WideOperands = module:program.Entry (
             811, 814, 817, 820, 823, 826, 829, 832, 835, 838,
             841, 844, 847, 850, 853, 856, 859, 862, 865, 868,
             871, 874, 877, 880, 883, 886, 889, 892, 895, 898
-        ];
+        ]);
         let total: int64 = 0;
         for (let value in values) {
             total = total + value;
@@ -98,7 +98,7 @@ let WideOperands = module:program.Entry (
     };
 
     let wide_text = func() -> int64 {
-        let values: string[list] = [
+        let values: string[list] = new([
             "s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9",
             "s10", "s11", "s12", "s13", "s14", "s15", "s16", "s17", "s18", "s19",
             "s20", "s21", "s22", "s23", "s24", "s25", "s26", "s27", "s28", "s29",
@@ -129,7 +129,7 @@ let WideOperands = module:program.Entry (
             "s270", "s271", "s272", "s273", "s274", "s275", "s276", "s277", "s278", "s279",
             "s280", "s281", "s282", "s283", "s284", "s285", "s286", "s287", "s288", "s289",
             "s290", "s291", "s292", "s293", "s294", "s295", "s296", "s297", "s298", "s299"
-        ];
+        ]);
         let total: int64 = values.length as int64;
         for (let value in values) {
             if (value == "s299" || value == "s0") {

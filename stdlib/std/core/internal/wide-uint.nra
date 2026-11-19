@@ -17,7 +17,7 @@ export let WideUint = module (
     #Final
     export let WideUint = class (
         /// @brief No zero limb at the top; zero has no limbs.
-        export let limbs: uint32[list] = [];
+        export let limbs: uint32[list] = new;
 
         /// @brief Reports whether the value has no nonzero limbs.
         #Pure
@@ -60,17 +60,11 @@ export let WideUint = module (
             last a = limbs;
             last b = other.limbs;
             if (a.length != b.length) {
-                if (a.length < b.length) {
-                    return -1;
-                }
-                return 1;
+                return if (a.length < b.length) -> -1 else -> 1;
             }
             for (let i = a.length - 1; i >= 0; i--) {
                 if (a[i] != b[i]) {
-                    if (a[i] < b[i]) {
-                        return -1;
-                    }
-                    return 1;
+                    return if (a[i] < b[i]) -> -1 else -> 1;
                 }
             }
             return 0;
@@ -172,7 +166,7 @@ export let WideUint = module (
         /// @brief Multiplies by a single limb in place and keeps the result normalized.
         export let multiply_small = func(factor: uint32) {
             if (factor == 0) {
-                limbs = [];
+                limbs = new;
                 return;
             }
             last a = limbs;
@@ -243,7 +237,7 @@ export let WideUint = module (
             }
             last whole = count / 32;
             last part = count % 32;
-            last shifted: uint32[list] = [];
+            last shifted: uint32[list] = new;
             for (let i = 0; i < whole; i++) {
                 shifted.append(0);
             }
@@ -274,10 +268,10 @@ export let WideUint = module (
             last part = count % 32;
             last a = limbs;
             if (whole >= a.length) {
-                limbs = [];
+                limbs = new;
                 return;
             }
-            last shifted: uint32[list] = [];
+            last shifted: uint32[list] = new;
             for (let i = whole; i < a.length; i++) {
                 let value = (a[i] as uint64) >> part;
                 if (part != 0 && i + 1 < a.length) {
@@ -340,11 +334,11 @@ export let WideUint = module (
                 return "0";
             }
             last work = copy();
-            last groups: uint32[list] = [];
-            while (!work.is_zero()) {
+            last groups: uint32[list] = new;
+            while (not work.is_zero()) {
                 groups.append(work.divide_small(Billion));
             }
-            last bytes: uint8[list] = [];
+            last bytes: uint8[list] = new;
             append_group(bytes, groups[groups.length - 1], false);
             for (let i = groups.length - 2; i >= 0; i--) {
                 append_group(bytes, groups[i], true);
@@ -363,7 +357,7 @@ export let WideUint = module (
 
         /// @brief The digits of one base-10^9 group, padded to nine when `full`.
         let append_group = func(bytes: uint8[list], group: uint32, full: bool) {
-            last digits: uint8[list] = [];
+            last digits: uint8[list] = new;
             let rest = group;
             while (rest != 0) {
                 digits.append((48 + rest % 10) as uint8);
@@ -378,6 +372,9 @@ export let WideUint = module (
                 bytes.append(digits[i]);
             }
         };
+
+        /// @brief Names the value and its limb count.
+        export let.override to_string = func -> string => "WideUint(" .. limbs.length.to_string() .. " limbs)";
     );
 
     /// @brief Creates a fresh zero magnitude with no limbs.

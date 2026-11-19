@@ -20,8 +20,8 @@ let RegionGuards = module:program.Entry (
     let Special = class:Cell ();
 
     let accumulate = func(mode: int32, k: int32) -> int32 {
-        let values: int32[list] = [];
-        let cells: Cell[list] = [];
+        let values: int32[list] = new;
+        let cells: Cell[list] = new;
         for (let i = 0; i < 12; i = i + 1) {
             if (mode != 1 || i < k) {
                 values.append(i);

@@ -1,0 +1,9 @@
+// A generator captures as a lambda does: a `last` binding must be assigned first.
+let f = func() -> int {
+    last x: int;
+    let g = iterator() -> int {
+        yield x;
+    };
+    x = 1;
+    return x;
+};

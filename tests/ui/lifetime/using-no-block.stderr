@@ -1,0 +1,9 @@
+error[E0220]: expected a block after 'using (...)'
+  --> $DIR/using-no-block.nra:12:5
+   |
+12 |     return Result<int>.Ok(0);
+   |     ^^^^^^ expected '{', found 'return'
+   |
+   = help: the resource is closed when its block is left: using (name = value) { ... }
+
+For more information about this error, try `neura explain E0220`.

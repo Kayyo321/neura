@@ -1,0 +1,169 @@
+let error = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+let.promote _ = import:Std.Crypto.Algorithm;
+let chacha = import:Std.Crypto.Internal.ChaCha20;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let entropy = import:Std.Crypto.Random.Entropy;
+let sha2 = import:Std.Crypto.Hash.Sha2;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief A deterministic random bit generator built on ChaCha20 with fast key erasure (Stdlib.md section 21.3).
+///
+/// The construction, which no standard fixes, is: the key starts as SHA-256("Neura ChaCha20-DRBG seed" || seed);
+/// `reseed(material)` sets it to SHA-256("Neura ChaCha20-DRBG reseed" || key || material); `fill(count)` takes
+/// the ChaCha20 keystream under the key with an all-zero nonce from block 0, makes its first 32 bytes the next
+/// key, and returns the following `count` bytes. A key therefore never produces output twice, and the state
+/// after a call cannot recompute that call's output. scripts/crypto-vectors/gen-drbg.py is an independent
+/// Python reference of it.
+/// @see [Std.Crypto.Random.ChaCha20Drbg](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Random-ChaCha20Drbg)
+#Since("0.3.0")
+export let ChaCha20Drbg = module (
+    /// @brief The SHA-256 of the label followed by the parts.
+    let derive = func(label: string, a: uint8[list], b: uint8[list]) -> uint8[list] {
+        let digest = new sha2.Sha256();
+        digest.update(words.utf8(label));
+        digest.update(a);
+        digest.update(b);
+        return digest.finish();
+    };
+
+    /// @brief A ChaCha20 generator. Seeded from caller bytes it is reproducible; `from_entropy` seeds it from
+    /// the operating system. A fork-safe generator (`fork_safe`) checks Entropy.fork_generation before every
+    /// output and reseeds from the operating system when it changed; that check is a stub until the runtime
+    /// reports fork and VM-clone generations, so a fork-safe generator traps on its first use.
+    #[Final, NotThreadSafe, Since("0.3.0")]
+    export let ChaCha20Drbg = class (
+        let key: uint8[list];
+        let check_forks: bool = false;
+        let generation: uint64 = 0;
+        let zero_nonce: uint8[list] = words.zeros(12);
+
+        /// @brief A generator seeded with the bytes; a seed shorter than 32 bytes traps with "invalid argument:
+        /// seed must be at least 32 bytes".
+        export let init = func(seed: uint8[list]) {
+            crypto_policy.require(Algorithm.ChaCha20Drbg);
+            if (seed.length < 32) {
+                trap_with_message("invalid argument: seed must be at least 32 bytes");
+            }
+            key = derive("Neura ChaCha20-DRBG seed", seed, new);
+        };
+
+        /// @brief Mixes more material into the key.
+        export let reseed = func(material: uint8[list]) {
+            last next = derive("Neura ChaCha20-DRBG reseed", key, material);
+            words.wipe(key);
+            key = next;
+        };
+
+        /// @brief Mixes 32 bytes from the operating system into the key.
+        #NoDiscard
+        export let reseed_from_entropy = func -> Result<Unit> {
+            match (entropy.os_bytes(32)) {
+                Result.Ok(bytes) => {
+                    reseed(bytes);
+                    words.wipe(bytes);
+                    return Result<Unit>.Ok(Unit.Value);
+                },
+                Result.Err(e) => {
+                    return Result<Unit>.Err(e);
+                },
+            }
+        };
+
+        /// @brief Turns on fork detection: from now on every output first compares Entropy.fork_generation with
+        /// the value it saw last and reseeds from the operating system when it changed.
+        #Internal
+        export let enable_fork_checks = func {
+            check_forks = true;
+            generation = entropy.fork_generation();
+        };
+
+        /// @brief `count` random bytes. A negative count traps.
+        export let fill = func(count: int) -> uint8[list] {
+            if (count < 0) {
+                trap_with_message("invalid argument: negative length");
+            }
+            if (check_forks) {
+                last now = entropy.fork_generation();
+                if (now != generation) {
+                    generation = now;
+                    match (reseed_from_entropy()) {
+                        Result.Ok(_) => {
+                        },
+                        Result.Err(e) => {
+                            trap_with_message("invalid state: reseed after fork failed: " .. error.message(e));
+                        },
+                    }
+                }
+            }
+            last stream = chacha.xor_stream(key, 0, zero_nonce, words.zeros(32 + count));
+            words.wipe(key);
+            key = words.slice(stream, 0, 32);
+            last out = words.slice(stream, 32, stream.length);
+            words.wipe(stream);
+            return out;
+        };
+
+        /// @brief Four random bytes, little-endian.
+        export let next_uint32 = func -> uint32 => words.load32_le(fill(4), 0);
+
+        /// @brief Eight random bytes, little-endian.
+        export let next_uint64 = func -> uint64 => words.load64_le(fill(8), 0);
+
+        /// @brief Uniform in 0 up to but excluding `bound`, by rejection of 32-bit draws above the largest
+        /// multiple of `bound`. A bound below 1 traps.
+        export let next_below = func(bound: int) -> int {
+            if (bound < 1) {
+                trap_with_message("invalid argument: bound must be positive");
+            }
+            last range = bound as uint64;
+            last limit = 4294967296 - (4294967296 % range);
+            let draw = next_uint32() as uint64;
+            while (draw >= limit) {
+                draw = next_uint32() as uint64;
+            }
+            return (draw % range) as int;
+        };
+
+        /// @brief Overwrites the key. Later output traps.
+        export let wipe = func {
+            words.wipe(key);
+            key = new;
+        };
+
+        /// @brief A fixed placeholder, never the key.
+        export let.override to_string = func -> string => "ChaCha20Drbg(<redacted>)";
+    );
+
+    /// @brief A generator seeded with 32 bytes from the operating system. Fails as Entropy.os_bytes does.
+    #[NoDiscard, Since("0.3.0")]
+    export let from_entropy = func -> Result<ChaCha20Drbg> {
+        match (entropy.os_bytes(32)) {
+            Result.Ok(seed) => {
+                last drbg = new ChaCha20Drbg(seed);
+                words.wipe(seed);
+                return Result<ChaCha20Drbg>.Ok(drbg);
+            },
+            Result.Err(e) => {
+                return Result<ChaCha20Drbg>.Err(e);
+            },
+        }
+    };
+
+    /// @brief A generator seeded from the operating system that checks for fork and VM clones before every
+    /// output (see the class). Traps while Entropy.fork_generation is a stub.
+    #[NoDiscard, Since("0.3.0")]
+    export let fork_safe = func -> Result<ChaCha20Drbg> {
+        match (from_entropy()) {
+            Result.Ok(drbg) => {
+                drbg.enable_fork_checks();
+                return Result<ChaCha20Drbg>.Ok(drbg);
+            },
+            Result.Err(e) => {
+                return Result<ChaCha20Drbg>.Err(e);
+            },
+        }
+    };
+);

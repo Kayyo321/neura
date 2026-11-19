@@ -1,0 +1,69 @@
+let json = import:Std.Encoding.Json;
+let errors = import:Std.Core.Error;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+
+let Key = record (id: uint64);
+let Entry = record (key: Key, low: int64, note: Optional<string>);
+let Variant = enum<T> (Stop, Pair(T, T), Named { key: Key });
+let Envelope = record (entry: Entry, payload: Variant<int>, tuple: [bool, float64]);
+let Number = record (real: float64);
+let EntryJson = derive json.Codec<Entry>;
+let VariantJson = derive json.Codec<Variant<int>>;
+let EnvelopeJson = derive json.Codec<Envelope>;
+let NumberJson = derive json.Codec<Number>;
+
+let result_line = func<T>(value: Result<T>) {
+    match (value) {
+        Result.Ok(_) => { console.print_line("ok"); },
+        Result.Err(e) => {
+            match (e) {
+                errors.Error.Custom(detail) => { console.print_line(detail.code() + " " + detail.message()); },
+                errors.Error.Parse { kind, offset, message } => {
+                    console.print_line("parse " + kind.to_string() + " " + offset.to_string() + " " + message);
+                },
+                _ => { console.print_line("unexpected error"); },
+            }
+        },
+    }
+};
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last text = "{\"key\":{\"id\":18446744073709551615},\"low\":-9223372036854775808}";
+        match (EntryJson.decode(text)) {
+            Result.Ok(entry) => {
+                match (EntryJson.encode(entry)) {
+                    Result.Ok(encoded) => { console.print_line(encoded); },
+                    Result.Err(_) => { return program.ExitCode.Failure; },
+                }
+            },
+            Result.Err(_) => { return program.ExitCode.Failure; },
+        }
+        result_line(EntryJson.decode("null"));
+        result_line(EntryJson.decode("{\"low\":0,\"key\":null,\"x\":{},\"x\":false}"));
+        result_line(EntryJson.decode("{\"key\":{\"id\":1,\"\\u0069d\":2},\"low\":0}"));
+        result_line(EntryJson.decode("{\"low\":false,\"low\":3}"));
+        result_line(EntryJson.decode("{\"low\":false}"));
+        result_line(EntryJson.decode("{\"key\":null,\"low\":false}"));
+        result_line(EntryJson.decode("{\"key\":null,\"low\":0,\"note\":null}"));
+        result_line(EntryJson.decode("{\"key\":null,\"low\":1.0}"));
+        result_line(EntryJson.decode("{\"key\":null,\"low\":1e2}"));
+        result_line(EntryJson.decode("{\"key\":{\"id\":18446744073709551616},\"low\":0}"));
+        result_line(NumberJson.encode(new Number(float64.from_bits(9221120237041090561))));
+        result_line(NumberJson.decode("{\"real\":1e999}"));
+        result_line(VariantJson.decode("{\"variant\":\"Stop\"}"));
+        result_line(VariantJson.decode("{\"variant\":\"Stop\",\"payload\":null}"));
+        result_line(VariantJson.decode("{\"variant\":\"Pair\",\"payload\":[1]}"));
+        result_line(VariantJson.decode("{\"variant\":\"Bad\"}"));
+        result_line(VariantJson.decode("{}"));
+        result_line(VariantJson.decode("{\"variant\":\"Pair\",\"variant\":\"Stop\"}"));
+        result_line(VariantJson.decode("{\"variant\":\"Named\",\"payload\":{\"key\":null,\"key\":null}}"));
+        result_line(EnvelopeJson.decode("{\"entry\":null,\"payload\":{\"variant\":\"Pair\",\"payload\":[1,2]},\"tuple\":[true,2.5]}"));
+        result_line(EntryJson.decode("{\"key\":"));
+        result_line(json.parse("{\"key\":"));
+        return program.ExitCode.Ok;
+    };
+);

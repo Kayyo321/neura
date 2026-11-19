@@ -16,6 +16,10 @@
 // it is an error (E0510, E0515). A read-modify-write evaluates the receiver
 // once, then calls the getter, computes, and calls the setter.
 
+constexpr const char* misplaced_hook_note =
+    "a '|' clause after a member is an accessor clause of that member; class hooks are written after the "
+    "class's '(', before its first member";
+
 namespace accessor_text {
 
 inline std::string kind_word(bool setter) { return setter ? "set" : "get"; }
@@ -41,14 +45,12 @@ void Lowering::check_accessor_member(const Declaration& decl, SymbolId owner) co
     const auto& first = decl.accessors.front();
     const auto name = decl.name_span.value_or(decl.span);
     const auto owner_kind = symbol(owner).kind;
-    if (owner_kind == SymbolKind::Interface)
-        throw Diagnostic(first.span, "an interface cannot declare accessors").with_code("E0519")
-            .label("accessor clause in an interface")
-            .label(name, "'" + decl.name + "' is an interface member")
-            .note("interfaces cannot require accessors in this release")
-            .help("declare the accessors on the field of a class that implements the interface, "
-                  "or require a method instead");
-    if (owner_kind != SymbolKind::Class)
+    if (owner_kind == SymbolKind::Interface) {
+        // A property requirement (lowering_properties.inc).
+        check_property_requirement(decl);
+        if (decl.kind == DeclKind::Binding && !decl.cast_target && decl.overloads.empty()) return;
+    }
+    if (owner_kind != SymbolKind::Class && owner_kind != SymbolKind::Interface)
         throw Diagnostic(first.span, "accessors are only allowed on class fields").with_code("E0519")
             .label("accessor clause outside a class")
             .label(name, "'" + decl.name + "' is a member of a " +
@@ -59,6 +61,7 @@ void Lowering::check_accessor_member(const Declaration& decl, SymbolId owner) co
                                          accessor_text::member_kind(decl)).with_code("E0518")
             .label("accessor clause on " + accessor_text::member_kind(decl))
             .label(name, "'" + decl.name + "' is declared here")
+            .note(misplaced_hook_note)
             .help("remove the clause; only an exported instance field can have 'get' and 'set' accessors");
     if (decl.static_member)
         throw Diagnostic(first.span, "a static field cannot have accessors").with_code("E0517")
@@ -102,6 +105,7 @@ void Lowering::check_accessor_member(const Declaration& decl, SymbolId owner) co
                 .note("in a setter, 'value' names the incoming value, so the field's storage would be hidden")
                 .help("rename the field");
     }
+    check_dispatch_words(decl);
     if (decl.type && decl.type->reference)
         throw Diagnostic(first.span, "a primitive reference field cannot have accessors").with_code("E0523")
             .label("accessor clause on a reference field")
@@ -126,6 +130,9 @@ void Lowering::declare_accessors(const Declaration& decl, SymbolId field) {
         set_attribute(symbol(field), clause.setter ? AttributeId::AccessorSet : AttributeId::AccessorGet,
                       attribute_symbol(function));
         set_attribute(symbol(function), AttributeId::AccessorOf, accessor_of_payload(field, kind));
+        // A slot that subclasses may override (lowering_properties.inc).
+        if (clause.dispatch == AccessorClause::Dispatch::Virtual)
+            set_attribute(symbol(function), AttributeId::AccessorVirtual, attribute_bool(true));
         accessor_clauses_.emplace(function, &clause);
     }
 }
@@ -159,6 +166,7 @@ void Lowering::lower_accessors(SymbolId field) {
             .label(name_span(field), "'" + symbol(field).name + "' is an alias of a type")
             .help("remove the clause; only an exported instance field can have 'get' and 'set' accessors");
     }
+    if (property_requirement(field)) return type_requirement_accessors(field);
     const auto field_type = symbol(field).type;
     // A copy: lowering the accessor bodies adds symbols.
     const auto name = symbol(field).name;
@@ -180,7 +188,15 @@ void Lowering::lower_accessors(SymbolId field) {
             expected_origin_ = ExpectedOrigin{name_span(field), "'" + name + "' has type " + describe(field_type) +
                                                                     ", which its getter returns"};
             auto result = node(IrOp::Return, clause.expression->span);
-            result.operands.push_back(value(*clause.expression, ctx, &field_type));
+            try {
+                result.operands.push_back(value(*clause.expression, ctx, &field_type));
+            } catch (Diagnostic& error) {
+                // `| get: instance;` after a member reads as a class hook
+                // written in the wrong place.
+                if (clause.expression->kind == ExprKind::Name && clause.expression->text == "instance")
+                    error.note(misplaced_hook_note);
+                throw;
+            }
             instructions.push_back(std::move(result));
         } else {
             const auto* declaration = entries_[field].declaration;
@@ -206,6 +222,7 @@ void Lowering::lower_accessors(SymbolId field) {
             }
         }
         program_.bodies.push_back({function, std::move(instructions)});
+        if (has_attribute(symbol(function), AttributeId::AccessorVirtual)) ensure_twin(function);
     }
 }
 
@@ -219,11 +236,15 @@ IrNode Lowering::route_field(IrNode field, const Expr& expr, Context& context) {
     const auto set = accessor(target, AccessorKind::Set);
     if (get == no_symbol && set == no_symbol) return field;
     const auto owner = symbol(target).owner;
-    const bool inside_class = inside(lexical_owner(context), owner);
+    // A property of an interface has no storage, so every access, also one in
+    // an interface default, calls its accessor.
+    const bool requirement = property_requirement(target);
+    const bool inside_class = !requirement && inside(lexical_owner(context), owner);
     const auto& receiver = expr.kind == ExprKind::Member ? expr.operands.front() : expr;
     const bool own_receiver = expr.kind == ExprKind::Name ||
         (receiver.kind == ExprKind::Name && receiver.text == "instance" &&
          find("instance", context, receiver.span) == no_symbol);
+    if (override_clause_ && target == override_clause_->field && own_receiver) return override_access(std::move(field), expr);
     if (inside_class && own_receiver) return field;
     const auto& name = symbol(target).name;
     const auto declaring = "'" + symbol(owner).name + "'";
@@ -233,6 +254,11 @@ IrNode Lowering::route_field(IrNode field, const Expr& expr, Context& context) {
             return field;
         }
         if (inside_class) return field;
+        if (requirement)
+            throw Diagnostic(expr.span, "'" + name + "' is read-only through " + declaring).with_code("E0510")
+                .label("cannot assign to '" + name + "' here")
+                .label(name_span(target), "'" + name + "' requires only '| get;'")
+                .help("add '| set;' to the property of " + declaring + ", or assign it through the class");
         auto error = Diagnostic(expr.span, "'" + name + "' is read-only outside its class").with_code("E0510")
             .label("cannot assign to '" + name + "' here");
         if (user_source(symbol(get).span.file)) error.label(symbol(get).span, "'" + name + "' declares only a getter");
@@ -271,6 +297,16 @@ IrNode Lowering::place_expression(const Expr& expr, Context& context) {
 // The value currently in `place`: through the getter for a field that
 // route_field marked, otherwise the place itself.
 IrNode Lowering::read_place(IrNode place, Context& context) {
+    if (place.op == IrOp::Field && place.text == "$override") {
+        if (override_clause_->get == no_symbol)
+            throw Diagnostic(place.span, "'" + symbol(place.symbol).name + "' has no getter in the base class")
+                .with_code("E0515")
+                .label("this updates '" + symbol(place.symbol).name + "', which reads it first");
+        auto call = node(IrOp::VirtualCall, place.span, place.type);
+        call.symbol = override_clause_->get;
+        call.operands = std::move(place.operands);
+        return call;
+    }
     if (place.op != IrOp::Field || place.text != "$accessor") return place;
     place.text.clear();
     const auto target = place.symbol;
@@ -296,6 +332,15 @@ IrNode Lowering::read_place(IrNode place, Context& context) {
 
 // Stores `value` into `place`: a Store, or a setter call for a marked field.
 IrNode Lowering::store_place(IrNode place, IrNode value, const Span& span) {
+    if (place.op == IrOp::Field && place.text == "$override") {
+        auto call = node(IrOp::VirtualCall, span, void_type);
+        call.symbol = override_clause_->set;
+        call.operands = std::move(place.operands);
+        call.operands.push_back(std::move(value));
+        auto result = node(IrOp::Discard, span);
+        result.operands.push_back(std::move(call));
+        return result;
+    }
     if (place.op != IrOp::Field || place.text != "$accessor") {
         auto store = node(IrOp::Store, span);
         store.operands.push_back(std::move(place));

@@ -1,0 +1,64 @@
+let array_deque = import:Std.Collections.ArrayDeque;
+let array_list = import:Std.Collections.ArrayList;
+let bit_set = import:Std.Collections.BitSet;
+let hash_map = import:Std.Collections.HashMap;
+let hash_set = import:Std.Collections.HashSet;
+let immutable_list = import:Std.Collections.ImmutableList;
+let int_map = import:Std.Collections.IntMap;
+let linked_list = import:Std.Collections.LinkedList;
+let ordinal_map = import:Std.Collections.OrdinalMap;
+let ordering = import:Std.Core.Ordering;
+let priority_queue = import:Std.Collections.PriorityQueue;
+let sequence = import:Std.Collections.Sequence;
+let string_map = import:Std.Collections.StringMap;
+let tree_map = import:Std.Collections.TreeMap;
+let test = import:Std.Test;
+
+let IteratorToStringTests = module (
+    let compare = func(a: int, b: int) -> ordering.Ordering {
+        if (a < b) {
+            return ordering.Ordering.Less;
+        }
+        return a > b ? ordering.Ordering.Greater : ordering.Ordering.Equal;
+    };
+
+    export let test_list_like_iterators_show_their_position = func() -> void {
+        last list = array_list.of<int>(new([1, 2, 3]));
+        last it = list.iterator();
+        test.assert_equal_string("ArrayListIterator(position 0)", it.to_string());
+        it.next();
+        test.assert_equal_string("ArrayListIterator(position 1)", it.to_string());
+        test.assert_equal_string("ImmutableListIterator(position 0)",
+            immutable_list.of<int>(new([1, 2])).iterator().to_string());
+        test.assert_equal_string("ArrayDequeIterator(position 0)", array_deque.of<int>(new([1])).iterator().to_string());
+        test.assert_equal_string("LinkedListIterator(pending)", linked_list.of<int>(new([1])).iterator().to_string());
+        test.assert_equal_string("LinkedListIterator(exhausted)",
+            linked_list.create<int>().iterator().to_string());
+    };
+
+    export let test_map_and_set_iterators_show_their_position = func() -> void {
+        last map = hash_map.create<int, int>();
+        map.put(1, 2);
+        test.assert_equal_string("HashMapIterator(position 0)", map.iterator().to_string());
+        last ints = int_map.create<int>();
+        ints.put(1, 2);
+        test.assert_equal_string("IntMapIterator(position 0)", ints.iterator().to_string());
+        last strings = string_map.create<int>();
+        strings.put("a", 2);
+        test.assert_equal_string("StringMapIterator(position 0)", strings.iterator().to_string());
+        last set = hash_set.create<int>();
+        set.add(1);
+        test.assert_equal_string("HashSetIterator(position 0)", set.iterator().to_string());
+    };
+
+    export let test_ordered_iterators_name_their_state = func() -> void {
+        last tree = tree_map.create<int, int>(compare);
+        tree.put(1, 2);
+        test.assert_equal_string("TreeMapIterator(pending)", tree.iterator().to_string());
+        last queue = priority_queue.create<int>(compare);
+        queue.enqueue(4);
+        test.assert_equal_string("PriorityQueueIterator(position 0)", queue.iterator().to_string());
+        last bits = bit_set.of(new([3]));
+        test.assert_equal_string("BitSetIterator(next 3)", bits.iterator().to_string());
+    };
+);

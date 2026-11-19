@@ -1,0 +1,233 @@
+let errors = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let.promote _ = import:Std.Core.Optional;
+let optionals = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+
+/// @brief The Sec-WebSocket-Extensions header value (RFC 6455 section 9.1).
+///
+/// The grammar is `extension-list = 1#extension`, `extension = token *( ";" param )`, `param = token [ "="
+/// (token / quoted-string) ]`, with optional whitespace around the separators. A quoted value must be a token
+/// once unquoted. `parse` keeps the elements and parameters in order (order is the client's preference);
+/// `format` writes the canonical form `name; a; b=10, other`. Failures are Parse errors of kind Syntax at the
+/// offending byte offset.
+/// @see [Std.Net.Realtime.Ws.Extensions](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-Ws-Extensions)
+#Since("0.3.0")
+export let Extensions = module (
+    /// @brief One extension parameter: a name and an optional value.
+    #[Final, Immutable]
+    export let ExtensionParam = class (
+        /// @brief The parameter name.
+        export last name: string;
+        /// @brief The value, unquoted, or `None` for a parameter without one.
+        export last value: Optional<string>;
+
+        /// @brief Stores the name and value.
+        export let init = func(param_name: string, param_value: Optional<string>) {
+            name = param_name;
+            value = param_value;
+        };
+
+        /// @brief Equal when the name and value are.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: ExtensionParam) {
+                return false;
+            }
+            return name == that.name && optionals.equals<string>(value, that.value);
+        };
+
+        /// @brief Combines the name and value.
+        export let.override hash_code = func -> uint32 =>
+            hashing.combine(strings.hash(name), optionals.hash<string>(value));
+
+        /// @brief `name` or `name=value`.
+        export let.override to_string = func -> string => match (value) {
+            Optional.Some(text) => name .. "=" .. text,
+            Optional.None => name,
+        };
+    );
+
+    /// @brief One element of the list: an extension name and its parameters.
+    #Final
+    export let Extension = class (
+        /// @brief The extension token, such as `permessage-deflate`.
+        export last name: string;
+        /// @brief The parameters in order.
+        export last params: ExtensionParam[list];
+
+        /// @brief Stores the name and parameters.
+        export let init = func(token: string, parameters: ExtensionParam[list]) {
+            name = token;
+            params = parameters;
+        };
+
+        /// @brief How many parameters are named `param_name`.
+        #NoDiscard
+        export let count = func(param_name: string) -> int {
+            let n = 0;
+            for (let param in params) {
+                if (param.name == param_name) {
+                    n++;
+                }
+            }
+            return n;
+        };
+
+        /// @brief Equal when the names and parameter lists are.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: Extension) {
+                return false;
+            }
+            if (name != that.name || params.length != that.params.length) {
+                return false;
+            }
+            for (let i = 0; i < params.length; i++) {
+                return false unless params[i].equals(that.params[i]);
+            }
+            return true;
+        };
+
+        /// @brief Combines the name and parameters.
+        export let.override hash_code = func -> uint32 {
+            let hash = strings.hash(name);
+            for (let param in params) {
+                hash = hashing.combine(hash, param.hash_code());
+            }
+            return hash;
+        };
+
+        /// @brief The element as it is written in the header.
+        export let.override to_string = func -> string {
+            let text = name;
+            for (let param in params) {
+                text ..= "; " .. param.to_string();
+            }
+            return text;
+        };
+    );
+
+    /// @brief Whether `c` is a tchar of RFC 9110 section 5.6.2.
+    #[NoDiscard, Pure]
+    export let is_token_byte = func(c: uint8) -> bool {
+        return if ((c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122)) -> true
+            else -> c == 33 or 35 or 36 or 37 or 38 or 39 or 42 or 43 or 45 or 46 or 94 or 95 or 96 or 124 or 126;
+    };
+
+    /// @brief Whether the text is a non-empty token.
+    #[NoDiscard, Pure]
+    export let is_token = func(text: string) -> bool {
+        if (text.byte_length == 0) {
+            return false;
+        }
+        for (let i = 0; i < text.byte_length; i++) {
+            return false unless is_token_byte(text.byte_at(i));
+        }
+        return true;
+    };
+
+    /// @brief Parses a header value into its extensions, in order. Empty list elements (`a, , b`) are skipped,
+    /// as RFC 9110 section 5.6.1 allows; a value with no element fails.
+    #NoDiscard
+    export let parse = func(value: string) -> Result<Extension[list]> {
+        last list: Extension[list] = new;
+        last length = value.byte_length;
+        let i = skip_space(value, 0);
+        while (i < length) {
+            if (value.byte_at(i) == 44) {
+                i = skip_space(value, i + 1);
+                continue;
+            }
+            last name_end = token_end(value, i);
+            if (name_end == i) {
+                return syntax("expected an extension name", i);
+            }
+            last name = value.slice(i, name_end);
+            last params: ExtensionParam[list] = new;
+            i = skip_space(value, name_end);
+            while (i < length && value.byte_at(i) == 59) {
+                i = skip_space(value, i + 1);
+                last param_end = token_end(value, i);
+                if (param_end == i) {
+                    return syntax("expected a parameter name", i);
+                }
+                last param_name = value.slice(i, param_end);
+                i = skip_space(value, param_end);
+                let param_value = Optional<string>.None;
+                if (i < length && value.byte_at(i) == 61) {
+                    i = skip_space(value, i + 1);
+                    if (i < length && value.byte_at(i) == 34) {
+                        last start = i + 1;
+                        let j = start;
+                        let text = "";
+                        while (j < length && value.byte_at(j) != 34) {
+                            if (value.byte_at(j) == 92) {
+                                j++;
+                                if (j >= length) {
+                                    return syntax("unterminated quoted string", j);
+                                }
+                            }
+                            // A quoted value must be a token, so any other byte (including UTF-8) fails here.
+                            return syntax("a quoted parameter value must be a token", j) unless is_token_byte(value.byte_at(j));
+                            text ..= value.slice(j, j + 1);
+                            j++;
+                        }
+                        if (j >= length) {
+                            return syntax("unterminated quoted string", j);
+                        }
+                        return syntax("a quoted parameter value must be a token", start) unless is_token(text);
+                        param_value = Optional<string>.Some(text);
+                        i = skip_space(value, j + 1);
+                    } else {
+                        last value_end = token_end(value, i);
+                        if (value_end == i) {
+                            return syntax("expected a parameter value", i);
+                        }
+                        param_value = Optional<string>.Some(value.slice(i, value_end));
+                        i = skip_space(value, value_end);
+                    }
+                }
+                params.append(new ExtensionParam(param_name, param_value));
+            }
+            if (i < length && value.byte_at(i) != 44) {
+                return syntax("expected ',' or ';'", i);
+            }
+            list.append(new Extension(name, params));
+        }
+        return if (list.length == 0) -> syntax("no extension in the list", 0)
+            else -> Result<Extension[list]>.Ok(list);
+    };
+
+    /// @brief The header value of the extensions, `, `-separated.
+    #NoDiscard
+    export let format = func(list: Extension[list]) -> string {
+        let text = "";
+        for (let i = 0; i < list.length; i++) {
+            text = i == 0 ? list[i].to_string() : text .. ", " .. list[i].to_string();
+        }
+        return text;
+    };
+
+    /// @brief The offset after the token starting at `start`.
+    let token_end = func(value: string, start: int) -> int {
+        let i = start;
+        while (i < value.byte_length && is_token_byte(value.byte_at(i))) {
+            i++;
+        }
+        return i;
+    };
+
+    /// @brief The offset after spaces and tabs from `start`.
+    let skip_space = func(value: string, start: int) -> int {
+        let i = start;
+        while (i < value.byte_length && (value.byte_at(i) == 32 || value.byte_at(i) == 9)) {
+            i++;
+        }
+        return i;
+    };
+
+    /// @brief A Syntax parse failure at the offset.
+    let syntax = func(message: string, offset: int) -> Result<Extension[list]> =>
+        Result<Extension[list]>.Err(errors.Error.Parse { kind: errors.ParseErrorKind.Syntax, offset: offset,
+            message: message });
+);

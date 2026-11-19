@@ -88,19 +88,15 @@ export let LocalDate = module (
             if (month != other.month) {
                 return order(month < other.month);
             }
-            if (day != other.day) {
-                return order(day < other.day);
-            }
-            return Ordering.Equal;
+            return if (day != other.day) -> order(day < other.day) else -> Ordering.Equal;
         };
 
         /// @brief Tests whether the year, month, and day all agree.
-        #Pure
+        /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is LocalDate)) {
+            if (other is not date: LocalDate) {
                 return false;
             }
-            last date = other as LocalDate;
             return year == date.year && month == date.month && day == date.day;
         };
 
@@ -123,7 +119,7 @@ export let LocalDate = module (
     /// outside 1 through 12, or a day outside the month.
     #[Pure, ThreadSafe]
     export let of = func(year: int, month: int, day: int) -> LocalDate {
-        if (!valid(year, month, day)) {
+        if (not valid(year, month, day)) {
             trap_with_message("invalid argument: invalid date");
         }
         return new(year, month, day);
@@ -132,9 +128,7 @@ export let LocalDate = module (
     /// @brief nil for invalid components.
     #[Pure, ThreadSafe]
     export let try_of = func(year: int, month: int, day: int) -> LocalDate {
-        if (!valid(year, month, day)) {
-            return nil;
-        }
+        return nil unless valid(year, month, day);
         return new(year, month, day);
     };
 
@@ -157,9 +151,7 @@ export let LocalDate = module (
         last scan = new calendar.Scanner(text);
         let [year, month, day] = calendar.read_date(scan);
         scan.finish();
-        if (!scan.ok()) {
-            return result.Result<LocalDate>.Err(scan.failure());
-        }
+        return result.Result<LocalDate>.Err(scan.failure()) unless scan.ok();
         return result.Result<LocalDate>.Ok(new LocalDate(year as int, month, day));
     };
 
@@ -177,10 +169,7 @@ export let LocalDate = module (
             trap_with_message("invalid argument: date out of range");
         }
         last length = calendar.month_length(year, month);
-        if (day > length) {
-            return new(year as int, month, length);
-        }
-        return new(year as int, month, day);
+        return if (day > length) -> new(year as int, month, length) else -> new(year as int, month, day);
     };
 
     /// @brief Converts an unequal comparison to Less or Greater.

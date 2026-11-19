@@ -1,0 +1,2 @@
+// Edge case 5 of docs/design/Expressions030.md: `typeof` is a reserved word.
+let typeof = 1;

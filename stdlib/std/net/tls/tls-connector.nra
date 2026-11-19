@@ -1,0 +1,76 @@
+let.promote _ = import:Std.Net.Connector;
+let host = import:Std.Net.Socket.Internal.HostCalls;
+let host_error = import:Std.Core.Internal.HostError;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let socket = import:Std.Net.Internal.Socket;
+let.promote _ = import:Std.Net.Core.SocketAddr;
+let support = import:Std.Net.Socket.Internal.Support;
+let.promote _ = import:Std.Net.Tls.TlsConfig;
+let.promote _ = import:Std.Net.Tls.TlsStream;
+
+/// @brief A `Std.Net.Connector` that opens verified TLS client streams to one address. Needs the net
+/// capability.
+///
+/// The peer is always verified: against the configuration's CA file or the system trust store, and against
+/// its server name (or, when that is empty, the dialed address, which the host matches as an IP address). The
+/// server name is sent as SNI and the ALPN list is offered. The handshake runs in the host's TLS provider
+/// (`neura.net.tls.connect`), which a build configured with `NEURA_ENABLE_SERVER_TLS` has; in another build
+/// `connect` fails with Unsupported. A
+/// configuration with a client certificate (mutual TLS) or a version range narrower than TLS 1.2 through 1.3
+/// needs an extended host service that no runtime offers yet.
+/// @see [Std.Net.Tls.TlsConnector](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Tls-TlsConnector)
+#Since("0.3.0")
+export let TlsConnector = module (
+    /// @brief Dials `address()` and completes a TLS client handshake for each `connect`.
+    #Final
+    export let TlsConnector = class implements Connector<SocketAddr, TlsStream> (
+        /// @brief The address dialed.
+        last target: SocketAddr;
+        /// @brief The client configuration.
+        export last config: TlsConfig;
+
+        /// @brief A connector for `address`. A server configuration traps with "invalid argument: a TLS
+        /// connector needs a client configuration".
+        export let init = func(address: SocketAddr, client: TlsConfig) {
+            if (client.role != TlsRole.Client) {
+                trap_with_message("invalid argument: a TLS connector needs a client configuration");
+            }
+            target = address;
+            config = client;
+        };
+
+        /// @brief The address this connector dials.
+        export let address = func -> SocketAddr => target;
+
+        /// @brief Opens a TLS stream to `address()`; fails with Unsupported in a build without TLS.
+        #NoDiscard
+        export let connect = func -> Result<TlsStream> {
+            last text = target.to_string();
+            last nanos = support.timeout_nanos(config.handshake_timeout);
+            last outcome = config.is_mutual() || not config.allows_both_versions()
+                ? host.tls_connect_extended(target.host_text(), target.port, nanos, config.server_name, config.alpn(),
+                config.ca_file, version_code(config.min_version), version_code(config.max_version),
+                config.certificate_file, config.key_file)
+                : host.tls_connect(target.host_text(), target.port, nanos, config.server_name, config.alpn(),
+                config.ca_file);
+            return match (outcome) {
+                host.TlsOutcome.Ok(opened) => Result<TlsStream>.Ok(stream_of(opened, target)),
+                host.TlsOutcome.Error(code) => Result<TlsStream>.Err(host_error.io(code, "TLS connect failed", text)),
+            };
+        };
+
+        /// @brief Text such as "TlsConnector(192.0.2.1:443)".
+        export let.override to_string = func -> string => "TlsConnector(" .. target.to_string() .. ")";
+    );
+
+    /// @brief The host's version number: 12 or 13.
+    #Pure
+    export let version_code = func(version: TlsVersion) -> int => version == TlsVersion.Tls12 ? 12 : 13;
+
+    /// @brief A stream from the host's [ID, ALPN].
+    let stream_of = func(opened: [int64, string], target: SocketAddr) -> TlsStream {
+        let [id, alpn] = opened;
+        return new TlsStream(new socket.Handle(id, target.to_string()), Optional<SocketAddr>.Some(target), alpn);
+    };
+);

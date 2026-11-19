@@ -112,7 +112,11 @@ enum class Code : std::uint8_t {
     Call,
     // A return of register `a` (absent for a void function): `block` is
     // complete; the caller continues in the program it called from, at the
-    // label of its return block, or the program leaves.
+    // label of its return block, or the program leaves. A function with
+    // several result words (NVR 1.7) has `width` above 1 and one register per
+    // word in operands[other, other + width) (`a` is the first): every word is
+    // written to the caller's consecutive result slots, flags set. A Call to
+    // such a function leaves its words in the slots from `dst` on.
     Return,
     // A dispatch block's exit: the exit dispatch_tables[index] selects for
     // the tag in register `a` (the table's default when no entry has the
@@ -194,6 +198,10 @@ struct Region {
     std::vector<const nvr::Exit*> exits;
     std::vector<Checkpoint> checkpoints;
     bool uses_float = false;
+    // Whether the function has an EnterRegion exit (NVR 1.7), lifted or not:
+    // a frame of it may own storage regions, which its return releases, so
+    // tier 3 never pops such a frame in place (tier3::Function::enters_region).
+    bool enters_region = false;
     // Overflow checks removed by the region's range analysis (each proven
     // never to fail; the image keeps them).
     std::uint32_t eliminated_checks = 0;
@@ -246,7 +254,10 @@ struct Region {
 // Whether a state operation runs inside a region: one that only reads or
 // writes existing heap or global storage, never allocates, grows, frees, or
 // builds text, and calls no kernel. A region calls the executor's own
-// state-operation code for it, with the same checks and traps.
+// state-operation code for it, with the same checks and traps. The component
+// operations of collections of aggregates (NVR 1.7) are among them, and so are
+// the length and version reads of such a collection; the operations that
+// allocate, append or remove on one are not (a program runs them as helpers).
 bool inline_state_operation(const nvr::Exit& exit);
 
 // How tier 1 runs a block, as region formation needs it.

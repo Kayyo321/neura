@@ -1,0 +1,13 @@
+error[E0504]: incompatible interface requirements for 'name'
+  --> $DIR/incompatible.nra:10:1
+   |
+ 3 |     let name: string;
+   |         ---- required here
+...
+ 7 |     let name: int;
+   |         ---- and here
+...
+10 | let Both = class implements Named, Numbered (
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^... 'Named' requires 'name: string' and 'Numbered' requires 'name: int32'
+
+For more information about this error, try `neura explain E0504`.

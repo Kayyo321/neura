@@ -5,6 +5,7 @@
 // records in docs/runtime/NVR.md.
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -18,21 +19,35 @@ inline constexpr std::uint16_t major_version = 1;
 // The highest minor version of major version 1 that this code reads and
 // writes. The writer emits the lowest minor version whose features the image
 // uses, so images that need nothing newer stay byte-identical to 1.0.
-inline constexpr std::uint16_t minor_version = 6;
+inline constexpr std::uint16_t minor_version = 9;
+// The minor version that adds the class hook operations HookEnter and
+// HookLeave (docs/design/Hooks030.md). The lead may renumber it at merge.
+inline constexpr std::uint16_t hooks_minor_version = 8;
+// The minor version that adds ConcatText, the one-allocation string chain
+// (docs/design/Expressions030.md, String chains).
+inline constexpr std::uint16_t concat_minor_version = 9;
 inline constexpr std::uint32_t graph_profile = 1;
 
 enum class TypeKind : std::uint8_t {
     Void = 0, Bool = 1, Unsigned = 2, Signed = 3, Text = 4, Bytes = 5, Object = 6, Array = 7, List = 8,
     // NVR 1.1: IEEE 754 binary16, binary32, or binary64 by width, and
     // bfloat16 (width 16).
-    Float = 9, BFloat = 10
+    Float = 9, BFloat = 10,
+    // NVR 1.7. A fixed run of typed words stored inline in an array or list:
+    // `reference` is a layout (no parent, no interfaces, two to
+    // max_aggregate_components fields) that lists the component types. It is
+    // valid only as the element type of an Array or List.
+    Aggregate = 11
 };
+
+inline constexpr std::size_t max_aggregate_components = 64;
 
 struct Type {
     TypeKind kind = TypeKind::Void;
     // Width in bits for Unsigned, Signed, Float, and BFloat; zero otherwise.
     std::uint8_t width = 0;
-    // Layout for Object, element type for Array and List; zero otherwise.
+    // Layout for Object and Aggregate, element type for Array and List; zero
+    // otherwise.
     std::uint32_t reference = 0;
 
     bool operator==(const Type&) const = default;
@@ -52,6 +67,11 @@ struct Layout {
 
     bool operator==(const Layout&) const = default;
 };
+
+// NVR 1.7: a non-nil constant of a fieldless object layout.
+inline bool is_static_object_constant(const Type& type, const Constant& value) {
+    return type.kind == TypeKind::Object && value.payload.size() == 1 && value.payload.front() == 1;
+}
 
 struct Global {
     std::uint32_t type = 0;
@@ -167,10 +187,47 @@ enum class StateOp : std::uint8_t {
     // NVR 1.3.
     RepeatCollection = 23,
     // NVR 1.6. A call of a built-in C kernel; the immediate is its KERN index.
-    Kernel = 24
+    Kernel = 24,
+    // NVR 1.7. A component of one element of an array or list of aggregates;
+    // the immediate is the component index.
+    ReadComponent = 25, WriteComponent = 26,
+    // NVR 1.7. Storage regions (docs/design/Storage030.md, "Regions"):
+    // EnterRegion gives a uint64 region token; ReleaseRegion(token) frees what
+    // the region owns; RegionObject(token), RegionCollection(token, elements...)
+    // and RegionRepeat(token, length, words...) allocate as AllocateObject,
+    // AllocateCollection and RepeatCollection do, into the region;
+    // MoveToRegion(entry, token) moves an entry and what it reaches in the same
+    // region to an enclosing region.
+    EnterRegion = 27, ReleaseRegion = 28, RegionObject = 29, RegionCollection = 30, RegionRepeat = 31,
+    MoveToRegion = 32,
+    // Class hooks (hooks_minor_version; docs/design/Hooks030.md, Recursion):
+    // HookEnter(policy, handle) opens an event of kind `immediate` (0 get,
+    // 1 set) on the task's stack of active events; HookLeave closes the
+    // newest one, which the same frame opened. A hidden hook function runs
+    // them first and last.
+    HookEnter = 33, HookLeave = 34,
+    // NVR 1.9 (concat_minor_version). ConcatText(text, text, ...) is the
+    // text of its two or more text arguments in order, built with one
+    // allocation of the total length; immediate zero.
+    ConcatText = 35
 };
 
-inline constexpr std::uint8_t state_op_count = 25;
+inline constexpr std::uint8_t state_op_count = 36;
+
+// The most events a task can have open at once.
+inline constexpr std::size_t max_hook_events = 64;
+
+inline constexpr bool is_hook_operation(StateOp operation) {
+    return operation == StateOp::HookEnter || operation == StateOp::HookLeave;
+}
+
+// Reserved token of execution-lifetime static storage (NVR 1.7).
+inline constexpr std::uint64_t static_region_token = UINT64_MAX;
+
+// Whether `operation` is one of the NVR 1.7 region operations.
+inline constexpr bool is_region_operation(StateOp operation) {
+    return operation >= StateOp::EnterRegion && operation <= StateOp::MoveToRegion;
+}
 
 enum class TrapReason : std::uint32_t {
     Arithmetic = 1, Bounds = 2, ProgramFailure = 3, InvalidDispatch = 4,
@@ -190,8 +247,8 @@ struct Exit {
     // State operation code and immediate.
     StateOp operation = StateOp::AllocateObject;
     std::uint32_t immediate = 0;
-    // Call, State, Host, and Scheduler arguments. Return holds its value here: one value
-    // for a nonvoid function and none otherwise. MessageTrap has one text.
+    // Call, State, Host, and Scheduler arguments. Return holds its values here: one per
+    // result word, so none for a void function. MessageTrap has one text.
     std::vector<Value> arguments;
     // Call, State, and Scheduler result slot, Host success slot.
     std::uint32_t result_slot = absent;
@@ -206,6 +263,19 @@ struct Exit {
     bool operator==(const Exit&) const = default;
 };
 
+// NVR 1.8 can read an unwritten field/global with a typed fallback, commit
+// a consecutive run of words in one transition, or check a nil cast's policy.
+inline bool extended_reference_state(const Exit& exit) {
+    switch (exit.operation) {
+    case StateOp::ReadField: case StateOp::ClassCast: return exit.arguments.size() > 1;
+    case StateOp::ReadGlobal: return !exit.arguments.empty();
+    case StateOp::WriteField: return exit.arguments.size() > 2;
+    case StateOp::WriteGlobal: return exit.arguments.size() > 1;
+    case StateOp::WriteComponent: return exit.arguments.size() > 3;
+    default: return false;
+    }
+}
+
 struct Block {
     std::uint32_t graph = 0;
     std::vector<Value> inputs;
@@ -218,6 +288,10 @@ struct Block {
 struct Function {
     std::uint32_t parameter_count = 0;
     std::uint32_t result_type = 0;
+    // Types of the result words after the first (1.7). Empty is the single
+    // word, or void, of every earlier version; a function with more words
+    // has a nonvoid result_type and no void word.
+    std::vector<std::uint32_t> more_results;
     std::vector<std::uint32_t> frame_types;
     std::vector<Block> blocks;
 
@@ -322,6 +396,10 @@ std::uint16_t required_minor_version(const Image& image);
 // Whether the image has tasks: a TRNS table, a scheduler exit, or a poll.
 bool concurrent_image(const Image& image);
 
+// Whether any function of `image` uses a region operation (NVR 1.7). A run of
+// such an image reports its peak stack cells.
+bool uses_regions(const Image& image);
+
 // Number of graph lanes a value of `type` occupies at the graph boundary.
 unsigned lane_count(const Type& type);
 
@@ -330,5 +408,21 @@ unsigned lane_count(const Type& type);
 unsigned selector_lanes(std::size_t exit_count);
 
 bool is_reference(TypeKind kind);
+
+// The component types of `element_type` when it is an Aggregate (NVR 1.7), or
+// null for any other type. The caller has a validated image.
+inline const std::vector<std::uint32_t>* aggregate_components(const Image& image, std::uint32_t element_type) {
+    if (element_type >= image.types.size() || image.types[element_type].kind != TypeKind::Aggregate) return nullptr;
+    return &image.layouts[image.types[element_type].reference].fields;
+}
+
+// The component types of the elements of array or list type `collection`, or
+// null when its elements are single words.
+inline const std::vector<std::uint32_t>* collection_components(const Image& image, std::uint32_t collection) {
+    if (collection >= image.types.size()) return nullptr;
+    const auto& type = image.types[collection];
+    if (type.kind != TypeKind::Array && type.kind != TypeKind::List) return nullptr;
+    return aggregate_components(image, type.reference);
+}
 
 } // namespace neura::nvr

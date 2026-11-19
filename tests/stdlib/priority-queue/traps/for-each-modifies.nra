@@ -16,7 +16,7 @@ export let Main = module:program.Entry (
             }
             return ordering.Ordering.Equal;
         };
-        let items = priority_queue.from_list<int>([1, 2], compare);
+        let items = priority_queue.from_list<int>(new([1, 2]), compare);
         items.for_each(func(value: int) -> void {
             items.clear();
         });

@@ -1,0 +1,20 @@
+// Edge case 42: an alias made late in a loop body is seen at its top.
+let closeable = import:Std.Io.Closeable;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+let Resource = class implements closeable.Closeable (
+    export let close = func -> Result<Unit> => Result<Unit>.Ok(Unit.Value);
+);
+let Owner = class (
+    export let kept: Resource = nil;
+);
+let work = func(owner: Owner) -> Result<int> {
+    using (source = new Resource()) {
+        let alias: Resource = nil;
+        for (let round = 0; round < 2; round++) {
+            owner.kept = alias;
+            alias = source;
+        }
+    }
+    return Result<int>.Ok(0);
+};

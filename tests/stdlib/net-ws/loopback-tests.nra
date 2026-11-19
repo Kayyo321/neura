@@ -1,0 +1,90 @@
+// test-options: --allow-net
+// host-dependent-counts: the decoders read whatever chunks the kernel delivers, so how the 70,000-byte message is split between reads varies by host
+let close_status = import:Std.Net.Realtime.Ws.CloseStatus;
+let duration = import:Std.Time.Duration;
+let handshake = import:Std.Net.Realtime.Ws.Handshake;
+let messages = import:Std.Net.Realtime.Ws.Message;
+let optional = import:Std.Core.Optional;
+let random = import:Std.Random.Random;
+let result = import:Std.Core.Result;
+let tcp_listener = import:Std.Net.TcpListener;
+let tcp_stream = import:Std.Net.TcpStream;
+let test = import:Std.Test;
+let unit = import:Std.Core.Unit;
+let ws = import:Std.Net.Realtime.Ws.WebSocket;
+
+// A WebSocket client and server over real TCP sockets on the loopback interface, in one task: the kernel
+// buffers each side's writes, so the steps run in turn.
+let LoopbackTests = module (
+    // The client's read function: on its first call it lets the server side run its handshake.
+    let Pump = class (
+        last client: tcp_stream.TcpStream;
+        last server_stream: tcp_stream.TcpStream;
+        export let server: optional.Optional<ws.WebSocket> = optional.Optional<ws.WebSocket>.None;
+
+        export let init = func(client_side: tcp_stream.TcpStream, server_side: tcp_stream.TcpStream) {
+            client = client_side;
+            server_stream = server_side;
+        };
+
+        export let read = func(max: int) -> result.Result<uint8[list]> {
+            if (!optional.is_some<ws.WebSocket>(server)) {
+                last supported: string[list] = new(["echo"]);
+                server = optional.Optional<ws.WebSocket>.Some(test.assert_ok<ws.WebSocket>(
+                    ws.accept(ws.over_tcp(server_stream), supported, random.seeded(2), ws.default_options())));
+            }
+            return client.read(max);
+        };
+
+        export let.override to_string = func -> string => "Pump";
+    );
+
+    let text_of = func(socket: ws.WebSocket) -> string {
+        last message = test.assert_some<messages.Message>(
+            test.assert_ok<optional.Optional<messages.Message>>(socket.receive()));
+        return match (message) {
+            messages.Message.Text(text) => text,
+            messages.Message.Binary(_) => "<binary>",
+        };
+    };
+
+    export let test_echo_over_tcp = func {
+        last listener = test.assert_ok<tcp_listener.TcpListener>(tcp_listener.bind("127.0.0.1", 0));
+        last client_stream = test.assert_ok<tcp_stream.TcpStream>(
+            tcp_stream.connect("127.0.0.1", listener.local_port, duration.of_seconds(5)));
+        last server_stream = test.assert_ok<tcp_stream.TcpStream>(listener.accept());
+        last pump = new Pump(client_stream, server_stream);
+        last transport = new ws.StreamTransport(new bound(pump.read), new bound(client_stream.write),
+            new bound(client_stream.close), 4096);
+        last protocols: string[list] = new(["echo"]);
+        last request = handshake.client_request("127.0.0.1", "/echo", random.seeded(1), protocols, "");
+        last client = test.assert_ok<ws.WebSocket>(ws.connect(transport, request, random.seeded(3), ws.default_options()));
+        last server = test.assert_some<ws.WebSocket>(pump.server);
+        test.assert_equal_string("echo", test.assert_some<string>(client.protocol));
+        // A 70,000-byte message uses the 64-bit length form and two fragments.
+        last big: uint8[list] = new;
+        for (let i = 0; i < 70000; i++) {
+            big.append((i % 251) as uint8);
+        }
+        test.assert_ok<unit.Unit>(client.send(messages.Message.Text("hello over tcp")));
+        test.assert_ok<unit.Unit>(client.send(messages.Message.Binary(big)));
+        test.assert_equal_string("hello over tcp", text_of(server));
+        last received = test.assert_some<messages.Message>(
+            test.assert_ok<optional.Optional<messages.Message>>(server.receive()));
+        last bytes = messages.bytes_of(received);
+        test.assert_equal<int>(70000, bytes.length);
+        test.assert_equal<uint8>(big[69999], bytes[69999]);
+        test.assert_ok<unit.Unit>(server.send(messages.Message.Text("echo: hello over tcp")));
+        test.assert_equal_string("echo: hello over tcp", text_of(client));
+        // The closing handshake, one step at a time: a ping from the server is still in flight.
+        test.assert_ok<unit.Unit>(server.ping(new));
+        test.assert_ok<unit.Unit>(client.send_close(1000, "done"));
+        test.assert(client.state == ws.ReadyState.Closing);
+        test.assert_none<messages.Message>(test.assert_ok<optional.Optional<messages.Message>>(server.receive()));
+        test.assert_equal_string("1000 done", test.assert_some<close_status.CloseReason>(server.peer_close).to_string());
+        test.assert_none<messages.Message>(test.assert_ok<optional.Optional<messages.Message>>(client.receive()));
+        test.assert(client.state == ws.ReadyState.Closed);
+        test.assert_equal<int>(1000, test.assert_some<close_status.CloseReason>(client.peer_close).code);
+        test.assert_ok<unit.Unit>(listener.close());
+    };
+);

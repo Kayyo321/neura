@@ -1,0 +1,136 @@
+// test-options: --gpu=off --max-steps 1000000000
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Core.SecretBytes;
+let.promote _ = import:Std.Crypto.KeyEncapsulation;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let error = import:Std.Core.Error;
+let hex = import:Std.Encoding.Hex;
+let ml_kem = import:Std.Crypto.Pqc.MlKem;
+let test = import:Std.Test;
+let vectors = import:MlKemVectors;
+
+// ML-KEM against NIST's ACVP test sets ML-KEM-keyGen-FIPS203 and ML-KEM-encapDecap-FIPS203 (support/,
+// scripts/crypto-vectors/gen-pqc-ml-kem.py).
+let MlKemTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let set_of = func(name: string) -> ml_kem.ParameterSet {
+        if (name == "512") {
+            return ml_kem.ParameterSet.MlKem512;
+        }
+        if (name == "768") {
+            return ml_kem.ParameterSet.MlKem768;
+        }
+        return ml_kem.ParameterSet.MlKem1024;
+    };
+
+    export let test_key_generation = func {
+        last rows = vectors.keygen;
+        for (let i = 0; i < rows.length; i += 5) {
+            last kem = new ml_kem.MlKem(set_of(rows[i]));
+            last key = kem.key_pair_from_seed(decode(rows[i + 1]), decode(rows[i + 2]));
+            test.assert_equal_string(rows[i + 3], hex.encode(key.public_key_bytes()));
+            test.assert_equal_string(rows[i + 4], hex.encode(key.expose()));
+        }
+        test.assert_equal_int32(150, rows.length);
+    };
+
+    export let test_encapsulation = func {
+        last rows = vectors.encaps;
+        for (let i = 0; i < rows.length; i += 5) {
+            last kem = new ml_kem.MlKem(set_of(rows[i]));
+            last public_key = test.assert_ok(kem.parse_public_key(decode(rows[i + 1])));
+            last result = kem.encapsulate_with(public_key, decode(rows[i + 2]));
+            test.assert_equal_string(rows[i + 3], hex.encode(result.ciphertext));
+            test.assert_equal_string(rows[i + 4], hex.encode(result.shared_secret.expose()));
+        }
+        test.assert_equal_int32(150, rows.length);
+    };
+
+    export let test_decapsulation_and_implicit_rejection = func {
+        last rows = vectors.decaps;
+        let rejected = 0;
+        for (let i = 0; i < rows.length; i += 5) {
+            last kem = new ml_kem.MlKem(set_of(rows[i]));
+            last private_key = test.assert_ok(kem.parse_private_key(decode(rows[i + 1])));
+            last secret = test.assert_ok(kem.decapsulate(private_key, decode(rows[i + 2])));
+            test.assert_equal_string(rows[i + 3], hex.encode(secret.expose()));
+            if (rows[i + 4] == "modified ciphertext") {
+                rejected++;
+            }
+        }
+        test.assert_equal_int32(15, rejected);
+        test.assert_equal_int32(150, rows.length);
+    };
+
+    export let test_encapsulation_key_check = func {
+        last rows = vectors.ek_check;
+        let failures = 0;
+        for (let i = 0; i < rows.length; i += 4) {
+            last kem = new ml_kem.MlKem(set_of(rows[i]));
+            last parsed = kem.parse_public_key(decode(rows[i + 1]));
+            if (rows[i + 2] == "true") {
+                let _ = test.assert_ok(parsed);
+            } else {
+                last e = test.assert_err(parsed);
+                test.assert_equal_string("crypto.invalid_key", error_code(e));
+                failures++;
+            }
+        }
+        test.assert(failures > 0);
+        test.assert_equal_int32(120, rows.length);
+    };
+
+    export let test_decapsulation_key_check = func {
+        last rows = vectors.dk_check;
+        let failures = 0;
+        for (let i = 0; i < rows.length; i += 4) {
+            last kem = new ml_kem.MlKem(set_of(rows[i]));
+            last parsed = kem.parse_private_key(decode(rows[i + 1]));
+            if (rows[i + 2] == "true") {
+                let _ = test.assert_ok(parsed);
+            } else {
+                let _ = test.assert_err(parsed);
+                failures++;
+            }
+        }
+        test.assert(failures > 0);
+        test.assert_equal_int32(120, rows.length);
+    };
+
+    let error_code = func(e: error.Error) -> string => match (e) {
+        error.Error.Custom(detail) => detail.code(),
+        _ => "",
+    };
+
+    export let test_round_trip_with_generator = func {
+        last kem = new ml_kem.MlKem(ml_kem.ParameterSet.MlKem512, new drbg.ChaCha20Drbg(decode("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")));
+        last private_key = test.assert_ok(kem.generate_key_pair());
+        last public_key = private_key.public_key();
+        last sent = kem.encapsulate(public_key);
+        test.assert_equal_int32(768, sent.ciphertext.length);
+        last received = test.assert_ok(kem.decapsulate(private_key, sent.ciphertext));
+        test.assert(received.ct_equals(sent.shared_secret));
+        // Wrong ciphertext lengths are data errors, not traps.
+        let short_ciphertext = sent.ciphertext;
+        short_ciphertext.remove_at(0);
+        test.assert_equal_string("crypto.invalid_ciphertext", error_code(test.assert_err(kem.decapsulate(private_key, short_ciphertext))));
+        test.assert_equal_string("crypto.invalid_key", error_code(test.assert_err(kem.parse_public_key(decode("00")))));
+    };
+
+    export let test_keys_print_and_compare = func {
+        last kem = new ml_kem.MlKem(ml_kem.ParameterSet.MlKem768);
+        last seed = decode("0000000000000000000000000000000000000000000000000000000000000000");
+        last private_key = kem.key_pair_from_seed(seed, seed);
+        test.assert_equal_string("MlKemPrivateKey(<redacted>)", private_key.to_string());
+        last public_key = private_key.public_key();
+        test.assert_equal_string("MlKemPublicKey(ML-KEM-768, 1184 bytes)", public_key.to_string());
+        last again = test.assert_ok(kem.parse_public_key(public_key.to_bytes()));
+        test.assert(public_key.equals(again));
+        test.assert_equal_uint64(public_key.hash_code() as uint64, again.hash_code() as uint64);
+        test.assert_equal_string("MlKem(<redacted>)", kem.to_string());
+        test.assert_equal_int32(1184, ml_kem.public_key_length(ml_kem.ParameterSet.MlKem768));
+        test.assert_equal_int32(2400, ml_kem.private_key_length(ml_kem.ParameterSet.MlKem768));
+        test.assert_equal_int32(1088, ml_kem.ciphertext_length(ml_kem.ParameterSet.MlKem768));
+    };
+);

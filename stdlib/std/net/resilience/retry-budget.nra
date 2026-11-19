@@ -1,0 +1,80 @@
+/// @brief A budget that bounds retries (or hedged requests) to a percentage of requests, in the manner of Finagle's
+/// `RetryBudget`, without its time-based expiry of deposits.
+///
+/// The balance is kept in hundredths of a retry. It starts at `initial` retries and never exceeds `maximum`
+/// retries. Each request deposits `percent` hundredths; each retry withdraws 100 hundredths and is refused when the
+/// balance is below 100. Over a long run at most `percent` retries per 100 requests are allowed, plus the initial
+/// reserve, which lets a quiet client retry its first failures. `unlimited` never refuses.
+/// @see [Std.Net.Resilience.RetryBudget](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-RetryBudget)
+#Since("0.3.0")
+export let RetryBudget = module (
+    /// @brief A ratio budget of retries to requests.
+    #[Final, NotThreadSafe]
+    export let RetryBudget = class (
+        /// @brief Hundredths of a retry earned per request.
+        last percent: int;
+        /// @brief The largest balance, in hundredths.
+        last ceiling: int64;
+        /// @brief Whether the budget never refuses.
+        last unbounded: bool;
+        /// @brief The balance in hundredths of a retry.
+        let balance: int64;
+
+        /// @brief A budget earning `percent` hundredths per request, starting with `initial` retries and holding at
+        /// most `maximum`. Traps with "invalid argument: <name>" unless 0 <= percent, 0 <= initial <= maximum.
+        export let init = func(ratio_percent: int, initial: int, maximum: int, open: bool) {
+            if (ratio_percent < 0) {
+                trap_with_message("invalid argument: percent");
+            }
+            if (initial < 0 || initial > maximum) {
+                trap_with_message("invalid argument: initial");
+            }
+            percent = ratio_percent;
+            ceiling = (maximum as int64) * 100;
+            unbounded = open;
+            balance = (initial as int64) * 100;
+        };
+
+        /// @brief Records one request.
+        export let deposit = func {
+            balance += percent as int64;
+            if (balance > ceiling) {
+                balance = ceiling;
+            }
+        };
+
+        /// @brief Takes one retry from the balance; false, with nothing taken, when fewer than one is available.
+        export let try_withdraw = func -> bool {
+            if (unbounded) {
+                return true;
+            }
+            if (balance < 100) {
+                return false;
+            }
+            balance -= 100;
+            return true;
+        };
+
+        /// @brief The whole retries available now.
+        export let available = func -> int => (balance / 100) as int;
+
+        /// @brief Text such as "RetryBudget(20 percent, balance 1.50)", or "RetryBudget(unlimited)".
+        export let.override to_string = func -> string {
+            if (unbounded) {
+                return "RetryBudget(unlimited)";
+            }
+            last hundredths = balance % 100;
+            return "RetryBudget(" .. percent.to_string() .. " percent, balance " .. (balance / 100).to_string() .. "."
+                .. (hundredths < 10 ? "0" : "") .. hundredths.to_string() .. ")";
+        };
+    );
+
+    /// @brief A budget of `percent` retries per 100 requests, starting with `initial` and holding at most `maximum`.
+    #NoDiscard
+    export let of = func(percent: int, initial: int, maximum: int) -> RetryBudget =>
+        new RetryBudget(percent, initial, maximum, false);
+
+    /// @brief A budget that always allows a retry.
+    #NoDiscard
+    export let unlimited = func -> RetryBudget => new RetryBudget(0, 0, 0, true);
+);

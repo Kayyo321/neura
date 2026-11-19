@@ -17,97 +17,97 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **LinkedList** · [`export let LinkedList = class<T> implements MutableList<T>, Deque<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L35)
+- **LinkedList** · [`export let LinkedList = class<T> implements MutableList<T>, Deque<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L38)
   A doubly linked list that also supports queue and deque operations. Tagged `#NotThreadSafe`.
-- **LinkedList.LinkedList** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L125)
+- **LinkedList.LinkedList** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L128)
   Returns the number of elements.
-- **LinkedList.LinkedList** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L128)
+- **LinkedList.LinkedList** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L131)
   Returns true when there are no elements.
-- **LinkedList.LinkedList** · [`export let get = func(index: int) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L132)
+- **LinkedList.LinkedList** · [`export let get = func(index: int) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L135)
   Traps with "invalid argument: index out of range" for an index outside 0 through size() - 1.
-- **LinkedList.LinkedList** · [`export let set = func(index: int, value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L136)
+- **LinkedList.LinkedList** · [`export let set = func(index: int, value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L139)
   Replaces the element at `index` without invalidating iterators. An invalid index traps with `invalid argument: index out of range`.
-- **LinkedList.LinkedList** · [`export let first = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L141)
+- **LinkedList.LinkedList** · [`export let first = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L144)
   Returns the first element. Traps with `no such element` when empty.
-- **LinkedList.LinkedList** · [`export let last = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L149)
+- **LinkedList.LinkedList** · [`export let last = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L152)
   Returns the last element. Traps with `no such element` when empty.
-- **LinkedList.LinkedList** · [`export let first_or_none = func -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L158)
+- **LinkedList.LinkedList** · [`export let first_or_none = func -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L161)
   Returns the first element as `Some`, or `None` when empty. Tagged `#NoDiscard`.
 - **LinkedList.LinkedList** · [`export let last_or_none = func -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L167)
   Returns the last element as `Some`, or `None` when empty. Tagged `#NoDiscard`.
-- **LinkedList.LinkedList** · [`export let peek = func -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L176)
+- **LinkedList.LinkedList** · [`export let peek = func -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L173)
   The first element, or None when empty. Tagged `#NoDiscard`.
-- **LinkedList.LinkedList** · [`export let add = func(value: T) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L179)
+- **LinkedList.LinkedList** · [`export let add = func(value: T) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L176)
   Appends `value` and returns true.
-- **LinkedList.LinkedList** · [`export let add_last = func(value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L185)
+- **LinkedList.LinkedList** · [`export let add_last = func(value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L182)
   Appends `value` at the back.
-- **LinkedList.LinkedList** · [`export let enqueue = func(value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L190)
+- **LinkedList.LinkedList** · [`export let enqueue = func(value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L187)
   Appends `value` at the back.
-- **LinkedList.LinkedList** · [`export let add_first = func(value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L195)
+- **LinkedList.LinkedList** · [`export let add_first = func(value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L192)
   Inserts `value` at the front.
-- **LinkedList.LinkedList** · [`export let add_at = func(index: int, value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L201)
+- **LinkedList.LinkedList** · [`export let add_at = func(index: int, value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L198)
   Inserts before `index` or appends if the index equals the size. Traps with "invalid argument: index out of range" otherwise.
-- **LinkedList.LinkedList** · [`export let add_all = func(values: T[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L211)
+- **LinkedList.LinkedList** · [`export let add_all = func(items: T[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L208)
   Appends each element in order, reading by position up to the starting length.
-- **LinkedList.LinkedList** · [`export let remove_at = func(index: int) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L221)
+- **LinkedList.LinkedList** · [`export let remove_at = func(index: int) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L218)
   Unlinks and returns the element at `index`. Traps with `invalid argument: index out of range` for an invalid index.
-- **LinkedList.LinkedList** · [`export let remove_first = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L224)
+- **LinkedList.LinkedList** · [`export let remove_first = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L221)
   Removes and returns the first element. Traps with `no such element` when empty.
-- **LinkedList.LinkedList** · [`export let remove_last = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L232)
+- **LinkedList.LinkedList** · [`export let remove_last = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L229)
   Removes and returns the last element. Traps with `no such element` when empty.
-- **LinkedList.LinkedList** · [`export let dequeue = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L240)
+- **LinkedList.LinkedList** · [`export let dequeue = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L237)
   Removes and returns the first element. Traps with `no such element` when empty.
-- **LinkedList.LinkedList** · [`export let try_dequeue = func -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L243)
+- **LinkedList.LinkedList** · [`export let try_dequeue = func -> optional.Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L240)
   Removes the first element and returns it as `Some`, or returns `None` when empty.
-- **LinkedList.LinkedList** · [`export let swap = func(i: int, j: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L252)
+- **LinkedList.LinkedList** · [`export let swap = func(i: int, j: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L249)
   Exchanges the values in two nodes without invalidating iterators. An invalid index traps with `invalid argument: index out of range`.
-- **LinkedList.LinkedList** · [`export let reverse = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L261)
+- **LinkedList.LinkedList** · [`export let reverse = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L258)
   Reverses the element order in place without invalidating iterators.
-- **LinkedList.LinkedList** · [`export let fill = func(value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L276)
+- **LinkedList.LinkedList** · [`export let fill = func(value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L273)
   Replaces each element with `value` without invalidating iterators.
-- **LinkedList.LinkedList** · [`export let truncate = func(size: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L287)
+- **LinkedList.LinkedList** · [`export let truncate = func(size: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L284)
   Removes elements from the end until `size` remain. Traps with "invalid argument: negative size" or "invalid argument: size above current size".
-- **LinkedList.LinkedList** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L301)
+- **LinkedList.LinkedList** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L298)
   Clears every node's links, so iterators that still hold a node keep nothing else reachable.
-- **LinkedList.LinkedList** · [`export let slice = func(start: int, end: int) -> LinkedList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L318)
+- **LinkedList.LinkedList** · [`export let slice = func(start: int, end: int) -> LinkedList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L315)
   A new LinkedList with the elements from `start` inclusive to `end` exclusive. Traps with "invalid argument: range" unless 0 <= start <= end <= size().
-- **LinkedList.LinkedList** · [`export let to_list = func -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L337)
+- **LinkedList.LinkedList** · [`export let to_list = func -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L334)
   A new built-in list in order.
-- **LinkedList.LinkedList** · [`export let iterator = func -> iterators.Iterator<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L348)
+- **LinkedList.LinkedList** · [`export let iterator = func -> iterators.Iterator<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L345)
   Returns a fail-fast iterator from the first node to the last.
-- **LinkedList.LinkedList** · [`export let sequence = func -> sequences.Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L352)
+- **LinkedList.LinkedList** · [`export let sequence = func -> sequences.Sequence<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L349)
   A lazy pipeline over this list's fail-fast iterator (Stdlib.md section 9.12): a structural change while it runs traps.
-- **LinkedList.LinkedList** · [`export let for_each = func(action: func(T) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L356)
+- **LinkedList.LinkedList** · [`export let for_each = func(action: func(T) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L353)
   Calls `action` in list order. The action leaves the list structure unchanged.
-- **LinkedList.LinkedList** · [`export let remove_if = func(drop: func(T) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L371)
+- **LinkedList.LinkedList** · [`export let remove_if = func(drop: func(T) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L368)
   Calls `drop` once per element in list order and unlinks the matches. The predicate leaves the list structure unchanged. The number of removed elements.
-- **LinkedList.LinkedList** · [`export let retain_if = func(keep: func(T) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L376)
+- **LinkedList.LinkedList** · [`export let retain_if = func(keep: func(T) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L373)
   Removes elements rejected by `keep` and returns the removal count. Calls the predicate once per element in list order. The predicate leaves the list structure unchanged.
-- **LinkedList.LinkedList** · [`export let index_where = func(test: func(T) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L402)
+- **LinkedList.LinkedList** · [`export let index_where = func(test: func(T) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L399)
   Returns the first index accepted by `test`, or -1 if no element matches. The predicate leaves the list structure unchanged.
-- **LinkedList.LinkedList** · [`export let sort = func(c: func(T, T) -> ordering.Ordering)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L422)
+- **LinkedList.LinkedList** · [`export let sort = func(c: func(T, T) -> ordering.Ordering)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L419)
   Stably sorts a copy of the values and writes them back into the existing nodes. The comparator defines a total order and leaves the list structure unchanged.
-- **LinkedList.LinkedList** · [`export let binary_search = func(value: T, c: func(T, T) -> ordering.Ordering) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L443)
+- **LinkedList.LinkedList** · [`export let binary_search = func(value: T, c: func(T, T) -> ordering.Ordering) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L440)
   Searches a copy and returns the first comparator-equal index, or `-insertion_point - 1` when absent. The list is already sorted by `c`, which leaves the list structure unchanged.
-- **LinkedList.LinkedList** · [`export let contains = func(value: T) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L455)
+- **LinkedList.LinkedList** · [`export let contains = func(value: T) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L452)
   Tests membership with `value.equals(element)`.
-- **LinkedList.LinkedList** · [`export let index_of = func(value: T) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L458)
+- **LinkedList.LinkedList** · [`export let index_of = func(value: T) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L455)
   Returns the lowest index where `value.equals(element)` is true, or -1 when absent.
-- **LinkedList.LinkedList** · [`export let last_index_of = func(value: T) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L472)
+- **LinkedList.LinkedList** · [`export let last_index_of = func(value: T) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L469)
   Returns the highest index where `value.equals(element)` is true, or -1 when absent.
-- **LinkedList.LinkedList** · [`export let remove = func(value: T) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L486)
+- **LinkedList.LinkedList** · [`export let remove = func(value: T) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L483)
   Removes the first element equal to `value`.
-- **LinkedList.LinkedList** · [`export let validate = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L500)
+- **LinkedList.LinkedList** · [`export let validate = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L497)
   Traps with "invalid state: ..." on a broken endpoint, reciprocal link, or count.
-- **LinkedList.LinkedList** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L528)
+- **LinkedList.LinkedList** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L525)
   Another LinkedList with the same element type, size, and equal elements at each index.
-- **LinkedList.LinkedList** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L548)
+- **LinkedList.LinkedList** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L542)
   Folds the element hashes in list order from 1, multiplying by 31 before each addition with 32-bit wraparound.
-- **LinkedList.LinkedList** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L560)
+- **LinkedList.LinkedList** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L554)
   Formats the list as `[a, b, c]`. The list prints "(this collection)" where its own text reaches it again.
-- **LinkedList** · [`export let create = func<T> -> LinkedList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L611)
+- **LinkedList** · [`export let create = func<T> -> LinkedList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L609)
   Creates an empty linked list.
-- **LinkedList** · [`export let of = func<T>(items: T[list]) -> LinkedList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L614)
+- **LinkedList** · [`export let of = func<T>(items: T[list]) -> LinkedList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L612)
   Copies `items`.
 <!-- END SOURCE API -->
 

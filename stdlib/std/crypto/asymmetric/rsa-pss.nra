@@ -1,0 +1,215 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.Signer;
+let.promote _ = import:Std.Crypto.Verifier;
+let asym_hash = import:Std.Crypto.Internal.AsymHash;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let entropy = import:Std.Crypto.Random.Entropy;
+let error = import:Std.Core.Error;
+let mp = import:Std.Crypto.Internal.Mp;
+let rsa = import:Std.Crypto.Asymmetric.Rsa;
+let rsa_core = import:Std.Crypto.Internal.RsaCore;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief RSASSA-PSS signatures of RFC 8017, section 8.1, with MGF1 over the same hash (Stdlib.md section
+/// 21.8).
+///
+/// The hash is SHA-256 unless another SHA-2 or SHA-3 hash is chosen, and the salt length is the hash length
+/// unless another is chosen (0 gives deterministic signatures). The salt comes from a `ChaCha20Drbg` given to
+/// the signer, or else from `Entropy.os_bytes`; `sign_with_salt` takes it directly for known-answer tests.
+/// Verification takes a fixed salt length, or any length with `RsaPssVerifier(key, hash, -1)`. A signature
+/// is exactly the modulus length; any other length is false.
+/// @see [Std.Crypto.Asymmetric.RsaPss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-RsaPss)
+#Since("0.3.0")
+export let RsaPss = module (
+    /// @brief Signs with RSASSA-PSS; it also verifies against the matching public key.
+    #[Final, Since("0.3.0")]
+    export let RsaPssSigner = class implements Signer<rsa.RsaPrivateKey, uint8[list]>,
+        Verifier<rsa.RsaPublicKey, uint8[list]> (
+        last key: rsa.RsaPrivateKey;
+        /// @brief The hash of the message and of MGF1.
+        export last hash: Algorithm;
+        /// @brief The salt length in bytes.
+        export last salt_length: int;
+        let generator: drbg.ChaCha20Drbg;
+        let has_generator: bool = false;
+
+        /// @brief A signer with SHA-256 and a 32-byte salt, or the given hash and salt length (from 0), with salts
+        /// from `Entropy.os_bytes`, or from the given generator. Another hash or a negative salt length traps.
+        export let init = func(private_key: rsa.RsaPrivateKey) {
+            key = private_key;
+            hash = Algorithm.Sha256;
+            salt_length = 32;
+            check();
+        } or func(private_key: rsa.RsaPrivateKey, digest: Algorithm, salt_bytes: int) {
+            key = private_key;
+            hash = digest;
+            salt_length = salt_bytes;
+            check();
+        } or func(private_key: rsa.RsaPrivateKey, digest: Algorithm, salt_bytes: int, random: drbg.ChaCha20Drbg) {
+            key = private_key;
+            hash = digest;
+            salt_length = salt_bytes;
+            generator = random;
+            has_generator = true;
+            check();
+        };
+
+        let check = func {
+            crypto_policy.require(Algorithm.RsaPss);
+            asym_hash.check(hash);
+            crypto_policy.require(hash);
+            if (salt_length < 0) {
+                trap_with_message("invalid argument: RSA-PSS salt length must not be negative");
+            }
+        };
+
+        /// @brief `Algorithm.RsaPss`.
+        export let algorithm = func -> Algorithm => Algorithm.RsaPss;
+
+        /// @brief The public key.
+        export let public_key = func -> rsa.RsaPublicKey => key.public_key;
+
+        /// @brief The signature with the given salt. A wiped key or a salt of the wrong length traps.
+        #NoDiscard
+        export let sign_with_salt = func(message: uint8[list], salt: uint8[list]) -> Result<uint8[list]> {
+            last core = key.core;
+            core.require_live();
+            if (salt.length != salt_length) {
+                trap_with_message("invalid argument: RSA-PSS salt must be " .. salt_length.to_string() .. " bytes");
+            }
+            last em = rsa_core.pss_encode(hash, asym_hash.digest(hash, message), salt, core.public_core.bits - 1);
+            last y = core.apply(rsa_core.os2ip_below(core.public_core, em));
+            if (y.length == 0) {
+                return Result<uint8[list]>.Err(error.custom("crypto.fault", "RSA private operation failed its check"));
+            }
+            return Result<uint8[list]>.Ok(rsa_core.i2osp(core.public_core, y));
+        };
+
+        /// @brief The signature with a fresh salt. Fails when the entropy source or the private operation's
+        /// check fails. A wiped key traps before requesting a salt.
+        #NoDiscard
+        export let try_sign = func(message: uint8[list]) -> Result<uint8[list]> {
+            key.core.require_live();
+            last salt: Result<uint8[list]> = has_generator ? Result<uint8[list]>.Ok(generator.fill(salt_length))
+                : entropy.os_bytes(salt_length);
+            match (salt) {
+                Result.Ok(bytes) => {
+                    return sign_with_salt(message, bytes);
+                },
+                Result.Err(e) => {
+                    return Result<uint8[list]>.Err(e);
+                },
+            }
+        };
+
+        /// @brief The signature with a fresh salt. Traps with `unavailable: ...` when `try_sign` fails.
+        export let sign = func(message: uint8[list]) -> uint8[list] {
+            match (try_sign(message)) {
+                Result.Ok(signature) => {
+                    return signature;
+                },
+                Result.Err(e) => {
+                    trap_with_message("unavailable: RSA-PSS signing failed: " .. e.to_string());
+                },
+            }
+        };
+
+        /// @brief Whether the signature is valid for the message under the matching public key.
+        export let verify = func(message: uint8[list], signature: uint8[list]) -> bool =>
+            new RsaPssVerifier(key.public_key, hash, salt_length).verify(message, signature);
+
+        export let.override to_string = func -> string => "RsaPssSigner(<redacted>)";
+    );
+
+    /// @brief Verifies RSASSA-PSS signatures under a public key.
+    #[Final, Since("0.3.0")]
+    export let RsaPssVerifier = class implements Verifier<rsa.RsaPublicKey, uint8[list]> (
+        last key: rsa.RsaPublicKey;
+        /// @brief The hash of the message.
+        export last hash: Algorithm;
+        /// @brief The digest used by MGF1.
+        /// @see [Std.Crypto.Asymmetric.RsaPss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-RsaPss)
+        #Since("0.3.0")
+        export last mask_hash: Algorithm;
+        /// @brief The salt length, or -1 for any.
+        export last salt_length: int;
+
+        /// @brief A verifier with SHA-256 and a 32-byte salt, or the given digest and salt length (-1 accepts
+        /// any). MGF1 uses the message digest unless an explicit MGF1 digest is supplied.
+        /// @see [Std.Crypto.Asymmetric.RsaPss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-RsaPss)
+        #Since("0.3.0")
+        export let init = func(public_key: rsa.RsaPublicKey) {
+            key = public_key;
+            hash = Algorithm.Sha256;
+            mask_hash = Algorithm.Sha256;
+            salt_length = 32;
+            check();
+        } or func(public_key: rsa.RsaPublicKey, digest: Algorithm, salt_bytes: int) {
+            key = public_key;
+            hash = digest;
+            mask_hash = digest;
+            salt_length = salt_bytes;
+            check();
+        } or func(public_key: rsa.RsaPublicKey, digest: Algorithm, mgf_digest: Algorithm, salt_bytes: int) {
+            key = public_key;
+            hash = digest;
+            mask_hash = mgf_digest;
+            salt_length = salt_bytes;
+            check();
+        };
+
+        let check = func {
+            crypto_policy.require(Algorithm.RsaPss);
+            asym_hash.check(hash);
+            crypto_policy.require(hash);
+            asym_hash.check(mask_hash);
+            crypto_policy.require(mask_hash);
+            if (salt_length < -1) {
+                trap_with_message("invalid argument: RSA-PSS salt length must be -1 or more");
+            }
+        };
+
+        /// @brief `Algorithm.RsaPss`.
+        export let algorithm = func -> Algorithm => Algorithm.RsaPss;
+
+        /// @brief The public key.
+        export let public_key = func -> rsa.RsaPublicKey => key;
+
+        /// @brief Whether the signature is valid for the message.
+        export let verify = func(message: uint8[list], signature: uint8[list]) -> bool =>
+            verify_digest(asym_hash.digest(hash, message), signature);
+
+        /// @brief Whether the signature is valid for a digest computed elsewhere.
+        #NoDiscard
+        export let verify_digest = func(digest: uint8[list], signature: uint8[list]) -> bool {
+            last core = key.core;
+            if (signature.length != core.k || digest.length != asym_hash.output_length(hash)) {
+                return false;
+            }
+            last s = rsa_core.os2ip_below(core, signature);
+            if (s.length == 0) {
+                return false;
+            }
+            last em_bits = core.bits - 1;
+            last em = mp_bytes(core.apply(s), (em_bits + 7) / 8);
+            return rsa_core.pss_verify(hash, mask_hash, digest, em, em_bits, salt_length);
+        };
+
+        export let.override to_string = func -> string => "RsaPssVerifier(" .. key.bits().to_string() .. " bits)";
+    );
+
+    /// @brief I2OSP(value, length) of RFC 8017, section 4.1, for a value of k bytes, or an empty list when the
+    /// value needs more than `length` bytes.
+    let mp_bytes = func(value: uint32[list], length: int) -> uint8[list] {
+        last full = mp.to_bytes_be(value, value.length * 4);
+        for (let i = 0; i < full.length - length; i++) {
+            if (full[i] != 0) {
+                return new;
+            }
+        }
+        return words.slice(full, full.length - length, full.length);
+    };
+);

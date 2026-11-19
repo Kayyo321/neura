@@ -35,15 +35,15 @@ The following public declarations are taken from the module source; each links t
   Applies the function only to a present payload and returns its optional result. Tagged `#NoDiscard`.
 - **Optional** · [`export let filter = func<T>(o: Optional<T>, keep: func(T) -> bool) -> Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L67)
   Keeps the present payload only when it passes the predicate. Tagged `#NoDiscard`.
-- **Optional** · [`export let value_or_else = func<T>(o: Optional<T>, make: func() -> T) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L82)
+- **Optional** · [`export let value_or_else = func<T>(o: Optional<T>, make: func() -> T) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L79)
   Calls `make` only for None.
-- **Optional** · [`export let or_else = func<T>(o: Optional<T>, other: func() -> Optional<T>) -> Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L89)
+- **Optional** · [`export let or_else = func<T>(o: Optional<T>, other: func() -> Optional<T>) -> Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L86)
   Calls the fallback only for None and returns its optional result. Tagged `#NoDiscard`.
-- **Optional** · [`export let equals = func<T>(a: Optional<T>, b: Optional<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L95)
+- **Optional** · [`export let equals = func<T>(a: Optional<T>, b: Optional<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L92)
   Both None, or both Some with equal values.
-- **Optional** · [`export let hash = func<T>(o: Optional<T>) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L110)
+- **Optional** · [`export let hash = func<T>(o: Optional<T>) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L107)
   0 for None, otherwise Hash.combine(1, the value's hash).
-- **Optional** · [`export let to_string = func<T>(o: Optional<T>) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L116)
+- **Optional** · [`export let to_string = func<T>(o: Optional<T>) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L113)
   Formats None or the text of a present payload wrapped in Some.
 <!-- END SOURCE API -->
 

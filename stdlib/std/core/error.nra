@@ -28,6 +28,9 @@ export let Error = module (
         export let code = func() -> string;
         /// @brief Returns the detail's human-readable message.
         export let message = func() -> string;
+
+        /// @brief Formats the detail as its code and message.
+        export let.override to_string = func -> string => code() .. ": " .. message();
     );
 
     /// @brief Stores a custom error's code and message as strings.
@@ -54,12 +57,11 @@ export let Error = module (
         export let.override message = func -> string => message_text;
 
         /// @brief Two simple details are equal when their code and message are.
-        #Pure
+        /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is SimpleDetail)) {
+            if (other is not detail: SimpleDetail) {
                 return false;
             }
-            last detail = other as SimpleDetail;
             return code_text == detail.code() && message_text == detail.message();
         };
 
@@ -70,17 +72,51 @@ export let Error = module (
 
         /// @brief Returns the formatted custom error detail.
         #Pure
-        export let.override to_string = func -> string => code_text + ": " + message_text;
+        export let.override to_string = func -> string => code_text .. ": " .. message_text;
     );
 
-    /// @brief Represents an expected failure and its category-specific context.
+    /// @brief The link from a Context error to the error that caused it. An enum value is stored inline, so
+    /// an Error cannot hold another Error directly; the class holds it by reference instead.
+    #[Final, Since("0.3.0")]
+    export let ErrorLink = class (
+        /// @brief The error that the context describes.
+        export last cause: Error;
+
+        /// @brief Links to the given cause.
+        export let init = func(value: Error) {
+            cause = value;
+        };
+
+        /// @brief Names the link and shows its cause's message.
+        export let.override to_string = func -> string => "ErrorLink(" .. message(cause) .. ")";
+    );
+
+    /// @brief The link from a PortableError context to its cause. It is #Immutable, like PortableError, so
+    /// that a portable error stays transferable.
+    #[Final, Immutable, ThreadSafe, Since("0.3.0")]
+    export let PortableErrorLink = class (
+        /// @brief The portable error that the context describes.
+        export last cause: PortableError;
+
+        /// @brief Links to the given cause.
+        export let init = func(value: PortableError) {
+            cause = value;
+        };
+
+        /// @brief Names the link and shows its cause's message.
+        export let.override to_string = func -> string =>
+            "PortableErrorLink(" .. message(from_portable(cause)) .. ")";
+    );
+
+    /// @brief Represents an expected failure and its category-specific context. A Context error reaches its
+    /// cause through an ErrorLink: match Context { message, cause } and read cause.cause.
     #Since("0.1.0")
     export let Error = enum (
         Io { kind: IoErrorKind, message: string, path: string },
         Parse { kind: ParseErrorKind, offset: int, message: string },
         Encoding { offset: int, message: string },
         Custom(ErrorDetail),
-        Context { message: string, cause: Error }
+        Context { message: string, cause: ErrorLink }
     );
 
     /// @brief A transferable copy of an Error, so that a failure can cross a channel or a spawn
@@ -93,7 +129,7 @@ export let Error = module (
         Parse { kind: ParseErrorKind, offset: int, message: string },
         Encoding { offset: int, message: string },
         Custom { code: string, message: string },
-        Context { message: string, cause: PortableError }
+        Context { message: string, cause: PortableErrorLink }
     );
 
     /// @brief A Custom error holding a SimpleDetail.
@@ -104,7 +140,7 @@ export let Error = module (
     /// @brief Wraps an error with a message that describes the operation that failed.
     #[Pure, ThreadSafe]
     export let context = func(cause: Error, text: string) -> Error =>
-        Error.Context { message: text, cause: cause };
+        Error.Context { message: text, cause: new ErrorLink(cause) };
 
     /// @brief The transferable copy of an error. A Custom error keeps its code and message but loses its
     /// ErrorDetail object, so a subclass's other members are gone; every other variant is copied as it is.
@@ -115,7 +151,7 @@ export let Error = module (
         Error.Encoding { offset, message: text } => PortableError.Encoding { offset: offset, message: text },
         Error.Custom(detail) => PortableError.Custom { code: detail.code(), message: detail.message() },
         Error.Context { message: text, cause } =>
-            PortableError.Context { message: text, cause: to_portable(cause) },
+            PortableError.Context { message: text, cause: new PortableErrorLink(to_portable(cause.cause)) },
     };
 
     /// @brief The error a portable copy stands for. A Custom copy comes back holding a SimpleDetail with the
@@ -128,7 +164,7 @@ export let Error = module (
         PortableError.Encoding { offset, message: text } => Error.Encoding { offset: offset, message: text },
         PortableError.Custom { code, message: text } => custom(code, text),
         PortableError.Context { message: text, cause } =>
-            Error.Context { message: text, cause: from_portable(cause) },
+            Error.Context { message: text, cause: new ErrorLink(from_portable(cause.cause)) },
     };
 
     /// @brief Returns the spelling of an I/O error category.
@@ -142,18 +178,18 @@ export let Error = module (
     /// @brief Formats an error with its category and context.
     export let message = func(e: Error) -> string => match (e) {
         Error.Io { kind, message: text, path } => io_text(kind, text, path),
-        Error.Parse { kind: _, offset, message: text } => "parse error at " + offset.to_string() + ": " + text,
-        Error.Encoding { offset, message: text } => "invalid encoding at " + offset.to_string() + ": " + text,
+        Error.Parse { kind: _, offset, message: text } => "parse error at " .. offset.to_string() .. ": " .. text,
+        Error.Encoding { offset, message: text } => "invalid encoding at " .. offset.to_string() .. ": " .. text,
         Error.Custom(detail) => detail.message(),
-        Error.Context { message: text, cause } => text + ": " + message(cause),
+        Error.Context { message: text, cause } => text .. ": " .. message(cause.cause),
     };
 
     /// @brief Formats an I/O failure with its kind and optional path.
     let io_text = func(kind: IoErrorKind, text: string, path: string) -> string {
         if (path == "") {
-            return io_kind_name(kind) + ": " + text;
+            return io_kind_name(kind) .. ": " .. text;
         }
-        return io_kind_name(kind) + ": " + text + " (" + path + ")";
+        return io_kind_name(kind) .. ": " .. text .. " (" .. path .. ")";
     };
 
     /// @brief Follows Context causes to the end.
@@ -163,7 +199,7 @@ export let Error = module (
         do {
             match (current) {
                 Error.Context { message: _, cause } => {
-                    current = cause;
+                    current = cause.cause;
                 },
                 _ => {
                     return current;
@@ -175,14 +211,14 @@ export let Error = module (
     /// @brief The error, then each cause in order.
     #[Pure, ThreadSafe]
     export let chain = func(e: Error) -> Error[list] {
-        last result: Error[list] = [];
+        last result: Error[list] = new;
         let current = e;
         let more = true;
         while (more) {
             result.append(current);
             match (current) {
                 Error.Context { message: _, cause } => {
-                    current = cause;
+                    current = cause.cause;
                 },
                 _ => {
                     more = false;
@@ -200,7 +236,9 @@ export let Error = module (
                     Error.Io { kind: other_kind, message: other_text, path: other_path } => {
                         return kind == other_kind && text == other_text && path == other_path;
                     },
-                    _ => { return false; },
+                    _ => {
+                        return false;
+                    },
                 }
             },
             Error.Parse { kind, offset, message: text } => {
@@ -208,7 +246,9 @@ export let Error = module (
                     Error.Parse { kind: other_kind, offset: other_offset, message: other_text } => {
                         return kind == other_kind && offset == other_offset && text == other_text;
                     },
-                    _ => { return false; },
+                    _ => {
+                        return false;
+                    },
                 }
             },
             Error.Encoding { offset, message: text } => {
@@ -216,21 +256,29 @@ export let Error = module (
                     Error.Encoding { offset: other_offset, message: other_text } => {
                         return offset == other_offset && text == other_text;
                     },
-                    _ => { return false; },
+                    _ => {
+                        return false;
+                    },
                 }
             },
             Error.Custom(detail) => {
                 match (b) {
-                    Error.Custom(other_detail) => { return detail === other_detail; },
-                    _ => { return false; },
+                    Error.Custom(other_detail) => {
+                        return detail === other_detail;
+                    },
+                    _ => {
+                        return false;
+                    },
                 }
             },
             Error.Context { message: text, cause } => {
                 match (b) {
                     Error.Context { message: other_text, cause: other_cause } => {
-                        return text == other_text && equals(cause, other_cause);
+                        return text == other_text && equals(cause.cause, other_cause.cause);
                     },
-                    _ => { return false; },
+                    _ => {
+                        return false;
+                    },
                 }
             },
         }
@@ -246,7 +294,7 @@ export let Error = module (
             hashing.combine(hashing.combine(2, offset.hash_code()), text.hash_code()),
         Error.Custom(detail) => hashing.combine(3, detail.hash_code()),
         Error.Context { message: text, cause } =>
-            hashing.combine(hashing.combine(4, text.hash_code()), hash(cause)),
+            hashing.combine(hashing.combine(4, text.hash_code()), hash(cause.cause)),
     };
 
     /// @brief The same text as message.

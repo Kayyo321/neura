@@ -4,6 +4,10 @@
 /// @see [Std.Concurrent.Parallel](https://github.com/Kayyo321/neura/wiki/Stdlib-Concurrent-Parallel)
 #Since("0.1.0")
 export let Parallel = module (
+    // ItemLimits keeps identity equality: an `equals(other: class)` reads `other`, which can run any class's
+    // getter (docs/design/Hooks030.md, Events), so this #ThreadSafe class would fail E0608 in every program
+    // that declares a getter that is not task-safe.
+
     /// @brief The limits each item of a map runs under, the same under any number of workers. An item that
     /// exceeds one traps as that item. The fields are read-only.
     #[Final, Immutable, ThreadSafe]
@@ -25,6 +29,10 @@ export let Parallel = module (
             max_steps = steps;
             max_heap_cells = heap_cells;
         };
+
+        /// @brief Formats the limits with both bounds.
+        export let.override to_string = func -> string =>
+            "ItemLimits(" .. max_steps.to_string() .. " steps, " .. max_heap_cells.to_string() .. " heap cells)";
     );
 
     /// @brief Limits of the given steps and heap cells for each item.
@@ -37,9 +45,9 @@ export let Parallel = module (
     /// reports the trap of the lowest index.
     #NoDiscard(reason: "the worker has no effects, so the results are all a map gives")
     export let map = func<T, U>(items: T[], worker: func(T) -> U, limits: ItemLimits) -> U[] {
-        last started: uint64[list] = [];
+        last started: uint64[list] = new;
         for (let item: T in items) {
-            started.append(start<U>(func -> U => worker(item), limits.max_steps, limits.max_heap_cells));
+            started.append(start<U>(new func -> U => worker(item), limits.max_steps, limits.max_heap_cells));
         }
         return finish<U>(started);
     };

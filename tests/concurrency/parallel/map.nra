@@ -46,7 +46,7 @@ let checksum = func(text: string) -> uint32 => crc32s.of(strings.to_bytes(text))
 let digest_length = func(text: string) -> int => sha256s.of(strings.to_bytes(text)).length;
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let starts: int[] = [27, 97, 871, 6171, 77031, 837799, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
         let lengths = parallel.map<int, int>(starts, collatz, parallel.limits(10000000, 100000));
         let line = "";
@@ -64,7 +64,7 @@ export let Main = module : program.Entry (
         }
 
         let offset = 100;
-        let shifted = parallel.map<int, int>([1, 2, 3], func(x: int) -> int => x + offset, parallel.limits(100000, 100000));
+        let shifted = parallel.map<int, int>([1, 2, 3], new func(x: int) -> int => x + offset, parallel.limits(100000, 100000));
         console.print_line((shifted[0] + shifted[1] + shifted[2]).to_string());
 
         let words: string[] = ["ab", "", "xyz"];

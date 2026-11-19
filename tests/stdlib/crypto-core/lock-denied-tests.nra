@@ -1,0 +1,38 @@
+// test-options: --gpu=off --deny-entropy
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Crypto.Core.SecretBytes;
+let test = import:Std.Test;
+
+let LockDeniedTests = module (
+    export let test_denial_preserves_original = func {
+        last secret = new SecretBytes(new([9, 8, 7]));
+        last original = secret.expose();
+        match (test.assert_err(secret.try_lock())) {
+            Error.Io { kind, message: _, path: _ } => {
+                test.assert(kind == IoErrorKind.CapabilityDenied);
+            },
+            _ => {
+                test.fail("expected a capability error");
+            },
+        }
+        test.assert_equal_int32(9, original[0] as int);
+        test.assert(secret.ct_equals(new SecretBytes(new([9, 8, 7]))));
+        test.assert(!secret.is_wiped());
+        secret.wipe();
+        test.assert_equal_int32(0, original[0] as int);
+    };
+
+    export let test_invalid_length_is_a_result = func {
+        last secret = new SecretBytes(new);
+        match (test.assert_err(secret.try_lock())) {
+            Error.Io { kind, message: _, path: _ } => {
+                test.assert(kind == IoErrorKind.InvalidInput);
+            },
+            _ => {
+                test.fail("expected a size error");
+            },
+        }
+        test.assert_equal_int32(0, secret.length());
+        test.assert(!secret.is_wiped());
+    };
+);

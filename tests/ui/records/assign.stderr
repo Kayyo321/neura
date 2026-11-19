@@ -1,0 +1,12 @@
+error[E0445]: cannot assign to 'last' field 'x' here
+ --> $DIR/assign.nra:4:5
+  |
+2 | let P = record (x: int, y: int);
+  |                 - declared here without a value
+3 | let f = func(p: P) {
+4 |     p.x = 3;
+  |     ^^^ only an 'init' of its class can assign it, once
+  |
+  = help: assign it in each 'init' as 'x = value' or 'instance.x = value', outside any closure
+
+For more information about this error, try `neura explain E0445`.

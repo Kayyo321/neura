@@ -682,7 +682,7 @@ NEURA_TEST(vm, list_versions_count_structural_changes) {
 let program = import:Std.Program;
 let App = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
-        let values: int32[list] = [1, 2];
+        let values: int32[list] = new([1, 2]);
         let seen: int32 = 0;
         for (let value in values) {
             values[1] = 5;
@@ -704,6 +704,100 @@ let App = module:program.Entry (
     check_equal(run.output, std::string("element writes keep the version\n"), "output before the trap");
     check(!run.result.completed && run.result.trap.kind == nvm::TrapKind::Program && run.result.trap.reason == 5,
           "appending during for-each traps with reason 5");
+}
+
+} // namespace neura::testing
+
+namespace neura::testing {
+
+// docs/design/Expressions030.md, String chains, Allocation: a chain of k
+// runtime string operands creates one text entry and copies its B bytes
+// once (NVR 1.9 concat-text); the same chains written with `+` create
+// k - 1 entries. Built optimized and unoptimized. The counts are the heap's
+// test-only counters (RunResult::text_allocations), not the heap peak.
+NEURA_TEST(vm, string_chains_allocate_once) {
+    const auto directory = fs::temp_directory_path() / "neura-vm-tests";
+    fs::create_directories(directory);
+    const auto program = [&](std::string_view name, std::string_view op) {
+        const auto chain = [&](std::initializer_list<std::string_view> operands) {
+            std::string text;
+            for (const auto operand : operands) {
+                if (!text.empty()) text += " " + std::string(op) + " ";
+                text += operand;
+            }
+            return text;
+        };
+        const auto path = directory / (std::string(name) + ".nra");
+        std::ofstream out(path);
+        out << "let program = import:Std.Program;\n\n"
+            << "let two = func(a: string, b: string) -> string => " << chain({"a", "b"}) << ";\n"
+            << "let four = func(a: string, b: string, c: string, d: string) -> string => "
+            << chain({"a", "b", "c", "d"}) << ";\n"
+            << "let sixteen = func(a: string, b: string) -> string => "
+            << chain({"a", "b", "a", "b", "a", "b", "a", "b", "a", "b", "a", "b", "a", "b", "a", "b"}) << ";\n\n"
+            << "export let Main = module : program.Entry (\n"
+            << "    export let.override main = func(args: string[]) -> program.ExitCode {\n"
+            << "        if (two(\"ab\", \"\u00e9\") != \"ab\u00e9\") { return program.ExitCode.Failure; }\n"
+            << "        if (four(\"a\", \"\", \"bc\", \"d\") != \"abcd\") { return program.ExitCode.Failure; }\n"
+            << "        if (sixteen(\"x\", \"yz\") != \"xyzxyzxyzxyzxyzxyzxyzxyz\") { return program.ExitCode.Failure; }\n"
+            << "        return program.ExitCode.Ok;\n"
+            << "    };\n"
+            << ");\n";
+        return path;
+    };
+    // B = 4 + 4 + 24 bytes over the three chains.
+    const auto chains = program("text-chains", "..");
+    const auto plus = program("text-plus", "+");
+    for (const bool optimize : {true, false}) {
+        const auto mode = std::string(optimize ? " (optimized)" : " (unoptimized)");
+        const auto image = build_program({chains}, {}, optimize);
+        const auto run = run_captured(image);
+        check(run.result.completed && run.result.status == 0, "chains" + mode + ": " + describe_trap(run.result, image));
+        check_equal(run.result.text_allocations, std::uint64_t{3}, "one text allocation per chain" + mode);
+        check_equal(run.result.text_bytes_copied, std::uint64_t{32}, "each result byte copied once" + mode);
+        const auto added = build_program({plus}, {}, optimize);
+        const auto control = run_captured(added);
+        check(control.result.completed && control.result.status == 0,
+              "plus" + mode + ": " + describe_trap(control.result, added));
+        check_equal(control.result.text_allocations, std::uint64_t{1 + 3 + 15}, "'+' allocates k - 1 times" + mode);
+    }
+}
+
+// Edge case 41: a chain whose one allocation exceeds the heap budget traps
+// with resource exhaustion after every operand ran, and stores nothing.
+NEURA_TEST(vm, string_chain_heap_budget_traps_after_operands) {
+    const auto path = fs::temp_directory_path() / "neura-vm-tests" / "text-chain-budget.nra";
+    fs::create_directories(path.parent_path());
+    std::ofstream(path) << R"(let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let note = func(text: string, label: string) -> string {
+    console.print_line(label);
+    return text;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let block = "0123456789012345678901234567890123456789012345678901234567890123";
+        let result = note(block, "first") .. note(block, "second") .. note(block, "third") .. block .. block .. block
+            .. block .. block .. block .. block .. block .. block .. block .. block .. block .. block;
+        console.print_line("stored");
+        return program.ExitCode.Ok;
+    };
+);
+)";
+    const auto image = build_program({path});
+    const auto free = run_captured(image);
+    check(free.result.completed, describe_trap(free.result, image));
+    check_equal(free.output, std::string("first\nsecond\nthird\nstored\n"), "unlimited run");
+    nvm::RunLimits limits;
+    // The chain's 1,024-byte result is the run's largest allocation (about
+    // 130 cells): a budget 64 cells under the peak fails there.
+    limits.max_heap_cells = free.result.peak_heap_cells - 64;
+    const auto limited = run_captured(image, limits);
+    check(!limited.result.completed && limited.result.trap.kind == TrapKind::HeapLimit,
+          "the chain's allocation exceeds the budget: " + describe_trap(limited.result, image));
+    check_equal(limited.output, std::string("first\nsecond\nthird\n"), "every operand ran before the trap");
 }
 
 } // namespace neura::testing

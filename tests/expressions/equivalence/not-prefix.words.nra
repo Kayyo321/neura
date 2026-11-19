@@ -1,0 +1,31 @@
+// `not` as a prefix operator (docs/design/Expressions030.md, Negation
+// words, edge case 1), built against not-prefix.expanded.nra, the same
+// program written with `!`.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Shape = class (
+    export let sides: int = 0;
+);
+let Circle = class : Shape (
+    export let radius: int = 1;
+);
+
+let describe = func(shape: Shape, a: bool, b: bool) -> string {
+    let parts = "";
+    parts = parts + " " + (not a).to_string();
+    parts = parts + " " + (not (a && b)).to_string();
+    parts = parts + " " + (not not a).to_string();
+    parts = parts + " " + (!not a).to_string();
+    parts = parts + " " + (not a && b).to_string();
+    parts = parts + " " + (not a == b).to_string();
+    return parts;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(describe(new Circle(), true, false));
+        console.print_line(describe(new Shape(), false, true));
+        return program.ExitCode.Ok;
+    };
+);

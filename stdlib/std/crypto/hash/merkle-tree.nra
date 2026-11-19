@@ -1,0 +1,245 @@
+let.promote _ = import:Std.Crypto.Algorithm;
+let constant_time = import:Std.Crypto.Core.ConstantTime;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let.promote _ = import:Std.Crypto.StreamingDigest;
+
+/// @brief An append-only Merkle tree with inclusion and consistency proofs, hashed as in RFC 6962 and RFC 9162,
+/// section 2.1, over any digest (Stdlib.md section 21.4).
+///
+/// A leaf hash is H(0x00 || data) and a node hash H(0x01 || left || right); the tree of n leaves splits at the
+/// largest power of two below n, and the empty tree's root is H(""). Proof generation follows the definitions
+/// of PATH and PROOF; verification follows the algorithms of RFC 9162, sections 2.1.3.2 and 2.1.4.2, and
+/// compares hashes with ConstantTime.ct_eq. Every root is recomputed from the stored leaf hashes, so a root or
+/// proof costs time proportional to the tree size.
+/// @see [Std.Crypto.Hash.MerkleTree](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Hash-MerkleTree)
+#Since("0.3.0")
+export let MerkleTree = module (
+    let digest_of = func<H: StreamingDigest<H>>(prefix: uint8, a: uint8[list], b: uint8[list]) -> uint8[list] {
+        let digest = H.create();
+        digest.update(new([prefix]));
+        digest.update(a);
+        digest.update(b);
+        return digest.finish();
+    };
+
+    /// @brief H(0x00 || data).
+    #[NoDiscard, Since("0.3.0")]
+    export let leaf_hash = func<H: StreamingDigest<H>>(data: uint8[list]) -> uint8[list] => digest_of<H>(0, data, new);
+
+    /// @brief H(0x01 || left || right).
+    #[NoDiscard, Since("0.3.0")]
+    export let node_hash = func<H: StreamingDigest<H>>(left: uint8[list], right: uint8[list]) -> uint8[list] =>
+        digest_of<H>(1, left, right);
+
+    /// @brief The largest power of two below n (n at least 2).
+    let split = func(n: int) -> int {
+        let k = 1;
+        while (k * 2 < n) {
+            k *= 2;
+        }
+        return k;
+    };
+
+    /// @brief MTH over leaves[start, end).
+    let subtree = func<H: StreamingDigest<H>>(leaves: uint8[list][list], start: int, end: int) -> uint8[list] {
+        last n = end - start;
+        if (n == 0) {
+            let digest = H.create();
+            return digest.finish();
+        }
+        if (n == 1) {
+            return leaves[start];
+        }
+        last k = split(n);
+        return node_hash<H>(subtree<H>(leaves, start, start + k), subtree<H>(leaves, start + k, end));
+    };
+
+    /// @brief An append-only tree of leaf hashes over the digest H.
+    #[Final, Since("0.3.0")]
+    export let MerkleTree = class<H: StreamingDigest<H>> (
+        /// @brief The leaf hashes, in order.
+        let leaves: uint8[list][list] = new;
+
+        /// @brief An empty tree. Checks the policy for MerkleTree (and, at the first hash, for H).
+        export let init = func {
+            crypto_policy.require(Algorithm.MerkleTree);
+        };
+
+        /// @brief The number of leaves.
+        export let size = func -> int => leaves.length;
+
+        /// @brief Appends a leaf with the data and returns its index.
+        export let append = func(data: uint8[list]) -> int {
+            leaves.append(leaf_hash<H>(data));
+            return leaves.length - 1;
+        };
+
+        /// @brief The leaf hash at the index.
+        export let leaf = func(index: int) -> uint8[list] => leaves[index];
+
+        /// @brief The root of the whole tree.
+        export let root = func -> uint8[list] => subtree<H>(leaves, 0, leaves.length);
+
+        /// @brief The root of the tree of the first `tree_size` leaves. Traps with "invalid argument: tree
+        /// size" unless 0 <= tree_size <= size().
+        export let root_at = func(tree_size: int) -> uint8[list] {
+            check_size(tree_size);
+            return subtree<H>(leaves, 0, tree_size);
+        };
+
+        /// @brief The audit path of leaf `index` in the tree of the first `tree_size` leaves (RFC 6962 PATH).
+        /// Traps unless index < tree_size <= size().
+        export let inclusion_proof = func(index: int, tree_size: int) -> uint8[list][list] {
+            check_size(tree_size);
+            if (index < 0 || index >= tree_size) {
+                trap_with_message("invalid argument: leaf index");
+            }
+            let proof: uint8[list][list] = new;
+            path(index, 0, tree_size, proof);
+            return proof;
+        };
+
+        /// @brief The proof that the tree of `old_size` leaves is a prefix of the tree of `new_size` leaves
+        /// (RFC 6962 PROOF). Empty when old_size is 0 or equals new_size. Traps unless
+        /// 0 <= old_size <= new_size <= size().
+        export let consistency_proof = func(old_size: int, new_size: int) -> uint8[list][list] {
+            check_size(new_size);
+            if (old_size < 0 || old_size > new_size) {
+                trap_with_message("invalid argument: tree size");
+            }
+            let proof: uint8[list][list] = new;
+            if (old_size > 0 && old_size < new_size) {
+                subproof(old_size, 0, new_size, true, proof);
+            }
+            return proof;
+        };
+
+        let check_size = func(tree_size: int) {
+            if (tree_size < 0 || tree_size > leaves.length) {
+                trap_with_message("invalid argument: tree size");
+            }
+        };
+
+        // PATH(m, D[start:end]); appends in proof order (deepest first).
+        let path = func(m: int, start: int, end: int, proof: uint8[list][list]) {
+            last n = end - start;
+            if (n <= 1) {
+                return;
+            }
+            last k = split(n);
+            if (m < k) {
+                path(m, start, start + k, proof);
+                proof.append(subtree<H>(leaves, start + k, end));
+            } else {
+                path(m - k, start + k, end, proof);
+                proof.append(subtree<H>(leaves, start, start + k));
+            }
+        };
+
+        // SUBPROOF(m, D[start:end], b).
+        let subproof = func(m: int, start: int, end: int, whole: bool, proof: uint8[list][list]) {
+            last n = end - start;
+            if (m == n) {
+                if (not whole) {
+                    proof.append(subtree<H>(leaves, start, end));
+                }
+                return;
+            }
+            last k = split(n);
+            if (m <= k) {
+                subproof(m, start, start + k, whole, proof);
+                proof.append(subtree<H>(leaves, start + k, end));
+            } else {
+                subproof(m - k, start + k, end, false, proof);
+                proof.append(subtree<H>(leaves, start, start + k));
+            }
+        };
+
+        export let.override to_string = func -> string => "MerkleTree(" .. leaves.length.to_string() .. " leaves)";
+    );
+
+    /// @brief Whether `proof` shows that the leaf hash is at `index` in the tree of `tree_size` leaves with
+    /// the root (RFC 9162, section 2.1.3.2).
+    #[NoDiscard, Since("0.3.0")]
+    export let verify_inclusion = func<H: StreamingDigest<H>>(leaf: uint8[list], index: int, tree_size: int,
+        proof: uint8[list][list], root: uint8[list]) -> bool {
+        if (index < 0 || index >= tree_size) {
+            return false;
+        }
+        let fn = index;
+        let sn = tree_size - 1;
+        let r = leaf;
+        for (let p in proof) {
+            if (sn == 0) {
+                return false;
+            }
+            if (fn % 2 == 1 || fn == sn) {
+                r = node_hash<H>(p, r);
+                while (fn % 2 == 0 && fn != 0) {
+                    fn = fn / 2;
+                    sn = sn / 2;
+                }
+            } else {
+                r = node_hash<H>(r, p);
+            }
+            fn = fn / 2;
+            sn = sn / 2;
+        }
+        return sn == 0 && constant_time.ct_eq(r, root);
+    };
+
+    /// @brief Whether `proof` shows that the tree of `old_size` leaves with `old_root` is a prefix of the tree
+    /// of `new_size` leaves with `new_root` (RFC 9162, section 2.1.4.2). Equal sizes need an empty proof and
+    /// equal roots; an old size of 0 needs an empty proof.
+    #[NoDiscard, Since("0.3.0")]
+    export let verify_consistency = func<H: StreamingDigest<H>>(old_size: int, new_size: int, old_root: uint8[list],
+        new_root: uint8[list], proof: uint8[list][list]) -> bool {
+        if (old_size < 0 || old_size > new_size) {
+            return false;
+        }
+        if (old_size == new_size) {
+            return proof.length == 0 && constant_time.ct_eq(old_root, new_root);
+        }
+        if (old_size == 0) {
+            return proof.length == 0;
+        }
+        if (proof.length == 0) {
+            return false;
+        }
+        let path: uint8[list][list] = new;
+        // An exact power of two: the old root is the first node of the path.
+        if ((old_size & (old_size - 1)) == 0) {
+            path.append(old_root);
+        }
+        for (let p in proof) {
+            path.append(p);
+        }
+        let fn = old_size - 1;
+        let sn = new_size - 1;
+        while (fn % 2 == 1) {
+            fn = fn / 2;
+            sn = sn / 2;
+        }
+        let fr = path[0];
+        let sr = path[0];
+        for (let i = 1; i < path.length; i++) {
+            last c = path[i];
+            if (sn == 0) {
+                return false;
+            }
+            if (fn % 2 == 1 || fn == sn) {
+                fr = node_hash<H>(c, fr);
+                sr = node_hash<H>(c, sr);
+                while (fn % 2 == 0 && fn != 0) {
+                    fn = fn / 2;
+                    sn = sn / 2;
+                }
+            } else {
+                sr = node_hash<H>(sr, c);
+            }
+            fn = fn / 2;
+            sn = sn / 2;
+        }
+        return sn == 0 && constant_time.ct_eq(fr, old_root) && constant_time.ct_eq(sr, new_root);
+    };
+);

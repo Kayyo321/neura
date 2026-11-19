@@ -1,0 +1,190 @@
+let calls = import:Std.Net.Rpc.Call;
+let hashing = import:Std.Core.Hash;
+let proto = import:Std.Net.Rpc.ProtoWire;
+let.promote _ = import:Std.Core.Result;
+let sorting = import:Std.Collections.Sorting;
+let strings = import:Std.Text.Strings;
+
+/// @brief gRPC server reflection (`grpc.reflection.v1.ServerReflection`; grpc/grpc-proto
+/// grpc/reflection/v1/reflection.proto, fetched to std-net/rfc/grpc-reflection-v1.proto): a registry of
+/// service names and method descriptors.
+///
+/// The `list_services` answer is real: `list_services` returns the registered names in sorted order and
+/// `encode_list_services_response` builds the `ServerReflectionResponse` with field 6 `ListServiceResponse {
+/// repeated ServiceResponse service = 1; }`, each `ServiceResponse { string name = 1; }`. The file-descriptor
+/// answers (`file_by_filename`, `file_containing_symbol`) are stubs: without a schema compiler there are no
+/// `FileDescriptorProto`s to send.
+/// @see [Std.Net.Rpc.Reflection](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Rpc-Reflection)
+#Since("0.3.0")
+export let Reflection = module (
+    /// @brief The service name of the protocol.
+    export const ServiceName: string = "grpc.reflection.v1.ServerReflection";
+
+    /// @brief One method of a service: its name, message types and streaming kind.
+    #Final
+    export let MethodDescriptor = class (
+        /// @brief The method name, such as `Check`.
+        export last name: string;
+        /// @brief The fully qualified request message type.
+        export last input_type: string;
+        /// @brief The fully qualified response message type.
+        export last output_type: string;
+        /// @brief Whether the client streams.
+        export last client_streaming: bool;
+        /// @brief Whether the server streams.
+        export last server_streaming: bool;
+
+        /// @brief A descriptor with every part given.
+        export let init = func(method_name: string, input: string, output: string, client_streams: bool,
+            server_streams: bool) {
+            name = method_name;
+            input_type = input;
+            output_type = output;
+            client_streaming = client_streams;
+            server_streaming = server_streams;
+        };
+
+        /// @brief Equal when every part is.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: MethodDescriptor) {
+                return false;
+            }
+            return name == that.name && input_type == that.input_type && output_type == that.output_type
+                && client_streaming == that.client_streaming && server_streaming == that.server_streaming;
+        };
+
+        /// @brief Combines the parts.
+        export let.override hash_code = func -> uint32 => hashing.combine(hashing.combine(hashing.combine(
+            strings.hash(name), strings.hash(input_type)), strings.hash(output_type)),
+            (client_streaming ? 2 : 0) + (server_streaming ? 1 : 0));
+
+        /// @brief `name(input) returns (output)` with `stream` markers, as in a `.proto` file.
+        export let.override to_string = func -> string => name .. "(" .. (client_streaming ? "stream " : "")
+            .. input_type .. ") returns (" .. (server_streaming ? "stream " : "") .. output_type .. ")";
+    );
+
+    /// @brief Registered services and their methods.
+    #[Final, NotThreadSafe]
+    export let ReflectionRegistry = class (
+        /// @brief Service names, parallel to `methods`.
+        last services: string[list] = new;
+        /// @brief The methods of each service.
+        last methods: MethodDescriptor[list][list] = new;
+
+        /// @brief An empty registry.
+        export let init = func {
+        };
+
+        /// @brief Registers a service with its methods, replacing an earlier registration of the name.
+        export let add_service = func(name: string, service_methods: MethodDescriptor[list]) {
+            for (let i = 0; i < services.length; i++) {
+                if (services[i] == name) {
+                    methods[i] = service_methods;
+                    return;
+                }
+            }
+            services.append(name);
+            methods.append(service_methods);
+        };
+
+        /// @brief The registered service names, sorted.
+        #NoDiscard
+        export let list_services = func -> string[list] {
+            last out: string[list] = new;
+            for (let s in services) {
+                out.append(s);
+            }
+            sorting.sort<string>(out, strings.compare);
+            return out;
+        };
+
+        /// @brief The methods of `service`, empty when unknown.
+        #NoDiscard
+        export let methods_of = func(service: string) -> MethodDescriptor[list] {
+            for (let i = 0; i < services.length; i++) {
+                if (services[i] == service) {
+                    return methods[i];
+                }
+            }
+            return new;
+        };
+
+        /// @brief The method paths of every registered method.
+        #NoDiscard
+        export let method_paths = func -> calls.MethodPath[list] {
+            last out: calls.MethodPath[list] = new;
+            for (let i = 0; i < services.length; i++) {
+                for (let m in methods[i]) {
+                    out.append(new calls.MethodPath(services[i], m.name));
+                }
+            }
+            return out;
+        };
+
+        /// @brief The serialized `FileDescriptorProto`s of the file named `filename` and its dependencies.
+        /// @stub no protobuf file descriptors without a schema compiler
+        #NoDiscard
+        export let file_by_filename = func(filename: string) -> Result<uint8[list][list]> {
+            trap_with_message("unsupported: Std.Net.Rpc.Reflection.ReflectionRegistry.file_by_filename is not implemented in Neura 0.3.0 (no protobuf file descriptors without a schema compiler)");
+        };
+
+        /// @brief The serialized `FileDescriptorProto`s of the file defining `symbol` and its dependencies.
+        /// @stub no protobuf file descriptors without a schema compiler
+        #NoDiscard
+        export let file_containing_symbol = func(symbol: string) -> Result<uint8[list][list]> {
+            trap_with_message("unsupported: Std.Net.Rpc.Reflection.ReflectionRegistry.file_containing_symbol is not implemented in Neura 0.3.0 (no protobuf file descriptors without a schema compiler)");
+        };
+
+        /// @brief The number of services.
+        export let.override to_string = func -> string =>
+            "ReflectionRegistry(" .. services.length.to_string() .. " services)";
+    );
+
+    /// @brief The `ServerReflectionResponse` answering a `list_services` request: field 6 holding a
+    /// `ListServiceResponse` with one `ServiceResponse` per name, in the order given.
+    #NoDiscard
+    export let encode_list_services_response = func(names: string[list]) -> uint8[list] {
+        last list = proto.writer();
+        for (let name in names) {
+            last entry = proto.writer();
+            entry.write_string(1, name);
+            list.write_message(1, entry);
+        }
+        last response = proto.writer();
+        response.write_message(6, list);
+        return response.to_bytes();
+    };
+
+    /// @brief The service names of a `ServerReflectionResponse` holding a `ListServiceResponse`; unknown fields
+    /// are skipped.
+    #NoDiscard
+    export let decode_list_services_response = func(bytes: uint8[list]) -> Result<string[list]> {
+        last names: string[list] = new;
+        last r = proto.reader(bytes);
+        while (r.has_next()) {
+            last key = r.read_key()?;
+            if (key.field == 6 && key.wire_type == proto.LengthDelimited) {
+                last list = r.read_message()?;
+                while (list.has_next()) {
+                    last entry_key = list.read_key()?;
+                    if (entry_key.field == 1 && entry_key.wire_type == proto.LengthDelimited) {
+                        last entry = list.read_message()?;
+                        while (entry.has_next()) {
+                            last name_key = entry.read_key()?;
+                            if (name_key.field == 1 && name_key.wire_type == proto.LengthDelimited) {
+                                names.append(entry.read_string()?);
+                            } else {
+                                entry.skip(name_key.wire_type)?;
+                            }
+                        }
+                    } else {
+                        list.skip(entry_key.wire_type)?;
+                    }
+                }
+            } else {
+                r.skip(key.wire_type)?;
+            }
+        }
+        return Result<string[list]>.Ok(names);
+    };
+);

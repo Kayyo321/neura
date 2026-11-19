@@ -1,0 +1,9 @@
+error[E0494]: optional access on a receiver that is never absent
+  --> $DIR/optional-never-absent.nra:12:34
+   |
+12 | let size = func(count: int32) => count?.abs();
+   |                                  ^^^^^ int32 is not a reference or an Optional of one
+   |
+   = help: use '.' to read the member
+
+For more information about this error, try `neura explain E0494`.

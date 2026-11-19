@@ -1,0 +1,348 @@
+let cancellation = import:Std.Concurrent.Cancellation;
+let channels = import:Std.Concurrent.Channel;
+let commands = import:Std.Ui.Commands;
+let error = import:Std.Core.Error;
+let model = import:Std.Ui.ModelHost;
+let result = import:Std.Core.Result;
+let test = import:Std.Test;
+let ui = import:Std.Ui;
+
+let counter_view = html(count: int32, on_add: func(ui.ClickEvent) -> void) {
+    <button type="button" on:click={on_add}>{count}</button>
+};
+
+let status_view = html(text: string) {
+    <output>{text}</output>
+};
+
+let panel_view = html(title: string, child: ui.View) {
+    <section><h1>{title}</h1>{child}</section>
+};
+
+// Doubles its input; a negative input fails.
+let double = func(value: int32) -> result.Result<int32> {
+    if (value < 0) {
+        return result.Result<int32>.Err(error.custom("ui.negative", "the input is negative"));
+    }
+    return result.Result<int32>.Ok(value * 2);
+};
+
+let describe = func(state: commands.CommandState<int32>) -> string => match (state) {
+    commands.CommandState.Idle => "idle",
+    commands.CommandState.Running => "running",
+    commands.CommandState.Succeeded(value) => "succeeded " + value.to_string(),
+    commands.CommandState.Failed(problem) => "failed " + error.message(error.from_portable(problem)),
+    commands.CommandState.Cancelled => "cancelled",
+};
+
+let UiCommandsTests = module (
+    let mounted = func(host: model.Host, target: string, top: ui.Component) -> ui.Root =>
+        test.assert_ok<ui.Root>(ui.mount(host, target, top));
+
+    let join = func(items: string[list]) -> string {
+        let text = "";
+        for (let i = 0; i < items.length; i++) {
+            if (i > 0) {
+                text = text + "; ";
+            }
+            text = text + items[i];
+        }
+        return text;
+    };
+
+    // A component that renders the state of `command`, bound to it.
+    let command_component = func(command: commands.Command<int32, int32>, trace: string[list]) -> ui.Component {
+        last top = ui.component<commands.CommandState<int32>>(command.state, new func(state: commands.CommandState<int32>) -> ui.View {
+            trace.append(describe(state));
+            return status_view(describe(state));
+        });
+        command.bind(top);
+        return top;
+    };
+
+    // A run succeeds in a later turn: Running is rendered, then the result.
+    export let test_run_succeeds = func() -> void {
+        let trace: string[list] = new;
+        let host = new model.Host();
+        let command = new commands.Command<int32, int32>(double);
+        let top = command_component(command, trace);
+        let root = mounted(host, "#app", top);
+        host.click(1, top, new func(event: ui.ClickEvent) {
+            test.assert(command.run(21) == commands.RunOutcome.Started);
+        });
+        host.await_completion();
+        commands.run(root);
+        test.assert_equal_string("idle; running; succeeded 42", join(trace));
+        test.assert_equal_int32(0, root.commands_in_flight());
+        test.assert_equal_int32(0, command.runs_in_flight());
+        test.assert(root.stats().turns == 2);
+        test.assert_equal_string("open #app: root 1; commit 1 on root 1: 1 render; commit 2 on root 1: 1 render; "
+                                 + "await completion; commit 3 on root 1: 1 render", join(host.log));
+    };
+
+    // A failed run is Failed with the error's portable form.
+    export let test_run_fails = func() -> void {
+        let trace: string[list] = new;
+        let host = new model.Host();
+        let command = new commands.Command<int32, int32>(double);
+        let top = command_component(command, trace);
+        let root = mounted(host, "#app", top);
+        host.click(1, top, new func(event: ui.ClickEvent) {
+            command.run(-1);
+        });
+        host.await_completion();
+        commands.run(root);
+        test.assert_equal_string("idle; running; failed the input is negative", join(trace));
+    };
+
+    // Case 13: a command run twice quickly: the first completion is discarded.
+    export let test_run_twice_discards_first = func() -> void {
+        let trace: string[list] = new;
+        let host = new model.Host();
+        let command = new commands.Command<int32, int32>(double);
+        let top = command_component(command, trace);
+        let root = mounted(host, "#app", top);
+        host.click(1, top, new func(event: ui.ClickEvent) {
+            command.run(1);
+            command.run(2);
+        });
+        host.await_completion();
+        host.await_completion();
+        commands.run(root);
+        test.assert_equal_string("idle; running; succeeded 4", join(trace));
+        test.assert(root.stale_completions() == 1);
+        test.assert(command.generation() == 2);
+    };
+
+    // Case 14: a slow command across unmount and remount. The work waits on a gate; unmounting
+    // its component cancels it and raises the generation, so its completion is discarded after
+    // the remount too, and the work saw the cancellation.
+    export let test_unmount_and_remount_discard = func() -> void {
+        let trace: string[list] = new;
+        const [open_gate, gate, _] = channels.open<int32>(4);
+        const [report, reports, _] = channels.open<string>(4);
+        let command = new commands.Command<int32, int32>(new func(value: int32) -> result.Result<int32> {
+            match (gate.receive()) {
+                channels.Received.Value(extra) => {
+                    report.send("opened");
+                    return result.Result<int32>.Ok(value + extra);
+                },
+                channels.Received.Cancelled => {
+                    report.send("cancelled " + cancellation.requested().to_string());
+                    return result.Result<int32>.Ok(value);
+                },
+                channels.Received.Closed => {
+                    return result.Result<int32>.Ok(0);
+                },
+            }
+        });
+        let child = command_component(command, trace);
+        let show = new ui.State<bool>(true);
+        let parent = ui.component<bool>(show, new func(visible: bool) -> ui.View {
+            if (visible) {
+                return panel_view("shown", ui.slot(child));
+            }
+            return panel_view("hidden", status_view(""));
+        });
+        let host = new model.Host();
+        let root = mounted(host, "#app", parent);
+        host.click(1, child, new func(event: ui.ClickEvent) {
+            command.run(5);
+        });
+        host.click(2, parent, new func(event: ui.ClickEvent) {
+            show.set(false);
+        });
+        host.click(3, parent, new func(event: ui.ClickEvent) {
+            show.set(true);
+        });
+        host.await_completion();
+        commands.run(root);
+        test.assert_equal_string("idle; running; cancelled", join(trace));
+        test.assert(root.stale_completions() == 1);
+        test.assert(command.generation() == 2);
+        test.assert(child.is_mounted());
+        match (reports.try_receive()) {
+            channels.TryReceived.Value(text) => {
+                test.assert_equal_string("cancelled true", text);
+            },
+            _ => {
+                test.fail("the work did not report");
+            },
+        }
+        test.assert_equal_int32(0, root.commands_in_flight());
+        open_gate.send(0);
+    };
+
+    // Case 15: cancel when idle, or after a run has ended, does nothing.
+    export let test_cancel_when_idle = func() -> void {
+        let trace: string[list] = new;
+        let host = new model.Host();
+        let command = new commands.Command<int32, int32>(double);
+        let top = command_component(command, trace);
+        let root = mounted(host, "#app", top);
+        command.cancel();
+        test.assert(command.generation() == 0);
+        test.assert_equal_string("idle", describe(command.state.get()));
+        host.click(1, top, new func(event: ui.ClickEvent) {
+            command.run(3);
+        });
+        host.await_completion();
+        host.click(1, top, new func(event: ui.ClickEvent) {
+            command.cancel();
+        });
+        host.end_batch();
+        commands.run(root);
+        test.assert_equal_string("idle; running; succeeded 6", join(trace));
+        test.assert(command.generation() == 1);
+    };
+
+    // Cancelling a running command: the state is Cancelled at once, the work sees the request, and
+    // its completion is discarded.
+    export let test_cancel_running = func() -> void {
+        let trace: string[list] = new;
+        const [open_gate, gate, _] = channels.open<int32>(4);
+        let command = new commands.Command<int32, int32>(new func(value: int32) -> result.Result<int32> {
+            match (gate.receive()) {
+                channels.Received.Value(extra) => {
+                    return result.Result<int32>.Ok(value + extra);
+                },
+                _ => {
+                    return result.Result<int32>.Err(error.custom("ui.stopped", "stopped"));
+                },
+            }
+        });
+        let host = new model.Host();
+        let top = command_component(command, trace);
+        let root = mounted(host, "#app", top);
+        host.click(1, top, new func(event: ui.ClickEvent) {
+            command.run(1);
+        });
+        host.click(1, top, new func(event: ui.ClickEvent) {
+            command.cancel();
+        });
+        host.await_completion();
+        commands.run(root);
+        test.assert_equal_string("idle; running; cancelled", join(trace));
+        test.assert(root.stale_completions() == 1);
+        open_gate.send(0);
+    };
+
+    // A gated run that is opened completes normally, in the turn after the event that opened it.
+    export let test_gate_opened_by_event = func() -> void {
+        let trace: string[list] = new;
+        const [open_gate, gate, _] = channels.open<int32>(4);
+        let command = new commands.Command<int32, int32>(new func(value: int32) -> result.Result<int32> {
+            match (gate.receive()) {
+                channels.Received.Value(extra) => {
+                    return result.Result<int32>.Ok(value + extra);
+                },
+                _ => {
+                    return result.Result<int32>.Ok(-1);
+                },
+            }
+        });
+        let host = new model.Host();
+        let top = command_component(command, trace);
+        let root = mounted(host, "#app", top);
+        host.click(1, top, new func(event: ui.ClickEvent) {
+            command.run(40);
+        });
+        host.click(2, top, new func(event: ui.ClickEvent) {
+            open_gate.send(2);
+        });
+        host.await_completion();
+        commands.run(root);
+        test.assert_equal_string("idle; running; succeeded 42", join(trace));
+        test.assert(root.stale_completions() == 0);
+    };
+
+    // U-10: over the limit, run is Rejected and starts nothing; an unbound or unmounted command is
+    // Rejected too.
+    export let test_limit_and_rejection = func() -> void {
+        let trace: string[list] = new;
+        let loose = new commands.Command<int32, int32>(double);
+        test.assert(loose.run(1) == commands.RunOutcome.Rejected);
+        let host = new model.Host();
+        let first = new commands.Command<int32, int32>(double);
+        let top = command_component(first, trace);
+        let second = new commands.Command<int32, int32>(double);
+        second.bind(top);
+        let root = mounted(host, "#app", top);
+        root.set_command_limit(2);
+        let outcomes: string[list] = new;
+        host.click(1, top, new func(event: ui.ClickEvent) {
+            outcomes.append(first.run(1).to_string());
+            outcomes.append(second.run(2).to_string());
+            outcomes.append(first.run(3).to_string());
+        });
+        host.await_completion();
+        host.await_completion();
+        commands.run(root);
+        test.assert_equal_string("Started; Started; Rejected", join(outcomes));
+        test.assert_equal_string("succeeded 2", describe(first.state.get()));
+        test.assert_equal_string("succeeded 4", describe(second.state.get()));
+        root.close();
+        test.assert(first.run(1) == commands.RunOutcome.Rejected);
+    };
+
+    // Closing the root with a run in flight: run_with_commands cancels it, waits for its task, and
+    // leaves no run in flight.
+    export let test_close_with_run_in_flight = func() -> void {
+        let trace: string[list] = new;
+        const [open_gate, gate, _] = channels.open<int32>(4);
+        let command = new commands.Command<int32, int32>(new func(value: int32) -> result.Result<int32> {
+            let _ = gate.receive();
+            return result.Result<int32>.Ok(value);
+        });
+        let host = new model.Host();
+        let top = command_component(command, trace);
+        let root = mounted(host, "#app", top);
+        host.click(1, top, new func(event: ui.ClickEvent) {
+            command.run(1);
+        });
+        host.click(2, top, new func(event: ui.ClickEvent) {
+            root.close();
+        });
+        host.end_batch();
+        commands.run(root);
+        test.assert(root.is_closed());
+        test.assert_equal_int32(0, root.commands_in_flight());
+        test.assert_equal_int32(0, command.runs_in_flight());
+        test.assert_equal_string("idle; running", join(trace));
+        test.assert_equal_string("cancelled", describe(command.state.get()));
+        open_gate.send(0);
+    };
+
+    // A run started between turns, before the loop: it starts when run_with_commands begins, and
+    // Running is never rendered because the completion's turn is the next one.
+    export let test_run_on_mount = func() -> void {
+        let trace: string[list] = new;
+        let host = new model.Host();
+        let command = new commands.Command<int32, int32>(double);
+        let top = command_component(command, trace);
+        let root = mounted(host, "#app", top);
+        command.run(8);
+        host.await_completion();
+        commands.run(root);
+        test.assert_equal_string("idle; succeeded 16", join(trace));
+    };
+
+    // Unmount leaves no listener, subscription or task: 100 cycles of mount, run, complete, close.
+    export let test_no_retained_runs = func() -> void {
+        let host = new model.Host();
+        let command = new commands.Command<int32, int32>(double);
+        let trace: string[list] = new;
+        let top = command_component(command, trace);
+        for (let cycle = 0; cycle < 100; cycle++) {
+            let root = mounted(host, "#app", top);
+            command.run(cycle);
+            host.await_completion();
+            commands.run(root);
+            test.assert_equal_int32(0, root.commands_in_flight());
+            root.close();
+            test.assert_equal_int32(0, command.state.subscriber_count());
+            host.clear_log();
+        }
+        test.assert_equal_string("succeeded 198", describe(command.state.get()));
+    };
+);

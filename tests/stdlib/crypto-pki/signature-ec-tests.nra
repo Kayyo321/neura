@@ -1,0 +1,21 @@
+// test-options: --gpu=off --max-steps 30000000000
+let algorithm_verifier = import:Std.Crypto.Pki.AlgorithmVerifier;
+let cases = import:SignatureTestCases;
+let vectors = import:SignatureVectors;
+
+let SignatureEcTests = module (
+    export let test_ecdsa_sha2 = func {
+        let verifier: algorithm_verifier.AlgorithmVerifier = new;
+        for (let name in ["p256-sha224", "p256-sha256", "p256-sha384", "p256-sha512", "p384-sha384", "p521-sha512",
+            "secp256k1-sha256"]) {
+            cases.verify(vectors.certificates, name, verifier);
+        }
+    };
+
+    export let test_ecdsa_sha3 = func {
+        let verifier: algorithm_verifier.AlgorithmVerifier = new;
+        for (let name in ["p256-sha3-224", "p256-sha3-256", "p384-sha3-384", "p521-sha3-512"]) {
+            cases.verify(vectors.certificates, name, verifier);
+        }
+    };
+);

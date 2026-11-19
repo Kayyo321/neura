@@ -274,14 +274,32 @@ NEURA_TEST(tier, a_difference_planted_in_the_run_is_reported_by_name) {
     // Without a heap comparison at every sync point, a change made to the
     // heap near the end of the run, which nothing reads afterwards, is found
     // by the comparison at the end of the run.
+    nvm::TierCache clean_cache(regions, eager_regions());
+    const auto clean = run_captured(regions, tier_2(&clean_cache));
+    check(clean.result.completed, "the unperturbed region run completes");
+    // Leave enough steps for a sync before completion, but keep the change
+    // close enough to the end that the spaced heap check waits for completion.
+    constexpr std::uint64_t late_margin = 32;
+    check(clean.result.steps > late_margin, "the region run is long enough for a late perturbation");
+    const auto late_step = clean.result.steps > late_margin ? clean.result.steps - late_margin : 0;
     for (const auto perturb : {Perturb::HeapField, Perturb::HeapInitialized, Perturb::ListVersion}) {
+        // Confirm a sync point exists before completion at this threshold.
+        // Comparing every heap makes the injected difference visible there.
+        std::string immediate_report;
+        const auto immediate = perturbed_item(regions, perturb, late_step, "a late heap change at a sync",
+                                              {}, true, &immediate_report);
+        check(starts_with(immediate, "heap handle ") && !contains(immediate_report, " at a completion event;"),
+              "the change is planted before completion: " + immediate_report);
         std::string report;
-        const auto late = perturbed_item(regions, perturb, 9000, "a late heap change", {}, false, &report);
+        const auto late = perturbed_item(regions, perturb, late_step, "a late heap change", {}, false, &report);
         check(starts_with(late, "heap handle ") && contains(report, " at a completion event;"),
               "a late heap change is found at the end of the run: " + report);
     }
     const auto cells = perturbed_item(regions, Perturb::LiveCells, 1000, "live cells");
     check(starts_with(cells, "live heap cells: "), "the live cells are named: " + cells);
+    // The region cells and the regions a task has open (NVR 1.7) are compared too.
+    const auto stack = perturbed_item(region_image(environment), Perturb::StackCells, 1000, "stack cells");
+    check(starts_with(stack, "live stack cells: "), "the live stack cells are named: " + stack);
     const auto steps = perturbed_item(regions, Perturb::Steps, 1000, "steps");
     check(starts_with(steps, "steps: "), "the step count is named: " + steps);
     // A channel holding values: producers fill a buffer of two.
@@ -295,6 +313,47 @@ NEURA_TEST(tier, a_difference_planted_in_the_run_is_reported_by_name) {
     const auto rotation = build_program({concurrency_program(environment, "select-rotation")});
     const auto selects = perturbed_item(rotation, Perturb::TaskSelects, 0, "task selects");
     check(starts_with(selects, "task 0 selects: "), "a task's committed selects are named: " + selects);
+}
+
+NEURA_TEST(tier, the_shadow_compares_the_storage_regions_that_programs_run) {
+    // tests/backend/tier/region-tiers.nvra under function programs, which run the region
+    // operations as helpers and release on return (NVR 1.7): a clean run has no difference, and a
+    // region's owning frame, the released handles or the stack cells changed in the run are each
+    // reported by name at the next sync point.
+    if (!regions_enabled()) return;
+    const auto image = region_tiers_image(environment);
+    auto options = eager_regions();
+    options.programs = nvm::TierOptions::Programs::On;
+    options.native_after = 1;
+    {
+        nvm::TierCache cache(image, options);
+        auto limits = tier_2(&cache);
+        Hooks hooks;
+        limits.tier_shadow = &hooks.hooks;
+        const auto run = run_captured(image, limits);
+        check(run.result.completed, "the region image runs under the oracle");
+        check(hooks.reports.empty(), "no difference" + (hooks.reports.empty() ? "" : ": " + hooks.reports[0]));
+        check(hooks.hooks.syncs > 0, "the oracle reached sync points");
+        check(cache.statistics().region_counts.helpers > 0, "programs ran region operations as helpers");
+    }
+    const std::vector<std::pair<Perturb, std::string>> cases{
+        {Perturb::RegionDepth, "frame region "}, {Perturb::ReleasedHandles, "released handle"},
+        {Perturb::StackCells, "live stack cells: "}};
+    for (const auto& [perturb, expected] : cases) {
+        nvm::TierCache cache(image, options);
+        auto limits = tier_2(&cache);
+        Hooks hooks;
+        hooks.hooks.perturb = perturb;
+        hooks.hooks.at_step = 400;
+        limits.tier_shadow = &hooks.hooks;
+        run_captured(image, limits);
+        check(hooks.hooks.perturbed, expected + ": the run was perturbed");
+        check_equal(hooks.reports.size(), std::size_t{1}, expected + ": one report");
+        if (hooks.reports.empty()) continue;
+        const auto item = item_of(hooks.reports.front());
+        check(starts_with(item, expected), "the difference is named: " + item);
+        if (perturb == Perturb::RegionDepth) check(contains(item, " frame depth: "), "the owning frame is named: " + item);
+    }
 }
 
 NEURA_TEST(tier, a_coverage_observer_sees_each_block_once_with_the_oracle) {

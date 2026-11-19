@@ -1,0 +1,13 @@
+error[E0215]: a class hook clause takes no tags
+ --> $DIR/exported.nra:3:5
+  |
+3 |     export | get: instance;
+  |     ^^^^^^ 'export' does not apply to a class hook clause
+  |
+  = help: a class hook clause is '| get: <expression>;' or '| set: { ... };'
+help: remove 'export'
+  |
+3 |     export | get: instance;
+  |     -------
+
+For more information about this error, try `neura explain E0215`.

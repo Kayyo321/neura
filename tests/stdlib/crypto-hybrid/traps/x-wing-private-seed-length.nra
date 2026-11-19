@@ -1,0 +1,13 @@
+// test-options: --gpu=off
+// run-options: --gpu=off
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: wrong hybrid KEM seed length
+let program = import:Std.Program;
+let x_wing = import:Std.Crypto.Pqc.XWing;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = new x_wing.XWing().key_pair_from_seed(new);
+        return program.ExitCode.Ok;
+    };
+);

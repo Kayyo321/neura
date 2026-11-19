@@ -29,7 +29,7 @@ export let Path = module (
         /// @brief This path followed by `other`; an absolute `other` replaces it.
         #Pure
         export let join = func(other: string) -> Path =>
-            absolute_text(other) ? new(other) : new(text + "/" + other);
+            absolute_text(other) ? new(other) : new(text .. "/" .. other);
 
         /// @brief The path without its last component, or nil for the root, `.`, and a single relative
         /// component.
@@ -39,7 +39,7 @@ export let Path = module (
             if (parts.length == 0) {
                 return nil;
             }
-            if (parts.length == 1 && !is_absolute) {
+            if (parts.length == 1 && not is_absolute) {
                 return nil;
             }
             parts.remove_at(parts.length - 1);
@@ -87,10 +87,8 @@ export let Path = module (
         #Pure
         export let components = func -> string[list] {
             last parts = split(text);
-            if (!is_absolute) {
-                return parts;
-            }
-            last all: string[list] = ["/"];
+            return parts unless is_absolute;
+            last all: string[list] = new(["/"]);
             for (let part in parts) {
                 all.append(part);
             }
@@ -101,12 +99,12 @@ export let Path = module (
         /// `..` directly below the root is removed; leading `..` of a relative path are kept.
         #Pure
         export let resolve_lexically = func -> Path {
-            last kept: string[list] = [];
+            last kept: string[list] = new;
             for (let part in split(text)) {
                 if (part == "..") {
                     if (kept.length > 0 && kept[kept.length - 1] != "..") {
                         kept.remove_at(kept.length - 1);
-                    } else if (!is_absolute) {
+                    } else if (not is_absolute) {
                         kept.append(part);
                     }
                 } else {
@@ -151,7 +149,7 @@ export let Path = module (
             while (common < mine.length && common < theirs.length && mine[common] == theirs[common]) {
                 common++;
             }
-            last parts: string[list] = [];
+            last parts: string[list] = new;
             let i = common;
             while (i < theirs.length) {
                 if (theirs[i] == "..") {
@@ -173,12 +171,12 @@ export let Path = module (
         export let compare_to = func(other: Path) -> Ordering => compare_text(text, other.to_string());
 
         /// @brief Tests equality of the normalized path text.
-        #Pure
+        /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Path)) {
+            if (other is not that: Path) {
                 return false;
             }
-            return text == (other as Path).to_string();
+            return text == that.to_string();
         };
 
         /// @brief Hashes the normalized path text.
@@ -199,7 +197,7 @@ export let Path = module (
 
     /// @brief The components of `text` other than empty ones and `.`.
     let split = func(text: string) -> string[list] {
-        last parts: string[list] = [];
+        last parts: string[list] = new;
         let start = 0;
         let i = 0;
         last count = text.byte_length;
@@ -267,9 +265,6 @@ export let Path = module (
         if (a.byte_length < b.byte_length) {
             return Ordering.Less;
         }
-        if (a.byte_length > b.byte_length) {
-            return Ordering.Greater;
-        }
-        return Ordering.Equal;
+        return if (a.byte_length > b.byte_length) -> Ordering.Greater else -> Ordering.Equal;
     };
 );

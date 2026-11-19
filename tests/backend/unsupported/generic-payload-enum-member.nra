@@ -3,7 +3,7 @@ let console = import:Std.Io.Console;
 let program = import:Std.Program;
 
 let Main = module:program.Entry (
-    let V = enum (Null, Number(string));
+    let V = enum (Null, Value(any));
     let Box = class<T> (
         export let item: T;
         export let init = func(value: T) -> void {
@@ -15,7 +15,7 @@ let Main = module:program.Entry (
     );
 
     export let.override main = func(args: string[]) -> program.ExitCode {
-        let b = new Box<V>(V.Number("1"));
+        let b = new Box<V>(V.Value("1"));
         console.print_line(b.text());
         return program.ExitCode.Ok;
     };

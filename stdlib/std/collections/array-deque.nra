@@ -13,9 +13,9 @@ export let ArrayDeque = module (
     export let ArrayDeque = class<T> implements Deque<T> (
         /// @brief The first part of the deque in reverse order: its last element is
         /// the deque's first.
-        let front: T[list] = [];
+        let front: T[list] = new;
         /// @brief The rest of the deque in order.
-        let back: T[list] = [];
+        let back: T[list] = new;
         /// @brief The structural modification count shared with iterators.
         last modifications: cell.Cell<uint64> = cell.of<uint64>(0);
         /// @brief Whether this instance's text conversion is running.
@@ -172,8 +172,8 @@ export let ArrayDeque = module (
 
         /// @brief Removes all elements from both halves of the deque.
         export let clear = func {
-            last empty_front: T[list] = [];
-            last empty_back: T[list] = [];
+            last empty_front: T[list] = new;
+            last empty_back: T[list] = new;
             front = empty_front;
             back = empty_back;
             changed();
@@ -196,7 +196,7 @@ export let ArrayDeque = module (
 
         /// @brief A new built-in list from first to last.
         export let to_list = func -> T[list] {
-            last result: T[list] = [];
+            last result: T[list] = new;
             let i = front.length - 1;
             while (i >= 0) {
                 result.append(front[i]);
@@ -236,7 +236,7 @@ export let ArrayDeque = module (
             last walk = iterator();
             let i = 0;
             while (walk.has_next()) {
-                if (i >= count || !walk.next().equals(get(i))) {
+                if (i >= count || not walk.next().equals(get(i))) {
                     trap_with_message("invalid state: deque order");
                 }
                 i += 1;
@@ -300,11 +300,12 @@ export let ArrayDeque = module (
                 trap_with_message("no such element");
             }
             position += 1;
-            if (index < split) {
-                return front[split - 1 - index];
-            }
-            return back[index - split];
+            return if (index < split) -> front[split - 1 - index] else -> back[index - split];
         };
+
+        /// @brief Names the iterator and its position.
+        export let.override to_string = func -> string =>
+            "ArrayDequeIterator(position " .. position.to_string() .. ")";
     );
 
     /// @brief Creates an empty deque.

@@ -1,0 +1,16 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: ML-KEM randomness m must be 32 bytes
+let ml_kem = import:Std.Crypto.Pqc.MlKem;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let seed: uint8[list] = new;
+        for (let i = 0; i < 32; i++) {
+            seed.append(i as uint8);
+        }
+        let kem = new ml_kem.MlKem(ml_kem.ParameterSet.MlKem512);
+        let _ = kem.encapsulate_with(kem.key_pair_from_seed(seed, seed).public_key(), new([1]));
+        return program.ExitCode.Ok;
+    };
+);

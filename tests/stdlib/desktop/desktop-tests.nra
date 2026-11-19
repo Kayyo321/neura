@@ -1,0 +1,75 @@
+let desktop = import:Std.Desktop;
+let hex = import:Std.Encoding.Hex;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+
+// The native side of the desktop channel without a host: the registry text and digest, and the dispatcher.
+// tests/desktop/bridge_test.js covers the frame codec against the window host with the real child.
+// The registry digest was computed with
+//   printf '%s' '{"operations":["fixture.clipboard_read","fixture.clipboard_write","fixture.close","fixture.data_dir","fixture.echo","fixture.fail","fixture.focus","fixture.menu","fixture.menu_bad","fixture.notify","fixture.open","fixture.open_many","fixture.open_read","fixture.quit","fixture.save","fixture.spin","fixture.title","fixture.trap","fixture.unserved","fixture.wait","fixture.work"],"schema":1}' | sha256sum
+// and tests/desktop/bridge_test.js checks the same value against the window host's parser.
+let DesktopTests = module (
+    let fixture_ids = func -> string[list] => new([
+        "fixture.clipboard_read", "fixture.clipboard_write", "fixture.close", "fixture.data_dir", "fixture.echo",
+        "fixture.fail", "fixture.focus", "fixture.menu", "fixture.menu_bad", "fixture.notify", "fixture.open",
+        "fixture.open_many", "fixture.open_read", "fixture.quit", "fixture.save", "fixture.spin", "fixture.title",
+        "fixture.trap", "fixture.unserved", "fixture.wait", "fixture.work"
+    ]);
+
+    export let test_registry_text_and_digest = func() -> void {
+        last registry = new desktop.Registry(fixture_ids());
+        test.assert_equal_string("{\"operations\":[\"fixture.clipboard_read\",\"fixture.clipboard_write\",\"fixture.close\","
+            + "\"fixture.data_dir\",\"fixture.echo\",\"fixture.fail\",\"fixture.focus\",\"fixture.menu\","
+            + "\"fixture.menu_bad\",\"fixture.notify\",\"fixture.open\",\"fixture.open_many\",\"fixture.o"
+            + "pen_read\",\"fixture.quit\",\"fixture.save\",\"fixture.spin\",\"fixture.title\",\"fixture."
+            + "trap\",\"fixture.unserved\",\"fixture.wait\",\"fixture.work\"],\"schema\":1}", registry.json());
+        test.assert_equal_string("e917d79fbe142599476e9a5da796ee9ebcd9404133d6c92310f9183a4004cc8e",
+            hex.encode(registry.digest()));
+        test.assert(registry.contains("fixture.echo"));
+        test.assert(!registry.contains("fixture.missing"));
+        test.assert(registry.equals(new desktop.Registry(fixture_ids())));
+        last empty: string[list] = new;
+        test.assert_equal_string("{\"operations\":[],\"schema\":1}", new desktop.Registry(empty).json());
+    };
+
+    export let test_dispatcher_answers_unserved_operations = func() -> void {
+        last registry = new desktop.Registry(fixture_ids());
+        last dispatcher = new desktop.Dispatcher(registry);
+        dispatcher.add("fixture.echo", func(call: desktop.Call) -> Result<uint8[list]> =>
+            Result<uint8[list]>.Ok(call.request()));
+        last context = new desktop.Context(registry);
+        last window = context.window(3);
+        let [status, reply] = dispatcher.dispatch(new desktop.Call(1, window, "fixture.echo", strings.to_bytes("hi"), 5));
+        test.assert_equal_uint64(0, status as uint64);
+        test.assert_equal_string("6869", hex.encode(reply));
+        let [missing, message] = dispatcher.dispatch(new desktop.Call(2, window, "fixture.fail", new([]), 5));
+        test.assert_equal_uint64(13, missing as uint64);
+        test.assert_equal_string("756e737570706f727465643a206f7065726174696f6e20666978747572652e6661696c", hex.encode(message));
+    };
+
+    // A call's request reaches its task as text when it is UTF-8 and as hex digits otherwise; both come back
+    // byte for byte. Windows are equal by handle.
+    export let test_call_requests_and_windows = func() -> void {
+        last context = new desktop.Context(new desktop.Registry(fixture_ids()));
+        last text = new desktop.Call(7, context.window(2), "fixture.echo", strings.to_bytes("{\"a\":\"é\"}"), 9);
+        test.assert_equal_string("7b2261223a22c3a9227d", hex.encode(text.request()));
+        match (text.text()) {
+            Optional.Some(value) => { test.assert_equal_string("{\"a\":\"é\"}", value); },
+            Optional.None => { test.fail("a UTF-8 request has text"); },
+        }
+        last raw: uint8[list] = new([0 as uint8, 255 as uint8, 192 as uint8, 116 as uint8]);
+        last binary = new desktop.Call(8, context.window(2), "fixture.echo", raw, 9);
+        test.assert_equal_string("00ffc074", hex.encode(binary.request()));
+        match (binary.text()) {
+            Optional.Some(value) => { test.fail("a request that is not UTF-8 has no text"); },
+            Optional.None => {},
+        }
+        test.assert_equal_uint64(8, binary.id as uint64);
+        test.assert_equal_string("fixture.echo", binary.operation);
+        test.assert(binary.window().equals(context.window(2)));
+        test.assert(!binary.window().equals(context.window(3)));
+        test.assert_equal_string("Call(8, fixture.echo, Window(2))", binary.to_string());
+    };
+);

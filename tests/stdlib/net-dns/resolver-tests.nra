@@ -1,0 +1,429 @@
+let caches = import:Std.Net.Dns.DnsCache;
+let errors = import:Std.Core.Error;
+let fixed_clock = import:Std.Time.FixedClock;
+let hosts_files = import:Std.Net.Dns.HostsFile;
+let instant = import:Std.Time.Instant;
+let ips = import:Std.Net.Core.IpAddr;
+let ipv4 = import:Std.Net.Core.Ipv4Addr;
+let messages = import:Std.Net.Dns.Message;
+let names = import:Std.Net.Dns.Name;
+let random = import:Std.Random.Random;
+let resolv_confs = import:Std.Net.Dns.ResolvConf;
+let resolvers = import:Std.Net.Dns.StubResolver;
+let result = import:Std.Core.Result;
+let tcp_dns = import:Std.Net.Dns.TcpDnsTransport;
+let test = import:Std.Test;
+let transports = import:Std.Net.Dns.DnsTransport;
+let unit = import:Std.Core.Unit;
+
+// The stub resolver over in-memory transports.
+let ResolverTests = module (
+    let name_of = func(text: string) -> names.DnsName => test.assert_ok<names.DnsName>(names.parse(text));
+
+    let a_record = func(name: string, d: int, ttl: int64) -> messages.ResourceRecord =>
+        new messages.ResourceRecord(name_of(name), messages.TypeA, messages.ClassIn, ttl,
+            messages.RecordData.A(ipv4.of(192, 0, 2, d)));
+
+    let cname = func(name: string, target: string) -> messages.ResourceRecord =>
+        new messages.ResourceRecord(name_of(name), messages.TypeCname, messages.ClassIn, 300,
+            messages.RecordData.Cname(name_of(target)));
+
+    let soa = func -> messages.ResourceRecord =>
+        new messages.ResourceRecord(name_of("example.com"), messages.TypeSoa, messages.ClassIn, 3600,
+            messages.RecordData.Soa { mname: name_of("ns1.example.com"), rname: name_of("hostmaster.example.com"),
+                serial: 1, refresh: 7200, retry: 900, expire: 1209600, minimum: 300 });
+
+    let zone = func(label: string, stream: bool) -> transports.MemoryTransport {
+        last server = new transports.MemoryTransport(label, stream);
+        server.set_soa(soa());
+        return server;
+    };
+
+    let upstreams = func(server: transports.MemoryTransport) -> resolvers.Upstream[list] {
+        last list: resolvers.Upstream[list] = new;
+        list.append(new resolvers.Upstream(server));
+        return list;
+    };
+
+    let resolver_with = func(conf: string, hosts: string, servers: resolvers.Upstream[list]) -> resolvers.StubResolver {
+        last clock = fixed_clock.of(instant.of_epoch_seconds(1700000000, 0));
+        return new resolvers.StubResolver(resolv_confs.parse(conf), hosts_files.parse(hosts),
+            new caches.DnsCache(clock), servers, random.seeded(7));
+    };
+
+    let first_address = func(answer: resolvers.Answer) -> string => ips.to_string(answer.addresses()[0]);
+
+    export let test_hosts_answer_first = func {
+        last server = zone("main", false);
+        server.add(a_record("db.example.com", 9, 300));
+        last resolver = resolver_with("", "10.0.0.5 db.example.com db\n", upstreams(server));
+        last answer = test.assert_ok<resolvers.Answer>(resolver.lookup("db.example.com.", messages.TypeA));
+        test.assert_equal_string("10.0.0.5", first_address(answer));
+        test.assert(answer.source == resolvers.Source.Hosts);
+        test.assert_equal<int>(0, server.query_count());
+        last all = test.assert_ok<ips.IpAddr[list]>(resolver.resolve("db"));
+        test.assert_equal_string("10.0.0.5", ips.to_string(all[0]));
+        // An address literal resolves to itself.
+        test.assert_equal_string("192.0.2.200", ips.to_string(
+            test.assert_ok<ips.IpAddr[list]>(resolver.resolve("192.0.2.200"))[0]));
+    };
+
+    export let test_network_then_cache = func {
+        last server = zone("main", false);
+        server.add(a_record("www.example.com", 1, 300));
+        last resolver = resolver_with("nameserver 192.0.2.53\n", "", upstreams(server));
+        last first = test.assert_ok<resolvers.Answer>(resolver.lookup("www.example.com.", messages.TypeA));
+        test.assert(first.source == resolvers.Source.Network);
+        test.assert_equal_string("192.0.2.1", first_address(first));
+        last second = test.assert_ok<resolvers.Answer>(resolver.lookup("www.example.com.", messages.TypeA));
+        test.assert(second.source == resolvers.Source.Cache);
+        test.assert_equal<int>(1, server.query_count());
+        // The query carried RD and a random ID.
+        test.assert(server.received[0].header.recursion_desired);
+    };
+
+    export let test_nxdomain_cached_negatively = func {
+        last server = zone("main", false);
+        last resolver = resolver_with("", "", upstreams(server));
+        last answer = test.assert_ok<resolvers.Answer>(resolver.lookup("gone.example.com.", messages.TypeA));
+        test.assert(answer.is_name_error());
+        last again = test.assert_ok<resolvers.Answer>(resolver.lookup("gone.example.com.", messages.TypeAaaa));
+        test.assert(again.is_name_error());
+        test.assert(again.source == resolvers.Source.Cache);
+        test.assert_equal<int>(1, server.query_count());
+        last failed = test.assert_err<ips.IpAddr[list]>(resolver.resolve("gone.example.com."));
+        test.assert(errors.message(failed) != "");
+    };
+
+    export let test_search_list_and_ndots = func {
+        last server = zone("main", false);
+        server.add(a_record("db.corp.example.com", 3, 300));
+        last resolver = resolver_with("search corp.example.com example.com\noptions ndots:2\n", "", upstreams(server));
+        // "db" has 0 dots, below ndots 2: search domains first, then as is.
+        last tries = test.assert_ok<names.DnsName[list]>(resolver.candidates("db"));
+        test.assert_equal<int>(3, tries.length);
+        test.assert_equal_string("db.corp.example.com.", tries[0].to_string());
+        test.assert_equal_string("db.example.com.", tries[1].to_string());
+        test.assert_equal_string("db.", tries[2].to_string());
+        // "a.b.c" has 2 dots: as is first.
+        last dotted = test.assert_ok<names.DnsName[list]>(resolver.candidates("a.b.c"));
+        test.assert_equal_string("a.b.c.", dotted[0].to_string());
+        test.assert_equal_string("a.b.c.corp.example.com.", dotted[1].to_string());
+        // A trailing dot: only as is.
+        test.assert_equal<int>(1, test.assert_ok<names.DnsName[list]>(resolver.candidates("db.")).length);
+        last answer = test.assert_ok<resolvers.Answer>(resolver.lookup("db", messages.TypeA));
+        test.assert_equal_string("192.0.2.3", first_address(answer));
+        test.assert_equal<int>(1, server.query_count());
+        // A name found only under the second domain: the first try is NXDOMAIN, the second answers.
+        server.add(a_record("web.example.com", 4, 300));
+        last web = test.assert_ok<resolvers.Answer>(resolver.lookup("web", messages.TypeA));
+        test.assert_equal_string("web.example.com. IN A", web.question.to_string());
+        test.assert_equal<int>(3, server.query_count());
+    };
+
+    export let test_cname_chased_across_responses = func {
+        last server = zone("main", false);
+        server.add(cname("www.example.com", "edge.example.com"));
+        server.add(cname("edge.example.com", "host.example.com"));
+        server.add(a_record("host.example.com", 8, 300));
+        last resolver = resolver_with("", "", upstreams(server));
+        last answer = test.assert_ok<resolvers.Answer>(resolver.lookup("www.example.com.", messages.TypeA));
+        test.assert_equal_string("host.example.com.", answer.canonical_name.to_string());
+        test.assert_equal<int>(2, answer.aliases.length);
+        test.assert_equal_string("192.0.2.8", first_address(answer));
+        test.assert_equal<int>(3, server.query_count());
+        // Cached with its aliases.
+        last cached = test.assert_ok<resolvers.Answer>(resolver.lookup("www.example.com.", messages.TypeA));
+        test.assert(cached.source == resolvers.Source.Cache);
+        test.assert_equal_string("host.example.com.", cached.canonical_name.to_string());
+    };
+
+    export let test_cname_loop_rejected = func {
+        last server = zone("main", false);
+        server.add(cname("a.example.com", "b.example.com"));
+        server.add(cname("b.example.com", "a.example.com"));
+        last resolver = resolver_with("", "", upstreams(server));
+        last problem = test.assert_err<resolvers.Answer>(resolver.lookup("a.example.com.", messages.TypeA));
+        test.assert_equal_string("CNAME loop or chain longer than 8", errors.message(problem));
+    };
+
+    export let test_mismatched_id_tries_next_server = func {
+        last bad = zone("bad", false);
+        bad.wrong_id_next = 5;
+        bad.add(a_record("www.example.com", 66, 300));
+        last good = zone("good", false);
+        good.add(a_record("www.example.com", 1, 300));
+        last list: resolvers.Upstream[list] = new;
+        list.append(new resolvers.Upstream(bad));
+        list.append(new resolvers.Upstream(good));
+        last resolver = resolver_with("", "", list);
+        last answer = test.assert_ok<resolvers.Answer>(resolver.lookup("www.example.com.", messages.TypeA));
+        test.assert_equal_string("192.0.2.1", first_address(answer));
+        test.assert_equal<int>(1, bad.query_count());
+        test.assert_equal<int>(1, good.query_count());
+    };
+
+    export let test_truncation_falls_back_to_stream = func {
+        last datagram = zone("udp", false);
+        last stream = zone("tcp", true);
+        // 40 A records: about 1,200 bytes, above 512.
+        for (let i = 1; i <= 40; i++) {
+            datagram.add(a_record("big.example.com", i, 300));
+            stream.add(a_record("big.example.com", i, 300));
+        }
+        last list: resolvers.Upstream[list] = new;
+        list.append(new resolvers.Upstream(datagram, stream));
+        last resolver = resolver_with("", "", list);
+        last answer = test.assert_ok<resolvers.Answer>(resolver.lookup("big.example.com.", messages.TypeA));
+        test.assert_equal<int>(40, answer.records.length);
+        test.assert_equal<int>(1, datagram.query_count());
+        test.assert_equal<int>(1, stream.query_count());
+        // Without a stream transport the truncated answer is an error.
+        last only = zone("udp-only", false);
+        for (let i = 1; i <= 40; i++) {
+            only.add(a_record("big.example.com", i, 300));
+        }
+        last bare = resolver_with("", "", upstreams(only));
+        last problem = test.assert_err<resolvers.Answer>(bare.lookup("big.example.com.", messages.TypeA));
+        test.assert_equal_string("truncated response and no stream transport", errors.message(problem));
+        // With EDNS(0) offering 1232 bytes the answer fits in one datagram.
+        last edns_server = zone("edns", false);
+        for (let i = 1; i <= 40; i++) {
+            edns_server.add(a_record("big.example.com", i, 300));
+        }
+        last edns = resolver_with("options edns0\n", "", upstreams(edns_server));
+        test.assert_equal<int>(40, test.assert_ok<resolvers.Answer>(
+            edns.lookup("big.example.com.", messages.TypeA)).records.length);
+    };
+
+    export let test_attempts_and_servfail = func {
+        last flaky = zone("flaky", false);
+        flaky.fail_next = 1;
+        flaky.add(a_record("www.example.com", 1, 300));
+        // attempts:2 with one server: the first try times out, the second answers.
+        last resolver = resolver_with("options attempts:2\n", "", upstreams(flaky));
+        test.assert_ok<resolvers.Answer>(resolver.lookup("www.example.com.", messages.TypeA));
+        test.assert_equal<int>(2, flaky.query_count());
+        // attempts:1: the timeout is the result.
+        last down = zone("down", false);
+        down.fail_next = 3;
+        last single = resolver_with("options attempts:1\n", "", upstreams(down));
+        last problem = test.assert_err<resolvers.Answer>(single.lookup("www.example.com.", messages.TypeA));
+        test.assert(errors.message(problem) != "");
+        // SERVFAIL moves on to the next server.
+        last failing = zone("failing", false);
+        failing.forced_rcode = messages.RcodeServerFailure;
+        last good = zone("good", false);
+        good.add(a_record("www.example.com", 2, 300));
+        last list: resolvers.Upstream[list] = new;
+        list.append(new resolvers.Upstream(failing));
+        list.append(new resolvers.Upstream(good));
+        last both = resolver_with("", "", list);
+        last answer = test.assert_ok<resolvers.Answer>(both.lookup("www.example.com.", messages.TypeA));
+        test.assert_equal_string("192.0.2.2", first_address(answer));
+    };
+
+    export let test_rotate = func {
+        last one = zone("one", false);
+        last two = zone("two", false);
+        for (let i = 1; i <= 4; i++) {
+            one.add(a_record("h" + i.to_string() + ".example.com", i, 300));
+            two.add(a_record("h" + i.to_string() + ".example.com", i, 300));
+        }
+        last list: resolvers.Upstream[list] = new;
+        list.append(new resolvers.Upstream(one));
+        list.append(new resolvers.Upstream(two));
+        last rotating = resolver_with("options rotate\n", "", list);
+        for (let i = 1; i <= 4; i++) {
+            test.assert_ok<resolvers.Answer>(rotating.lookup("h" + i.to_string() + ".example.com.",
+                messages.TypeA));
+        }
+        test.assert_equal<int>(2, one.query_count());
+        test.assert_equal<int>(2, two.query_count());
+        // Without rotate the first server takes every query.
+        last three = zone("three", false);
+        last four = zone("four", false);
+        three.add(a_record("h1.example.com", 1, 300));
+        three.add(a_record("h2.example.com", 2, 300));
+        last fixed: resolvers.Upstream[list] = new;
+        fixed.append(new resolvers.Upstream(three));
+        fixed.append(new resolvers.Upstream(four));
+        last plain = resolver_with("", "", fixed);
+        test.assert_ok<resolvers.Answer>(plain.lookup("h1.example.com.", messages.TypeA));
+        test.assert_ok<resolvers.Answer>(plain.lookup("h2.example.com.", messages.TypeA));
+        test.assert_equal<int>(2, three.query_count());
+        test.assert_equal<int>(0, four.query_count());
+    };
+
+    export let test_split_horizon_routing = func {
+        last public = zone("public", false);
+        public.add(a_record("www.example.com", 1, 300));
+        public.add(a_record("notcorp.example", 2, 300));
+        last corp = zone("corp", false);
+        corp.add(a_record("db.corp.example", 10, 300));
+        last lab = zone("lab", false);
+        lab.add(a_record("x.lab.corp.example", 20, 300));
+        last resolver = resolver_with("", "", upstreams(public));
+        test.assert_ok<int>(resolver.add_route("corp.example", upstreams(corp)));
+        test.assert_ok<int>(resolver.add_route("LAB.corp.example.", upstreams(lab)));
+        test.assert_equal_string("192.0.2.10", first_address(test.assert_ok<resolvers.Answer>(
+            resolver.lookup("db.corp.example.", messages.TypeA))));
+        // The longest suffix wins.
+        test.assert_equal_string("192.0.2.20", first_address(test.assert_ok<resolvers.Answer>(
+            resolver.lookup("x.lab.corp.example.", messages.TypeA))));
+        // Label boundaries: notcorp.example is not within corp.example.
+        test.assert_equal_string("192.0.2.2", first_address(test.assert_ok<resolvers.Answer>(
+            resolver.lookup("notcorp.example.", messages.TypeA))));
+        test.assert_equal_string("192.0.2.1", first_address(test.assert_ok<resolvers.Answer>(
+            resolver.lookup("www.example.com.", messages.TypeA))));
+        test.assert_equal<int>(1, corp.query_count());
+        test.assert_equal<int>(1, lab.query_count());
+        test.assert_equal<int>(2, public.query_count());
+    };
+
+    export let test_hosts_before_search_list = func {
+        last server = zone("main", false);
+        server.add(a_record("db.corp.example.com", 3, 300));
+        last resolver = resolver_with("search corp.example.com\n", "10.0.0.5 db\n", upstreams(server));
+        last answer = test.assert_ok<resolvers.Answer>(resolver.lookup("db", messages.TypeA));
+        test.assert_equal_string("10.0.0.5", first_address(answer));
+        test.assert_equal<int>(0, server.query_count());
+    };
+
+    export let test_question_must_match = func {
+        last query = messages.query(7, name_of("www.example.com"), messages.TypeA);
+        last same = messages.response_to(query, messages.RcodeNoError);
+        test.assert_ok<int>(resolvers.check_match(query, same));
+        // Same ID, another question.
+        last other = messages.response_to(messages.query(7, name_of("evil.example.com"), messages.TypeA),
+            messages.RcodeNoError);
+        test.assert_equal_string("response question does not match the query",
+            errors.message(test.assert_err<int>(resolvers.check_match(query, other))));
+        // Same ID and question, QR clear.
+        test.assert_err<int>(resolvers.check_match(query, query));
+    };
+
+    export let test_cname_chain_bounded = func {
+        last server = zone("main", false);
+        // c0 -> c1 -> ... -> c10: ten links, more than MaxCnameChain (8), no loop.
+        for (let i = 0; i < 10; i++) {
+            server.add(cname("c" + i.to_string() + ".example.com", "c" + (i + 1).to_string() + ".example.com"));
+        }
+        server.add(a_record("c10.example.com", 10, 300));
+        last resolver = resolver_with("", "", upstreams(server));
+        test.assert_err<resolvers.Answer>(resolver.lookup("c0.example.com.", messages.TypeA));
+        // Eight links are allowed.
+        last ok = test.assert_ok<resolvers.Answer>(resolver.lookup("c2.example.com.", messages.TypeA));
+        test.assert_equal<int>(8, ok.aliases.length);
+        test.assert_equal_string("192.0.2.10", first_address(ok));
+    };
+
+    let one_string = func -> uint8[list][list] {
+        last parts: uint8[list][list] = new;
+        last part: uint8[list] = new;
+        part.append(104);
+        parts.append(part);
+        return parts;
+    };
+
+    export let test_any_query = func {
+        last server = zone("main", false);
+        server.add(a_record("www.example.com", 1, 300));
+        server.add(new messages.ResourceRecord(name_of("www.example.com"), messages.TypeTxt, messages.ClassIn, 300,
+            messages.RecordData.Txt(one_string())));
+        last resolver = resolver_with("", "", upstreams(server));
+        test.assert_equal<int>(2, test.assert_ok<resolvers.Answer>(
+            resolver.lookup("www.example.com.", messages.TypeAny)).records.length);
+    };
+
+    export let test_upstreams_from_resolv_conf = func {
+        last conf = resolv_confs.parse("nameserver 192.0.2.53\nnameserver 2001:db8::53\noptions timeout:2\n");
+        last list = resolvers.upstreams_for(conf);
+        test.assert_equal<int>(2, list.length);
+        test.assert_equal_string("UdpDnsTransport(192.0.2.53:53)", list[0].primary.to_string());
+        test.assert_equal_string("TcpDnsTransport([2001:db8::53]:53)",
+            test.assert_some<transports.DnsTransport>(list[1].fallback).to_string());
+        // No nameserver line: the local server.
+        test.assert_equal_string("UdpDnsTransport(127.0.0.1:53)",
+            resolvers.upstreams_for(resolv_confs.parse(""))[0].primary.to_string());
+    };
+
+    export let test_no_servers = func {
+        last resolver = resolver_with("", "", new);
+        last problem = test.assert_err<resolvers.Answer>(resolver.lookup("www.example.com.", messages.TypeA));
+        test.assert_equal_string("no name servers configured", errors.message(problem));
+    };
+
+    // A byte source that hands out preloaded chunks, then the end of the stream; and a sink.
+    let Pipe = class (
+        last chunks: uint8[list][list] = new;
+        let next: int = 0;
+        export last written: uint8[list] = new;
+
+        export let add = func(bytes: uint8[list]) {
+            chunks.append(bytes);
+        };
+
+        let within: int = 0;
+
+        // At most `max` bytes, never crossing a chunk boundary, as a stream read does.
+        export let read = func(max: int) -> result.Result<uint8[list]> {
+            if (next >= chunks.length) {
+                return result.Result<uint8[list]>.Ok(new);
+            }
+            last chunk = chunks[next];
+            last out: uint8[list] = new;
+            while (within < chunk.length && out.length < max) {
+                out.append(chunk[within]);
+                within++;
+            }
+            if (within >= chunk.length) {
+                next++;
+                within = 0;
+            }
+            return result.Result<uint8[list]>.Ok(out);
+        };
+
+        export let write = func(data: uint8[list]) -> result.Result<unit.Unit> {
+            for (let b in data) {
+                written.append(b);
+            }
+            return result.Result<unit.Unit>.Ok(unit.Unit.Value);
+        };
+    );
+
+    let bytes_between = func(all: uint8[list], start: int, end: int) -> uint8[list] {
+        last out: uint8[list] = new;
+        for (let i = start; i < end; i++) {
+            out.append(all[i]);
+        }
+        return out;
+    };
+
+    // RFC 1035 section 4.2.2: a two-byte length prefix, read however the bytes are split.
+    export let test_tcp_framing_split_reads = func {
+        last query = messages.query(4660, name_of("www.example.com"), messages.TypeA);
+        last response = messages.response_to(query, messages.RcodeNoError);
+        response.answers.append(a_record("www.example.com", 1, 300));
+        last framed = tcp_dns.frame(test.assert_ok<uint8[list]>(messages.encode(response)));
+        last pipe = new Pipe();
+        // Split inside the length prefix and inside the body.
+        pipe.add(bytes_between(framed, 0, 1));
+        pipe.add(bytes_between(framed, 1, 7));
+        pipe.add(bytes_between(framed, 7, framed.length));
+        last answer = test.assert_ok<messages.Message>(tcp_dns.exchange_on(pipe.read, pipe.write, query));
+        test.assert_equal<int>(1, answer.answers.length);
+        // What was written: the 33-byte query behind its length 0x0021.
+        test.assert_equal<int>(35, pipe.written.length);
+        test.assert_equal<int>(0, pipe.written[0] as int);
+        test.assert_equal<int>(33, pipe.written[1] as int);
+        // The stream ends mid-message.
+        last short = new Pipe();
+        short.add(bytes_between(framed, 0, 10));
+        test.assert_err<messages.Message>(tcp_dns.exchange_on(short.read, short.write, query));
+        // The stream ends inside the length.
+        last shorter = new Pipe();
+        shorter.add(bytes_between(framed, 0, 1));
+        test.assert_err<messages.Message>(tcp_dns.exchange_on(shorter.read, shorter.write, query));
+    };
+);

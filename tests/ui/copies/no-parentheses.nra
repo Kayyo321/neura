@@ -1,0 +1,4 @@
+// The source is written in parentheses (edge case 45).
+let User = record (id: int64, name: string, active: bool);
+let user = new User(7, "Ada", true);
+let copy = new with user { name: "G" };

@@ -1,0 +1,25 @@
+// Case 84: the event retains an explicitly owned closure and its object.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let events = import:Std.Events.Event;
+let Counter = class (
+    export let total: int = 0;
+);
+let attach = func(event: events.Event<int>, counter: Counter) -> events.Subscription {
+    return event.subscribe(new func(value: int) {
+        counter.total += value;
+    });
+};
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let event = new events.Event<int>();
+        let counter = new Counter();
+        let token = attach(event, counter);
+        event.emit(3);
+        event.emit(5);
+        token.unsubscribe();
+        event.emit(10);
+        console.println("total {}", counter.total);
+        return program.ExitCode.Ok;
+    };
+);

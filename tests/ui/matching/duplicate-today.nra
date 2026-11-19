@@ -1,0 +1,10 @@
+// Edge case 34: a repeated arm in the form of 0.2 stays E0412.
+let.promote _ = import:Std.Core.Optional;
+let Shape = enum (Dot, Line(int), Box { size: [int, int], label: Optional<string> });
+let Tree = enum (Leaf(int), Node(Tree, Tree));
+let Light = enum (Red, Yellow, Green);
+let length = func(shape: Shape) -> int => match (shape) {
+    Shape.Line(n) => n,
+    Shape.Line(m) => m,
+    _ => 0,
+};

@@ -22,7 +22,7 @@ export let BufferedReader = module (
         /// @brief The configured maximum buffer size in bytes.
         last capacity: int;
         /// @brief Stores the buffered bytes.
-        let buffer: uint8[list] = [];
+        let buffer: uint8[list] = new;
         /// @brief The index of the next unread byte in the buffer.
         let start: int = 0;
 
@@ -72,7 +72,7 @@ export let BufferedReader = module (
             if (count < 0) {
                 trap_with_message("invalid argument: negative count");
             }
-            last collected: uint8[list] = [];
+            last collected: uint8[list] = new;
             while (collected.length < count) {
                 match (read(count - collected.length)) {
                     Result.Ok(chunk) => {
@@ -92,7 +92,7 @@ export let BufferedReader = module (
         /// @brief Every remaining byte.
         #NoDiscard
         export let read_all = func -> Result<uint8[list]> {
-            last collected: uint8[list] = [];
+            last collected: uint8[list] = new;
             do {
                 match (read(capacity)) {
                     Result.Ok(chunk) => {
@@ -111,6 +111,9 @@ export let BufferedReader = module (
         /// @brief Creates the error for EOF before an exact byte count is available.
         let unexpected_end = func -> errors.Error =>
             bytes.io(errors.IoErrorKind.UnexpectedEnd, "unexpected end of stream", "");
+
+        /// @brief Names the reader and its buffer capacity.
+        export let.override to_string = func -> string => "BufferedReader(capacity " .. capacity.to_string() .. ")";
     );
 
     /// @brief A reader holding up to 8,192 bytes.

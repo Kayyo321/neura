@@ -1,0 +1,255 @@
+let bytes = import:Std.Io.Internal.Bytes;
+let.promote _ = import:Std.Time.Duration;
+let host = import:Std.Net.Socket.Internal.HostCalls;
+let host_error = import:Std.Core.Internal.HostError;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let socket = import:Std.Net.Internal.Socket;
+let.promote _ = import:Std.Net.Core.SocketAddr;
+let.promote _ = import:Std.Net.Socket.SocketOptions;
+let.promote _ = import:Std.Net.Socket.StreamSocket;
+let support = import:Std.Net.Socket.Internal.Support;
+let.promote _ = import:Std.Net.TcpStream;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief A connected TCP socket: `Std.Net.TcpStream` with addresses, options, a half-close and the
+/// `StreamSocket` and `Std.Net.Transport` contracts. Needs the net capability.
+///
+/// Reading, writing, the read timeout and close are those of the underlying `TcpStream`, so they overlap and
+/// cancel as its documentation describes. `connect` and `TcpConnector` know the peer they dialed; a socket that
+/// `TcpServer.accept` returned has no known peer address in Neura 0.3.0 (the host's accept service reports
+/// none), and `peer_address` is then `None`. `local_port` asks the host and works today. `local_address` is
+/// known for an accepted socket whose server is bound to a specific address; otherwise it needs a host service
+/// that reports a socket's local address, and it traps. Applying an option set uses the host's option service;
+/// `shutdown` needs a host service that no runtime offers yet, and traps. After close every
+/// operation except close fails with Closed.
+/// @see [Std.Net.Socket.TcpSocket](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-TcpSocket)
+#Since("0.3.0")
+export let TcpSocket = module (
+    /// @brief Represents a host file ID or an unsigned host error code.
+    let FileOutcome = enum (Ok(int64), Error(uint32));
+    /// @brief Represents host success without a value or an unsigned host error code.
+    let FileDone = enum (Ok, Error(uint32));
+    /// @brief Opens a file; mode 0 reads (as Std.Fs.File.OpenMode.Read).
+    let open_file = func(path: string, mode: int) -> FileOutcome host("neura.fs.open", 1);
+    /// @brief Releases an open file.
+    let close_file = func(file: int64) -> FileDone host("neura.fs.close", 1);
+
+    /// @brief One connected TCP socket.
+    #[Final, NoDiscard(reason: "a socket must be closed"), NotThreadSafe]
+    export let TcpSocket = class implements StreamSocket<SocketAddr> (
+        /// @brief The host's socket ID.
+        last id: int64;
+        /// @brief The address text used in error messages.
+        last label: string;
+        /// @brief The stream that reads, writes and closes.
+        last stream: TcpStream;
+        /// @brief The dialed peer, when known.
+        last peer: Optional<SocketAddr>;
+        /// @brief The local address, when known without asking the host.
+        last known_local: Optional<SocketAddr>;
+        /// @brief True when the socket was created with Multipath TCP.
+        export last multipath: bool;
+        /// @brief Tracks whether the socket may still use the host ID.
+        let open_now: bool = true;
+
+        /// @brief Use `connect`, `TcpConnector` or `TcpServer`; the handle comes from the library.
+        export let init = func(opened: socket.Handle, dialed: Optional<SocketAddr>, local: Optional<SocketAddr>,
+            uses_multipath: bool) {
+            id = opened.id;
+            label = opened.address;
+            stream = new TcpStream(opened);
+            peer = dialed;
+            known_local = local;
+            multipath = uses_multipath;
+        };
+
+        /// @brief Up to `max` bytes; an empty list once the peer has finished sending. A maximum below 1 traps.
+        #NoDiscard
+        export let read = func(max: int) -> Result<uint8[list]> => stream.read(max);
+
+        /// @brief Writes every byte, as `TcpStream.write`.
+        #NoDiscard
+        export let write = func(data: uint8[list]) -> Result<Unit> => stream.write(data);
+
+        /// @brief The next bytes the peer sent (at most `ReceiveChunk`), or `None` at the end of its data.
+        #NoDiscard
+        export let receive = func -> Result<Optional<uint8[list]>> {
+            last chunk = stream.read(ReceiveChunk)?;
+            return if (chunk.length == 0) -> Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.None)
+                else -> Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.Some(chunk));
+        };
+
+        /// @brief Sends every byte; the `Std.Net.Transport` form of `write`.
+        #NoDiscard
+        export let send = func(data: uint8[list]) -> Result<Unit> => stream.write(data);
+
+        /// @brief The longest a read waits; zero waits without limit.
+        export let read_timeout = func -> Duration => stream.read_timeout;
+
+        /// @brief Sets the read timeout. A negative timeout traps with "invalid argument: negative timeout".
+        export let set_read_timeout = func(timeout: Duration) {
+            stream.read_timeout = timeout;
+        };
+
+        /// @brief The peer this socket dialed, or `None` for an accepted socket (not reported by the host).
+        export let peer_address = func -> Optional<SocketAddr> => peer;
+
+        /// @brief The local port, from the host. Works today.
+        #NoDiscard
+        export let local_port = func -> Result<int> {
+            return Result<int>.Err(bytes.closed("socket", label)) unless open_now;
+            return match (host.local_port(id)) {
+                host.CountOutcome.Ok(port) => Result<int>.Ok(port),
+                host.CountOutcome.Error(code) => Result<int>.Err(host_error.io(code, "local port failed", label)),
+            };
+        };
+
+        /// @brief The local address. Known without the host for an accepted socket whose server is bound to a
+        /// specific address; otherwise it asks the host, which traps in Neura 0.3.0 (no local-address service).
+        #NoDiscard
+        export let local_address = func -> Result<SocketAddr> {
+            return Result<SocketAddr>.Err(bytes.closed("socket", label)) unless open_now;
+            return match (known_local) {
+                Optional.Some(address) => Result<SocketAddr>.Ok(address),
+                Optional.None => match (host.local_address(id)) {
+                    host.AddressOutcome.Ok(reported) => support.reported_address(reported),
+                    host.AddressOutcome.Error(code) => Result<SocketAddr>.Err(
+                        host_error.io(code, "local address failed", label)),
+                },
+            };
+        };
+
+        /// @brief Ends reading, writing (the peer reads the end of the stream) or both, keeping the socket
+        /// open. Traps in Neura 0.3.0: the runtime has no shutdown service.
+        #NoDiscard
+        export let shutdown = func(how: Shutdown) -> Result<Unit> {
+            return Result<Unit>.Err(bytes.closed("socket", label)) unless open_now;
+            last code = how == Shutdown.Read ? 0 : how == Shutdown.Write ? 1 : 2;
+            return match (host.shutdown(id, code)) {
+                host.DoneOutcome.Ok => bytes.ok(),
+                host.DoneOutcome.Error(failure) => Result<Unit>.Err(host_error.io(failure, "shutdown failed", label)),
+            };
+        };
+
+        /// @brief Applies an option set built for `SocketKind.TcpStream`; another kind, or a set with
+        /// multipath (chosen at connect), traps with "invalid argument". An empty set does nothing; a non-empty
+        /// set is applied with the host's option service.
+        #NoDiscard
+        export let set_options = func(options: SocketOptions) -> Result<Unit> {
+            support.check_kind(options, SocketKind.TcpStream);
+            if (options.multipath) {
+                trap_with_message("invalid argument: multipath is chosen when the socket connects");
+            }
+            return Result<Unit>.Err(bytes.closed("socket", label)) unless open_now;
+            return support.apply(id, options, label);
+        };
+
+        /// @brief Sends up to `count` bytes of the file at `path`, from byte `offset`, straight from the file to
+        /// the socket (`sendfile(2)` on Linux); the count sent, which is short at the end of the file. Opening
+        /// the file needs the fs capability. The transfer needs the host's send-file service, which traps in
+        /// Neura 0.3.0. A negative offset or count traps with "invalid argument".
+        #NoDiscard
+        export let send_file = func(path: string, offset: int64, count: int64) -> Result<int64> {
+            if (offset < 0 || count < 0) {
+                trap_with_message("invalid argument: negative offset or count");
+            }
+            return Result<int64>.Err(bytes.closed("socket", label)) unless open_now;
+            let file: int64 = 0;
+            match (open_file(path, 0)) {
+                FileOutcome.Ok(opened) => {
+                    file = opened;
+                },
+                FileOutcome.Error(code) => {
+                    return Result<int64>.Err(host_error.io(code, "file open failed", path));
+                },
+            }
+            last sent = host.send_file(id, file, offset, count);
+            close_file(file);
+            return match (sent) {
+                host.LongOutcome.Ok(total) => Result<int64>.Ok(total),
+                host.LongOutcome.Error(code) => Result<int64>.Err(host_error.io(code, "send file failed", label)),
+            };
+        };
+
+        /// @brief Moves up to `count` bytes from this socket to `target` inside the kernel (`splice(2)` through a
+        /// pipe); the count moved. Needs a splice host service, which no runtime offers yet: traps in Neura 0.3.0.
+        #NoDiscard
+        export let splice_to = func(target: TcpSocket, count: int64) -> Result<int64> {
+            if (count < 0) {
+                trap_with_message("invalid argument: negative count");
+            }
+            return Result<int64>.Err(bytes.closed("socket", label)) unless open_now;
+            return match (host.splice(id, target.id, count)) {
+                host.LongOutcome.Ok(total) => Result<int64>.Ok(total),
+                host.LongOutcome.Error(code) => Result<int64>.Err(host_error.io(code, "splice failed", label)),
+            };
+        };
+
+        /// @brief Sends every byte with `MSG_ZEROCOPY`, so the kernel reads the caller's pages instead of copying
+        /// them. Needs a zero-copy host service, which no runtime offers yet (host values are copied at the
+        /// boundary): traps in Neura 0.3.0.
+        #NoDiscard
+        export let send_zerocopy = func(data: uint8[list]) -> Result<Unit> {
+            return Result<Unit>.Err(bytes.closed("socket", label)) unless open_now;
+            return match (host.send_zerocopy(id, data)) {
+                host.CountOutcome.Ok(count) => count == data.length ? bytes.ok()
+                    : Result<Unit>.Err(bytes.no_progress("zero-copy send was short", label)),
+                host.CountOutcome.Error(code) => Result<Unit>.Err(host_error.io(code, "zero-copy send failed", label)),
+            };
+        };
+
+        /// @brief Releases the connection, as `TcpStream.close`. Closing again returns Ok.
+        export let close = func -> Result<Unit> {
+            open_now = false;
+            return stream.close();
+        };
+
+        /// @brief Text such as "TcpSocket(to 127.0.0.1:8080)" or "TcpSocket(accepted on 127.0.0.1:9000)".
+        export let.override to_string = func -> string => match (peer) {
+            Optional.Some(address) => "TcpSocket(to " .. address.to_string() .. ")",
+            Optional.None => "TcpSocket(accepted on " .. label .. ")",
+        };
+    );
+
+    /// @brief Connects to `address`, waiting at most `timeout` (zero waits without limit). A negative timeout
+    /// traps with "invalid argument: negative timeout".
+    #NoDiscard
+    export let connect = func(address: SocketAddr, timeout: Duration) -> Result<TcpSocket> =>
+        connect_with(address, timeout, none(SocketKind.TcpStream));
+
+    /// @brief Connects to `address` with an option set built for `SocketKind.TcpStream` (another kind traps).
+    /// With multipath the socket is created with Multipath TCP, which needs a host service that no runtime offers
+    /// yet and traps. The other options are applied after the connection is made; if that fails the socket is
+    /// closed and the error returned.
+    #NoDiscard
+    export let connect_with = func(address: SocketAddr, timeout: Duration, options: SocketOptions)
+        -> Result<TcpSocket> {
+        support.check_kind(options, SocketKind.TcpStream);
+        last nanos = support.timeout_nanos(timeout);
+        last text = address.to_string();
+        last outcome = options.multipath ? host.mptcp_connect(address.host_text(), address.port, nanos)
+            : host.connect(address.host_text(), address.port, nanos);
+        let id: int64 = 0;
+        match (outcome) {
+            host.IdOutcome.Ok(opened) => {
+                id = opened;
+            },
+            host.IdOutcome.Error(code) => {
+                return Result<TcpSocket>.Err(host_error.io(code, "connect failed", text));
+            },
+        }
+        last connected = new TcpSocket(new socket.Handle(id, text), Optional<SocketAddr>.Some(address),
+            Optional<SocketAddr>.None, options.multipath);
+        if (options.settings().length > 0) {
+            match (support.apply(id, options, text)) {
+                Result.Ok(_) => {},
+                Result.Err(problem) => {
+                    connected.close();
+                    return Result<TcpSocket>.Err(problem);
+                },
+            }
+        }
+        return Result<TcpSocket>.Ok(connected);
+    };
+);

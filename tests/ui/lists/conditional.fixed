@@ -1,0 +1,4 @@
+// Each arm of a conditional needs its own `new`.
+let pick = func(flag: bool) -> int[list] {
+    return flag ? new([1]) : new;
+};

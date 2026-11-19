@@ -173,23 +173,11 @@ std::optional<nvr::Block> regenerate(const nvr::Image& image, std::uint32_t func
     if (lifted.evidence != Evidence::Structural || !lifted.dispatch.empty()) {
         return std::nullopt;
     }
-    std::vector<std::pair<std::uint32_t, ExpressionPtr>> values(lifted.values.begin(), lifted.values.end());
-    // The order that matched: checks list the order of failing operations;
-    // values without checks keep lane order.
-    std::vector<std::pair<std::uint32_t, ExpressionPtr>> ordered;
-    for (const auto& [reason, expression] : lifted.checks) {
-        for (const auto& value : values) {
-            if (value.second == expression &&
-                std::none_of(ordered.begin(), ordered.end(), [&](const auto& v) { return v.first == value.first; })) {
-                ordered.push_back(value);
-            }
-        }
-    }
-    for (const auto& value : values) {
-        if (std::none_of(ordered.begin(), ordered.end(), [&](const auto& v) { return v.first == value.first; })) {
-            ordered.push_back(value);
-        }
-    }
+    // The order in which the recognition matched the block: the order its
+    // values are computed in, which fixes the order of its checks. A block
+    // that several values leave through one exit, such as a tuple returned
+    // in words, has that order only from the match.
+    const auto ordered = lifted.computation_order();
     return lift::replay(image, original, ordered, lifted.condition, lifted.exit_when_true, graph, nullptr);
 }
 

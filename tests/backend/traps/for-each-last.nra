@@ -7,7 +7,7 @@ let program = import:Std.Program;
 // change made while visiting the last element still fails.
 let Last = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
-        let values: int32[list] = [7];
+        let values: int32[list] = new([7]);
         for (let value in values) {
             console.print_line("visit last");
             values.remove_at(0);

@@ -1,0 +1,9 @@
+error[E0506]: class 'Child' needs a constructor to initialize its base
+  --> $DIR/shorthand-derived-needs-base-constructor.nra:10:42
+   |
+10 |     export let init = func(size: int) => set;
+   |                                          ^^^
+   |
+   = help: '=> set' calls super.init() first; write the constructor as a block that calls super.init(...) itself
+
+For more information about this error, try `neura explain E0506`.

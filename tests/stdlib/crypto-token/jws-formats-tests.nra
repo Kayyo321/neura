@@ -1,0 +1,98 @@
+// test-options: --gpu=off
+let ecdsa = import:Std.Crypto.Asymmetric.Ecdsa;
+let hex = import:Std.Encoding.Hex;
+let jwk = import:Std.Crypto.Token.Jwk;
+let jws = import:Std.Crypto.Token.Jws;
+let test = import:Std.Test;
+let utf8 = import:Std.Encoding.Utf8;
+let vectors = import:JwsFormatVectors;
+
+let JwsFormatTests = module (
+    let bytes = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+    let text = func(encoded: string) -> string => test.assert_ok(utf8.decode(bytes(encoded)));
+    let mac_key = func(encoded: string) -> jwk.HmacKey =>
+        test.assert_ok(jwk.parse_hmac(text(encoded), jwk.HmacAlgorithm.Hs256));
+
+    export let test_rfc7797 = func {
+        last rows = vectors.rfc7797;
+        for (let i = 0; i < rows.length; i += 6) {
+            last key = mac_key(rows[i]);
+            last payload = bytes(rows[i + 1]);
+            let _ = test.assert_ok(jws.verify_detached<jwk.HmacKey>(rows[i + 3], payload, key));
+            last flattened = test.assert_ok(jws.verify_json<jwk.HmacKey>(text(rows[i + 4]), key));
+            test.assert_equal_string(rows[i + 1], hex.encode(flattened));
+            let _ = test.assert_ok(jws.verify_json_detached<jwk.HmacKey>(text(rows[i + 5]), payload, key));
+            let _ = test.assert_err(jws.verify_json<jwk.HmacKey>(text(rows[i + 5]), key));
+            let _ = test.assert_err(jws.verify_json_detached<jwk.HmacKey>(text(rows[i + 4]), payload, key));
+        }
+        let _ = test.assert_err(jws.verify_detached<jwk.HmacKey>(rows[2], bytes(rows[1]), mac_key(rows[0])));
+        let _ = test.assert_err(jws.verify<jwk.HmacKey>(rows[8], mac_key(rows[6])));
+    };
+
+    export let test_general_and_flattened = func {
+        last rows = vectors.rfc7515;
+        last rsa = test.assert_ok(jwk.parse_rsa(text(rows[0]), jwk.RsaAlgorithm.Rs256));
+        last ec = test.assert_ok(jwk.parse_ec(text(rows[1]), ecdsa.Curve.P256));
+        last general = text(rows[3]);
+        last flattened = text(rows[4]);
+        test.assert_equal_string(rows[2], hex.encode(test.assert_ok(jws.verify_json<jwk.RsaKey>(general, rsa, 0))));
+        test.assert_equal_string(rows[2], hex.encode(test.assert_ok(jws.verify_json<jwk.EcKey>(general, ec, 1))));
+        test.assert_equal_string(rows[2], hex.encode(test.assert_ok(jws.verify_json<jwk.EcKey>(flattened, ec))));
+        let _ = test.assert_err(jws.verify_json<jwk.RsaKey>(general, rsa, 1));
+        let _ = test.assert_err(jws.verify_json<jwk.EcKey>(general, ec, 2));
+        let _ = test.assert_err(jws.verify_json<jwk.EcKey>(flattened, ec, 1));
+    };
+
+    export let test_binary_payload_and_encoded_extension = func {
+        last rows = vectors.binary_detached;
+        last key = mac_key(rows[0]);
+        last payload = bytes(rows[1]);
+        let _ = test.assert_ok(jws.verify_detached<jwk.HmacKey>(rows[2], payload, key));
+        let _ = test.assert_ok(jws.verify_detached<jwk.HmacKey>(rows[3], payload, key));
+        let _ = test.assert_ok(jws.verify_json_detached<jwk.HmacKey>(text(rows[4]), payload, key));
+        payload[0] = payload[0] ^ 1;
+        let _ = test.assert_err(jws.verify_detached<jwk.HmacKey>(rows[2], payload, key));
+        let _ = test.assert_err(jws.verify_json_detached<jwk.HmacKey>(text(rows[4]), payload, key));
+    };
+
+    export let test_general_selects_one_trusted_key = func {
+        last rows = vectors.trusted_indices;
+        last first = mac_key(rows[0]);
+        last second = mac_key(rows[1]);
+        last payload = bytes(rows[2]);
+        last serialization = text(rows[3]);
+        let _ = test.assert_ok(jws.verify_json_detached<jwk.HmacKey>(serialization, payload, first, 0));
+        let _ = test.assert_ok(jws.verify_json_detached<jwk.HmacKey>(serialization, payload, second, 1));
+        let _ = test.assert_err(jws.verify_json_detached<jwk.HmacKey>(serialization, payload, first, 1));
+        let _ = test.assert_err(jws.verify_json_detached<jwk.HmacKey>(serialization, payload, second, 0));
+    };
+
+    export let test_empty_payload_is_distinct_from_absent_or_null = func {
+        last rows = vectors.empty_payload;
+        last key = mac_key(rows[0]);
+        test.assert_equal_int32(0, test.assert_ok(jws.verify_json<jwk.HmacKey>(text(rows[1]), key)).length);
+        let _ = test.assert_ok(jws.verify_json_detached<jwk.HmacKey>(text(rows[2]), new, key));
+        let _ = test.assert_err(jws.verify_json_detached<jwk.HmacKey>(text(rows[1]), new, key));
+        let _ = test.assert_err(jws.verify_json<jwk.HmacKey>(text(rows[2]), key));
+        let _ = test.assert_err(jws.verify_json_detached<jwk.HmacKey>(text(rows[3]), new, key));
+        let _ = test.assert_err(jws.verify_json<jwk.HmacKey>(text(rows[3]), key));
+    };
+
+    export let test_rejects_ambiguous_headers = func {
+        last data = vectors.binary_detached;
+        last key = mac_key(data[0]);
+        last payload = bytes(data[1]);
+        last cases = vectors.bad_headers;
+        for (let i = 0; i < cases.length; i += 2) {
+            let _ = test.assert_err(jws.verify_detached<jwk.HmacKey>(cases[i + 1], payload, key));
+        }
+    };
+
+    export let test_rejects_ambiguous_serializations = func {
+        last key = mac_key(vectors.rfc7797[0]);
+        last cases = vectors.bad_serializations;
+        for (let i = 0; i < cases.length; i += 2) {
+            let _ = test.assert_err(jws.verify_json<jwk.HmacKey>(text(cases[i + 1]), key));
+        }
+    };
+);

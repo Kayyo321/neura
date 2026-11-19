@@ -1,0 +1,4 @@
+// A property needs '| get;' (edge case 61).
+let Named = interface (
+    let name: string;
+);

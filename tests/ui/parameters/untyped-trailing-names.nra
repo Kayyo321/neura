@@ -1,0 +1,4 @@
+// A name with no type at the end of the list has no group to take a type from.
+let add = func(a: int, b, c) -> int {
+    return a;
+};

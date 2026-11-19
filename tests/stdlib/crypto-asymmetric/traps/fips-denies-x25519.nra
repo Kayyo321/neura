@@ -1,0 +1,17 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): denied: X25519 is not allowed under the Fips140_3 policy
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let program = import:Std.Program;
+let x25519 = import:Std.Crypto.Asymmetric.X25519;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        crypto_policy.set_policy(crypto_policy.Policy.Fips140_3);
+        let key: uint8[list] = new;
+        for (let i = 0; i < 32; i++) {
+            key.append(i as uint8);
+        }
+        let _ = new x25519.X25519PrivateKey(key);
+        return program.ExitCode.Ok;
+    };
+);

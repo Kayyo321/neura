@@ -1,0 +1,21 @@
+let.promote _ = import:Std.Io.Closeable;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief A bidirectional transport with typed input and output units (docs/design/Net030.md).
+///
+/// A byte transport uses byte lists or `Std.Net.Core.IoSlice` views for `In` and `Out`; `FramedTransport`
+/// fixes both to a frame type. `receive` returns `None` at the orderly end of the peer's data, so an empty unit
+/// and the end are different results.
+/// @see [Std.Net.Transport](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Transport)
+#Since("0.3.0")
+export let Transport = module (
+    /// @brief Receives units of `In` and sends units of `Out`.
+    export let Transport = interface<In, Out>:Closeable (
+        /// @brief The next unit from the peer, or `None` once the peer has finished sending.
+        let receive = func -> Result<Optional<In>>;
+        /// @brief Sends one unit completely or fails.
+        let send = func(data: Out) -> Result<Unit>;
+    );
+);

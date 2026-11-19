@@ -1,0 +1,103 @@
+let optional = import:Std.Core.Optional;
+let query = import:Std.Net.Core.Query;
+let test = import:Std.Test;
+
+// The query-string AST: pairs, lookups, encoding back, and the nested-key tree.
+let QueryTests = module (
+    let parse = func(raw: string, mode: query.QueryMode) -> query.QueryString =>
+        test.assert_ok<query.QueryString>(query.parse(raw, mode));
+
+    // Generated with python3 -I: urllib.parse.parse_qsl('a=1&b=x+y&a=2&c&d=&&e=%26%3D', keep_blank_values=True)
+    // == [('a','1'), ('b','x y'), ('a','2'), ('c',''), ('d',''), ('e','&=')] (Python's form mode; it does not
+    // keep the difference between 'c' and 'd=', which this AST keeps).
+    export let test_parse_pairs = func {
+        last q = parse("a=1&b=x+y&a=2&c&d=&&e=%26%3D", query.QueryMode.Form);
+        test.assert_equal<int>(6, q.size());
+        test.assert_equal_string("a", q.pair_at(0).key);
+        test.assert_equal_string("1", q.pair_at(0).value_or_empty());
+        test.assert_equal_string("x y", test.assert_some<string>(q.get("b")));
+        test.assert_none<string>(q.pair_at(3).value);
+        test.assert_equal_string("", test.assert_some<string>(q.pair_at(4).value));
+        test.assert_equal_string("&=", test.assert_some<string>(q.get("e")));
+        last all = q.get_all("a");
+        test.assert_equal<int>(2, all.length);
+        test.assert_equal_string("2", all[1]);
+        test.assert_equal_string("", test.assert_some<string>(q.get("c")));
+        test.assert_none<string>(q.get("missing"));
+        test.assert(q.contains("d"));
+    };
+
+    export let test_plus_modes = func {
+        last rfc = parse("b=x+y", query.QueryMode.Rfc3986);
+        test.assert_equal_string("x+y", test.assert_some<string>(rfc.get("b")));
+        last form = parse("b=x+y", query.QueryMode.Form);
+        test.assert_equal_string("x y", test.assert_some<string>(form.get("b")));
+    };
+
+    export let test_first_equals_splits = func {
+        last q = parse("k=a=b", query.QueryMode.Rfc3986);
+        test.assert_equal_string("a=b", test.assert_some<string>(q.get("k")));
+        last empty_key = parse("=v", query.QueryMode.Rfc3986);
+        test.assert_equal_string("v", test.assert_some<string>(empty_key.get("")));
+    };
+
+    export let test_round_trip_both_modes = func {
+        last q = new query.QueryString();
+        q.add("k y&=", "a&b=c+d%#é");
+        q.add_flag("flag");
+        q.add("empty", "");
+        // python3 -I: urllib.parse.urlencode([('k y','a&b=c+d%'),('x#','é')]) gives
+        // 'k+y=a%26b%3Dc%2Bd%25&x%23=%C3%A9', the same escapes as the Form mode for these bytes.
+        last form = q.encode(query.QueryMode.Form);
+        test.assert_equal_string("k+y%26%3D=a%26b%3Dc%2Bd%25%23%C3%A9&flag&empty=", form);
+        last rfc = q.encode(query.QueryMode.Rfc3986);
+        test.assert_equal_string("k%20y%26%3D=a%26b%3Dc%2Bd%25%23%C3%A9&flag&empty=", rfc);
+        test.assert(parse(form, query.QueryMode.Form).equals(q));
+        test.assert(parse(rfc, query.QueryMode.Rfc3986).equals(q));
+        test.assert_equal_string(rfc, q.to_string());
+    };
+
+    export let test_edit = func {
+        last q = parse("a=1&b=2&a=3", query.QueryMode.Rfc3986);
+        q.set("a", "9");
+        test.assert_equal_string("a=9&b=2", q.to_string());
+        test.assert_equal<int>(1, q.remove_all("b"));
+        test.assert_equal<int>(0, q.remove_all("b"));
+        q.set("c", "x");
+        test.assert_equal_string("a=9&c=x", q.to_string());
+    };
+
+    export let test_decode_errors_have_raw_offsets = func {
+        last e = test.assert_err<query.QueryString>(query.parse("a=1&b=%zz", query.QueryMode.Rfc3986));
+        test.assert_equal_string("Parse{kind: InvalidCharacter, offset: 6, message: '%' must be followed by two hex digits}", e.to_string());
+    };
+
+    export let test_key_path = func {
+        last path = query.key_path("a[b][c]");
+        test.assert_equal<int>(3, path.length);
+        test.assert_equal_string("c", path[2]);
+        test.assert_equal<int>(1, query.key_path("a[b").length);
+        test.assert_equal<int>(1, query.key_path("[a]").length);
+        test.assert_equal<int>(1, query.key_path("a[b]c").length);
+        test.assert_equal<int>(1, query.key_path("a]").length);
+        last empty = query.key_path("a[]");
+        test.assert_equal<int>(2, empty.length);
+        test.assert_equal_string("", empty[1]);
+    };
+
+    export let test_tree = func {
+        last q = parse("user[name]=ann&user[roles][]=admin&user[roles][]=dev&page=2&user[name]=bob&x[y",
+            query.QueryMode.Rfc3986);
+        last root = q.tree();
+        last user = test.assert_some<query.QueryNode>(root.child("user"));
+        last name = test.assert_some<query.QueryNode>(user.child("name"));
+        test.assert_equal<int>(2, name.values.length);
+        test.assert_equal_string("ann", test.assert_some<string>(name.value()));
+        last roles = test.assert_some<query.QueryNode>(user.child("roles"));
+        test.assert_equal<int>(2, roles.children.length);
+        test.assert_equal_string("dev", test.assert_some<string>(test.assert_some<query.QueryNode>(roles.child("1")).value()));
+        test.assert_equal_string("2", test.assert_some<string>(test.assert_some<query.QueryNode>(root.child("page")).value()));
+        test.assert(optional.is_some<query.QueryNode>(root.child("x[y")));
+        test.assert_equal_string("{}[user{}[name{ann,bob}[] roles{}[0{admin}[] 1{dev}[]]] page{2}[] x[y{}[]]", root.to_string());
+    };
+);

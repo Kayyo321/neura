@@ -7,7 +7,7 @@ export let Bytes = module (
     /// @brief The UTF-8 bytes of `text`.
     #Pure
     export let of_string = func(text: string) -> uint8[list] {
-        last bytes: uint8[list] = [];
+        last bytes: uint8[list] = new;
         last count = text.byte_length;
         let i = 0;
         while (i < count) {
@@ -20,7 +20,7 @@ export let Bytes = module (
     /// @brief A new list of bytes[start] up to but excluding bytes[end].
     #Pure
     export let copy_range = func(bytes: uint8[list], start: int, end: int) -> uint8[list] {
-        last copy: uint8[list] = [];
+        last copy: uint8[list] = new;
         let i = start;
         while (i < end) {
             copy.append(bytes[i]);
@@ -64,7 +64,7 @@ export let Bytes = module (
     /// @brief The error of an operation on a closed resource (Stdlib.md 5.5).
     #Pure
     export let closed = func(what: string, path: string) -> error.Error =>
-        io(error.IoErrorKind.Closed, what + " is closed", path);
+        io(error.IoErrorKind.Closed, what .. " is closed", path);
 
     /// @brief The error for bytes that are not valid UTF-8.
     #Pure

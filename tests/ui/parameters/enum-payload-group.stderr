@@ -1,0 +1,8 @@
+error[E0203]: expected ')'
+ --> $DIR/enum-payload-group.nra:3:15
+  |
+3 |     Point(x, y: int),
+  |               ^ expected ')', found ':'
+  |          - unclosed '(' opened here
+
+For more information about this error, try `neura explain E0203`.

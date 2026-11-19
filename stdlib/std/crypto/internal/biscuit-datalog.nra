@@ -1,0 +1,482 @@
+let externals = import:Std.Crypto.Internal.BiscuitExternals;
+let expr = import:Std.Crypto.Internal.BiscuitExpr;
+let errors = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief The bounded Datalog engine used by Biscuit v3. Internal.
+export let BiscuitDatalog = module (
+    export const MaxItems: int = 128;
+    export const MaxBody: int = 32;
+    export const MaxTerms: int = 16;
+    const MaxFacts: int = 512;
+    const MaxRounds: int = 32;
+    const MaxWork: int = 100000;
+    const AuthorizerBlock: int = 16;
+
+    export let fail = func<T>(code: string, message: string) -> Result<T> =>
+        Result<T>.Err(errors.custom(code, message));
+
+    export let Scope = enum (Authority, Previous, External(string));
+
+    export let Predicate = class (
+        export last name: string;
+        export last terms: expr.Term[list];
+
+        export let init = func(identifier: string, arguments: expr.Term[list]) {
+            name = identifier;
+            terms = arguments;
+        };
+
+        export let.override equals = func(other: class) -> bool {
+            if (other is not predicate: Predicate) {
+                return false;
+            }
+            if (name != predicate.name || terms.length != predicate.terms.length) {
+                return false;
+            }
+            for (let i = 0; i < terms.length; i++) {
+                if (not terms[i].equals(predicate.terms[i])) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        export let.override hash_code = func -> uint32 => name.hash_code();
+        export let.override to_string = func -> string => "Biscuit Predicate";
+    );
+
+    export let Query = class (
+        export last body: Predicate[list];
+        export last scopes: Scope[list] = new;
+        export last expressions: expr.Operation[list][list] = new;
+
+        export let init = func(predicates: Predicate[list]) {
+            body = predicates;
+        };
+
+        export let.override to_string = func -> string => "Biscuit Query";
+    );
+
+    export let Rule = class (
+        export last head: Predicate;
+        export last query: Query;
+
+        export let init = func(conclusion: Predicate, condition: Query) {
+            head = conclusion;
+            query = condition;
+        };
+
+        export let.override to_string = func -> string => "Biscuit Rule";
+    );
+
+    export let CheckKind = enum (One, All, Reject);
+
+    export let Check = class (
+        export last kind: CheckKind;
+        export last queries: Query[list];
+
+        export let init = func(category: CheckKind, alternatives: Query[list]) {
+            kind = category;
+            queries = alternatives;
+        };
+
+        export let.override to_string = func -> string => "Biscuit Check";
+    );
+
+    export let Block = class (
+        export last facts: Predicate[list] = new;
+        export last rules: Rule[list] = new;
+        export last checks: Check[list] = new;
+        export last scopes: Scope[list] = new;
+        export let signer: string = "";
+        export let revocation: string = "";
+
+        export let.override to_string = func -> string => "Biscuit Block";
+    );
+
+    export let Policy = class (
+        export last allow: bool;
+        export last queries: Query[list];
+
+        export let init = func(grant_access: bool, alternatives: Query[list]) {
+            allow = grant_access;
+            queries = alternatives;
+        };
+
+        export let.override to_string = func -> string => "Biscuit Policy";
+    );
+
+    export let Authorizer = class (
+        export last logic: Block = new;
+        export last policies: Policy[list] = new;
+
+        export let.override to_string = func -> string => "Biscuit Authorizer";
+    );
+
+    export let Budget = class (
+        let work: int = 0;
+
+        export let step = func -> Result<Unit> {
+            if (work == MaxWork) {
+                return fail<Unit>("biscuit.limit", "too many Datalog matching steps");
+            }
+            work++;
+            return Result<Unit>.Ok(Unit.Value);
+        };
+
+        export let.override to_string = func -> string => "Biscuit Budget";
+    );
+
+    export let ground = func(predicate: Predicate) -> bool {
+        for (let term in predicate.terms) {
+            if (term.kind == expr.Kind.Variable) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    let contains_variable = func(query: Query, name: string) -> bool {
+        for (let predicate in query.body) {
+            for (let term in predicate.terms) {
+                if (term.kind == expr.Kind.Variable && term.text == name) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+
+    export let safe_query = func(query: Query) -> bool {
+        let variables: string[list] = new;
+        for (let predicate in query.body) {
+            for (let term in predicate.terms) {
+                if (term.kind == expr.Kind.Variable) {
+                    variables.append(term.text);
+                }
+            }
+        }
+        for (let code in query.expressions) {
+            if (not expr.valid(code, variables)) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    export let safe_rule = func(rule: Rule) -> bool {
+        for (let term in rule.head.terms) {
+            if (term.kind == expr.Kind.Variable && not contains_variable(rule.query, term.text)) {
+                return false;
+            }
+        }
+        return safe_query(rule.query);
+    };
+
+    let bound = func(bindings: [string, expr.Term][list], name: string, budget: Budget) -> Result<Optional<expr.Term>> {
+        for (let pair in bindings) {
+            budget.step()?;
+            if (pair[0] == name) {
+                return Result<Optional<expr.Term>>.Ok(Optional<expr.Term>.Some(pair[1]));
+            }
+        }
+        return Result<Optional<expr.Term>>.Ok(Optional<expr.Term>.None);
+    };
+
+    let bind_terms = func(pattern: Predicate, fact: Predicate, bindings: [string, expr.Term][list], budget: Budget)
+        -> Result<bool> {
+        for (let i = 0; i < pattern.terms.length; i++) {
+            budget.step()?;
+            last term = pattern.terms[i];
+            last actual = fact.terms[i];
+            if (term.kind == expr.Kind.Variable) {
+                match (bound(bindings, term.text, budget)?) {
+                    Optional.Some(value) => {
+                        if (not value.equals(actual)) {
+                            return Result<bool>.Ok(false);
+                        }
+                    },
+                    Optional.None => {
+                        bindings.append([term.text, actual]);
+                    },
+                }
+            } else if (not term.equals(actual)) {
+                return Result<bool>.Ok(false);
+            }
+        }
+        return Result<bool>.Ok(true);
+    };
+
+    let Fact = class (
+        export last predicate: Predicate;
+        export last origins: uint32;
+
+        export let init = func(value: Predicate, provenance: uint32) {
+            predicate = value;
+            origins = provenance;
+        };
+
+        export let.override to_string = func -> string => "Biscuit Fact";
+    );
+
+    let origin = func(index: int) -> uint32 => (1 as uint32) << index;
+
+    let trust = func(scopes: Scope[list], inherited: uint32, block: int, blocks: Block[list]) -> uint32 {
+        if (scopes.length == 0) {
+            return inherited;
+        }
+        let visible = origin(block) | origin(AuthorizerBlock);
+        for (let scope in scopes) {
+            match (scope) {
+                Scope.Authority => {
+                    visible = visible | origin(0);
+                },
+                Scope.Previous => {
+                    if (block != AuthorizerBlock) {
+                        visible = visible | (origin(block + 1) - 1);
+                    }
+                },
+                Scope.External(key) => {
+                    for (let i = 1; i < blocks.length; i++) {
+                        if (blocks[i].signer == key) {
+                            visible = visible | origin(i);
+                        }
+                    }
+                },
+            }
+        }
+        return visible;
+    };
+
+    let ScopedRule = class (
+        export last rule: Rule;
+        export last origin: uint32;
+        export last trust: uint32;
+
+        export let init = func(value: Rule, at: uint32, allowed: uint32) {
+            rule = value;
+            origin = at;
+            trust = allowed;
+        };
+
+        export let.override to_string = func -> string => "Biscuit ScopedRule";
+    );
+
+    // A successful continuation can stop the search early for checks and policies.
+    let visit = func(query: Query, index: int, facts: Fact[list], visible: uint32, origins: uint32,
+        bindings: [string, expr.Term][list], on_match: func([string, expr.Term][list], uint32) -> Result<bool>, budget: Budget)
+        -> Result<bool> {
+        if (index == query.body.length) {
+            return on_match(bindings, origins);
+        }
+        last pattern = query.body[index];
+        for (let entry in facts) {
+            budget.step()?;
+            if ((entry.origins & visible) != entry.origins) {
+                continue;
+            }
+            last fact = entry.predicate;
+            if (pattern.name == fact.name && pattern.terms.length == fact.terms.length) {
+                last previous = bindings.length;
+                if ((bind_terms(pattern, fact, bindings, budget)?)
+                    && (visit(query, index + 1, facts, visible, origins | entry.origins, bindings, on_match, budget)?)) {
+                    return Result<bool>.Ok(true);
+                }
+                while (bindings.length > previous) {
+                    bindings.remove_at(bindings.length - 1);
+                }
+            }
+        }
+        return Result<bool>.Ok(false);
+    };
+
+    let evaluate = func(query: Query, bindings: [string, expr.Term][list], budget: Budget,
+        registry: externals.Registry) -> Result<bool> {
+        for (let code in query.expressions) {
+            last result = expr.evaluate(code, bindings, func -> Result<Unit> => budget.step(), registry)?;
+            if (not (expr.as_bool(result)?)) {
+                return Result<bool>.Ok(false);
+            }
+        }
+        return Result<bool>.Ok(true);
+    };
+
+    let substitute = func(head: Predicate, bindings: [string, expr.Term][list], budget: Budget) -> Result<Predicate> {
+        let terms: expr.Term[list] = new;
+        for (let term in head.terms) {
+            if (term.kind == expr.Kind.Variable) {
+                match (bound(bindings, term.text, budget)?) {
+                    Optional.Some(value) => {
+                        terms.append(value);
+                    },
+                    Optional.None => {
+                        return fail<Predicate>("biscuit.format", "unbound variable in rule head");
+                    },
+                }
+            } else {
+                terms.append(term);
+            }
+        }
+        return Result<Predicate>.Ok(new Predicate(head.name, terms));
+    };
+
+    let add = func(facts: Fact[list], fact: Fact, budget: Budget) -> Result<Unit> {
+        for (let current in facts) {
+            budget.step()?;
+            if (current.origins == fact.origins && current.predicate.equals(fact.predicate)) {
+                return Result<Unit>.Ok(Unit.Value);
+            }
+        }
+        if (facts.length == MaxFacts) {
+            return fail<Unit>("biscuit.limit", "too many Datalog facts");
+        }
+        facts.append(fact);
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    let close = func(facts: Fact[list], rules: ScopedRule[list], budget: Budget, registry: externals.Registry) -> Result<Unit> {
+        for (let round in 0 .. MaxRounds) {
+            let generated: Fact[list] = new;
+            for (let entry in rules) {
+                let _ = visit(entry.rule.query, 0, facts, entry.trust, entry.origin, new,
+                    func(bindings: [string, expr.Term][list], origins: uint32) -> Result<bool> {
+                        if (evaluate(entry.rule.query, bindings, budget, registry)?) {
+                            last fact = substitute(entry.rule.head, bindings, budget)?;
+                            add(generated, new Fact(fact, origins), budget)?;
+                        }
+                        return Result<bool>.Ok(false);
+                    }, budget)?;
+            }
+            last previous = facts.length;
+            for (let fact in generated) {
+                add(facts, fact, budget)?;
+            }
+            if (facts.length == previous) {
+                return Result<Unit>.Ok(Unit.Value);
+            }
+        }
+        return fail<Unit>("biscuit.limit", "Datalog did not reach a fixed point");
+    };
+
+    let block_trust = func(block: Block, index: int, blocks: Block[list]) -> uint32 {
+        last fallback = origin(0) | origin(index) | origin(AuthorizerBlock);
+        return trust(block.scopes, fallback, index, blocks);
+    };
+
+    let load_block = func(block: Block, index: int, blocks: Block[list], facts: Fact[list], rules: ScopedRule[list],
+        budget: Budget) -> Result<Unit> {
+        last marker = origin(index);
+        last inherited = block_trust(block, index, blocks);
+        for (let value in block.facts) {
+            add(facts, new Fact(value, marker), budget)?;
+        }
+        if (block.revocation != "") {
+            let tuple: expr.Term[list] = new([
+                new expr.Term(expr.Kind.Integer, index.to_string()), new expr.Term(expr.Kind.Bytes, block.revocation)
+            ]);
+            add(facts, new Fact(new Predicate("revocation_id", tuple), marker), budget)?;
+        }
+        for (let rule in block.rules) {
+            rules.append(new ScopedRule(rule, marker, trust(rule.query.scopes, inherited, index, blocks)));
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    let query_matches = func(query: Query, kind: CheckKind, facts: Fact[list], visible: uint32, budget: Budget,
+        registry: externals.Registry) -> Result<bool> {
+        let found: bool[list] = new([false]);
+        last stopped = visit(query, 0, facts, visible, 0, new,
+            func(bindings: [string, expr.Term][list], origins: uint32) -> Result<bool> {
+                found[0] = true;
+                last condition = evaluate(query, bindings, budget, registry)?;
+                return Result<bool>.Ok(kind == CheckKind.All ? not condition : condition);
+            }, budget)?;
+        if (kind == CheckKind.All) {
+            return Result<bool>.Ok(found[0] && not stopped);
+        }
+        return Result<bool>.Ok(kind == CheckKind.Reject ? not stopped : stopped);
+    };
+
+    let matches = func(queries: Query[list], kind: CheckKind, facts: Fact[list], index: int, inherited: uint32,
+        blocks: Block[list], budget: Budget, registry: externals.Registry) -> Result<bool> {
+        for (let query in queries) {
+            last visible = trust(query.scopes, inherited, index, blocks);
+            last success = query_matches(query, kind, facts, visible, budget, registry)?;
+            if (kind == CheckKind.Reject && not success) {
+                return Result<bool>.Ok(false);
+            }
+            if (kind != CheckKind.Reject && success) {
+                return Result<bool>.Ok(true);
+            }
+        }
+        return Result<bool>.Ok(kind == CheckKind.Reject);
+    };
+
+    let check_all = func(block: Block, index: int, blocks: Block[list], facts: Fact[list], budget: Budget,
+        registry: externals.Registry) -> Result<Unit> {
+        last inherited = block_trust(block, index, blocks);
+        for (let check in block.checks) {
+            if (not (matches(check.queries, check.kind, facts, index, inherited, blocks, budget, registry)?)) {
+                return fail<Unit>("biscuit.check", "a Datalog check did not match");
+            }
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    let require_query_functions = func(query: Query, registry: externals.Registry) -> Result<Unit> {
+        for (let code in query.expressions) {
+            expr.require_registered(code, registry)?;
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    let require_block_functions = func(block: Block, registry: externals.Registry) -> Result<Unit> {
+        for (let rule in block.rules) {
+            require_query_functions(rule.query, registry)?;
+        }
+        for (let check in block.checks) {
+            for (let query in check.queries) {
+                require_query_functions(query, registry)?;
+            }
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    /// @brief Evaluates facts and rules with explicit provenance. Only trusted origins may support a query.
+    export let authorize = func(blocks: Block[list], authorizer: Authorizer, registry: externals.Registry) -> Result<Unit> {
+        require_block_functions(authorizer.logic, registry)?;
+        for (let block in blocks) {
+            require_block_functions(block, registry)?;
+        }
+        for (let policy in authorizer.policies) {
+            for (let query in policy.queries) {
+                require_query_functions(query, registry)?;
+            }
+        }
+        let budget: Budget = new;
+        let facts: Fact[list] = new;
+        let rules: ScopedRule[list] = new;
+        load_block(authorizer.logic, AuthorizerBlock, blocks, facts, rules, budget)?;
+        for (let i = 0; i < blocks.length; i++) {
+            load_block(blocks[i], i, blocks, facts, rules, budget)?;
+        }
+        close(facts, rules, budget, registry)?;
+        check_all(authorizer.logic, AuthorizerBlock, blocks, facts, budget, registry)?;
+        for (let i = 0; i < blocks.length; i++) {
+            check_all(blocks[i], i, blocks, facts, budget, registry)?;
+        }
+        last inherited = block_trust(authorizer.logic, AuthorizerBlock, blocks);
+        for (let policy in authorizer.policies) {
+            if (matches(policy.queries, CheckKind.One, facts, AuthorizerBlock, inherited, blocks, budget, registry)?) {
+                if (policy.allow) {
+                    return Result<Unit>.Ok(Unit.Value);
+                }
+                return fail<Unit>("biscuit.denied", "the first matching Datalog policy denies access");
+            }
+        }
+        return fail<Unit>("biscuit.denied", "no Datalog policy matched");
+    };
+);

@@ -1,0 +1,3 @@
+// A primitive may not be stored in an interface with static requirements.
+let.promote _ = import:Std.Core.Arithmetic;
+let value: Additive<int> = 3;

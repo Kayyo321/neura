@@ -69,14 +69,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
+          VERSION: ${{ steps.plan.outputs.version }}
         run: |
           # A trial builds a -dev version, which sorts before every published
-          # candidate of the same version, so it has nothing to update from.
+          # candidate of the same version: it updates from the most recent
+          # release of an earlier version, so check 9 runs in a trial as it
+          # does for a tag whose previous release is of an earlier version.
           if [ "$REF_TYPE" = tag ]; then
             tag=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 20 --json tagName \
               --jq "[.[].tagName | select(. != \"$REF_NAME\")][0] // \"\"")
           else
-            tag=""
+            tag=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 20 --json tagName \
+              --jq "[.[].tagName | select(startswith(\"v$VERSION\") | not)][0] // \"\"")
           fi
           echo "previous release: ${tag:-none}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
@@ -85,35 +89,54 @@ jobs:
     name: Build and test (${{ matrix.triple }})
     needs: plan
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
+    # The longest a hosted runner allows. Without the x86-64 JIT (aarch64
+    # and macOS) the suite takes hours on the 3- and 4-core runners
+    # (docs/ContinuousIntegration.md, "Time limits").
+    timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:
+        # timeout-scale multiplies every test's time limit
+        # (NEURA_TEST_TIMEOUT_SCALE); the limits are set for a developer
+        # machine with the JIT.
         include:
           - triple: x86_64-linux-gnu
             runner: ubuntu-24.04
-            minimum: 177
+            minimum: 180
             exclude: "^$"
+            timeout-scale: 3
           - triple: aarch64-linux-gnu
             runner: ubuntu-24.04-arm
-            minimum: 177
+            minimum: 180
             exclude: "^$"
+            timeout-scale: 12
           # macOS has no native launcher, so the six native-* tests are not
-          # registered there.
+          # registered there. Its runners have no Docker, which the
+          # PostgreSQL provider's test starts its servers in: there it is
+          # left out instead of being reported as skipped.
           - triple: aarch64-apple-darwin
             runner: macos-15
-            minimum: 171
-            exclude: "^$"
+            minimum: 174
+            exclude: "^server-sql-postgres$"
+            timeout-scale: 12
+          # The Intel runner runs the crypto suites five to six times slower than the arm one
+          # (release trial 21), and its suite reaches the 360-minute job limit: the pure-Neura
+          # suites stdlib-crypto-advanced, stdlib-crypto-asymmetric and stdlib-crypto-pqc with
+          # its parts (hours each without the JIT) run on the other three targets, including arm macOS with
+          # the same compiler, library and interpreter without the JIT
+          # (docs/ContinuousIntegration.md, "Tests that run on fewer targets").
           - triple: x86_64-apple-darwin
             runner: macos-15-intel
-            minimum: 171
-            exclude: "^$"
+            minimum: 174
+            exclude: "^(server-sql-postgres|stdlib-crypto-advanced|stdlib-crypto-asymmetric|stdlib-crypto-pqc(-.*)?)$"
+            timeout-scale: 12
     env:
       NEURA_LIBCLANG_REQUIRED: "1"
       NEURA_USERNS_REQUIRED: "1"
       PRERELEASE: ${{ needs.plan.outputs.prerelease }}
       FULL: ${{ needs.plan.outputs.full }}
       TRIPLE: ${{ matrix.triple }}
+      TIMEOUT_SCALE: ${{ matrix.timeout-scale }}
     steps:
       - name: Check out the repository and its submodule
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -143,14 +166,109 @@ jobs:
           echo "PKG_CONFIG_PATH=$(brew --prefix libffi)/lib/pkgconfig" >> "$GITHUB_ENV"
           echo "JOBS=$(sysctl -n hw.ncpu)" >> "$GITHUB_ENV"
 
+      # The server components that every archive links statically: OpenSSL
+      # (TLS), nghttp2 (HTTP/2) and libpq (the PostgreSQL provider), built
+      # from the sources packaging/server-components.lock.toml pins
+      # (docs/runtime/ServerHost.md, "Release archives"). For a tag only the
+      # source archives are cached; the script checks each against the
+      # lock's SHA-256 before it builds, so a restored cache cannot change
+      # what is linked.
+      - name: Restore the server component sources
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: server-downloads
+          key: server-sources-${{ hashFiles('packaging/server-components.lock.toml') }}
+
+      # A trial started by hand may reuse the components an earlier trial
+      # built on the same runner image from the same lock and script. A tag
+      # always builds them from the verified sources.
+      # The runner image (ImageOS, ImageVersion: variables of the runner's
+      # environment, not of the workflow's env context) and the compiler are
+      # part of the key.
+      - name: Name the built server components (trials only)
+        id: server-key
+        if: ${{ github.ref_type != 'tag' }}
+        env:
+          RECIPE: ${{ hashFiles('packaging/server-components.lock.toml', 'packaging/build-server-components.sh') }}
+        run: |
+          compiler=$("${CC:-cc}" --version 2> /dev/null | head -n 1 | tr -c 'A-Za-z0-9.\n' '-')
+          key="server-built-$TRIPLE-${ImageOS:-unknown}-${ImageVersion:-unknown}-$compiler-$RECIPE"
+          echo "$key"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the built server components (trials only)
+        id: server-built
+        if: ${{ github.ref_type != 'tag' }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/server-components
+          key: ${{ steps.server-key.outputs.key }}
+
+      - name: Build the server components
+        if: ${{ steps.server-built.outputs.cache-hit != 'true' }}
+        run: |
+          sh packaging/build-server-components.sh --downloads server-downloads --jobs "$JOBS" \
+            "$RUNNER_TEMP/server-components" 2>&1 | tee server-components.log
+
+      # Saved at once, not at the end of the job, so a trial whose tests
+      # fail still leaves the components for the next one.
+      - name: Save the built server components (trials only)
+        if: ${{ github.ref_type != 'tag' && steps.server-built.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/server-components
+          key: ${{ steps.server-key.outputs.key }}
+
+      - name: Locate the server components
+        run: echo "SERVER_COMPONENTS=$RUNNER_TEMP/server-components" >> "$GITHUB_ENV"
+
       - name: Configure
         run: >
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
           -DNEURA_PORTABLE_RELEASE=ON
           "-DNEURA_VERSION_PRERELEASE=$PRERELEASE"
           "-DNEURA_BUILD_COMMIT=$GITHUB_SHA"
+          -DNEURA_ENABLE_SERVER_TLS=ON "-DOPENSSL_ROOT_DIR=$SERVER_COMPONENTS/openssl"
+          "-DOPENSSL_INCLUDE_DIR=$SERVER_COMPONENTS/openssl/include"
+          -DNEURA_ENABLE_SERVER_HTTP2=ON "-DNEURA_NGHTTP2_ROOT=$SERVER_COMPONENTS/nghttp2"
+          -DNEURA_ENABLE_POSTGRES=ON "-DNEURA_LIBPQ_SOURCE=$SERVER_COMPONENTS/postgresql"
+          "-DNEURA_LIBPQ_BUILD=$SERVER_COMPONENTS/postgresql"
+          "-DNEURA_COMPONENT_LICENSES=$SERVER_COMPONENTS/licenses"
+          "-DNEURA_SERVER_TEST_OPENSSL=$SERVER_COMPONENTS/openssl/bin/openssl"
+          "-DNEURA_TEST_TIMEOUT_SCALE=$TIMEOUT_SCALE"
+
+      # The build must compile against and link the pinned libraries, never a
+      # system or Homebrew OpenSSL: FindOpenSSL may take the headers from the
+      # pkg-config file of Homebrew's OpenSSL, so the include directory is
+      # given too.
+      - name: Require the pinned server components
+        run: |
+          status=0
+          for entry in OPENSSL_SSL_LIBRARY OPENSSL_CRYPTO_LIBRARY OPENSSL_INCLUDE_DIR NEURA_NGHTTP2_LIBRARY; do
+            value=$(sed -n "s/^$entry:[A-Z]*=//p" build/CMakeCache.txt)
+            echo "$entry: $value"
+            case "$value" in
+              "$SERVER_COMPONENTS"/*) ;;
+              *) echo "::error::$entry is $value, not under $SERVER_COMPONENTS"; status=1 ;;
+            esac
+          done
+          "$SERVER_COMPONENTS/openssl/bin/openssl" version
+          cat "$SERVER_COMPONENTS/components.txt"
+          exit "$status"
+
+      # The archives' OpenSSL takes its default trust anchors from /etc/ssl
+      # (docs/Install.md): a verifying connection with no CA file given
+      # shows that the runner's system keeps them there.
+      - name: Require the default trust anchors to verify a public server
+        run: |
+          ls -ld /etc/ssl/cert.pem /etc/ssl/certs 2> /dev/null || true
+          echo | "$SERVER_COMPONENTS/openssl/bin/openssl" s_client -connect github.com:443 -servername github.com \
+            -verify_return_error > trust.log 2>&1 || true
+          grep -E "Verify return code" trust.log
+          grep -q "Verify return code: 0 (ok)" trust.log
 
       - name: Build
+        id: build
         run: cmake --build build --parallel "$JOBS" 2>&1 | tee build/build.log
 
       - name: Require a build of Neura's sources without compiler warnings
@@ -159,6 +277,176 @@ jobs:
             echo "::error::The build reported the compiler warnings above in Neura's sources."
             exit 1
           fi
+
+      # The install and the checks of what it holds run before the tests and
+      # whenever the build succeeded, so a failing or slow test does not hide
+      # them; packing still needs every step.
+      # stage holds the core and the SDK, for the dependency checks below;
+      # `cmake --install` without a component leaves the service out
+      # (docs/design/Service030.md). Each stage-<component> holds one install
+      # component, which make-archive.sh packs into the three archives of the
+      # target and describes with a manifest (docs/design/Lifecycle030.md).
+      # stage-service is empty in a build without neurad.
+      - name: Install into new prefixes
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          cmake --install build --prefix stage
+          for component in core sdk service; do
+            cmake --install build --component "$component" --prefix "stage-$component"
+            mkdir -p "stage-$component"
+          done
+
+      # The archive must run on a machine without a C++ runtime or libffi,
+      # with a C library no newer than the one documented in docs/Install.md.
+      - name: Require the documented system dependencies and no others (Linux)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && runner.os == 'Linux' }}
+        run: |
+          status=0
+          # Every executable of the three archives: stage holds core and sdk,
+          # stage-service the service component.
+          for file in stage/bin/* stage/lib/neura/*.so stage/lib/neura/launchers/*/* $(find stage-service -type f 2> /dev/null); do
+            # A static executable has no dynamic section: readelf prints
+            # nothing for it and objdump fails. Both mean it needs nothing.
+            needed=$(readelf -d "$file" 2> /dev/null | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p' | sort | tr '\n' ' ' || true)
+            newest=$(objdump -T "$file" 2> /dev/null | grep -o 'GLIBC_[0-9.]*' | sort -u -V | tail -n 1 || true)
+            echo "$file: needs ${needed:-nothing}; newest symbol version ${newest:-none}"
+            for library in $needed; do
+              case "$library" in
+                libc.so.6|libm.so.6|ld-linux-x86-64.so.2|ld-linux-aarch64.so.1) ;;
+                # The tools' own libraries, shipped in lib/neura.
+                "libneura-core-$FULL.so"|"libneura-sdk-$FULL.so") ;;
+                *) echo "::error::$file needs $library"; status=1 ;;
+              esac
+            done
+            if [ -n "$newest" ] && [ "$(printf '%s\nGLIBC_2.39\n' "$newest" | sort -V | tail -n 1)" != "GLIBC_2.39" ]; then
+              echo "::error::$file needs $newest, newer than GLIBC_2.39"
+              status=1
+            fi
+          done
+          exit "$status"
+
+      # On macOS the archive may need only libraries that are part of the
+      # system: everything under /usr/lib and /System.
+      - name: Require the documented system dependencies and no others (macOS)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && runner.os == 'macOS' }}
+        run: |
+          status=0
+          for file in stage/bin/* stage/lib/neura/*.dylib $(find stage-service -type f 2> /dev/null); do
+            otool -L "$file"
+            for library in $(otool -L "$file" | tail -n +2 | awk '{ print $1 }'); do
+              case "$library" in
+                /usr/lib/*|/System/*) ;;
+                # The tools' own libraries, found through their RPATH.
+                "@rpath/libneura-core-$FULL.dylib"|"@rpath/libneura-sdk-$FULL.dylib") ;;
+                *) echo "::error::$file needs $library"; status=1 ;;
+              esac
+            done
+          done
+          echo "minimum macOS version: $(otool -l stage/bin/neura | awk '/LC_BUILD_VERSION/ { found = 1 } found && /minos/ { print $2; exit }')"
+          exit "$status"
+
+      # The server components' C functions stay inside the tools and
+      # libneura-core (hidden visibility, and on Linux --exclude-libs as
+      # well), so a program that loads its own OpenSSL or libpq through C
+      # import binds to its own copy. On macOS the assembly routines of
+      # OpenSSL are global symbols of the objects; the check covers the C
+      # interfaces there.
+      - name: Require the server components to stay private
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          status=0
+          if [ "$RUNNER_OS" = Linux ]; then
+            files="stage/bin/* stage/lib/neura/*.so stage/lib/neura/launchers/*/*"
+            pattern='^(SSL_|SSL_CTX_|EVP_|OPENSSL_|CRYPTO_|OSSL_|ossl_|X509_|BIO_|ERR_|PEM_|BN_|RSA_|EC_|PQ|pq|pg_|nghttp2_)'
+          else
+            files="stage/bin/* stage/lib/neura/*.dylib"
+            pattern='^_(SSL_|SSL_CTX_|EVP_|X509_|BIO_|PEM_|OSSL_|PQ|pg_|nghttp2_)'
+          fi
+          for file in $files; do
+            if [ "$RUNNER_OS" = Linux ]; then
+              names=$(nm -D --defined-only "$file" 2> /dev/null | awk '{ print $NF }' || true)
+            else
+              names=$(nm -gU "$file" 2> /dev/null | awk '{ print $NF }' || true)
+            fi
+            exported=$(printf '%s\n' "$names" | grep -E "$pattern" || true)
+            if [ -n "$exported" ]; then
+              echo "::error::$file exports $(printf '%s\n' "$exported" | wc -l | tr -d ' ') server component symbols, such as $(printf '%s\n' "$exported" | head -n 3 | tr '\n' ' ')"
+              status=1
+            fi
+          done
+          exit "$status"
+
+      # The archive sizes against rc.3's archive, before the tests: on the
+      # slower targets the packing below comes hours later. Only a report;
+      # check 14 of packaging/qualify.sh, with its per-target budget, is the
+      # gate.
+      - name: Report the archive sizes before the tests
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p early/dist early/reference
+          for product in sdk runtime legacy; do
+            case "$product" in
+              runtime) parts="--service stage-service" ;;
+              *) parts="--sdk stage-sdk" ;;
+            esac
+            SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) sh packaging/make-archive.sh --product "$product" \
+              --core stage-core $parts --build "$GITHUB_SHA" early/dist "$FULL" "$TRIPLE" > /dev/null
+          done
+          ls -l early/dist
+          reference="neura-0.2.1-rc.3-$TRIPLE.tar.gz"
+          if gh release download v0.2.1-rc.3 --repo "$GITHUB_REPOSITORY" --dir early/reference --pattern "$reference"; then
+            size=$(wc -c < "early/reference/$reference" | tr -d ' ')
+            echo "reference $reference: $size bytes"
+            for file in early/dist/*.tar.gz; do
+              actual=$(wc -c < "$file" | tr -d ' ')
+              echo "$(basename "$file"): $actual bytes ($((actual * 100 / size))% of the reference)"
+            done
+          fi
+
+      # Trials only: evidence before the hours of the full suite, whose log
+      # can be read only once the job ends. The tests that were red in
+      # earlier trials, and the qualification checks on the archives packed
+      # above (on this runner, not a new one as the qualify job does), are
+      # uploaded at once. Neither decides the job: the full suite and the
+      # qualify job do.
+      - name: Run the earlier trials' red tests (trials only)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && github.ref_type != 'tag' }}
+        continue-on-error: true
+        run: >
+          ctest --test-dir build --parallel "$JOBS" --output-on-failure
+          -R '^(project-resolve|stdlib-net-socket|server-http-tls|server-worker-channel|server-host|server-host-h2c|server-sql|service-protocol|service-run|service-login|service-worker)$'
+          2>&1 | tee early/red-tests.txt; test "${PIPESTATUS[0]}" = 0
+
+      - name: Qualify the packed archives on this runner (trials only)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && github.ref_type != 'tag' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for tag in v0.2.1-rc.3 v0.2.0; do
+            mkdir -p "early/bridge/$tag"
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "early/bridge/$tag" --pattern "neura-${tag#v}-$TRIPLE.tar.gz"
+          done
+          rc3="early/bridge/v0.2.1-rc.3/neura-0.2.1-rc.3-$TRIPLE.tar.gz"
+          sh packaging/qualify.sh --archive "early/dist/neura-$FULL-$TRIPLE.tar.gz" \
+            --sdk-archive "early/dist/neura-sdk-$FULL-$TRIPLE.tar.gz" \
+            --runtime-archive "early/dist/neura-runtime-$FULL-$TRIPLE.tar.gz" --version "$FULL" --triple "$TRIPLE" \
+            --examples examples --bridge "$rc3" --bridge "early/bridge/v0.2.0/neura-0.2.0-$TRIPLE.tar.gz" \
+            --size-reference "$rc3" --previous "$rc3" --require-previous --require-bridge --server-components \
+            2>&1 | tee early/qualify.txt; test "${PIPESTATUS[0]}" = 0
+
+      - name: Upload the early evidence (trials only)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && github.ref_type != 'tag' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: evidence-early-${{ matrix.triple }}
+          path: |
+            early/red-tests.txt
+            early/qualify.txt
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Allow unprivileged user namespaces
         if: ${{ runner.os == 'Linux' }}
@@ -177,50 +465,6 @@ jobs:
           MINIMUM: ${{ matrix.minimum }}
         run: python3 scripts/check-test-report.py build/ctest-junit.xml --minimum "$MINIMUM"
 
-      - name: Install into a new prefix
-        run: cmake --install build --prefix stage
-
-      # The archive must run on a machine without a C++ runtime or libffi,
-      # with a C library no newer than the one documented in docs/Install.md.
-      - name: Require the documented system dependencies and no others (Linux)
-        if: ${{ runner.os == 'Linux' }}
-        run: |
-          status=0
-          for file in stage/bin/neura stage/lib/neura/launchers/*/*; do
-            # A static executable has no dynamic section: readelf prints
-            # nothing for it and objdump fails. Both mean it needs nothing.
-            needed=$(readelf -d "$file" 2> /dev/null | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p' | sort | tr '\n' ' ' || true)
-            newest=$(objdump -T "$file" 2> /dev/null | grep -o 'GLIBC_[0-9.]*' | sort -u -V | tail -n 1 || true)
-            echo "$file: needs ${needed:-nothing}; newest symbol version ${newest:-none}"
-            for library in $needed; do
-              case "$library" in
-                libc.so.6|libm.so.6|ld-linux-x86-64.so.2|ld-linux-aarch64.so.1) ;;
-                *) echo "::error::$file needs $library"; status=1 ;;
-              esac
-            done
-            if [ -n "$newest" ] && [ "$(printf '%s\nGLIBC_2.39\n' "$newest" | sort -V | tail -n 1)" != "GLIBC_2.39" ]; then
-              echo "::error::$file needs $newest, newer than GLIBC_2.39"
-              status=1
-            fi
-          done
-          exit "$status"
-
-      # On macOS the archive may need only libraries that are part of the
-      # system: everything under /usr/lib and /System.
-      - name: Require the documented system dependencies and no others (macOS)
-        if: ${{ runner.os == 'macOS' }}
-        run: |
-          status=0
-          otool -L stage/bin/neura
-          for library in $(otool -L stage/bin/neura | tail -n +2 | awk '{ print $1 }'); do
-            case "$library" in
-              /usr/lib/*|/System/*) ;;
-              *) echo "::error::stage/bin/neura needs $library"; status=1 ;;
-            esac
-          done
-          echo "minimum macOS version: $(otool -l stage/bin/neura | awk '/LC_BUILD_VERSION/ { found = 1 } found && /minos/ { print $2; exit }')"
-          exit "$status"
-
       - name: Require the built version to be the planned one
         run: |
           reported=$(stage/bin/neura --version)
@@ -230,12 +474,35 @@ jobs:
             *) echo "::error::expected neura $FULL ($TRIPLE, commit $GITHUB_SHA)"; exit 1 ;;
           esac
 
-      - name: Pack the archive
+      # Neura-sdk, Neura-runtime, and the legacy archive that 0.2 updaters
+      # read: the tree of the SDK archive under the 0.2 name.
+      - name: Pack the archives
         run: |
           mkdir dist
-          SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) sh packaging/make-archive.sh stage dist "$FULL" "$TRIPLE"
+          for product in sdk runtime legacy; do
+            case "$product" in
+              runtime) parts="--service stage-service" ;;
+              *) parts="--sdk stage-sdk" ;;
+            esac
+            SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) sh packaging/make-archive.sh --product "$product" \
+              --core stage-core $parts --build "$GITHUB_SHA" dist "$FULL" "$TRIPLE"
+          done
+          ls -l dist
 
-      - name: Upload the archive
+      # The size report of the baseline: each executable's and library's
+      # stripped size, and each archive's size (the qualify job checks the
+      # archives against rc.3's).
+      - name: Report the sizes
+        run: |
+          mkdir sizes
+          for file in $(find stage-core stage-sdk stage-service -type f \( -perm -u+x -o -name '*.so' -o -name '*.dylib' \) | sort); do
+            cp "$file" sizes/item
+            strip sizes/item 2> /dev/null || true
+            printf '%s %s stripped %s\n' "$file" "$(wc -c < "$file" | tr -d ' ')" "$(wc -c < sizes/item | tr -d ' ')"
+          done | tee sizes.txt
+          ls -l dist | tee -a sizes.txt
+
+      - name: Upload the archives
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: archive-${{ matrix.triple }}
@@ -249,9 +516,11 @@ jobs:
         with:
           name: evidence-build-${{ matrix.triple }}
           path: |
+            sizes.txt
             build/build.log
             build/ctest-junit.xml
             build/Testing/Temporary/LastTest.log
+            server-components.log
           if-no-files-found: warn
           retention-days: 90
 
@@ -259,7 +528,7 @@ jobs:
     name: Qualify the archive (${{ matrix.triple }})
     needs: [plan, build]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -291,7 +560,9 @@ jobs:
           path: dist
 
       # A target that the previous release did not have has nothing to
-      # update from, and its upgrade check is reported as not run.
+      # update from, and its upgrade check is reported as not run. A 0.3
+      # release has three archives; the upgrade starts from its SDK archive,
+      # and from a 0.2 release's only archive.
       - name: Download the previous release's archive
         if: ${{ env.PREVIOUS != '' }}
         env:
@@ -299,21 +570,48 @@ jobs:
         run: |
           mkdir previous
           gh release download "$PREVIOUS" --repo "$GITHUB_REPOSITORY" --dir previous --pattern SHA256SUMS
-          if grep -F -- "-$TRIPLE.tar.gz" previous/SHA256SUMS > previous/expected; then
-            gh release download "$PREVIOUS" --repo "$GITHUB_REPOSITORY" --dir previous \
-              --pattern "neura-*-$TRIPLE.tar.gz"
-            (cd previous && shasum -a 256 --check expected)
-          else
-            echo "$PREVIOUS has no archive for $TRIPLE"
-          fi
+          version=${PREVIOUS#v}
+          for file in "neura-sdk-$version-$TRIPLE.tar.gz" "neura-$version-$TRIPLE.tar.gz"; do
+            if grep -F -- "  $file" previous/SHA256SUMS > previous/expected; then
+              gh release download "$PREVIOUS" --repo "$GITHUB_REPOSITORY" --dir previous --pattern "$file"
+              (cd previous && shasum -a 256 --check expected)
+              echo "$file" > previous/chosen
+              break
+            fi
+          done
+          [ -f previous/chosen ] || echo "$PREVIOUS has no archive for $TRIPLE"
+
+      # The 0.2 bridge (docs/design/Lifecycle030.md): the published 0.2
+      # clients update into this release with their own neura update, then
+      # migrate. rc.3 is also the size reference of the baseline.
+      - name: Download the 0.2 archives for the bridge
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir bridge
+          for tag in v0.2.1-rc.3 v0.2.0; do
+            file="neura-${tag#v}-$TRIPLE.tar.gz"
+            mkdir "bridge/$tag"
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "bridge/$tag" --pattern SHA256SUMS --pattern "$file"
+            (cd "bridge/$tag" && grep -F -- "  $file" SHA256SUMS | shasum -a 256 --check)
+          done
 
       - name: Run the lifecycle checks
         run: |
-          set -- --archive "dist/neura-$FULL-$TRIPLE.tar.gz" --version "$FULL" --triple "$TRIPLE" --examples examples
-          previous=$(ls previous/neura-*-"$TRIPLE".tar.gz 2> /dev/null || true)
-          if [ -n "$previous" ]; then
-            set -- "$@" --previous "$previous" --require-previous
+          set -- --archive "dist/neura-$FULL-$TRIPLE.tar.gz" --sdk-archive "dist/neura-sdk-$FULL-$TRIPLE.tar.gz" \
+            --runtime-archive "dist/neura-runtime-$FULL-$TRIPLE.tar.gz" --version "$FULL" --triple "$TRIPLE" --examples examples \
+            --bridge "bridge/v0.2.1-rc.3/neura-0.2.1-rc.3-$TRIPLE.tar.gz" --bridge "bridge/v0.2.0/neura-0.2.0-$TRIPLE.tar.gz" \
+            --size-reference "bridge/v0.2.1-rc.3/neura-0.2.1-rc.3-$TRIPLE.tar.gz"
+          if [ -f previous/chosen ]; then
+            set -- "$@" --previous "previous/$(cat previous/chosen)" --require-previous
           fi
+          # A trial builds a -dev version, which may sort before rc.3; a tag
+          # must update from both 0.2 clients.
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            set -- "$@" --require-bridge
+          fi
+          # Every archive links the server components (the build job above).
+          set -- "$@" --server-components
           sh packaging/qualify.sh "$@" | tee "qualify-$TRIPLE.txt"
 
       - name: Upload the qualification report
@@ -358,7 +656,7 @@ jobs:
       - name: Write the checksums and the update metadata
         run: |
           sh packaging/make-release-metadata.sh dist "$FULL"
-          cat dist/SHA256SUMS dist/neura-release.txt
+          cat dist/SHA256SUMS dist/neura-release.txt dist/neura-components.txt
 
       # The one-line install command downloads this script from the release.
       - name: Add the install script
@@ -395,6 +693,7 @@ jobs:
             gh attestation verify "$file" --repo "$GITHUB_REPOSITORY"
           done
           cmp check/neura-release.txt dist/neura-release.txt
+          cmp check/neura-components.txt dist/neura-components.txt
           cmp check/install.sh dist/install.sh
 
       # A published release candidate can be downloaded by anyone, so the

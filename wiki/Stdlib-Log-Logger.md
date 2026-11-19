@@ -41,9 +41,11 @@ The following public declarations are taken from the module source; each links t
   Logs a Warn record if that level is enabled.
 - **Logger.Logger** · [`export let error = func(message: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L71)
   Logs an Error record if that level is enabled.
-- **Logger** · [`export let create = func(name: string, sink: func(string) -> void, level: LogLevel) -> Logger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L86)
+- **Logger.Logger** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L84)
+  Names the logger.
+- **Logger** · [`export let create = func(name: string, sink: func(string) -> void, level: LogLevel) -> Logger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L89)
   A logger without timestamps. Tagged `#Pure`, `#ThreadSafe`.
-- **Logger** · [`export let create_timed = func(name: string, sink: func(string) -> void, level: LogLevel, source: Clock) -> Logger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L91)
+- **Logger** · [`export let create_timed = func(name: string, sink: func(string) -> void, level: LogLevel, source: Clock) -> Logger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/log/logger.nra#L94)
   A logger whose records start with the clock's instant. Tagged `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 

@@ -1,0 +1,207 @@
+let.promote _ = import:Std.Core.Comparable;
+let.promote _ = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let.promote _ = import:Std.Net.Core.NetAddress;
+let.promote _ = import:Std.Core.Ordering;
+let.promote _ = import:Std.Core.Result;
+
+/// @brief IPv4 addresses (RFC 791): the 32-bit value, dotted-decimal text, and the special-purpose ranges of
+/// RFC 1918, RFC 3927, RFC 5737 and RFC 5771.
+///
+/// An `Ipv4Addr` is an immutable class, so each value is one heap object reclaimed by the tracing collector:
+/// this runtime does not provide zero-allocation value types. `parse` accepts only the strict dotted-decimal
+/// form: four decimal parts 0 to 255, no leading zeros except a lone `0`, no sign, no space; the shorthand
+/// forms `inet_aton` accepts (`127.1`, `0x7f.0.0.1`, `0177.0.0.1`) are rejected.
+/// @see [Std.Net.Core.Ipv4Addr](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Core-Ipv4Addr)
+#Since("0.3.0")
+export let Ipv4Addr = module (
+    /// @brief An IPv4 address, ordered by its unsigned 32-bit value (the same as its octets in order).
+    #[Final, NoDiscard, Immutable, ThreadSafe, Since("0.3.0")]
+    export let Ipv4Addr = class implements NetAddress, Comparable<Ipv4Addr> (
+        /// @brief The address as a number: the first octet is the most significant byte.
+        export last bits: uint32;
+
+        /// @brief Constructs the address with the given numeric value.
+        export let init = func(value: uint32) {
+            bits = value;
+        };
+
+        /// @brief The four octets in network order, as a new list.
+        #Pure
+        export let octets = func -> uint8[list] {
+            last bytes: uint8[list] = new;
+            bytes.append(((bits >> 24) & 255) as uint8);
+            bytes.append(((bits >> 16) & 255) as uint8);
+            bytes.append(((bits >> 8) & 255) as uint8);
+            bytes.append((bits & 255) as uint8);
+            return bytes;
+        };
+
+        /// @brief Tests for `0.0.0.0`.
+        #Pure
+        export let is_unspecified = func -> bool => bits == 0;
+
+        /// @brief Tests for `127.0.0.0/8` (RFC 1122 section 3.2.1.3).
+        #Pure
+        export let is_loopback = func -> bool => octet(0) == 127;
+
+        /// @brief Tests for the private ranges of RFC 1918: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`.
+        #Pure
+        export let is_private = func -> bool {
+            last a = octet(0);
+            last b = octet(1);
+            return a == 10 || (a == 172 && b >= 16 && b <= 31) || (a == 192 && b == 168);
+        };
+
+        /// @brief Tests for `169.254.0.0/16` (RFC 3927).
+        #Pure
+        export let is_link_local = func -> bool => octet(0) == 169 && octet(1) == 254;
+
+        /// @brief Tests for `224.0.0.0/4` (RFC 5771).
+        #Pure
+        export let is_multicast = func -> bool => octet(0) >= 224 && octet(0) <= 239;
+
+        /// @brief Tests for the limited broadcast address `255.255.255.255` (RFC 919).
+        #Pure
+        export let is_broadcast = func -> bool => bits == 4294967295;
+
+        /// @brief Tests for the documentation ranges of RFC 5737: `192.0.2.0/24`, `198.51.100.0/24`,
+        /// `203.0.113.0/24`.
+        #Pure
+        export let is_documentation = func -> bool {
+            last a = octet(0);
+            last b = octet(1);
+            last c = octet(2);
+            return (a == 192 && b == 0 && c == 2) || (a == 198 && b == 51 && c == 100)
+                || (a == 203 && b == 0 && c == 113);
+        };
+
+        /// @brief Always `AddressFamily.Ipv4`.
+        #Pure
+        export let family = func -> AddressFamily => AddressFamily.Ipv4;
+
+        /// @brief Compares the unsigned values.
+        #Pure
+        export let compare_to = func(other: Ipv4Addr) -> Ordering {
+            return if (bits == other.bits) -> Ordering.Equal
+                else -> bits < other.bits ? Ordering.Less : Ordering.Greater;
+        };
+
+        /// @brief Tests whether another address is an `Ipv4Addr` with the same value.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: Ipv4Addr) {
+                return false;
+            }
+            return bits == that.bits;
+        };
+
+        /// @brief Combines 17 with the value.
+        #Pure
+        export let.override hash_code = func -> uint32 => hashing.combine(17, bits);
+
+        /// @brief The dotted-decimal form, for example `192.0.2.1`.
+        #Pure
+        export let.override to_string = func -> string =>
+            octet(0).to_string() .. "." .. octet(1).to_string() .. "." .. octet(2).to_string() .. "."
+            .. octet(3).to_string();
+
+        /// @brief Octet `index` (0 is the most significant) as an int.
+        let octet = func(index: int) -> int => ((bits >> ((3 - index) * 8) as uint32) & 255) as int;
+    );
+
+    /// @brief The address `a.b.c.d`; traps when a part is outside 0 to 255.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let of = func(a: int, b: int, c: int, d: int) -> Ipv4Addr {
+        if (a < 0 || a > 255 || b < 0 || b > 255 || c < 0 || c > 255 || d < 0 || d > 255) {
+            trap_with_message("Ipv4Addr.of: a part is outside 0 to 255");
+        }
+        return new Ipv4Addr(((a as uint32) << 24) | ((b as uint32) << 16) | ((c as uint32) << 8) | (d as uint32));
+    };
+
+    /// @brief The address held in `bytes[offset]` to `bytes[offset + 3]`, network order; traps when fewer
+    /// than four bytes follow `offset`.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let from_bytes = func(bytes: uint8[list], offset: int) -> Ipv4Addr {
+        if (offset < 0 || offset + 4 > bytes.length) {
+            trap_with_message("Ipv4Addr.from_bytes: fewer than 4 bytes at the offset");
+        }
+        let value: uint32 = 0;
+        for (let i = offset; i < offset + 4; i++) {
+            value = (value << 8) | (bytes[i] as uint32);
+        }
+        return new Ipv4Addr(value);
+    };
+
+    /// @brief `127.0.0.1`.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let localhost = func -> Ipv4Addr => new Ipv4Addr(2130706433);
+
+    /// @brief `0.0.0.0`.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let unspecified = func -> Ipv4Addr => new Ipv4Addr(0);
+
+    /// @brief Parses strict dotted-decimal text: exactly four parts of 1 to 3 decimal digits, each 0 to 255,
+    /// with no leading zero except a lone `0`.
+    ///
+    /// Errors: Empty for ""; InvalidCharacter at the first byte that is not a digit or a dot (also a leading
+    /// zero, at the zero); Syntax at an empty part or a fifth part; OutOfRange at the start of a part above
+    /// 255; UnexpectedEnd at the length when fewer than four parts are given.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let parse = func(text: string) -> Result<Ipv4Addr> {
+        last length = text.byte_length;
+        if (length == 0) {
+            return failed(ParseErrorKind.Empty, 0, "empty input");
+        }
+        let value: uint32 = 0;
+        let parts = 0;
+        let i = 0;
+        while (true) {
+            last start = i;
+            let part = 0;
+            while (i < length && is_digit(text.byte_at(i) as int)) {
+                if (i > start && text.byte_at(start) == 48) {
+                    return failed(ParseErrorKind.InvalidCharacter, start, "leading zero in an IPv4 part");
+                }
+                if (i - start >= 3) {
+                    return failed(ParseErrorKind.OutOfRange, start, "IPv4 part above 255");
+                }
+                part = part * 10 + (text.byte_at(i) as int) - 48;
+                i++;
+            }
+            if (i == start) {
+                if (i < length && text.byte_at(i) != 46) {
+                    return failed(ParseErrorKind.InvalidCharacter, i, "expected a decimal digit");
+                }
+                return if (i >= length) -> failed(ParseErrorKind.UnexpectedEnd, i, "expected a decimal digit")
+                    else -> failed(ParseErrorKind.Syntax, i, "empty IPv4 part");
+            }
+            if (part > 255) {
+                return failed(ParseErrorKind.OutOfRange, start, "IPv4 part above 255");
+            }
+            value = (value << 8) | (part as uint32);
+            parts++;
+            if (parts == 4) {
+                if (i < length) {
+                    return if (text.byte_at(i) == 46) -> failed(ParseErrorKind.Syntax, i, "more than four IPv4 parts")
+                        else -> failed(ParseErrorKind.InvalidCharacter, i, "unexpected character after the address");
+                }
+                return Result<Ipv4Addr>.Ok(new Ipv4Addr(value));
+            }
+            if (i >= length) {
+                return failed(ParseErrorKind.UnexpectedEnd, i, "fewer than four IPv4 parts");
+            }
+            if (text.byte_at(i) != 46) {
+                return failed(ParseErrorKind.InvalidCharacter, i, "expected '.' or a decimal digit");
+            }
+            i++;
+        }
+        return failed(ParseErrorKind.Syntax, 0, "unreachable");
+    };
+
+    /// @brief Creates an IPv4 parse error at a UTF-8 byte offset.
+    let failed = func(kind: ParseErrorKind, offset: int, message: string) -> Result<Ipv4Addr> =>
+        Result<Ipv4Addr>.Err(Error.Parse { kind: kind, offset: offset, message: message });
+
+    /// @brief Tests for an ASCII decimal digit.
+    let is_digit = func(b: int) -> bool => b >= 48 && b <= 57;
+);

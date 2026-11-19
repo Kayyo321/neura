@@ -1,0 +1,4 @@
+// Edge case 57: 'yield' takes one value.
+let one = iterator() -> int {
+    yield;
+};

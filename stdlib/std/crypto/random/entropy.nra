@@ -1,0 +1,98 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Algorithm;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let host_error = import:Std.Core.Internal.HostError;
+let sha2 = import:Std.Crypto.Hash.Sha2;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief Operating-system and hardware entropy for seeding (Stdlib.md section 21.3).
+///
+/// The runtime's native entropy services require the entropy capability. A recording run stores the provider
+/// responses in its trace. Fork and VM-restore detection still require a provider that covers both events.
+/// @see [Std.Crypto.Random.Entropy](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Random-Entropy)
+#Since("0.3.0")
+export let Entropy = module (
+    /// @brief Carries the provider's entropy bytes or error code.
+    let FillOutcome = enum (Ok(uint8[list]), Error(uint32));
+    // The native provider accepts requests of at most 1 MiB.
+    let MaximumRequest = 1048576;
+    let fill_entropy = func(count: int) -> FillOutcome host("neura.entropy.fill", 1);
+    let fill_hardware = func(count: int) -> FillOutcome host("neura.entropy.hardware", 1);
+
+    let checked_response = func(response: FillOutcome, count: int, message: string) -> Result<uint8[list]> {
+        match (response) {
+            FillOutcome.Ok(bytes) => {
+                if (bytes.length != count) {
+                    return Result<uint8[list]>.Err(Error.Io {
+                        kind: IoErrorKind.InvalidData,
+                        message: "entropy source returned " .. bytes.length.to_string() .. " bytes", path: ""
+                    });
+                }
+                return Result<uint8[list]>.Ok(bytes);
+            },
+            FillOutcome.Error(code) => {
+                return Result<uint8[list]>.Err(host_error.io(code, message, ""));
+            },
+        }
+    };
+
+    /// @brief `count` bytes from the operating system's cryptographic generator, requested in pieces of at most
+    /// 1 MiB. A denied capability or a failed request is an `Io` error ("entropy request failed",
+    /// `CapabilityDenied` when denied). A short answer is `InvalidData`. A negative count traps.
+    #[NoDiscard, Since("0.3.0")]
+    export let os_bytes = func(count: int) -> Result<uint8[list]> {
+        if (count < 0) {
+            trap_with_message("invalid argument: negative length");
+        }
+        crypto_policy.require(Algorithm.OsEntropy);
+        let out: uint8[list] = new;
+        while (out.length < count) {
+            last remaining = count - out.length;
+            last want = remaining < MaximumRequest ? remaining : MaximumRequest;
+            last bytes = checked_response(fill_entropy(want), want, "entropy request failed")?;
+            words.append_all(out, bytes);
+        }
+        return Result<uint8[list]>.Ok(out);
+    };
+
+    /// @brief `count` bytes from the native RDSEED or RNDR provider, up to 1 MiB per request.
+    /// A negative count traps. The provider checks the entropy capability even for zero bytes.
+    /// A count above 1 MiB gives `Io(InvalidInput)`. Missing hardware gives `Io(Unsupported)`. Retry
+    /// exhaustion gives `Io(Other)`. The Modern policy admits this source.
+    /// @see [Std.Crypto.Random.Entropy](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Random-Entropy)
+    #[NoDiscard, Since("0.3.0")]
+    export let hardware_bytes = func(count: int) -> Result<uint8[list]> {
+        if (count < 0) {
+            trap_with_message("invalid argument: negative length");
+        }
+        crypto_policy.require(Algorithm.HardwareEntropy);
+        return checked_response(fill_hardware(count), count, "hardware entropy request failed");
+    };
+
+    /// @brief SHA-512("Neura entropy fusion" || os_bytes(64) || hardware_bytes(64)).
+    /// Both sources must be allowed by policy. Returns either provider's error without a fallback.
+    /// @see [Std.Crypto.Random.Entropy](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Random-Entropy)
+    #[NoDiscard, Since("0.3.0")]
+    export let fused_seed = func -> Result<uint8[list]> {
+        last system = os_bytes(64)?;
+        defer words.wipe(system);
+        last cpu = hardware_bytes(64)?;
+        defer words.wipe(cpu);
+        let digest = new sha2.Sha512();
+        digest.update(words.utf8("Neura entropy fusion"));
+        digest.update(system);
+        digest.update(cpu);
+        return Result<uint8[list]>.Ok(digest.finish());
+    };
+
+    /// @brief A number that changes whenever the process may have been duplicated: a POSIX `fork()` in the
+    /// child, or a restore of a virtual machine snapshot (the Linux VM generation ID, `MADV_WIPEONFORK` pages).
+    /// A generator that sees it change must reseed before it produces output.
+    /// @stub the runtime has no host operation that reports fork or VM-clone generations
+    #[NoDiscard, Since("0.3.0")]
+    export let fork_generation = func -> uint64 {
+        trap_with_message(
+            "unsupported: Std.Crypto.Random.Entropy.fork_generation is not implemented in Neura 0.3.0 (the runtime has no host operation that reports fork or VM-clone generations)");
+    };
+);

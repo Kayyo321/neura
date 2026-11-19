@@ -1,0 +1,56 @@
+// Every contract of Std.Core.Arithmetic for every conforming primitive
+// (docs/design/Records030.md, Primitive conformance and the contracts):
+// four for each sized integer, three for each float, two for bool.
+let.promote _ = import:Std.Core.Arithmetic;
+let additive = func<T: Additive<T>>(a: T) -> T => T.add(a, T.zero());
+let multiplicative = func<T: Multiplicative<T>>(a: T) -> T => T.multiply(a, T.one());
+let ordered = func<T: Ordered<T>>(a: T) -> bool => T.compare(a, a) == T.compare(a, a);
+let parseable = func<T: Parseable<T>>(text: string) -> bool => true;
+let check = func() {
+    additive<int8>(1);
+    multiplicative<int8>(1);
+    ordered<int8>(1);
+    parseable<int8>("1");
+    additive<int16>(1);
+    multiplicative<int16>(1);
+    ordered<int16>(1);
+    parseable<int16>("1");
+    additive<int32>(1);
+    multiplicative<int32>(1);
+    ordered<int32>(1);
+    parseable<int32>("1");
+    additive<int64>(1);
+    multiplicative<int64>(1);
+    ordered<int64>(1);
+    parseable<int64>("1");
+    additive<uint8>(1);
+    multiplicative<uint8>(1);
+    ordered<uint8>(1);
+    parseable<uint8>("1");
+    additive<uint16>(1);
+    multiplicative<uint16>(1);
+    ordered<uint16>(1);
+    parseable<uint16>("1");
+    additive<uint32>(1);
+    multiplicative<uint32>(1);
+    ordered<uint32>(1);
+    parseable<uint32>("1");
+    additive<uint64>(1);
+    multiplicative<uint64>(1);
+    ordered<uint64>(1);
+    parseable<uint64>("1");
+    additive<float16>(1.0);
+    multiplicative<float16>(1.0);
+    parseable<float16>("1");
+    additive<bfloat16>(1.0);
+    multiplicative<bfloat16>(1.0);
+    parseable<bfloat16>("1");
+    additive<float32>(1.0);
+    multiplicative<float32>(1.0);
+    parseable<float32>("1");
+    additive<float64>(1.0);
+    multiplicative<float64>(1.0);
+    parseable<float64>("1");
+    ordered<bool>(true);
+    parseable<bool>("true");
+};

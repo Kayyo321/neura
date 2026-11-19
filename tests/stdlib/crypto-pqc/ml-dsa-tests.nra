@@ -1,0 +1,125 @@
+// test-options: --gpu=off --max-steps 2000000000
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Algorithm;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let hex = import:Std.Encoding.Hex;
+let ml_dsa = import:Std.Crypto.Pqc.MlDsa;
+let test = import:Std.Test;
+let vectors = import:MlDsaVectors;
+
+// ML-DSA against NIST's ACVP test sets ML-DSA-keyGen-FIPS204, ML-DSA-sigGen-FIPS204 and ML-DSA-sigVer-FIPS204
+// (support/, scripts/crypto-vectors/gen-pqc-ml-dsa.py).
+let MlDsaTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let set_of = func(name: string) -> ml_dsa.ParameterSet {
+        if (name == "44") {
+            return ml_dsa.ParameterSet.MlDsa44;
+        }
+        if (name == "65") {
+            return ml_dsa.ParameterSet.MlDsa65;
+        }
+        return ml_dsa.ParameterSet.MlDsa87;
+    };
+
+    let hash_of = func(name: string) -> Algorithm {
+        if (name == "Sha224") {
+            return Algorithm.Sha224;
+        }
+        if (name == "Sha256") {
+            return Algorithm.Sha256;
+        }
+        if (name == "Sha384") {
+            return Algorithm.Sha384;
+        }
+        if (name == "Sha512") {
+            return Algorithm.Sha512;
+        }
+        if (name == "Sha512_256") {
+            return Algorithm.Sha512_256;
+        }
+        if (name == "Sha3_224") {
+            return Algorithm.Sha3_224;
+        }
+        if (name == "Sha3_256") {
+            return Algorithm.Sha3_256;
+        }
+        if (name == "Sha3_384") {
+            return Algorithm.Sha3_384;
+        }
+        if (name == "Sha3_512") {
+            return Algorithm.Sha3_512;
+        }
+        if (name == "Shake128") {
+            return Algorithm.Shake128;
+        }
+        return Algorithm.Shake256;
+    };
+
+    export let test_key_generation = func {
+        last rows = vectors.keygen;
+        for (let i = 0; i < rows.length; i += 4) {
+            last key = ml_dsa.key_pair_from_seed(set_of(rows[i]), decode(rows[i + 1]));
+            test.assert_equal_string(rows[i + 2], hex.encode(key.public_key_bytes()));
+            test.assert_equal_string(rows[i + 3], hex.encode(key.expose()));
+        }
+        test.assert_equal_int32(60, rows.length);
+    };
+
+    export let test_verification = func {
+        last rows = vectors.verify;
+        let valid = 0;
+        for (let i = 0; i < rows.length; i += 9) {
+            last set = set_of(rows[i]);
+            last verifier = new ml_dsa.MlDsaVerifier(test.assert_ok(ml_dsa.parse_public_key(set, decode(rows[i + 5]))));
+            last kind = rows[i + 1];
+            last message = decode(rows[i + 4]);
+            last signature = decode(rows[i + 6]);
+            last context = decode(rows[i + 3]);
+            last expected = rows[i + 7] == "true";
+            last actual: bool;
+            if (kind == "pure") {
+                actual = verifier.verify_with_context(message, signature, context);
+            } else if (kind == "prehash") {
+                actual = verifier.verify_prehash(message, signature, context, hash_of(rows[i + 2]));
+            } else if (kind == "internal") {
+                actual = verifier.verify_internal(message, signature);
+            } else {
+                actual = verifier.verify_mu(message, signature);
+            }
+            test.assert_equal_bool(expected, actual);
+            if (expected) {
+                valid++;
+            }
+        }
+        test.assert_equal_int32(12, valid);
+        test.assert_equal_int32(261, rows.length);
+    };
+
+    /// @brief Wycheproof's malformed hints (order, repeats, padding, too many), z at and over its bound, wrong
+    /// lengths, long contexts and zero public keys.
+    export let test_wycheproof_verification = func {
+        last rows = vectors.wycheproof_verify;
+        let rejected = 0;
+        for (let i = 0; i < rows.length; i += 8) {
+            last set = set_of(rows[i]);
+            last expected = rows[i + 6] == "valid";
+            last actual: bool;
+            match (ml_dsa.parse_public_key(set, decode(rows[i + 2]))) {
+                Result.Ok(key) => {
+                    last verifier = new ml_dsa.MlDsaVerifier(key);
+                    actual = verifier.verify_with_context(decode(rows[i + 3]), decode(rows[i + 5]), decode(rows[i + 4]));
+                },
+                Result.Err(e) => {
+                    actual = false;
+                },
+            }
+            test.assert_with(expected == actual, "Wycheproof ML-DSA-" + rows[i] + " case " + rows[i + 1]);
+            if (!expected) {
+                rejected++;
+            }
+        }
+        test.assert_equal_int32(92, rejected);
+        test.assert_equal_int32(856, rows.length);
+    };
+);

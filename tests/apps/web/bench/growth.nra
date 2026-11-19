@@ -1,0 +1,52 @@
+// The browser half of budget B-W9 (docs/design/Apps030.md, "Budgets"), run by tests/apps/web/bench-web.py: the
+// image mounts a counter on #app, takes clicks until Close closes the root, and mounts a new counter on the same
+// state, again and again. Each mount prints the state's subscribers, so the page can check that unmounting leaves
+// none behind; the page reads neura.ui.stats and the runtime's memory after cycle 100 and after the last.
+let console = import:Std.Io.Console;
+let error = import:Std.Core.Error;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let ui = import:Std.Ui;
+let web = import:Std.Web;
+
+let counter_view = html(count: int32, on_add: func(ui.ClickEvent) -> void, on_close: func(ui.ClickEvent) -> void) {
+    <button type="button" id="add" on:click={on_add}>{count}</button>
+    <button type="button" id="close" on:click={on_close}>Close</button>
+};
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last state = new ui.State<int32>(0);
+        last held: ui.Root[list] = new;
+        last add = new func(event: ui.ClickEvent) {
+            state.set(state.get() + 1);
+        };
+        last close = new func(event: ui.ClickEvent) {
+            held[0].close();
+        };
+        let status = program.ExitCode.Ok;
+        let running = true;
+        scope (tasks) {
+            while (running) {
+                last top = ui.component<int32>(state, new func(value: int32) -> ui.View => counter_view(value, add, close));
+                match (web.mount("#app", top, tasks)) {
+                    result.Result.Ok(root) => {
+                        if (held.length == 0) {
+                            held.append(root);
+                        } else {
+                            held[0] = root;
+                        }
+                        console.print_line("mounted, subscribers " + state.subscriber_count().to_string());
+                        root.run();
+                    },
+                    result.Result.Err(problem) => {
+                        console.print_line("mount failed: " + error.message(problem));
+                        status = program.ExitCode.Failure;
+                        running = false;
+                    },
+                }
+            }
+        }
+        return status;
+    };
+);

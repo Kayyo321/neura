@@ -1,0 +1,14 @@
+let.promote _ = import:Std.Crypto.Algorithm;
+
+/// @brief The root contract of every algorithm implementation (Stdlib.md section 21.1).
+/// @see [Std.Crypto.CryptographicPrimitive](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-CryptographicPrimitive)
+#Since("0.3.0")
+export let CryptographicPrimitive = module (
+    /// @brief An algorithm implementation. `Alg` names the algorithm at the type level: the implementing class
+    /// itself for digests, the key type for ciphers. `algorithm` names it for Std.Crypto.Core.CryptoPolicy.
+    #Since("0.3.0")
+    export let CryptographicPrimitive = interface<Alg> (
+        /// @brief The algorithm identifier.
+        let algorithm = func -> Algorithm;
+    );
+);

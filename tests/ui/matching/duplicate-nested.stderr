@@ -1,0 +1,11 @@
+error[E0491]: unreachable match arm
+ --> $DIR/duplicate-nested.nra:8:5
+  |
+7 |     Tree.Node(Tree.Leaf(a), _) => a,
+  |     -------------------------- this earlier arm covers every value it matches
+8 |     Tree.Node(Tree.Leaf(b), _) => b,
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^ no value reaches this arm
+  |
+  = help: remove the arm, or move it before the arms that cover it
+
+For more information about this error, try `neura explain E0491`.

@@ -8,7 +8,7 @@ let.promote _ = import:Std.Core.Result;
 /// text conversion follows section 7.5.
 /// @see [Std.Core.BFloat16](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-BFloat16)
 #Since("0.1.0")
-export let BFloat16 = module (
+export let BFloat16 = module implements Additive<bfloat16>, Multiplicative<bfloat16>, Parseable<bfloat16> (
     /// @brief The largest finite value.
     export const Max: bfloat16 = bfloat16.from_bits(32639);
     /// @brief The smallest positive (subnormal) value.
@@ -66,10 +66,7 @@ export let BFloat16 = module (
         if (b < a) {
             return b;
         }
-        if (is_negative(a)) {
-            return a;
-        }
-        return b;
+        return if (is_negative(a)) -> a else -> b;
     };
 
     /// @brief Returns the greater value, propagating NaN and preferring positive zero over negative zero.
@@ -84,10 +81,7 @@ export let BFloat16 = module (
         if (b > a) {
             return b;
         }
-        if (is_negative(a)) {
-            return b;
-        }
-        return a;
+        return if (is_negative(a)) -> b else -> a;
     };
 
     /// @brief max(v, low), then min with high, so a NaN `v` gives NaN. Traps when either bound is NaN or `low`
@@ -142,10 +136,7 @@ export let BFloat16 = module (
             if (a_nan && b_nan) {
                 return Ordering.Equal;
             }
-            if (a_nan) {
-                return Ordering.Greater;
-            }
-            return Ordering.Less;
+            return if (a_nan) -> Ordering.Greater else -> Ordering.Less;
         }
         if (a < b) {
             return Ordering.Less;
@@ -157,10 +148,7 @@ export let BFloat16 = module (
         if (a_negative == is_negative(b)) {
             return Ordering.Equal;
         }
-        if (a_negative) {
-            return Ordering.Less;
-        }
-        return Ordering.Greater;
+        return if (a_negative) -> Ordering.Less else -> Ordering.Greater;
     };
 
     /// @brief Same bit pattern, except that every NaN equals every NaN; 0.0 and -0.0 differ (section 5.2).
@@ -199,4 +187,20 @@ export let BFloat16 = module (
     /// @brief Applies the requested rounding mode to the format's raw bit pattern.
     let round_with = func(v: bfloat16, mode: int) -> bfloat16 =>
         bfloat16.from_bits(float_text.round_bits(v.to_bits() as uint64, 7, 8, mode) as uint16);
+
+    /// @brief The additive identity, 0.0 (Std.Core.Arithmetic.Additive).
+    #[Pure, ThreadSafe, Since("0.3.0")]
+    export let zero = func() -> bfloat16 => 0.0;
+
+    /// @brief The sum `left + right`, rounded as the type's arithmetic specifies.
+    #[Pure, ThreadSafe, Since("0.3.0")]
+    export let add = func(left: bfloat16, right: bfloat16) -> bfloat16 => left + right;
+
+    /// @brief The multiplicative identity, 1.0 (Std.Core.Arithmetic.Multiplicative).
+    #[Pure, ThreadSafe, Since("0.3.0")]
+    export let one = func() -> bfloat16 => 1.0;
+
+    /// @brief The product `left * right`, rounded as the type's arithmetic specifies.
+    #[Pure, ThreadSafe, Since("0.3.0")]
+    export let multiply = func(left: bfloat16, right: bfloat16) -> bfloat16 => left * right;
 );

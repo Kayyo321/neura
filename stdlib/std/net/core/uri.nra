@@ -1,0 +1,985 @@
+let.promote _ = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let idna = import:Std.Net.Core.Idna;
+let optional = import:Std.Core.Optional;
+let percent = import:Std.Net.Core.PercentEncoding;
+let queries = import:Std.Net.Core.Query;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+
+/// @brief URI references (RFC 3986): parsing by the appendix A grammar, reference resolution (section 5.2),
+/// normalization (section 6.2.2 and, for http and https, 6.2.3), recomposition (section 5.3), and a builder
+/// that percent-encodes the components it is given.
+///
+/// A `Uri` holds its components as written (percent-encoded). An undefined component and an empty one are
+/// different: `http://a?` has an empty query, `http://a` none. The authority is present exactly when `host`
+/// is. Host forms: a registered name, an IPv4 address (the dec-octet form; anything else is a registered
+/// name, first-match-wins as in section 3.2.2), an IPv6 address in brackets, checked against the
+/// `IPv6address` ABNF, optionally with an RFC 6874 zone identifier introduced by `%25`, or an IPvFuture
+/// literal. Extensions and choices:
+///
+/// - A registered name may hold non-ASCII UTF-8 (an RFC 3987 `ireg-name`); everywhere else non-ASCII is an
+///   error. `normalize` converts such a name with `Idna.to_ascii`.
+/// - The port must be 0 to 65535 and is kept as a number: an empty port (`http://a:/`) is accepted and
+///   dropped, as section 6.2.3 allows, and leading zeros (`http://a:0080/`) are not kept, so neither survives
+///   `to_string` and `equals` does not tell them from the plain forms.
+/// - A non-ASCII registered name converted by IDNA has any ASCII byte that a registered name does not allow
+///   percent-encoded again (UTS 46 without STD3 rules keeps such bytes).
+/// - Equality (`equals`, `hash_code`) compares the components as written; `equivalent` compares the
+///   normalized forms.
+/// - When removing dot segments leaves a path that starts with `//` and there is no authority, `/.` is put
+///   in front so that the result still parses to the same components.
+/// @see [Std.Net.Core.Uri](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Core-Uri)
+#Since("0.3.0")
+export let Uri = module (
+    /// @brief Restricts construction of Uri values to this module.
+    let Seal = enum (Token);
+
+    /// @brief The form of a URI's host (RFC 3986 section 3.2.2).
+    #Since("0.3.0")
+    export let HostKind = enum (RegName, Ipv4, Ipv6, IpFuture);
+
+    /// @brief A URI or relative reference, its components as written.
+    #[Final, Immutable, ThreadSafe, Since("0.3.0")]
+    export let Uri = class (
+        /// @brief The scheme as written, without `:`; None for a relative reference.
+        export last scheme: optional.Optional<string>;
+        /// @brief The userinfo as written, without `@`.
+        export last userinfo: optional.Optional<string>;
+        /// @brief The host as written; an IP literal keeps its brackets. Some (possibly empty) exactly when the
+        /// URI has an authority.
+        export last host: optional.Optional<string>;
+        /// @brief The port number, 0 to 65535.
+        export last port: optional.Optional<int>;
+        /// @brief The path as written; possibly empty.
+        export last path: string;
+        /// @brief The query as written, without `?`.
+        export last query: optional.Optional<string>;
+        /// @brief The fragment as written, without `#`.
+        export last fragment: optional.Optional<string>;
+
+        /// @brief Builds a URI from checked components; only this module can name the seal.
+        export let init = func(seal: Seal, scheme_part: optional.Optional<string>,
+            userinfo_part: optional.Optional<string>, host_part: optional.Optional<string>,
+            port_part: optional.Optional<int>, path_part: string, query_part: optional.Optional<string>,
+            fragment_part: optional.Optional<string>) {
+            scheme = scheme_part;
+            userinfo = userinfo_part;
+            host = host_part;
+            port = port_part;
+            path = path_part;
+            query = query_part;
+            fragment = fragment_part;
+        };
+
+        /// @brief Tests whether the URI has an authority (`//` after the scheme).
+        #Pure
+        export let has_authority = func -> bool => optional.is_some<string>(host);
+
+        /// @brief Tests whether this is a relative reference (no scheme).
+        #Pure
+        export let is_relative = func -> bool => optional.is_none<string>(scheme);
+
+        /// @brief The authority as written (`userinfo@host:port`), if any.
+        #Pure
+        export let authority = func -> optional.Optional<string> {
+            return optional.Optional<string>.None unless has_authority();
+            return optional.Optional<string>.Some(authority_text(userinfo, host, port));
+        };
+
+        /// @brief The kind of host, if any.
+        #Pure
+        export let host_kind = func -> optional.Optional<HostKind> => match (host) {
+            optional.Optional.Some(h) => optional.Optional<HostKind>.Some(kind_of_host(h)),
+            optional.Optional.None => optional.Optional<HostKind>.None,
+        };
+
+        /// @brief The host without the brackets of an IP literal, as written; None without an authority.
+        #Pure
+        export let host_name = func -> optional.Optional<string> => match (host) {
+            optional.Optional.Some(h) => optional.Optional<string>.Some(unbracket(h)),
+            optional.Optional.None => optional.Optional<string>.None,
+        };
+
+        /// @brief The userinfo percent-decoded, or empty when absent. Errors as in PercentEncoding.decode.
+        #NoDiscard
+        export let decoded_userinfo = func -> Result<string> => decode_optional(userinfo);
+
+        /// @brief The host percent-decoded without IP-literal brackets, or empty when absent. Errors as in
+        /// PercentEncoding.decode.
+        #NoDiscard
+        export let decoded_host = func -> Result<string> => decode_optional(host_name());
+
+        /// @brief The path percent-decoded. Errors as in PercentEncoding.decode.
+        #NoDiscard
+        export let decoded_path = func -> Result<string> => percent.decode(path);
+
+        /// @brief The query percent-decoded (`+` stays `+`), or empty when absent. Errors as in
+        /// PercentEncoding.decode.
+        #NoDiscard
+        export let decoded_query = func -> Result<string> => decode_optional(query);
+
+        /// @brief The fragment percent-decoded, or empty when absent. Errors as in PercentEncoding.decode.
+        #NoDiscard
+        export let decoded_fragment = func -> Result<string> => decode_optional(fragment);
+
+        /// @brief The path's segments, each percent-decoded; the empty segment before a leading `/` is left
+        /// out, so `/a/b/` gives `a`, `b`, and the empty text. Errors as in PercentEncoding.decode.
+        #NoDiscard
+        export let path_segments = func -> Result<string[list]> {
+            last segments: string[list] = new;
+            if (path.byte_length == 0) {
+                return Result<string[list]>.Ok(segments);
+            }
+            last parts = strings.split(path, "/");
+            for (let i = 0; i < parts.length; i++) {
+                if (i > 0 || path.byte_at(0) != 47) {
+                    segments.append(percent.decode(parts[i])?);
+                }
+            }
+            return Result<string[list]>.Ok(segments);
+        };
+
+        /// @brief The query parsed into key/value pairs (an empty list when absent). Errors as in Query.parse.
+        #NoDiscard
+        export let query_parameters = func(mode: queries.QueryMode) -> Result<queries.QueryString> =>
+            queries.parse(optional.value_or<string>(query, ""), mode);
+
+        /// @brief The target of a reference resolved against this URI (RFC 3986 section 5.2.2, strict).
+        /// Errors: Parse Syntax when this URI has no scheme.
+        #NoDiscard
+        export let resolve = func(reference: Uri) -> Result<Uri> =>
+            resolve_reference(base: copy(), reference: reference);
+
+        /// @brief The normalized URI: syntax-based normalization (RFC 3986 section 6.2.2: lowercase scheme and
+        /// host, percent-encoding normalized, dot segments removed when there is a scheme) and, for http and
+        /// https, scheme-based normalization (section 6.2.3: the default port dropped and an empty path with an
+        /// authority made `/`). A registered name with non-ASCII, written as UTF-8 or as percent-encoded UTF-8, is
+        /// decoded and converted with Idna.to_ascii. Errors: those of PercentEncoding.decode and Idna.to_ascii
+        /// for such a name.
+        #NoDiscard
+        export let normalize = func -> Result<Uri> => normalize_uri(copy());
+
+        /// @brief Tests whether both URIs normalize to the same components; when either does not normalize,
+        /// compares them as written.
+        export let equivalent = func(other: Uri) -> bool {
+            last mine = normalize();
+            last theirs = other.normalize();
+            return match (mine) {
+                Result.Ok(a) => match (theirs) {
+                    Result.Ok(b) => a.to_string() == b.to_string(),
+                    Result.Err(e) => to_string() == other.to_string(),
+                },
+                Result.Err(e) => to_string() == other.to_string(),
+            };
+        };
+
+        /// @brief Equal when every component is equal as written (not normalized).
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: Uri) {
+                return false;
+            }
+            return to_string() == that.to_string();
+        };
+
+        /// @brief The hash of the recomposed text, consistent with equals.
+        #Pure
+        export let.override hash_code = func -> uint32 => hashing.combine(17, to_string().hash_code());
+
+        /// @brief The recomposed reference (RFC 3986 section 5.3).
+        #Pure
+        export let.override to_string = func -> string => compose(scheme, userinfo, host, port, path, query, fragment);
+
+        /// @brief A new Uri with the same components (the language has no expression for the receiver).
+        let copy = func -> Uri => new Uri(Seal.Token, scheme, userinfo, host, port, path, query, fragment);
+    );
+
+    /// @brief Parses a URI or relative reference (RFC 3986 appendix A, `URI-reference`).
+    ///
+    /// Errors (Parse, offset in bytes): Syntax for an empty scheme, an unclosed `[`, text after `]` that is
+    /// not `:port`, or an invalid IP literal; InvalidCharacter at a byte a component does not allow (including
+    /// a `:` in the first segment of a relative path, non-ASCII outside a registered name, and a `%` without
+    /// two hex digits); OutOfRange for a port above 65535.
+    #[NoDiscard, Pure, ThreadSafe, Since("0.3.0")]
+    export let parse = func(text: string) -> Result<Uri> {
+        last length = text.byte_length;
+        let i = 0;
+        let scheme = optional.Optional<string>.None;
+        last first_stop = find_first(text, 0, length, ":/?#");
+        if (first_stop < length && text.byte_at(first_stop) == 58) {
+            if (first_stop == 0) {
+                return failed(ParseErrorKind.Syntax, 0, "empty scheme");
+            }
+            last bad = invalid_scheme_at(text, first_stop);
+            if (bad >= 0) {
+                return failed(ParseErrorKind.InvalidCharacter, bad,
+                    "invalid scheme character (or ':' in the first segment of a relative path)");
+            }
+            scheme = optional.Optional<string>.Some(text.slice(0, first_stop));
+            i = first_stop + 1;
+        }
+        let userinfo = optional.Optional<string>.None;
+        let host = optional.Optional<string>.None;
+        let port = optional.Optional<int>.None;
+        if (i + 1 < length && text.byte_at(i) == 47 && text.byte_at(i + 1) == 47) {
+            last start = i + 2;
+            last end = find_first(text, start, length, "/?#");
+            // Userinfo.
+            let host_start = start;
+            last at = find_first(text, start, end, "@");
+            if (at < end) {
+                check(text, start, at, percent.EncodeSet.UserInfo, "userinfo")?;
+                userinfo = optional.Optional<string>.Some(text.slice(start, at));
+                host_start = at + 1;
+            }
+            // Host.
+            let port_start = -1;
+            if (host_start < end && text.byte_at(host_start) == 91) {
+                last close = find_first(text, host_start, end, "]");
+                if (close >= end) {
+                    return failed(ParseErrorKind.Syntax, host_start, "unclosed '[' in the host");
+                }
+                return failed(ParseErrorKind.Syntax, host_start, "invalid IP literal") unless valid_ip_literal(text.slice(host_start + 1, close));
+                host = optional.Optional<string>.Some(text.slice(host_start, close + 1));
+                if (close + 1 < end) {
+                    if (text.byte_at(close + 1) != 58) {
+                        return failed(ParseErrorKind.Syntax, close + 1,
+                            "expected ':' or the end of the authority after ']'");
+                    }
+                    port_start = close + 2;
+                }
+            } else {
+                last colon = find_first(text, host_start, end, ":");
+                last bad = invalid_reg_name_at(text, host_start, colon);
+                if (bad >= 0) {
+                    return failed(ParseErrorKind.InvalidCharacter, bad, "character not allowed in the host");
+                }
+                host = optional.Optional<string>.Some(text.slice(host_start, colon));
+                if (colon < end) {
+                    port_start = colon + 1;
+                }
+            }
+            // Port.
+            if (port_start >= 0) {
+                let value = 0;
+                for (let p = port_start; p < end; p++) {
+                    last b = text.byte_at(p);
+                    if (b < 48 || b > 57) {
+                        return failed(ParseErrorKind.InvalidCharacter, p, "port must be digits");
+                    }
+                    if (value > 6553) {
+                        return failed(ParseErrorKind.OutOfRange, port_start, "port above 65535");
+                    }
+                    value = value * 10 + ((b as int) - 48);
+                }
+                if (value > 65535) {
+                    return failed(ParseErrorKind.OutOfRange, port_start, "port above 65535");
+                }
+                if (end > port_start) {
+                    port = optional.Optional<int>.Some(value);
+                }
+            }
+            i = end;
+        }
+        last path_end = find_first(text, i, length, "?#");
+        check(text, i, path_end, percent.EncodeSet.Path, "path")?;
+        last path = text.slice(i, path_end);
+        i = path_end;
+        let query = optional.Optional<string>.None;
+        if (i < length && text.byte_at(i) == 63) {
+            last query_end = find_first(text, i + 1, length, "#");
+            check(text, i + 1, query_end, percent.EncodeSet.Query, "query")?;
+            query = optional.Optional<string>.Some(text.slice(i + 1, query_end));
+            i = query_end;
+        }
+        let fragment = optional.Optional<string>.None;
+        if (i < length) {
+            check(text, i + 1, length, percent.EncodeSet.Fragment, "fragment")?;
+            fragment = optional.Optional<string>.Some(text.slice(i + 1, length));
+        }
+        return Result<Uri>.Ok(new Uri(Seal.Token, scheme, userinfo, host, port, path, query, fragment));
+    };
+
+    /// @brief The target of a reference resolved against a base URI (RFC 3986 section 5.2.2, strict: a
+    /// reference with a scheme is used as it is, apart from its dot segments). The base's fragment is ignored.
+    ///
+    /// Errors: Parse Syntax when the base has no scheme (section 5.2.1 requires an absolute base).
+    #[NoDiscard, Pure, ThreadSafe, Since("0.3.0")]
+    export let resolve = func(base: Uri, reference: Uri) -> Result<Uri> =>
+        resolve_reference(base: base, reference: reference);
+
+    /// @brief The path with `.` and `..` segments removed (RFC 3986 section 5.2.4).
+    #[NoDiscard, Pure, ThreadSafe, Since("0.3.0")]
+    export let remove_dot_segments = func(path: string) -> string {
+        let input = path;
+        let output = "";
+        while (input.byte_length > 0) {
+            if (strings.starts_with(input, "../")) {
+                input = input.slice(3, input.byte_length);
+            } else if (strings.starts_with(input, "./")) {
+                input = input.slice(2, input.byte_length);
+            } else if (strings.starts_with(input, "/./")) {
+                input = input.slice(2, input.byte_length);
+            } else if (input == "/.") {
+                input = "/";
+            } else if (strings.starts_with(input, "/../")) {
+                input = input.slice(3, input.byte_length);
+                output = drop_last_segment(output);
+            } else if (input == "/..") {
+                input = "/";
+                output = drop_last_segment(output);
+            } else if (input == "." || input == "..") {
+                input = "";
+            } else {
+                last next = find_first(input, 1, input.byte_length, "/");
+                output ..= input.slice(0, next);
+                input = input.slice(next, input.byte_length);
+            }
+        }
+        return output;
+    };
+
+    /// @brief The default port of http (80) and https (443), compared without case; None for other schemes.
+    #[Pure, ThreadSafe, Since("0.3.0")]
+    export let default_port = func(scheme: string) -> optional.Optional<int> {
+        last lowered = strings.to_ascii_lower(scheme);
+        if (lowered == "http") {
+            return optional.Optional<int>.Some(80);
+        }
+        return if (lowered == "https") -> optional.Optional<int>.Some(443)
+            else -> optional.Optional<int>.None;
+    };
+
+    /// @brief Collects URI components and builds a checked Uri. Setters without `raw` percent-encode their
+    /// argument for the component; `raw` setters take text that is already encoded. The builder does not
+    /// return itself from setters (the language has no receiver expression); call them as statements.
+    #[Final, NotThreadSafe, Since("0.3.0")]
+    export let UriBuilder = class (
+        let scheme_text = optional.Optional<string>.None;
+        let userinfo_text = optional.Optional<string>.None;
+        let host_text = optional.Optional<string>.None;
+        let port_value = optional.Optional<int>.None;
+        let path_text: string = "";
+        let query_text = optional.Optional<string>.None;
+        let fragment_text = optional.Optional<string>.None;
+
+        /// @brief An empty builder: no components, empty path.
+        export let init = func {
+        };
+
+        /// @brief Sets the scheme (checked by build).
+        export let set_scheme = func(scheme: string) {
+            scheme_text = optional.Optional<string>.Some(scheme);
+        };
+
+        /// @brief Removes the scheme.
+        export let clear_scheme = func {
+            scheme_text = optional.Optional<string>.None;
+        };
+
+        /// @brief Sets the userinfo from decoded text, encoding it with the UserInfo set.
+        export let set_userinfo = func(text: string) {
+            userinfo_text = optional.Optional<string>.Some(percent.encode(text, percent.EncodeSet.UserInfo));
+        };
+
+        /// @brief Sets the userinfo as already-encoded text.
+        export let set_raw_userinfo = func(raw: string) {
+            userinfo_text = optional.Optional<string>.Some(raw);
+        };
+
+        /// @brief Removes the userinfo.
+        export let clear_userinfo = func {
+            userinfo_text = optional.Optional<string>.None;
+        };
+
+        /// @brief Sets the host from a name or address: text with a `:` is an IPv6 address and gets brackets
+        /// (a `%` zone separator becomes `%25`); other text is encoded with the RegName set, except that its
+        /// non-ASCII bytes are kept, and build converts a host with non-ASCII with Idna.to_ascii.
+        export let set_host = func(name: string) {
+            if (strings.contains(name, ":") && not strings.starts_with(name, "[")) {
+                host_text = optional.Optional<string>.Some("[" .. strings.replace(name, "%", "%25") .. "]");
+            } else if (has_non_ascii(name)) {
+                host_text = optional.Optional<string>.Some(encode_ireg_name(name));
+            } else {
+                host_text = optional.Optional<string>.Some(percent.encode(name, percent.EncodeSet.RegName));
+            }
+        };
+
+        /// @brief Sets the host as written (IP literals with brackets).
+        export let set_raw_host = func(raw: string) {
+            host_text = optional.Optional<string>.Some(raw);
+        };
+
+        /// @brief Removes the host, and with it the authority.
+        export let clear_host = func {
+            host_text = optional.Optional<string>.None;
+        };
+
+        /// @brief Sets the port (checked by build).
+        export let set_port = func(port: int) {
+            port_value = optional.Optional<int>.Some(port);
+        };
+
+        /// @brief Removes the port.
+        export let clear_port = func {
+            port_value = optional.Optional<int>.None;
+        };
+
+        /// @brief Sets the path from decoded text, encoding it with the Path set (`/` separates segments).
+        export let set_path = func(text: string) {
+            path_text = percent.encode(text, percent.EncodeSet.Path);
+        };
+
+        /// @brief Sets the path as already-encoded text.
+        export let set_raw_path = func(raw: string) {
+            path_text = raw;
+        };
+
+        /// @brief Appends `/` and the segment encoded with the PathSegment set (so `/` in it is encoded).
+        export let add_path_segment = func(segment: string) {
+            path_text ..= "/" .. percent.encode(segment, percent.EncodeSet.PathSegment);
+        };
+
+        /// @brief Sets the query from decoded text, encoding it with the Query set.
+        export let set_query = func(text: string) {
+            query_text = optional.Optional<string>.Some(percent.encode(text, percent.EncodeSet.Query));
+        };
+
+        /// @brief Sets the query as already-encoded text.
+        export let set_raw_query = func(raw: string) {
+            query_text = optional.Optional<string>.Some(raw);
+        };
+
+        /// @brief Sets the query from key/value pairs, encoded for the mode.
+        export let set_query_parameters = func(parameters: queries.QueryString, mode: queries.QueryMode) {
+            query_text = optional.Optional<string>.Some(parameters.encode(mode));
+        };
+
+        /// @brief Appends `key=value` to the query (with `&` when it is not empty), both encoded with the
+        /// QueryComponent set.
+        export let add_query_parameter = func(key: string, value: string) {
+            last pair = percent.encode(key, percent.EncodeSet.QueryComponent) .. "="
+                .. percent.encode(value, percent.EncodeSet.QueryComponent);
+            last current = optional.value_or<string>(query_text, "");
+            query_text = optional.Optional<string>.Some(current.byte_length == 0 ? pair : current .. "&" .. pair);
+        };
+
+        /// @brief Removes the query.
+        export let clear_query = func {
+            query_text = optional.Optional<string>.None;
+        };
+
+        /// @brief Sets the fragment from decoded text, encoding it with the Fragment set.
+        export let set_fragment = func(text: string) {
+            fragment_text = optional.Optional<string>.Some(percent.encode(text, percent.EncodeSet.Fragment));
+        };
+
+        /// @brief Sets the fragment as already-encoded text.
+        export let set_raw_fragment = func(raw: string) {
+            fragment_text = optional.Optional<string>.Some(raw);
+        };
+
+        /// @brief Removes the fragment.
+        export let clear_fragment = func {
+            fragment_text = optional.Optional<string>.None;
+        };
+
+        /// @brief Copies every component of a URI into the builder.
+        export let set_all = func(uri: Uri) {
+            scheme_text = uri.scheme;
+            userinfo_text = uri.userinfo;
+            host_text = uri.host;
+            port_value = uri.port;
+            path_text = uri.path;
+            query_text = uri.query;
+            fragment_text = uri.fragment;
+        };
+
+        /// @brief The URI of the components. The recomposed text is parsed again and must give back the same
+        /// components, so a builder cannot make a URI that reads differently.
+        ///
+        /// Errors: Parse Syntax for a userinfo or port without a host, a non-empty path that does not start with
+        /// `/` after a host, a path starting with `//` without a host, a relative path whose first segment
+        /// contains `:`, or components that otherwise do not read back unchanged; the errors of parse for invalid
+        /// raw components; those of PercentEncoding.decode and Idna.to_ascii for a non-ASCII host (which build
+        /// decodes, converts, and encodes with the RegName set again).
+        #NoDiscard
+        export let build = func -> Result<Uri> {
+            let host = host_text;
+            match (host_text) {
+                optional.Optional.Some(h) => {
+                    if (has_non_ascii(h)) {
+                        host = optional.Optional<string>.Some(idn_host(percent.decode(h)?)?);
+                    }
+                },
+                optional.Optional.None => {
+                    if (optional.is_some<string>(userinfo_text) || optional.is_some<int>(port_value)) {
+                        return failed(ParseErrorKind.Syntax, 0, "a userinfo or port needs a host");
+                    }
+                },
+            }
+            if (optional.is_some<string>(host) && path_text.byte_length > 0 && path_text.byte_at(0) != 47) {
+                return failed(ParseErrorKind.Syntax, 0, "a path after a host must start with '/'");
+            }
+            match (port_value) {
+                optional.Optional.Some(p) => {
+                    if (p < 0 || p > 65535) {
+                        return failed(ParseErrorKind.OutOfRange, 0, "port outside 0 to 65535");
+                    }
+                },
+                optional.Optional.None => {
+                },
+            }
+            last text = compose(scheme_text, userinfo_text, host, port_value, path_text, query_text, fragment_text);
+            last uri = parse(text)?;
+            if (not same(uri.scheme, scheme_text) || not same(uri.userinfo, userinfo_text) || not same(uri.host, host)
+                || not optional.equals<int>(uri.port, port_value) || uri.path != path_text
+                || not same(uri.query, query_text) || not same(uri.fragment, fragment_text)) {
+                return failed(ParseErrorKind.Syntax, 0,
+                    "the components do not read back unchanged from \"" .. text .. "\"");
+            }
+            return Result<Uri>.Ok(uri);
+        };
+
+        /// @brief The text the components recompose to, unchecked.
+        export let.override to_string = func -> string =>
+            compose(scheme_text, userinfo_text, host_text, port_value, path_text, query_text, fragment_text);
+    );
+
+    // Internal helpers.
+
+    /// @brief Tests whether two optional texts are both absent or equal.
+    let same = func(a: optional.Optional<string>, b: optional.Optional<string>) -> bool =>
+        optional.equals<string>(a, b);
+
+    /// @brief A parse failure.
+    let failed = func(kind: ParseErrorKind, offset: int, message: string) -> Result<Uri> =>
+        Result<Uri>.Err(Error.Parse { kind: kind, offset: offset, message: message });
+
+    /// @brief The first index in [start, end) of a byte that appears in `stops` (ASCII), or `end`.
+    let find_first = func(text: string, start: int, end: int, stops: string) -> int {
+        last count = stops.byte_length;
+        for (let i = start; i < end; i++) {
+            last b = text.byte_at(i);
+            for (let k = 0; k < count; k++) {
+                if (b == stops.byte_at(k)) {
+                    return i;
+                }
+            }
+        }
+        return end;
+    };
+
+    /// @brief Checks text[start, end) against a component set; the error offset is in `text`.
+    let check = func(text: string, start: int, end: int, set: percent.EncodeSet, name: string) -> Result<int> {
+        last bad = percent.first_invalid(text.slice(start, end), set);
+        if (bad >= 0) {
+            return Result<int>.Err(Error.Parse {
+                kind: ParseErrorKind.InvalidCharacter, offset: start + bad,
+                message: "character not allowed in the " .. name
+            });
+        }
+        return Result<int>.Ok(0);
+    };
+
+    /// @brief The offset of the first byte of text[0, end) that breaks `ALPHA *( ALPHA / DIGIT / "+" / "-" /
+    /// "." )`, or -1.
+    let invalid_scheme_at = func(text: string, end: int) -> int {
+        for (let i = 0; i < end; i++) {
+            last b = text.byte_at(i);
+            last alpha = (b >= 65 && b <= 90) || (b >= 97 && b <= 122);
+            if (not alpha && (i == 0 || not ((b >= 48 && b <= 57) || b == 43 or 45 or 46))) {
+                return i;
+            }
+        }
+        return -1;
+    };
+
+    /// @brief The offset of the first invalid byte of a registered name in text[start, end), or -1. Non-ASCII
+    /// bytes are allowed (ireg-name).
+    let invalid_reg_name_at = func(text: string, start: int, end: int) -> int {
+        let i = start;
+        while (i < end) {
+            last b = text.byte_at(i);
+            if (b == 37) {
+                if (i + 2 >= end || not percent.is_triplet(text, i)) {
+                    return i;
+                }
+                i += 3;
+            } else if (b >= 128 || percent.is_allowed(b, percent.EncodeSet.RegName)) {
+                i++;
+            } else {
+                return i;
+            }
+        }
+        return -1;
+    };
+
+    /// @brief Tests the inside of `[...]`: IPv6address, IPv6address "%25" ZoneID (RFC 6874), or IPvFuture.
+    let valid_ip_literal = func(inside: string) -> bool {
+        last length = inside.byte_length;
+        if (length == 0) {
+            return false;
+        }
+        last first = inside.byte_at(0);
+        if (first == 118 or 86) {
+            // IPvFuture = "v" 1*HEXDIG "." 1*( unreserved / sub-delims / ":" )
+            let i = 1;
+            while (i < length && percent.hex_value(inside.byte_at(i)) >= 0) {
+                i++;
+            }
+            if (i == 1 || i >= length || inside.byte_at(i) != 46 || i + 1 >= length) {
+                return false;
+            }
+            for (let k = i + 1; k < length; k++) {
+                return false unless percent.is_allowed(inside.byte_at(k), percent.EncodeSet.UserInfo);
+            }
+            return true;
+        }
+        last zone = strings.index_of(inside, "%25");
+        if (zone >= 0) {
+            last zone_id = inside.slice(zone + 3, length);
+            return if (zone_id.byte_length == 0 || percent.first_invalid(zone_id, percent.EncodeSet.Unreserved) >= 0) -> false
+                else -> valid_ipv6(inside.slice(0, zone));
+        }
+        return valid_ipv6(inside);
+    };
+
+    /// @brief Tests text against the RFC 3986 `IPv6address` ABNF: eight 16-bit pieces, or fewer around one
+    /// `::`, the last two of which may be an IPv4 address.
+    let valid_ipv6 = func(text: string) -> bool {
+        last length = text.byte_length;
+        if (length < 2) {
+            return false;
+        }
+        last double = strings.index_of(text, "::");
+        let pieces = 0;
+        if (double >= 0) {
+            if (strings.index_of_from(text, "::", double + 1) >= 0) {
+                return false;
+            }
+            last left = text.slice(0, double);
+            last right = text.slice(double + 2, length);
+            if (left.byte_length > 0) {
+                last left_count = count_pieces(left, allow_ipv4: false);
+                if (left_count < 0) {
+                    return false;
+                }
+                pieces += left_count;
+            }
+            if (right.byte_length > 0) {
+                last right_count = count_pieces(right, allow_ipv4: true);
+                if (right_count < 0) {
+                    return false;
+                }
+                pieces += right_count;
+            }
+            return pieces <= 7;
+        }
+        return count_pieces(text, allow_ipv4: true) == 8;
+    };
+
+    /// @brief The number of 16-bit pieces in `h16 *( ":" h16 )`, where the last may be an IPv4 address worth
+    /// two when allowed; -1 when the text does not match.
+    let count_pieces = func(text: string, allow_ipv4: bool) -> int {
+        last parts = strings.split(text, ":");
+        let count = 0;
+        for (let i = 0; i < parts.length; i++) {
+            last part = parts[i];
+            if (allow_ipv4 && i == parts.length - 1 && strings.contains(part, ".")) {
+                return -1 unless is_ipv4(part);
+                count += 2;
+            } else {
+                if (part.byte_length < 1 || part.byte_length > 4) {
+                    return -1;
+                }
+                for (let k = 0; k < part.byte_length; k++) {
+                    if (percent.hex_value(part.byte_at(k)) < 0) {
+                        return -1;
+                    }
+                }
+                count++;
+            }
+        }
+        return count;
+    };
+
+    /// @brief Tests text against `IPv4address = dec-octet "." dec-octet "." dec-octet "." dec-octet`, where a
+    /// dec-octet is 0 to 255 without leading zeros.
+    let is_ipv4 = func(text: string) -> bool {
+        last parts = strings.split(text, ".");
+        if (parts.length != 4) {
+            return false;
+        }
+        for (let part in parts) {
+            last count = part.byte_length;
+            if (count < 1 || count > 3 || (count > 1 && part.byte_at(0) == 48)) {
+                return false;
+            }
+            let value = 0;
+            for (let k = 0; k < count; k++) {
+                last b = part.byte_at(k);
+                if (b < 48 || b > 57) {
+                    return false;
+                }
+                value = value * 10 + ((b as int) - 48);
+            }
+            if (value > 255) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    /// @brief The kind of a host as written.
+    let kind_of_host = func(h: string) -> HostKind {
+        if (h.byte_length > 1 && h.byte_at(0) == 91) {
+            last first = h.byte_at(1);
+            return first == 118 or 86 ? HostKind.IpFuture : HostKind.Ipv6;
+        }
+        return is_ipv4(h) ? HostKind.Ipv4 : HostKind.RegName;
+    };
+
+    /// @brief The host without IP-literal brackets.
+    let unbracket = func(h: string) -> string {
+        return if (h.byte_length >= 2 && h.byte_at(0) == 91) -> h.slice(1, h.byte_length - 1)
+            else -> h;
+    };
+
+    /// @brief Decodes an optional component; an absent one decodes to the empty text.
+    let decode_optional = func(part: optional.Optional<string>) -> Result<string> => match (part) {
+        optional.Optional.Some(text) => percent.decode(text),
+        optional.Optional.None => Result<string>.Ok(""),
+    };
+
+    /// @brief `[userinfo "@"] host [":" port]`.
+    let authority_text = func(userinfo: optional.Optional<string>, host: optional.Optional<string>,
+        port: optional.Optional<int>) -> string {
+        let text = "";
+        match (userinfo) {
+            optional.Optional.Some(u) => {
+                text ..= u .. "@";
+            },
+            optional.Optional.None => {
+            },
+        }
+        text ..= optional.value_or<string>(host, "");
+        match (port) {
+            optional.Optional.Some(p) => {
+                text ..= ":" .. p.to_string();
+            },
+            optional.Optional.None => {
+            },
+        }
+        return text;
+    };
+
+    /// @brief Component recomposition (RFC 3986 section 5.3).
+    let compose = func(scheme: optional.Optional<string>, userinfo: optional.Optional<string>,
+        host: optional.Optional<string>, port: optional.Optional<int>, path: string,
+        query: optional.Optional<string>, fragment: optional.Optional<string>) -> string {
+        let text = "";
+        match (scheme) {
+            optional.Optional.Some(s) => {
+                text ..= s .. ":";
+            },
+            optional.Optional.None => {
+            },
+        }
+        if (optional.is_some<string>(host)) {
+            text ..= "//" .. authority_text(userinfo, host, port);
+        }
+        text ..= path;
+        match (query) {
+            optional.Optional.Some(q) => {
+                text ..= "?" .. q;
+            },
+            optional.Optional.None => {
+            },
+        }
+        match (fragment) {
+            optional.Optional.Some(f) => {
+                text ..= "#" .. f;
+            },
+            optional.Optional.None => {
+            },
+        }
+        return text;
+    };
+
+    /// @brief The output with its last segment and the `/` before it removed (section 5.2.4 step 2C).
+    let drop_last_segment = func(output: string) -> string {
+        last at = strings.last_index_of(output, "/");
+        return at < 0 ? "" : output.slice(0, at);
+    };
+
+    /// @brief Merges a relative-path reference with the base path (section 5.2.3).
+    let merge = func(base: Uri, reference_path: string) -> string {
+        if (base.has_authority() && base.path.byte_length == 0) {
+            return "/" .. reference_path;
+        }
+        last at = strings.last_index_of(base.path, "/");
+        return at < 0 ? reference_path : base.path.slice(0, at + 1) .. reference_path;
+    };
+
+    /// @brief Keeps a path without authority from starting with `//`.
+    let guard_path = func(host: optional.Optional<string>, path: string) -> string {
+        return if (optional.is_none<string>(host) && strings.starts_with(path, "//")) -> "/." .. path
+            else -> path;
+    };
+
+    /// @brief Reference resolution (section 5.2.2, strict).
+    let resolve_reference = func(base: Uri, reference: Uri) -> Result<Uri> {
+        if (base.is_relative()) {
+            return failed(ParseErrorKind.Syntax, 0, "the base URI must have a scheme");
+        }
+        if (not reference.is_relative()) {
+            last path = guard_path(reference.host, remove_dot_segments(reference.path));
+            return Result<Uri>.Ok(new Uri(Seal.Token, reference.scheme, reference.userinfo, reference.host,
+                reference.port, path, reference.query, reference.fragment));
+        }
+        if (reference.has_authority()) {
+            return Result<Uri>.Ok(new Uri(Seal.Token, base.scheme, reference.userinfo, reference.host,
+                reference.port, remove_dot_segments(reference.path), reference.query, reference.fragment));
+        }
+        let path = "";
+        let query = reference.query;
+        if (reference.path.byte_length == 0) {
+            path = base.path;
+            if (optional.is_none<string>(reference.query)) {
+                query = base.query;
+            }
+        } else if (reference.path.byte_at(0) == 47) {
+            path = remove_dot_segments(reference.path);
+        } else {
+            path = remove_dot_segments(merge(base, reference.path));
+        }
+        return Result<Uri>.Ok(new Uri(Seal.Token, base.scheme, base.userinfo, base.host, base.port,
+            guard_path(base.host, path), query, reference.fragment));
+    };
+
+    /// @brief Lowercases ASCII letters except the two hex digits after a `%`.
+    let lower_outside_triplets = func(text: string) -> string {
+        last output: uint8[list] = new;
+        last length = text.byte_length;
+        let i = 0;
+        while (i < length) {
+            last b = text.byte_at(i);
+            if (b == 37 && i + 2 < length) {
+                output.append(b);
+                output.append(text.byte_at(i + 1));
+                output.append(text.byte_at(i + 2));
+                i += 3;
+            } else {
+                output.append(b >= 65 && b <= 90 ? b + 32 : b);
+                i++;
+            }
+        }
+        let [valid, result] = string.from_utf8(output);
+        if (not valid) {
+            trap_with_message("invalid state: lowercasing broke UTF-8");
+        }
+        return result;
+    };
+
+    /// @brief Normalizes the percent-encoding of an optional component.
+    let normalize_optional = func(part: optional.Optional<string>) -> optional.Optional<string> => match (part) {
+        optional.Optional.Some(text) => optional.Optional<string>.Some(percent.normalize(text)),
+        optional.Optional.None => optional.Optional<string>.None,
+    };
+
+    /// @brief Tests whether the text has a byte at or above 0x80.
+    let has_non_ascii = func(text: string) -> bool {
+        for (let i = 0; i < text.byte_length; i++) {
+            if (text.byte_at(i) >= 128) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    /// @brief Normalizes a host: IDNA for a non-ASCII registered name, else case and percent-encoding.
+    let normalize_host = func(h: string) -> Result<string> {
+        if (h.byte_length > 0 && h.byte_at(0) == 91) {
+            last zone = strings.index_of(h, "%25");
+            if (zone >= 0) {
+                last address = strings.to_ascii_lower(h.slice(0, zone));
+                return Result<string>.Ok(address .. percent.normalize(h.slice(zone, h.byte_length)));
+            }
+            return Result<string>.Ok(strings.to_ascii_lower(h));
+        }
+        if (has_non_ascii(h)) {
+            return idn_host(percent.decode(h)?);
+        }
+        if (strings.contains(h, "%")) {
+            // Percent-encoded UTF-8 that decodes to a non-ASCII name is an IDN too (RFC 3986 section 3.2.2).
+            match (percent.decode(h)) {
+                Result.Ok(decoded) => {
+                    if (has_non_ascii(decoded)) {
+                        return idn_host(decoded);
+                    }
+                },
+                Result.Err(e) => {
+                },
+            }
+        }
+        return Result<string>.Ok(lower_outside_triplets(percent.normalize(h)));
+    };
+
+    /// @brief The A-label form of a decoded non-ASCII name, with any ASCII byte the RegName set does not allow
+    /// (such as `@`, `/`, `:`, `%` or a space, which Idna.to_ascii keeps) percent-encoded again, so that the
+    /// host reads back as the same host.
+    let idn_host = func(decoded: string) -> Result<string> =>
+        Result<string>.Ok(percent.encode(idna.to_ascii(decoded)?, percent.EncodeSet.RegName));
+
+    /// @brief A registered name with its non-ASCII bytes kept and every ASCII byte the RegName set does not allow
+    /// percent-encoded (an ireg-name).
+    let encode_ireg_name = func(name: string) -> string {
+        let text = "";
+        let start = 0;
+        last length = name.byte_length;
+        for (let i = 0; i < length; i++) {
+            last b = name.byte_at(i);
+            if (b < 128 && not percent.is_allowed(b, percent.EncodeSet.RegName)) {
+                text ..= name.slice(start, i) .. percent.encode(name.slice(i, i + 1), percent.EncodeSet.RegName);
+                start = i + 1;
+            }
+        }
+        return text .. name.slice(start, length);
+    };
+
+    /// @brief Syntax-based and (http, https) scheme-based normalization.
+    let normalize_uri = func(uri: Uri) -> Result<Uri> {
+        let scheme = optional.Optional<string>.None;
+        let defaults = optional.Optional<int>.None;
+        match (uri.scheme) {
+            optional.Optional.Some(s) => {
+                scheme = optional.Optional<string>.Some(strings.to_ascii_lower(s));
+                defaults = default_port(s);
+            },
+            optional.Optional.None => {
+            },
+        }
+        let host = optional.Optional<string>.None;
+        match (uri.host) {
+            optional.Optional.Some(h) => {
+                host = optional.Optional<string>.Some(normalize_host(h)?);
+            },
+            optional.Optional.None => {
+            },
+        }
+        let port = uri.port;
+        if (optional.is_some<int>(defaults) && optional.equals<int>(port, defaults)) {
+            port = optional.Optional<int>.None;
+        }
+        let path = percent.normalize(uri.path);
+        if (not uri.is_relative()) {
+            path = guard_path(uri.host, remove_dot_segments(path));
+        }
+        if (optional.is_some<int>(defaults) && uri.has_authority() && path.byte_length == 0) {
+            path = "/";
+        }
+        return Result<Uri>.Ok(new Uri(Seal.Token, scheme, normalize_optional(uri.userinfo), host, port, path,
+            normalize_optional(uri.query), normalize_optional(uri.fragment)));
+    };
+);

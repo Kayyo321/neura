@@ -1,0 +1,7 @@
+// Two arguments that give a type parameter different classes (edge case 41).
+let Dog = class ();
+let Cat = class ();
+let same = func<T>(a: T, b: T) -> T => b;
+let use = func(dog: Dog, cat: Cat) {
+    let either = same(dog, cat);
+};

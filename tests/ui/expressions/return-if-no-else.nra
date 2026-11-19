@@ -1,0 +1,5 @@
+// A `return if` needs a final `else` (docs/design/Expressions030.md, Return
+// forms, edge case 49): E0264 where `else` was expected.
+let pick = func(c: bool) -> int {
+    return if (c) -> 1;
+};

@@ -1,0 +1,10 @@
+error[E0537]: 'label' is not an instance field of class 'Child'
+ --> $DIR/shorthand-inherited-field.nra:7:39
+  |
+7 |     export let init = func(size: int, label: string) => set;
+  |                                       ^^^^^ 'label' is inherited, and the shorthand sets only the class's own fields
+  |                                                         --- '=> set' stores each parameter in the field of the same name
+  |
+  = help: name the parameter after an instance field of this class, or write the constructor with a block
+
+For more information about this error, try `neura explain E0537`.

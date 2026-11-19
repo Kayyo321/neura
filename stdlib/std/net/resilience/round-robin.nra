@@ -1,0 +1,64 @@
+let durations = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let balancers = import:Std.Net.Resilience.LoadBalancer;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief A load balancer that picks the endpoints in list order, cycling, regardless of load.
+/// @see [Std.Net.Resilience.RoundRobin](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-RoundRobin)
+#Since("0.3.0")
+export let RoundRobin = module (
+    /// @brief Round-robin over a fixed endpoint list.
+    #[Final, NotThreadSafe]
+    export let RoundRobin = class<Endpoint> implements balancers.LoadBalancer<Endpoint> (
+        /// @brief The endpoints, copied at construction.
+        last endpoints: Endpoint[list] = new;
+        /// @brief Pending requests per endpoint.
+        last waiting: int[list] = new;
+        /// @brief The position of the next pick.
+        let cursor: int = 0;
+
+        /// @brief A balancer over a copy of `targets`; the first pick is the first endpoint.
+        export let init = func(targets: Endpoint[list]) {
+            for (let i = 0; i < targets.length; i++) {
+                endpoints.append(targets[i]);
+                waiting.append(0);
+            }
+        };
+
+        /// @brief The endpoint after the previous pick.
+        export let pick = func -> Result<balancers.Selection<Endpoint>> {
+            if (endpoints.length == 0) {
+                return Result<balancers.Selection<Endpoint>>.Err(errors.custom(balancers.NoEndpointsCode,
+                    "the balancer has no endpoints"));
+            }
+            last index = cursor;
+            cursor = (cursor + 1) % endpoints.length;
+            waiting[index] = waiting[index] + 1;
+            return Result<balancers.Selection<Endpoint>>.Ok(new balancers.Selection<Endpoint>(index, endpoints[index]));
+        };
+
+        /// @brief Ends the pending request; latency and outcome do not affect round-robin.
+        export let report = func(selection: balancers.Selection<Endpoint>, latency: durations.Duration, success: bool)
+            -> Result<Unit> {
+            if (waiting[selection.index] > 0) {
+                waiting[selection.index] = waiting[selection.index] - 1;
+            }
+            return Result<Unit>.Ok(Unit.Value);
+        };
+
+        /// @brief The number of endpoints.
+        export let size = func -> int => endpoints.length;
+
+        /// @brief The pending requests of endpoint `index`.
+        export let pending = func(index: int) -> int => waiting[index];
+
+        /// @brief Text such as "RoundRobin(3 endpoints)".
+        export let.override to_string = func -> string => "RoundRobin(" .. endpoints.length.to_string() .. " endpoints)";
+    );
+
+    /// @brief A round-robin balancer over a copy of `endpoints`.
+    #NoDiscard
+    export let of = func<Endpoint>(endpoints: Endpoint[list]) -> RoundRobin<Endpoint> =>
+        new RoundRobin<Endpoint>(endpoints);
+);

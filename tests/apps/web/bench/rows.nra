@@ -1,0 +1,70 @@
+// The 1,000-row keyed list of budgets B-W5, B-W6 and B-W7 (docs/design/Apps030.md, "Budgets"), measured in a
+// browser by tests/apps/web/bench-web.py. Each row is a component over its own state, so a click on a row's button
+// renders that row alone; Reverse renders the list in the other order, and the rows, which do not render, move.
+let console = import:Std.Io.Console;
+let error = import:Std.Core.Error;
+let frozen = import:Std.Collections.Frozen;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let ui = import:Std.Ui;
+let web = import:Std.Web;
+
+let row_view = html(key: string, count: int32, on_add: func(ui.ClickEvent) -> void) {
+    <span>{key}</span> <button type="button" data-key={key} on:click={on_add}>{count}</button>
+};
+
+let rows_view = html(indexes: frozen.FrozenList<int32>, keys: string[list], views: ui.View[list],
+                     on_reverse: func(ui.ClickEvent) -> void) {
+    <button type="button" id="reverse" on:click={on_reverse}>Reverse</button>
+    <ul id="rows">
+        @for (const index in indexes; key: keys[index]) {
+            <li>{views[index]}</li>
+        }
+    </ul>
+};
+
+let make_row = func(key: string) -> ui.Component {
+    last count = new ui.State<int32>(0);
+    last add = new func(event: ui.ClickEvent) {
+        count.update(func(value: int32) -> int32 => value + 1);
+    };
+    return ui.component<int32>(count, new func(value: int32) -> ui.View => row_view(key, value, add));
+};
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last rows: ui.Component[list] = new;
+        for (let i = 0; i < 1000; i++) {
+            rows.append(make_row("r" + i.to_string()));
+        }
+        last reversed = new ui.State<bool>(false);
+        last on_reverse = new func(event: ui.ClickEvent) {
+            reversed.update(func(value: bool) -> bool => !value);
+        };
+        last page = ui.component<bool>(reversed, new func(backwards: bool) -> ui.View {
+            last indexes: int32[list] = new;
+            last keys: string[list] = new;
+            last views: ui.View[list] = new;
+            for (let i = 0; i < rows.length; i++) {
+                last at = backwards ? rows.length - 1 - i : i;
+                indexes.append(i as int32);
+                keys.append("r" + at.to_string());
+                views.append(ui.slot(rows[at]));
+            }
+            return rows_view(frozen.copy_of_list<int32>(indexes), keys, views, on_reverse);
+        });
+        let status = program.ExitCode.Ok;
+        scope (tasks) {
+            match (web.mount("#app", page, tasks)) {
+                result.Result.Ok(root) => {
+                    root.run();
+                },
+                result.Result.Err(problem) => {
+                    console.print_line("mount failed: " + error.message(problem));
+                    status = program.ExitCode.Failure;
+                },
+            }
+        }
+        return status;
+    };
+);

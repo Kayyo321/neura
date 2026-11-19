@@ -1,0 +1,9 @@
+error[E0570]: invalid record declaration
+ --> $DIR/own-name.nra:3:17
+  |
+3 | let R = record (R: int);
+  |                 ^ a record component cannot be named like its record
+  |
+  = help: rename the component
+
+For more information about this error, try `neura explain E0570`.

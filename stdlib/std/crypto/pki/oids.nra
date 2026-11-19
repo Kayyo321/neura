@@ -1,0 +1,289 @@
+/// @brief Dotted forms of the object identifiers that Std.Crypto.Pki names (Stdlib.md section 21.10).
+///
+/// The sources are RFC 5280 (X.509), RFC 3279, 4055, 5480, 5758, 8410 and 8017 (algorithms), RFC 6960 (OCSP),
+/// RFC 6962 (Certificate Transparency), RFC 8018 and 5084 (PBES2), RFC 2985 (PKCS #9), and the NIST Computer
+/// Security Objects Register for ML-DSA, SLH-DSA and ML-KEM (fetched 2026-11-17).
+/// @see [Std.Crypto.Pki.Oids](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Oids)
+#Since("0.3.0")
+export let Oids = module (
+    // Name attributes (RFC 5280 appendix A, RFC 4519, PKCS #9).
+    export const CommonName: string = "2.5.4.3";
+    export const Surname: string = "2.5.4.4";
+    export const SerialNumber: string = "2.5.4.5";
+    export const Country: string = "2.5.4.6";
+    export const Locality: string = "2.5.4.7";
+    export const StateOrProvince: string = "2.5.4.8";
+    export const Organization: string = "2.5.4.10";
+    export const OrganizationalUnit: string = "2.5.4.11";
+    export const Title: string = "2.5.4.12";
+    export const GivenName: string = "2.5.4.42";
+    export const DomainComponent: string = "0.9.2342.19200300.100.1.25";
+    export const UserId: string = "0.9.2342.19200300.100.1.1";
+    export const EmailAddress: string = "1.2.840.113549.1.9.1";
+    export const ChallengePassword: string = "1.2.840.113549.1.9.7";
+    export const ExtensionRequest: string = "1.2.840.113549.1.9.14";
+
+    // Certificate extensions (RFC 5280 section 4.2, RFC 6962).
+    export const SubjectKeyIdentifier: string = "2.5.29.14";
+    export const KeyUsage: string = "2.5.29.15";
+    export const SubjectAltName: string = "2.5.29.17";
+    export const IssuerAltName: string = "2.5.29.18";
+    export const BasicConstraints: string = "2.5.29.19";
+    export const NameConstraints: string = "2.5.29.30";
+    export const CrlDistributionPoints: string = "2.5.29.31";
+    export const CertificatePolicies: string = "2.5.29.32";
+    export const AnyPolicy: string = "2.5.29.32.0";
+    export const PolicyMappings: string = "2.5.29.33";
+    export const AuthorityKeyIdentifier: string = "2.5.29.35";
+    export const PolicyConstraints: string = "2.5.29.36";
+    export const ExtKeyUsage: string = "2.5.29.37";
+    export const AnyExtendedKeyUsage: string = "2.5.29.37.0";
+    export const InhibitAnyPolicy: string = "2.5.29.54";
+    export const AuthorityInfoAccess: string = "1.3.6.1.5.5.7.1.1";
+    export const SubjectInfoAccess: string = "1.3.6.1.5.5.7.1.11";
+    export const SctList: string = "1.3.6.1.4.1.11129.2.4.2";
+    export const PrecertificatePoison: string = "1.3.6.1.4.1.11129.2.4.3";
+    export const OcspNoCheck: string = "1.3.6.1.5.5.7.48.1.5";
+
+    // Policy qualifiers and access methods (RFC 5280).
+    export const QualifierCps: string = "1.3.6.1.5.5.7.2.1";
+    export const QualifierUserNotice: string = "1.3.6.1.5.5.7.2.2";
+    export const AccessOcsp: string = "1.3.6.1.5.5.7.48.1";
+    export const AccessCaIssuers: string = "1.3.6.1.5.5.7.48.2";
+
+    // Extended key usages (RFC 5280 section 4.2.1.12).
+    export const ServerAuth: string = "1.3.6.1.5.5.7.3.1";
+    export const ClientAuth: string = "1.3.6.1.5.5.7.3.2";
+    export const CodeSigning: string = "1.3.6.1.5.5.7.3.3";
+    export const EmailProtection: string = "1.3.6.1.5.5.7.3.4";
+    export const TimeStamping: string = "1.3.6.1.5.5.7.3.8";
+    export const OcspSigning: string = "1.3.6.1.5.5.7.3.9";
+
+    // Public-key algorithms.
+    export const RsaEncryption: string = "1.2.840.113549.1.1.1";
+    export const RsaSsaPss: string = "1.2.840.113549.1.1.10";
+    export const RsaOaep: string = "1.2.840.113549.1.1.7";
+    export const Mgf1: string = "1.2.840.113549.1.1.8";
+    export const EcPublicKey: string = "1.2.840.10045.2.1";
+    export const Prime256v1: string = "1.2.840.10045.3.1.7";
+    export const Secp384r1: string = "1.3.132.0.34";
+    export const Secp521r1: string = "1.3.132.0.35";
+    export const Secp256k1: string = "1.3.132.0.10";
+    export const X25519: string = "1.3.101.110";
+    export const X448: string = "1.3.101.111";
+    export const Ed25519: string = "1.3.101.112";
+    export const Ed448: string = "1.3.101.113";
+    export const MlDsa44: string = "2.16.840.1.101.3.4.3.17";
+    export const MlDsa65: string = "2.16.840.1.101.3.4.3.18";
+    export const MlDsa87: string = "2.16.840.1.101.3.4.3.19";
+    /// @brief CSOR HashML-DSA-44 with SHA-512.
+    /// @see [Std.Crypto.Pki.Oids](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Oids)
+    #Since("0.3.0")
+    export const HashMlDsa44WithSha512: string = "2.16.840.1.101.3.4.3.32";
+    /// @brief CSOR HashML-DSA-65 with SHA-512.
+    /// @see [Std.Crypto.Pki.Oids](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Oids)
+    #Since("0.3.0")
+    export const HashMlDsa65WithSha512: string = "2.16.840.1.101.3.4.3.33";
+    /// @brief CSOR HashML-DSA-87 with SHA-512.
+    /// @see [Std.Crypto.Pki.Oids](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Oids)
+    #Since("0.3.0")
+    export const HashMlDsa87WithSha512: string = "2.16.840.1.101.3.4.3.34";
+    export const MlKem512: string = "2.16.840.1.101.3.4.4.1";
+    export const MlKem768: string = "2.16.840.1.101.3.4.4.2";
+    export const MlKem1024: string = "2.16.840.1.101.3.4.4.3";
+    export const SlhDsaSha2_128s: string = "2.16.840.1.101.3.4.3.20";
+    export const SlhDsaSha2_128f: string = "2.16.840.1.101.3.4.3.21";
+    export const SlhDsaSha2_192s: string = "2.16.840.1.101.3.4.3.22";
+    export const SlhDsaSha2_192f: string = "2.16.840.1.101.3.4.3.23";
+    export const SlhDsaSha2_256s: string = "2.16.840.1.101.3.4.3.24";
+    export const SlhDsaSha2_256f: string = "2.16.840.1.101.3.4.3.25";
+    export const SlhDsaShake128s: string = "2.16.840.1.101.3.4.3.26";
+    export const SlhDsaShake128f: string = "2.16.840.1.101.3.4.3.27";
+    export const SlhDsaShake192s: string = "2.16.840.1.101.3.4.3.28";
+    export const SlhDsaShake192f: string = "2.16.840.1.101.3.4.3.29";
+    export const SlhDsaShake256s: string = "2.16.840.1.101.3.4.3.30";
+    export const SlhDsaShake256f: string = "2.16.840.1.101.3.4.3.31";
+
+    // Signature algorithms.
+    export const Sha256WithRsa: string = "1.2.840.113549.1.1.11";
+    export const Sha384WithRsa: string = "1.2.840.113549.1.1.12";
+    export const Sha512WithRsa: string = "1.2.840.113549.1.1.13";
+    export const Sha224WithRsa: string = "1.2.840.113549.1.1.14";
+    export const Sha1WithRsa: string = "1.2.840.113549.1.1.5";
+    export const EcdsaWithSha256: string = "1.2.840.10045.4.3.2";
+    export const EcdsaWithSha384: string = "1.2.840.10045.4.3.3";
+    export const EcdsaWithSha512: string = "1.2.840.10045.4.3.4";
+    export const EcdsaWithSha224: string = "1.2.840.10045.4.3.1";
+    // NIST CSOR sigAlgs 9 to 16: ECDSA and RSA PKCS #1 v1.5 with SHA-3.
+    export const EcdsaWithSha3_224: string = "2.16.840.1.101.3.4.3.9";
+    export const EcdsaWithSha3_256: string = "2.16.840.1.101.3.4.3.10";
+    export const EcdsaWithSha3_384: string = "2.16.840.1.101.3.4.3.11";
+    export const EcdsaWithSha3_512: string = "2.16.840.1.101.3.4.3.12";
+    export const RsaWithSha3_224: string = "2.16.840.1.101.3.4.3.13";
+    export const RsaWithSha3_256: string = "2.16.840.1.101.3.4.3.14";
+    export const RsaWithSha3_384: string = "2.16.840.1.101.3.4.3.15";
+    export const RsaWithSha3_512: string = "2.16.840.1.101.3.4.3.16";
+    // Composite ML-DSA (draft-ietf-lamps-pq-composite-sigs-19, section 6): id-MLDSA65-Ed25519-SHA512, the key and
+    // signature algorithm of Std.Crypto.Pqc.Ed25519MlDsa65.
+    export const MlDsa65Ed25519Sha512: string = "1.3.6.1.5.5.7.6.48";
+
+    // Digests (NIST CSOR hashAlgs, and SHA-1 for identification only).
+    export const Sha1: string = "1.3.14.3.2.26";
+    export const Sha256: string = "2.16.840.1.101.3.4.2.1";
+    export const Sha384: string = "2.16.840.1.101.3.4.2.2";
+    export const Sha512: string = "2.16.840.1.101.3.4.2.3";
+    export const Sha224: string = "2.16.840.1.101.3.4.2.4";
+    export const Sha3_224: string = "2.16.840.1.101.3.4.2.7";
+    export const Sha3_256: string = "2.16.840.1.101.3.4.2.8";
+    export const Sha3_384: string = "2.16.840.1.101.3.4.2.9";
+    export const Sha3_512: string = "2.16.840.1.101.3.4.2.10";
+
+    // PKCS #5 / PBES2 (RFC 8018), AES modes (NIST CSOR), HMAC PRFs (RFC 8018 appendix B.1).
+    export const Pbes2: string = "1.2.840.113549.1.5.13";
+    export const Pbkdf2: string = "1.2.840.113549.1.5.12";
+    export const HmacWithSha1: string = "1.2.840.113549.2.7";
+    export const HmacWithSha224: string = "1.2.840.113549.2.8";
+    export const HmacWithSha256: string = "1.2.840.113549.2.9";
+    export const HmacWithSha384: string = "1.2.840.113549.2.10";
+    export const HmacWithSha512: string = "1.2.840.113549.2.11";
+    export const Aes128Cbc: string = "2.16.840.1.101.3.4.1.2";
+    export const Aes192Cbc: string = "2.16.840.1.101.3.4.1.22";
+    export const Aes256Cbc: string = "2.16.840.1.101.3.4.1.42";
+    export const Aes128Gcm: string = "2.16.840.1.101.3.4.1.6";
+    export const Aes192Gcm: string = "2.16.840.1.101.3.4.1.26";
+    export const Aes256Gcm: string = "2.16.840.1.101.3.4.1.46";
+
+    // OCSP (RFC 6960).
+    export const OcspBasic: string = "1.3.6.1.5.5.7.48.1.1";
+    export const OcspNonce: string = "1.3.6.1.5.5.7.48.1.2";
+
+    /// @brief A short name for a dotted OID this module knows, such as "commonName" or "ecdsa-with-SHA256";
+    /// otherwise the dotted text itself.
+    #[NoDiscard, Since("0.3.0")]
+    export let name_of = func(dotted: string) -> string {
+        if (dotted == CommonName) {
+            return "CN";
+        }
+        if (dotted == Country) {
+            return "C";
+        }
+        if (dotted == Organization) {
+            return "O";
+        }
+        if (dotted == OrganizationalUnit) {
+            return "OU";
+        }
+        if (dotted == Locality) {
+            return "L";
+        }
+        if (dotted == StateOrProvince) {
+            return "ST";
+        }
+        if (dotted == DomainComponent) {
+            return "DC";
+        }
+        if (dotted == UserId) {
+            return "UID";
+        }
+        if (dotted == SerialNumber) {
+            return "serialNumber";
+        }
+        if (dotted == EmailAddress) {
+            return "emailAddress";
+        }
+        if (dotted == EcdsaWithSha256) {
+            return "ecdsa-with-SHA256";
+        }
+        if (dotted == EcdsaWithSha384) {
+            return "ecdsa-with-SHA384";
+        }
+        if (dotted == EcdsaWithSha512) {
+            return "ecdsa-with-SHA512";
+        }
+        if (dotted == Sha256WithRsa) {
+            return "sha256WithRSAEncryption";
+        }
+        if (dotted == Sha384WithRsa) {
+            return "sha384WithRSAEncryption";
+        }
+        if (dotted == Sha512WithRsa) {
+            return "sha512WithRSAEncryption";
+        }
+        if (dotted == Sha224WithRsa) {
+            return "sha224WithRSAEncryption";
+        }
+        if (dotted == Sha1WithRsa) {
+            return "sha1WithRSAEncryption";
+        }
+        if (dotted == EcdsaWithSha224) {
+            return "ecdsa-with-SHA224";
+        }
+        if (dotted == EcdsaWithSha3_224) {
+            return "id-ecdsa-with-sha3-224";
+        }
+        if (dotted == EcdsaWithSha3_256) {
+            return "id-ecdsa-with-sha3-256";
+        }
+        if (dotted == EcdsaWithSha3_384) {
+            return "id-ecdsa-with-sha3-384";
+        }
+        if (dotted == EcdsaWithSha3_512) {
+            return "id-ecdsa-with-sha3-512";
+        }
+        if (dotted == RsaWithSha3_224) {
+            return "id-rsassa-pkcs1-v1_5-with-sha3-224";
+        }
+        if (dotted == RsaWithSha3_256) {
+            return "id-rsassa-pkcs1-v1_5-with-sha3-256";
+        }
+        if (dotted == RsaWithSha3_384) {
+            return "id-rsassa-pkcs1-v1_5-with-sha3-384";
+        }
+        if (dotted == RsaWithSha3_512) {
+            return "id-rsassa-pkcs1-v1_5-with-sha3-512";
+        }
+        if (dotted == MlDsa65Ed25519Sha512) {
+            return "id-MLDSA65-Ed25519-SHA512";
+        }
+        if (dotted == RsaSsaPss) {
+            return "RSASSA-PSS";
+        }
+        if (dotted == RsaEncryption) {
+            return "rsaEncryption";
+        }
+        if (dotted == EcPublicKey) {
+            return "id-ecPublicKey";
+        }
+        if (dotted == Ed25519) {
+            return "Ed25519";
+        }
+        if (dotted == Ed448) {
+            return "Ed448";
+        }
+        if (dotted == X25519) {
+            return "X25519";
+        }
+        if (dotted == X448) {
+            return "X448";
+        }
+        if (dotted == MlDsa44) {
+            return "ML-DSA-44";
+        }
+        if (dotted == MlDsa65) {
+            return "ML-DSA-65";
+        }
+        if (dotted == MlDsa87) {
+            return "ML-DSA-87";
+        }
+        if (dotted == MlKem512) {
+            return "ML-KEM-512";
+        }
+        if (dotted == MlKem768) {
+            return "ML-KEM-768";
+        }
+        if (dotted == MlKem1024) {
+            return "ML-KEM-1024";
+        }
+        return dotted;
+    };
+);

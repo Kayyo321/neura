@@ -6,6 +6,7 @@
 #include "passes.hpp"
 
 #include "analysis.hpp"
+#include "analysis_cache.hpp"
 #include "effects.hpp"
 #include "locals.hpp"
 #include "neura-ir/purity.hpp"
@@ -237,8 +238,9 @@ std::size_t propagate_copies(IrProgram& program) {
 }
 
 std::size_t eliminate_common_subexpressions(IrProgram& program) {
-    const EffectAnalysis analysis(program);
-    const PurityAnalysis purity(program);
+    Analyses analyses(program);
+    const auto& purity = analyses.purity();
+    const auto& analysis = analyses.effects();
     std::size_t count = 0;
     for (auto& body : program.bodies) {
         if (!function_body(program, body)) continue;
@@ -307,7 +309,8 @@ std::size_t eliminate_common_subexpressions(IrProgram& program) {
 }
 
 std::size_t hoist_loop_invariants(IrProgram& program) {
-    const EffectAnalysis analysis(program);
+    Analyses analyses(program);
+    const auto& analysis = analyses.effects();
     std::size_t count = 0;
     for (auto& body : program.bodies) {
         if (!function_body(program, body)) continue;
@@ -358,7 +361,8 @@ std::size_t hoist_loop_invariants(IrProgram& program) {
 }
 
 std::size_t remove_dead_stores(IrProgram& program) {
-    const EffectAnalysis analysis(program);
+    Analyses analyses(program);
+    const auto& analysis = analyses.effects();
     std::size_t count = 0;
     for (auto& body : program.bodies) {
         if (!function_body(program, body)) continue;

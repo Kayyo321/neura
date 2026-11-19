@@ -1,0 +1,242 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+
+/// @brief Punycode (RFC 3492): the Bootstring encoding of a sequence of Unicode code points as ASCII letters,
+/// digits, and hyphens, used by IDNA for `xn--` labels.
+///
+/// The parameters are those of RFC 3492 section 5 (base 36, tmin 1, tmax 26, skew 38, damp 700, initial bias
+/// 72, initial n 128). Arithmetic is checked against maxint = 2147483647 (RFC 3492 section 6.4), so a long or
+/// hostile input fails with OutOfRange instead of overflowing. The encoder writes lowercase digits and does
+/// not produce the optional mixed-case annotation (appendix A); the decoder accepts digits in either case and
+/// copies basic code points as they are.
+/// @see [Std.Net.Core.Punycode](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Core-Punycode)
+#Since("0.3.0")
+export let Punycode = module (
+    const Base: int64 = 36;
+    const TMin: int64 = 1;
+    const TMax: int64 = 26;
+    const Skew: int64 = 38;
+    const Damp: int64 = 700;
+    const InitialBias: int64 = 72;
+    const InitialN: int64 = 128;
+    /// @brief The overflow bound of RFC 3492 section 6.4 (2^31 - 1).
+    const MaxInt: int64 = 2147483647;
+    /// @brief The largest Unicode scalar value (0x10FFFF).
+    const MaxScalar: int64 = 1114111;
+
+    /// @brief The Punycode encoding of the code points, without any ACE prefix.
+    ///
+    /// Errors: Parse OutOfRange at the index of a value that is not a Unicode scalar value (a surrogate
+    /// 0xD800-0xDFFF or above 0x10FFFF), or at 0 when the delta arithmetic would pass maxint.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let encode = func(code_points: uint32[list]) -> Result<string> {
+        last count = code_points.length;
+        last output: uint8[list] = new;
+        for (let i = 0; i < count; i++) {
+            last c = code_points[i] as int64;
+            if (c > MaxScalar || (c >= 55296 && c <= 57343)) {
+                return failed<string>(ParseErrorKind.OutOfRange, i, "not a Unicode scalar value");
+            }
+            if (c < 128) {
+                output.append(c as uint8);
+            }
+        }
+        last basic = output.length as int64;
+        let handled = basic;
+        if (basic > 0) {
+            output.append(45);
+        }
+        let n = InitialN;
+        let delta: int64 = 0;
+        let bias = InitialBias;
+        last total = count as int64;
+        while (handled < total) {
+            // The smallest code point not yet handled.
+            let m = MaxScalar + 1;
+            for (let cp in code_points) {
+                last c = cp as int64;
+                if (c >= n && c < m) {
+                    m = c;
+                }
+            }
+            if (m - n > (MaxInt - delta) / (handled + 1)) {
+                return failed<string>(ParseErrorKind.OutOfRange, 0, "punycode overflow");
+            }
+            delta += (m - n) * (handled + 1);
+            n = m;
+            for (let cp in code_points) {
+                last c = cp as int64;
+                if (c < n) {
+                    if (delta == MaxInt) {
+                        return failed<string>(ParseErrorKind.OutOfRange, 0, "punycode overflow");
+                    }
+                    delta++;
+                }
+                if (c == n) {
+                    let q = delta;
+                    let k = Base;
+                    while (true) {
+                        last t = threshold(k, bias);
+                        if (q < t) {
+                            break;
+                        }
+                        output.append(digit_byte(t + (q - t) % (Base - t)));
+                        q = (q - t) / (Base - t);
+                        k += Base;
+                    }
+                    output.append(digit_byte(q));
+                    bias = adapt(delta, handled + 1, handled == basic);
+                    delta = 0;
+                    handled++;
+                }
+            }
+            delta++;
+            n++;
+        }
+        let [valid, text] = string.from_utf8(output);
+        if (not valid) {
+            trap_with_message("invalid state: punycode output is not ASCII");
+        }
+        return Result<string>.Ok(text);
+    };
+
+    /// @brief The code points a Punycode string encodes (the text after any ACE prefix).
+    ///
+    /// Errors (Parse, offset in bytes of the input): InvalidCharacter for a non-ASCII byte before the last
+    /// delimiter or a byte that is not a base-36 digit after it; UnexpectedEnd when the last variable-length
+    /// integer is cut short; OutOfRange when the arithmetic passes maxint or a decoded value is basic (below
+    /// 0x80), a surrogate, or above 0x10FFFF.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let decode = func(text: string) -> Result<uint32[list]> {
+        last length = text.byte_length;
+        last output: uint32[list] = new;
+        let delimiter = -1;
+        for (let j = 0; j < length; j++) {
+            if (text.byte_at(j) == 45) {
+                delimiter = j;
+            }
+        }
+        if (delimiter > 0) {
+            for (let j = 0; j < delimiter; j++) {
+                last b = text.byte_at(j);
+                if (b >= 128) {
+                    return failed<uint32[list]>(ParseErrorKind.InvalidCharacter, j,
+                        "non-basic code point before the delimiter");
+                }
+                output.append(b as uint32);
+            }
+        }
+        let n = InitialN;
+        let i: int64 = 0;
+        let bias = InitialBias;
+        // RFC 3492 section 6.2: the last delimiter is consumed only when basic code points precede it.
+        let position = delimiter > 0 ? delimiter + 1 : 0;
+        while (position < length) {
+            last old_i = i;
+            let w: int64 = 1;
+            let k = Base;
+            while (true) {
+                if (position >= length) {
+                    return failed<uint32[list]>(ParseErrorKind.UnexpectedEnd, length, "truncated punycode integer");
+                }
+                last digit = digit_value(text.byte_at(position));
+                if (digit < 0) {
+                    return failed<uint32[list]>(ParseErrorKind.InvalidCharacter, position, "not a punycode digit");
+                }
+                position++;
+                if (digit > (MaxInt - i) / w) {
+                    return failed<uint32[list]>(ParseErrorKind.OutOfRange, position - 1, "punycode overflow");
+                }
+                i += digit * w;
+                last t = threshold(k, bias);
+                if (digit < t) {
+                    break;
+                }
+                if (w > MaxInt / (Base - t)) {
+                    return failed<uint32[list]>(ParseErrorKind.OutOfRange, position - 1, "punycode overflow");
+                }
+                w *= Base - t;
+                k += Base;
+            }
+            last size = (output.length as int64) + 1;
+            bias = adapt(i - old_i, size, old_i == 0);
+            if (i / size > MaxInt - n) {
+                return failed<uint32[list]>(ParseErrorKind.OutOfRange, position - 1, "punycode overflow");
+            }
+            n += i / size;
+            i = i % size;
+            if (n < 128 || n > MaxScalar || (n >= 55296 && n <= 57343)) {
+                return failed<uint32[list]>(ParseErrorKind.OutOfRange, position - 1,
+                    "decoded value is not a non-basic scalar value");
+            }
+            insert_at(output, i as int, n as uint32);
+            i++;
+        }
+        return Result<uint32[list]>.Ok(output);
+    };
+
+    /// @brief The Punycode encoding of the text's scalar values. Errors as in encode (only overflow can occur).
+    #[NoDiscard, Pure, ThreadSafe]
+    export let encode_text = func(text: string) -> Result<string> => encode(strings.scalars(text));
+
+    /// @brief The text a Punycode string encodes. Errors as in decode.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let decode_text = func(text: string) -> Result<string> {
+        last points = decode(text)?;
+        return Result<string>.Ok(strings.from_scalars(points));
+    };
+
+    // Internal helpers (RFC 3492 sections 6.1 to 6.3).
+
+    /// @brief The threshold t for the digit position k.
+    let threshold = func(k: int64, bias: int64) -> int64 {
+        if (k <= bias) {
+            return TMin;
+        }
+        return if (k >= bias + TMax) -> TMax
+            else -> k - bias;
+    };
+
+    /// @brief Bias adaptation (RFC 3492 section 6.1).
+    let adapt = func(delta_in: int64, num_points: int64, first_time: bool) -> int64 {
+        let delta = first_time ? delta_in / Damp : delta_in / 2;
+        delta += delta / num_points;
+        let k: int64 = 0;
+        while (delta > ((Base - TMin) * TMax) / 2) {
+            delta = delta / (Base - TMin);
+            k += Base;
+        }
+        return k + (((Base - TMin + 1) * delta) / (delta + Skew));
+    };
+
+    /// @brief The ASCII byte of a digit value 0-35: a-z then 0-9.
+    let digit_byte = func(d: int64) -> uint8 => d < 26 ? (d + 97) as uint8 : (d + 22) as uint8;
+
+    /// @brief The value of a base-36 digit in either case, or -1.
+    let digit_value = func(b: uint8) -> int64 {
+        if (b >= 48 && b <= 57) {
+            return (b as int64) - 22;
+        }
+        if (b >= 65 && b <= 90) {
+            return (b as int64) - 65;
+        }
+        return if (b >= 97 && b <= 122) -> (b as int64) - 97
+            else -> -1;
+    };
+
+    /// @brief Inserts the value at the index, shifting later values right.
+    let insert_at = func(values: uint32[list], index: int, value: uint32) {
+        values.append(value);
+        let j = values.length - 1;
+        while (j > index) {
+            values[j] = values[j - 1];
+            j--;
+        }
+        values[index] = value;
+    };
+
+    /// @brief A parse failure.
+    let failed = func<T>(kind: ParseErrorKind, offset: int, message: string) -> Result<T> =>
+        Result<T>.Err(Error.Parse { kind: kind, offset: offset, message: message });
+);

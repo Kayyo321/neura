@@ -11,13 +11,13 @@ let result = import:Std.Core.Result;
 export let JsonBenchmark = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         let n = result.value_or<int32>(int32s.parse(args[0]), 0);
-        let records: json.JsonValue[list] = [];
+        let records: json.JsonValue[list] = new;
         for (let i = 0; i < n; i = i + 1) {
-            let members: [string, json.JsonValue][list] = [];
+            let members: [string, json.JsonValue][list] = new;
             members.append(["id", json.number_of_int64(i as int64)]);
             members.append(["name", json.JsonValue.Text("record \"" + i.to_string() + "\"")]);
             members.append(["active", json.JsonValue.Boolean(i % 2 == 0)]);
-            members.append(["tags", json.JsonValue.Array([json.JsonValue.Text("a"), json.JsonValue.Null])]);
+            members.append(["tags", json.JsonValue.Array(new([json.JsonValue.Text("a"), json.JsonValue.Null]))]);
             records.append(json.JsonValue.Object(members));
         }
         let text = json.write(json.JsonValue.Array(records));

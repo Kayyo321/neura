@@ -1,0 +1,11 @@
+error[E0262]: a '..=' statement appends to a string, but the destination is int32
+ --> $DIR/concatenation-integer.nra:6:7
+  |
+6 |     n ..= 5;
+  |       ^^^ '..=' as a statement
+  |     - this has type int32
+  |
+  = note: as a statement, 'place ..= text;' appends text to a string; in an expression, 'start ..= stop' is an inclusive range
+  = help: to make an inclusive range, use it as a value: 'let r = start ..= stop;'
+
+For more information about this error, try `neura explain E0262`.

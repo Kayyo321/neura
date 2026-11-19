@@ -1,0 +1,17 @@
+// Edge case 42: the resource is not sent on a channel.
+let channels = import:Std.Concurrent.Channel;
+let closeable = import:Std.Io.Closeable;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+#Synchronized
+let Log = class implements closeable.Closeable (
+    export let close = func -> Result<Unit> => Result<Unit>.Ok(Unit.Value);
+);
+
+let work = func(sender: channels.Sender<Log>) -> Result<int> {
+    using (log = new Log()) {
+        sender.send(log);
+    }
+    return Result<int>.Ok(0);
+};

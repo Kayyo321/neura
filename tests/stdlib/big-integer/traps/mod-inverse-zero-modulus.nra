@@ -13,7 +13,7 @@ export let Main = module:program.Entry (
     };
 
     let digits_probe = func() -> uint32[list] {
-        let limbs: uint32[list] = [5];
+        let limbs: uint32[list] = new([5]);
         return limbs;
     };
 

@@ -1,0 +1,429 @@
+let errors = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let metadata = import:Std.Net.Rpc.Metadata;
+let.promote _ = import:Std.Core.Optional;
+let proto = import:Std.Net.Rpc.ProtoWire;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+
+/// @brief gRPC status: the 17 canonical codes, the HTTP mappings, the `grpc-status`, `grpc-message` and
+/// `grpc-status-details-bin` trailers, and the bridge to `Std.Core.Error`.
+///
+/// Sources (fetched to std-net/rfc/): the codes and names from grpc/grpc doc/statuscodes.md; the HTTP-to-gRPC
+/// table from doc/http-grpc-status-mapping.md, which applies only to a response without `grpc-status` and is
+/// not invertible; the gRPC-to-HTTP direction from the "HTTP Mapping" comments of googleapis
+/// google/rpc/code.proto; the trailer grammar and percent-encoding of `grpc-message` from doc/PROTOCOL-HTTP2.md;
+/// `google.rpc.Status` (code = 1, message = 2, details = 3) from google/rpc/status.proto.
+/// @see [Std.Net.Rpc.Status](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Rpc-Status)
+#Since("0.3.0")
+export let Status = module (
+    /// @brief The canonical status codes, numbered 0 to 16 in declaration order.
+    export let Code = enum (
+        Ok,
+        Cancelled,
+        Unknown,
+        InvalidArgument,
+        DeadlineExceeded,
+        NotFound,
+        AlreadyExists,
+        PermissionDenied,
+        ResourceExhausted,
+        FailedPrecondition,
+        Aborted,
+        OutOfRange,
+        Unimplemented,
+        Internal,
+        Unavailable,
+        DataLoss,
+        Unauthenticated
+    );
+
+    /// @brief The error code text of a status failure.
+    export const ErrorCode: string = "grpc.status";
+    /// @brief The trailer holding the code.
+    export const StatusHeader: string = "grpc-status";
+    /// @brief The trailer holding the percent-encoded message.
+    export const MessageHeader: string = "grpc-message";
+    /// @brief The binary trailer holding a serialized `google.rpc.Status`.
+    export const DetailsHeader: string = "grpc-status-details-bin";
+
+    /// @brief Every code in number order.
+    #NoDiscard
+    export let all = func -> Code[list] => new([Code.Ok, Code.Cancelled, Code.Unknown, Code.InvalidArgument,
+        Code.DeadlineExceeded, Code.NotFound, Code.AlreadyExists, Code.PermissionDenied, Code.ResourceExhausted,
+        Code.FailedPrecondition, Code.Aborted, Code.OutOfRange, Code.Unimplemented, Code.Internal,
+        Code.Unavailable, Code.DataLoss, Code.Unauthenticated]);
+
+    /// @brief The code's number, 0 to 16.
+    #NoDiscard
+    export let number = func(code: Code) -> int => match (code) {
+        Code.Ok => 0,
+        Code.Cancelled => 1,
+        Code.Unknown => 2,
+        Code.InvalidArgument => 3,
+        Code.DeadlineExceeded => 4,
+        Code.NotFound => 5,
+        Code.AlreadyExists => 6,
+        Code.PermissionDenied => 7,
+        Code.ResourceExhausted => 8,
+        Code.FailedPrecondition => 9,
+        Code.Aborted => 10,
+        Code.OutOfRange => 11,
+        Code.Unimplemented => 12,
+        Code.Internal => 13,
+        Code.Unavailable => 14,
+        Code.DataLoss => 15,
+        Code.Unauthenticated => 16,
+    };
+
+    /// @brief The code with that number, or `None` outside 0 to 16.
+    #NoDiscard
+    export let of_number = func(value: int) -> Optional<Code> {
+        return if (value < 0 || value > 16) -> Optional<Code>.None
+            else -> Optional<Code>.Some(all()[value]);
+    };
+
+    /// @brief The canonical name, such as `DEADLINE_EXCEEDED`.
+    #NoDiscard
+    export let name = func(code: Code) -> string => names()[number(code)];
+
+    /// @brief The code with the canonical name, or `None`.
+    #NoDiscard
+    export let of_name = func(text: string) -> Optional<Code> {
+        last list = names();
+        for (let i = 0; i < 17; i++) {
+            if (list[i] == text) {
+                return of_number(i);
+            }
+        }
+        return Optional<Code>.None;
+    };
+
+    /// @brief The gRPC code a client synthesizes for an HTTP response without `grpc-status`
+    /// (http-grpc-status-mapping.md): 400 INTERNAL, 401 UNAUTHENTICATED, 403 PERMISSION_DENIED, 404
+    /// UNIMPLEMENTED, 429/502/503/504 UNAVAILABLE, every other status (200 included) UNKNOWN.
+    #NoDiscard
+    export let from_http = func(http_status: int) -> Code {
+        if (http_status == 400) {
+            return Code.Internal;
+        }
+        if (http_status == 401) {
+            return Code.Unauthenticated;
+        }
+        if (http_status == 403) {
+            return Code.PermissionDenied;
+        }
+        if (http_status == 404) {
+            return Code.Unimplemented;
+        }
+        return if (http_status == 429 or 502 or 503 or 504) -> Code.Unavailable
+            else -> Code.Unknown;
+    };
+
+    /// @brief The HTTP status of a code per google/rpc/code.proto ("HTTP Mapping"), for gateways that answer a
+    /// gRPC failure over plain HTTP. A gRPC server itself always answers `:status 200`.
+    #NoDiscard
+    export let to_http = func(code: Code) -> int => match (code) {
+        Code.Ok => 200,
+        Code.Cancelled => 499,
+        Code.Unknown => 500,
+        Code.InvalidArgument => 400,
+        Code.DeadlineExceeded => 504,
+        Code.NotFound => 404,
+        Code.AlreadyExists => 409,
+        Code.PermissionDenied => 403,
+        Code.ResourceExhausted => 429,
+        Code.FailedPrecondition => 400,
+        Code.Aborted => 409,
+        Code.OutOfRange => 400,
+        Code.Unimplemented => 501,
+        Code.Internal => 500,
+        Code.Unavailable => 503,
+        Code.DataLoss => 500,
+        Code.Unauthenticated => 401,
+    };
+
+    /// @brief Percent-encodes a status message (PROTOCOL-HTTP2.md "Percent-Encoded"): its UTF-8 bytes in 0x20 to
+    /// 0x7E except `%` stay, every other byte becomes `%XX` with upper-case hex.
+    #NoDiscard
+    export let encode_message = func(text: string) -> string {
+        last out: uint8[list] = new;
+        last digits = "0123456789ABCDEF";
+        for (let i = 0; i < text.byte_length; i++) {
+            last b = text.byte_at(i);
+            if (b >= 32 && b <= 126 && b != 37) {
+                out.append(b);
+            } else {
+                out.append(37);
+                out.append(digits.byte_at((b / 16) as int));
+                out.append(digits.byte_at((b % 16) as int));
+            }
+        }
+        return string.from_utf8(out)[1];
+    };
+
+    /// @brief Decodes a percent-encoded status message; never fails. A `%` not followed by two hex digits is
+    /// kept as is; when the decoded bytes are not UTF-8 the raw text is returned unchanged (both allowed by
+    /// PROTOCOL-HTTP2.md).
+    #NoDiscard
+    export let decode_message = func(text: string) -> string {
+        last out: uint8[list] = new;
+        let i = 0;
+        while (i < text.byte_length) {
+            last b = text.byte_at(i);
+            if (b == 37 && i + 2 < text.byte_length && hex_digit(text.byte_at(i + 1)) >= 0
+                && hex_digit(text.byte_at(i + 2)) >= 0) {
+                out.append((hex_digit(text.byte_at(i + 1)) * 16 + hex_digit(text.byte_at(i + 2))) as uint8);
+                i += 3;
+            } else {
+                out.append(b);
+                i++;
+            }
+        }
+        last decoded = string.from_utf8(out);
+        return decoded[0] ? decoded[1] : text;
+    };
+
+    /// @brief A call's final status: a code, a message, and optional serialized `google.rpc.Status` details.
+    #Final
+    export let RpcStatus = class (
+        /// @brief The code.
+        export last code: Code;
+        /// @brief The message, possibly empty.
+        export last message: string;
+        /// @brief The serialized `google.rpc.Status`, empty when there are no details.
+        export last details: uint8[list];
+
+        /// @brief A status with every part given.
+        export let init = func(status_code: Code, text: string, detail_bytes: uint8[list]) {
+            code = status_code;
+            message = text;
+            details = detail_bytes;
+        };
+
+        /// @brief Whether the code is OK.
+        #NoDiscard
+        export let is_ok = func -> bool => number(code) == 0;
+
+        /// @brief Equal when the code, message and details are.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: RpcStatus) {
+                return false;
+            }
+            if (number(code) != number(that.code) || message != that.message || details.length != that.details.length) {
+                return false;
+            }
+            for (let i = 0; i < details.length; i++) {
+                if (details[i] != that.details[i]) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        /// @brief Combines the code, message and details.
+        export let.override hash_code = func -> uint32 {
+            let hash = hashing.combine(hashing.combine(17, number(code) as uint32), strings.hash(message));
+            for (let b in details) {
+                hash = hashing.combine(hash, b as uint32);
+            }
+            return hash;
+        };
+
+        /// @brief `NAME: message`.
+        export let.override to_string = func -> string =>
+            message.byte_length == 0 ? name(code) : name(code) .. ": " .. message;
+    );
+
+    /// @brief A status without details.
+    #NoDiscard
+    export let of = func(code: Code, message: string) -> RpcStatus => new RpcStatus(code, message, new);
+
+    /// @brief The OK status.
+    #NoDiscard
+    export let ok = func -> RpcStatus => of(Code.Ok, "");
+
+    /// @brief The trailers of a status: `grpc-status`, then `grpc-message` when the message is not empty, then
+    /// `grpc-status-details-bin` when the code is not OK and details are present.
+    #NoDiscard
+    export let to_trailers = func(status: RpcStatus) -> metadata.Metadata {
+        last out = metadata.empty();
+        out.add_raw(StatusHeader, number(status.code).to_string());
+        if (status.message.byte_length > 0) {
+            out.add_raw(MessageHeader, encode_message(status.message));
+        }
+        if (not status.is_ok() && status.details.length > 0) {
+            last ignored = out.add_binary(DetailsHeader, status.details);
+        }
+        return out;
+    };
+
+    /// @brief The status a client reads from trailers (or a Trailers-Only header block) of a response with HTTP
+    /// status `http_status`.
+    ///
+    /// Without `grpc-status`, the code comes from `from_http` and the message names the HTTP status. A value
+    /// that is not a decimal code 0 to 16 gives UNKNOWN. Details are kept only for a non-OK code, when they
+    /// decode as base64 and as a `google.rpc.Status` whose code field (if present) equals `grpc-status`;
+    /// otherwise they are dropped.
+    #NoDiscard
+    export let from_trailers = func(trailers: metadata.Metadata, http_status: int) -> RpcStatus {
+        last code_text = trailers.get(StatusHeader);
+        last message = match (trailers.get(MessageHeader)) {
+            Optional.Some(raw) => decode_message(raw),
+            Optional.None => "",
+        };
+        match (code_text) {
+            Optional.None => {
+                return of(from_http(http_status), message.byte_length > 0 ? message
+                    : "missing grpc-status (HTTP status " .. http_status.to_string() .. ")");
+            },
+            Optional.Some(text) => {
+                last code = parse_code(text);
+                if (number(code) == 0) {
+                    return of(code, message);
+                }
+                last details: uint8[list] = match (trailers.get_binary(DetailsHeader)) {
+                    Result.Ok(parts) => parts.length == 1 ? parts[0] : new,
+                    Result.Err(e) => new,
+                };
+                return if (details.length > 0 && not details_agree(details, number(code))) -> of(code, message)
+                    else -> new RpcStatus(code, message, details);
+            },
+        }
+    };
+
+    /// @brief The `google.rpc.Status` message of a status: code (field 1), message (field 2); its `details`
+    /// (field 3, `google.protobuf.Any`) are not modelled.
+    #NoDiscard
+    export let encode_rpc_status = func(status: RpcStatus) -> uint8[list] {
+        last w = proto.writer();
+        if (number(status.code) != 0) {
+            w.write_int32(1, number(status.code) as int32);
+        }
+        if (status.message.byte_length > 0) {
+            w.write_string(2, status.message);
+        }
+        return w.to_bytes();
+    };
+
+    /// @brief The error detail of a gRPC failure: the status a call ends with.
+    #Final
+    export let RpcFailure = class:errors.ErrorDetail (
+        /// @brief The status.
+        export last status: RpcStatus;
+
+        /// @brief Wraps `value`.
+        export let init = func(value: RpcStatus) {
+            super.init();
+            status = value;
+        };
+
+        /// @brief Always `grpc.status`.
+        export let.override code = func -> string => ErrorCode;
+
+        /// @brief `NAME: message`.
+        export let.override message = func -> string => status.to_string();
+
+        /// @brief Equal when the statuses are.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: RpcFailure) {
+                return false;
+            }
+            return status.equals(that.status);
+        };
+
+        /// @brief The status's hash.
+        export let.override hash_code = func -> uint32 => status.hash_code();
+
+        /// @brief `grpc.status NAME: message`.
+        export let.override to_string = func -> string => ErrorCode .. " " .. status.to_string();
+    );
+
+    /// @brief A Custom error carrying `status`.
+    #NoDiscard
+    export let to_error = func(status: RpcStatus) -> errors.Error => errors.Error.Custom(new RpcFailure(status));
+
+    /// @brief A Custom error carrying a status with `code` and `message`.
+    #NoDiscard
+    export let error = func(code: Code, message: string) -> errors.Error => to_error(of(code, message));
+
+    /// @brief The status an error maps to: an `RpcFailure`'s status, the status inside a Context error's cause,
+    /// otherwise UNKNOWN with the error's message (statuscodes.md: an application failure without a status).
+    #NoDiscard
+    export let of_error = func(problem: errors.Error) -> RpcStatus => match (problem) {
+        errors.Error.Custom(detail) => detail is RpcFailure ? (detail as RpcFailure).status
+            : of(Code.Unknown, errors.message(problem)),
+        errors.Error.Context { message, cause } => of_error(cause.cause),
+        _ => of(Code.Unknown, errors.message(problem)),
+    };
+
+    /// @brief The canonical names in number order.
+    let names = func -> string[] => ["OK", "CANCELLED", "UNKNOWN", "INVALID_ARGUMENT", "DEADLINE_EXCEEDED",
+        "NOT_FOUND", "ALREADY_EXISTS", "PERMISSION_DENIED", "RESOURCE_EXHAUSTED", "FAILED_PRECONDITION", "ABORTED",
+        "OUT_OF_RANGE", "UNIMPLEMENTED", "INTERNAL", "UNAVAILABLE", "DATA_LOSS", "UNAUTHENTICATED"];
+
+    /// @brief A decimal code without sign or leading zeros, 0 to 16; anything else is UNKNOWN.
+    let parse_code = func(text: string) -> Code {
+        if (text.byte_length == 0 || text.byte_length > 2 || (text.byte_length == 2 && text.byte_at(0) == 48)) {
+            return Code.Unknown;
+        }
+        let value = 0;
+        for (let i = 0; i < text.byte_length; i++) {
+            last b = text.byte_at(i);
+            if (b < 48 || b > 57) {
+                return Code.Unknown;
+            }
+            value = value * 10 + ((b - 48) as int);
+        }
+        return match (of_number(value)) {
+            Optional.Some(code) => code,
+            Optional.None => Code.Unknown,
+        };
+    };
+
+    /// @brief Whether `details` parse as a `google.rpc.Status` whose code field, if present, is `code`.
+    let details_agree = func(details: uint8[list], code: int) -> bool {
+        last r = proto.reader(details);
+        let found = 0;
+        while (r.has_next()) {
+            match (r.read_key()) {
+                Result.Ok(key) => {
+                    if (key.field == 1 && key.wire_type == proto.Varint) {
+                        match (r.read_int32()) {
+                            Result.Ok(value) => {
+                                found = value as int;
+                            },
+                            Result.Err(e) => {
+                                return false;
+                            },
+                        }
+                    } else {
+                        match (r.skip(key.wire_type)) {
+                            Result.Ok(u) => {
+                            },
+                            Result.Err(e) => {
+                                return false;
+                            },
+                        }
+                    }
+                },
+                Result.Err(e) => {
+                    return false;
+                },
+            }
+        }
+        return found == 0 || found == code;
+    };
+
+    /// @brief The value of a hex digit, or -1.
+    let hex_digit = func(b: uint8) -> int {
+        if (b >= 48 && b <= 57) {
+            return (b - 48) as int;
+        }
+        if (b >= 65 && b <= 70) {
+            return (b - 55) as int;
+        }
+        return if (b >= 97 && b <= 102) -> (b - 87) as int
+            else -> -1;
+    };
+);

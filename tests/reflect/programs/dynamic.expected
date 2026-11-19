@@ -1,0 +1,8 @@
+Point Point fields=2
+  x: int32
+  y: int32
+x=3 y=4
+Square shape
+area 25
+scale 15
+made Point(x: 7, y: 8)

@@ -1,0 +1,17 @@
+// A parameter named like the receiver cannot redirect the shorthand's store;
+// the written-out form has no spelling for this, so the test checks the result.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Shadow = class (
+    export let instance: int = 0;
+
+    export let init = func(instance: int) => set;
+);
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(new Shadow(5).instance.to_string());
+        return program.ExitCode.Ok;
+    };
+);

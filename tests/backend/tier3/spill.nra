@@ -21,7 +21,7 @@ let Tier3Spill = module:program.Entry (
     };
 
     let spill = func(n: int32) -> int64 {
-        let values: int64[list] = [];
+        let values: int64[list] = new;
         let s0: int64 = 1;
         let s1: int64 = 2;
         let s2: int64 = 3;

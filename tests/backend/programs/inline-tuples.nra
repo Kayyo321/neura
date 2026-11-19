@@ -1,0 +1,207 @@
+// Tuples are stored inline: a tuple is a run of value words in a frame slot, a parameter, a result, a field,
+// a global, a closure capture, an array or list element and a payload of an enum. This program uses a tuple in
+// each of those places, through a function value and through an interface, and checks the value members
+// (equals, hash_code, to_string) of nested tuples, lists and arrays of tuples. The one-word runtime
+// boundaries that keep the boxed layout are exercised by inline-tuples-tasks.nra.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let optional = import:Std.Core.Optional;
+let variadic = import:Std.Core.Variadic;
+
+let Kind = enum (Pair([int, string]), Wide { left: [int, [bool, string]], right: int }, Plain(int), Nothing);
+
+let Shape = interface (
+    let bounds = func() -> [int, int];
+    let label = func() -> [string, [int, bool]];
+);
+
+let Square = class implements Shape (
+    export last side: int;
+    export let init = func(side: int) {
+        instance.side = side;
+    };
+    export let bounds = func() -> [int, int] => [side, side];
+    export let label = func() -> [string, [int, bool]] => ["square", [side, true]];
+);
+
+let Wide = class implements Shape (
+    export last width: int;
+    export last height: int;
+    export let init = func(width: int, height: int) {
+        instance.width = width;
+        instance.height = height;
+    };
+    export let bounds = func() -> [int, int] => [width, height];
+    export let label = func() -> [string, [int, bool]] => ["wide", [width * height, width > height]];
+);
+
+// A tuple in several fields, and a field of a tuple of tuples.
+let Cell = class (
+    export let place: [int, int] = [1, 2];
+    export let note: [string, [bool, int]] = ["start", [false, 0]];
+    export let move = func(by: int) {
+        place = [place[0] + by, place[1] * by];
+        note = [note[0] + "!", [!note[1][0], note[1][1] + 1]];
+    };
+    export let summary = func() -> string =>
+        place[0].to_string() + "," + place[1].to_string() + " " + note[0] + " " + note[1][0].to_string() + " " +
+        note[1][1].to_string();
+);
+
+// A tuple in a typed variadic parameter is an element of the packed array; in an untyped one it becomes its text.
+let total_of = func(first: int, rest: ...[int, string]) -> int {
+    let total = first;
+    for (let row: [int, string] in rest) {
+        total += row[0] + row[1].byte_length;
+    }
+    return total;
+};
+
+let packed = func(items: ...) -> string {
+    let text = "";
+    for (let argument in items) {
+        text = text + match (argument) { variadic.Argument.Text(value) => value, _ => "other" } + "|";
+    }
+    return text;
+};
+
+let Main = module:program.Entry (
+    // A tuple in module storage: several globals.
+    let origin: [int, int] = [3, 4];
+    let history: [string, [int, int]] = ["none", [0, 0]];
+
+    let move_origin = func(dx: int, dy: int) {
+        history = ["moved", origin];
+        origin = [origin[0] + dx, origin[1] + dy];
+    };
+
+    let pair = func(a: int, b: string) -> [int, string] => [a, b];
+    let swap = func(value: [int, string]) -> [string, int] => [value[1], value[0]];
+    let nest = func(a: int, b: string) -> [[int, [bool, string]], int] => [[a, [a > 0, b]], a * 2];
+    let total = func(value: [[int, [bool, string]], int]) -> int => value[0][0] + value[1];
+
+    // A tuple through every kind of function value.
+    let make_adder = func(offset: [int, int]) -> func([int, int]) -> [int, int] {
+        return new func(point: [int, int]) -> [int, int] => [point[0] + offset[0], point[1] + offset[1]];
+    };
+    let apply = func(callback: func([int, int]) -> [int, int], point: [int, int]) -> [int, int] => callback(point);
+
+    let describe = func(kind: Kind) -> string => match (kind) {
+        Kind.Pair(inner) => "pair " + inner[0].to_string() + " " + inner[1],
+        Kind.Wide { left, right } => "wide " + left[0].to_string() + " " + left[1][0].to_string() + " " + left[1][1] +
+            " " + right.to_string(),
+        Kind.Plain(value) => "plain " + value.to_string(),
+        Kind.Nothing => "nothing",
+    };
+
+    let first_or = func(items: optional.Optional<[int, string]>, fallback: [int, string]) -> [int, string] => match (items) {
+        optional.Optional.Some(value) => value,
+        optional.Optional.None => fallback,
+    };
+
+    let classify = func(flag: bool, count: int) -> [string, int] {
+        last label: [string, int];
+        if (flag && count > 0) {
+            label = ["positive", count];
+        } else if (count == 0) {
+            label = ["zero", 0];
+        } else {
+            label = ["other", -count];
+        }
+        return label;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        // Locals, parameters, results and projection.
+        let first = pair(7, "seven");
+        let swapped = swap(first);
+        console.print_line(swapped[0] + " " + swapped[1].to_string());
+        let deep = nest(5, "deep");
+        console.print_line(deep[0][1][1] + " " + deep[0][1][0].to_string() + " " + total(deep).to_string());
+        first = pair(first[0] + 1, first[1] + "!");
+        console.print_line(first[0].to_string() + first[1]);
+        // A swap through a tuple keeps both values.
+        let ends: [int, int] = [1, 2];
+        ends = [ends[1], ends[0]];
+        console.print_line(ends[0].to_string() + ends[1].to_string());
+        let [alpha, beta] = pair(9, "nine");
+        console.print_line(alpha.to_string() + beta);
+
+        // Deferred `last` bindings: assigned on every path before their first read.
+        console.print_line(classify(true, 4)[0] + classify(false, 0)[0] + classify(false, 3)[1].to_string());
+
+        // Fields and globals.
+        let cell = new Cell();
+        cell.move(3);
+        cell.move(2);
+        console.print_line(cell.summary());
+        move_origin(1, 1);
+        move_origin(10, 10);
+        console.print_line(origin[0].to_string() + "," + origin[1].to_string() + " " + history[0] + " " +
+                           history[1][0].to_string() + "," + history[1][1].to_string());
+
+        // Function values: captures, parameters and results.
+        let add = make_adder([100, 200]);
+        let bound = apply(add, [1, 2]);
+        console.print_line(bound[0].to_string() + " " + bound[1].to_string());
+        let captured: [int, [string, bool]] = [5, ["cap", true]];
+        let reader = func(extra: int) -> [string, int] => [captured[1][0], captured[0] + extra];
+        captured = [6, ["cap", false]];
+        console.print_line(reader(1)[0] + reader(1)[1].to_string());
+
+        // Interfaces: every implementation returns the same words.
+        let shapes: Shape[] = [new Square(3), new Wide(4, 2)];
+        for (let shape: Shape in shapes) {
+            let bounds = shape.bounds();
+            let label = shape.label();
+            console.print_line(label[0] + " " + bounds[0].to_string() + "x" + bounds[1].to_string() + " " +
+                               label[1][0].to_string() + " " + label[1][1].to_string());
+        }
+
+        // Arrays and lists of tuples: elements are stored inline.
+        let points: [int, string][] = [[1, "a"], [2, "b"], [3, "c"]];
+        let listed: [int, string][list] = new([[1, "a"], [2, "b"], [3, "c"]]);
+        listed.append([4, "d"]);
+        listed[0] = [10, "z"];
+        listed.remove_at(1);
+        let line = "";
+        for (let entry: [int, string] in listed) {
+            line = line + entry[0].to_string() + entry[1] + " ";
+        }
+        console.print_line(line + listed.length.to_string() + " " + points.length.to_string());
+        points[2] = [30, "cc"];
+        console.print_line(points[2][1] + points[0][0].to_string());
+        let rows: [int, [int, int]][list] = new;
+        rows.append([1, [2, 3]]);
+        rows.append([4, [5, 6]]);
+        console.print_line(rows[1][1][1].to_string() + rows[0][1][0].to_string());
+        let singles: [int][] = [[1], [2]];
+        console.print_line(singles[1][0].to_string());
+        let nested: [string, int][][] = [[["a", 1]], [["b", 2], ["c", 3]]];
+        console.print_line(nested[1][1][0] + nested[1].length.to_string());
+
+        // Payload enums keep their object layout; a tuple payload is several fields.
+        let kinds: Kind[] = [Kind.Pair([1, "one"]), Kind.Wide { left: [2, [true, "two"]], right: 3 }, Kind.Plain(4), Kind.Nothing];
+        for (let kind: Kind in kinds) {
+            console.print_line(describe(kind));
+        }
+        console.print_line(first_or(optional.Optional<[int, string]>.Some([8, "eight"]), [0, "none"])[1]);
+        console.print_line(first_or(optional.Optional<[int, string]>.None, [0, "none"])[1]);
+
+        // Value members read the words; their results are those of boxed tuples.
+        let left: [int, [bool, string]] = [1, [true, "x"]];
+        let right: [int, [bool, string]] = [1, [true, "x"]];
+        let other: [int, [bool, string]] = [1, [false, "x"]];
+        console.print_line(left.to_string() + " " + left.equals(right).to_string() + " " + left.equals(other).to_string());
+        console.print_line(left.hash_code().to_string() + " " + (left.hash_code() == right.hash_code()).to_string());
+        let floats: [float, float] = [0.5, 1.5];
+        console.print_line(floats.hash_code().to_string() + " " + floats.equals([0.5, 1.5]).to_string());
+        console.print_line(points.to_string() + " " + points.equals(points).to_string());
+        console.print_line(listed.to_string() + " " + listed.hash_code().to_string());
+        console.print_line(rows.to_string() + " " + nested.hash_code().to_string());
+        // A tuple in a variadic argument keeps its text.
+        console.print_line(total_of(1, [2, "ab"], [3, "c"]).to_string());
+        console.print_line(packed(left, [1, 2]));
+        return program.ExitCode.Ok;
+    };
+);

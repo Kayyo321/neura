@@ -1,0 +1,27 @@
+let.promote _ = import:Std.Crypto.Pki.AlgorithmIdentifier;
+let.promote _ = import:Std.Crypto.Pki.PublicKeyInfo;
+
+/// @brief The signature-verification step of Std.Crypto.Pki (Stdlib.md section 21.10).
+///
+/// Path validation, OCSP and Certificate Transparency never verify a signature themselves: they ask a
+/// `SignatureVerifier` with the signature AlgorithmIdentifier, the signer's SubjectPublicKeyInfo, the signed
+/// bytes and the signature bytes. A verifier answers `Valid`, `Invalid`, or `UnsupportedAlgorithm` when it has
+/// no implementation for the algorithm or key, so that "cannot check" is never mistaken for "checked and bad",
+/// and neither is ever taken for valid.
+/// @see [Std.Crypto.Pki.SignatureVerifier](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-SignatureVerifier)
+#Since("0.3.0")
+export let SignatureVerifier = module (
+    /// @brief The outcome of one signature check.
+    #Since("0.3.0")
+    export let SignatureCheck = enum (Valid, Invalid, UnsupportedAlgorithm);
+
+    /// @brief Checks one signature.
+    #Since("0.3.0")
+    export let SignatureVerifier = interface (
+        /// @brief Whether `signature` is a valid signature over `signed` under `key` with `algorithm`. The
+        /// verifier must check that the algorithm fits the key (an RSA signature algorithm with an EC key is
+        /// `Invalid`), including RSASSA-PSS parameters.
+        let verify_signature = func(algorithm: AlgorithmIdentifier, key: SubjectPublicKeyInfo, signed: uint8[list],
+            signature: uint8[list]) -> SignatureCheck;
+    );
+);

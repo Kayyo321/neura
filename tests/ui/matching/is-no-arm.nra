@@ -1,0 +1,16 @@
+// Edge case 13: a match.is without an arm.
+let Named = interface (
+    let name = func -> string;
+);
+let Shape = class (
+    export let sides: int = 0;
+);
+let Circle = class : Shape (
+    export let radius: int = 1;
+);
+let Other = class (
+    export let value: int = 0;
+);
+let classify = func(value: Shape) {
+    match.is (value) { }
+};

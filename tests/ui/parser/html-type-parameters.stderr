@@ -1,0 +1,9 @@
+error[E0240]: malformed html factory
+ --> $DIR/html-type-parameters.nra:1:12
+  |
+1 | let view = html<T>(x: T) { <p></p> };
+  |            ^^^^^ an HTML factory has no type parameters
+  |
+  = help: write 'html(parameters) { ... }' or 'html(parameters) from "path.html"'
+
+For more information about this error, try `neura explain E0240`.

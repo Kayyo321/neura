@@ -112,6 +112,7 @@ struct Trace {
     Trap trap{};
     std::uint64_t steps = 0;
     std::uint64_t peak_heap_cells = 0;
+    std::uint64_t peak_stack_cells = 0;
 };
 
 // Runs `image` with its imports bound to `bindings`, recording every host

@@ -1,0 +1,45 @@
+schema = 1
+
+[providers.openssl]
+version = "3.5.9"
+source = "https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz"
+sha256 = "603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a"
+signature = "https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz.asc"
+release_key = "B146647E45A7B33947AB226B2A2C87D161692D40"
+license = "Apache-2.0"
+license_path = "openssl-3.5.9/LICENSE.txt"
+license_sha256 = "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a"
+
+[providers.sqlite]
+version = "3.54.1"
+source = "https://sqlite.org/2026/sqlite-amalgamation-3540100.zip"
+sha256 = "0a9c8e34352dad46006aa82836d5383bff9dc6bc9ce5a60553c05aa30e6ad1f9"
+upstream_sha3_256 = "92281c86e2957f9b9305890f9ac04204caa7b677cc868dc326d942689df28e30"
+license = "public domain"
+license_url = "https://www.sqlite.org/copyright.html"
+
+[providers.postgresql]
+version = "18.7"
+source = "https://ftp.postgresql.org/pub/source/v18.7/postgresql-18.7.tar.bz2"
+sha256 = "441dfae4280cae3e0425e5f876f80559fb0731c140f1aae22b3e5a54d0411bfd"
+license = "PostgreSQL"
+license_path = "postgresql-18.7/COPYRIGHT"
+license_sha256 = "3d6af92ff8a4c2cdf69afb1cf44edea727922f5cd0cf8b5f72b11cdecac8fdfd"
+
+# HTTP/2 framing and HPACK for the server host (Backend030, "HTTP/2 and
+# decision 9"). Built from this archive with
+#   ./configure --enable-lib-only --enable-static --disable-shared --with-pic CFLAGS="-O2 -fPIC"
+# and linked statically when NEURA_ENABLE_SERVER_HTTP2 is on. The signature is
+# made by the signing subkey of the release key; the archive digest is also
+# published in the release's checksums.txt.
+[providers.nghttp2]
+version = "1.71.0"
+source = "https://github.com/nghttp2/nghttp2/releases/download/v1.71.0/nghttp2-1.71.0.tar.xz"
+sha256 = "c0f55121d88650e4b9227aec28cebaf664d2417ca60fe70be0f8d38829f52116"
+checksums = "https://github.com/nghttp2/nghttp2/releases/download/v1.71.0/checksums.txt"
+signature = "https://github.com/nghttp2/nghttp2/releases/download/v1.71.0/nghttp2-1.71.0.tar.xz.asc"
+release_key = "F4F3B91474D1EB29889BD0EF7E8403D5D673C366"
+signing_subkey = "516B622918D15C478AB1EA3A5339A2BE82E07DEC"
+license = "MIT"
+license_path = "nghttp2-1.71.0/COPYING"
+license_sha256 = "6b94f3abc1aabd0c72a7c7d92a77f79dda7c8a0cb3df839a97890b4116a2de2a"

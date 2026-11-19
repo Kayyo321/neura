@@ -1,0 +1,9 @@
+// The bytes of a string's \x escapes must form valid UTF-8; otherwise the
+// literal is E0270, labelled at the escape where the first invalid sequence
+// starts (docs/design/Expressions030.md, Escapes, edge case 58).
+let lone = "caf\xE9";
+let truncated = "\xC3";
+let continuation = "a\x80b";
+let after_text = "é\xA9";
+let interpolated = $"x\xFF{1}";
+let short = "\x4G";

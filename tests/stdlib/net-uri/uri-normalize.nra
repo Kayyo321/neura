@@ -1,0 +1,103 @@
+let idna = import:Std.Net.Core.Idna;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let uris = import:Std.Net.Core.Uri;
+
+// Uri normalization (RFC 3986 sections 6.2.2 and 6.2.3) and equivalence.
+let UriNormalizeTests = module (
+    let normal = func(text: string) -> string =>
+        test.assert_ok<uris.Uri>(test.assert_ok<uris.Uri>(uris.parse(text)).normalize()).to_string();
+
+    let parse = func(text: string) -> uris.Uri => test.assert_ok<uris.Uri>(uris.parse(text));
+
+    // RFC 3986 section 6.2.2: the two equivalent URIs, and section 6.2.2.1's case example.
+    export let test_rfc_syntax_based_examples = func {
+        test.assert_equal_string("example://a/b/c/%7Bfoo%7D", normal("example://a/b/c/%7Bfoo%7D"));
+        test.assert_equal_string("example://a/b/c/%7Bfoo%7D", normal("eXAMPLE://a/./b/../b/%63/%7bfoo%7d"));
+        test.assert(parse("example://a/b/c/%7Bfoo%7D").equivalent(parse("eXAMPLE://a/./b/../b/%63/%7bfoo%7d")));
+        test.assert_equal_string("http://www.example.com/", normal("HTTP://www.EXAMPLE.com/"));
+    };
+
+    // RFC 3986 section 6.2.3: four equivalent http URIs whose normal form is the second, and one that is not
+    // equivalent to them.
+    export let test_rfc_scheme_based_examples = func {
+        test.assert_equal_string("http://example.com/", normal("http://example.com"));
+        test.assert_equal_string("http://example.com/", normal("http://example.com/"));
+        test.assert_equal_string("http://example.com/", normal("http://example.com:/"));
+        test.assert_equal_string("http://example.com/", normal("http://example.com:80/"));
+        test.assert(!parse("http://example.com/?").equivalent(parse("http://example.com/")));
+        test.assert_equal_string("https://example.com/", normal("HTTPS://example.com:443"));
+        test.assert_equal_string("https://example.com:80/", normal("https://example.com:80"));
+        // Only http and https have scheme-based rules here.
+        test.assert_equal_string("ftp://example.com:21", normal("ftp://example.com:21"));
+    };
+
+    export let test_percent_encoding_normalization = func {
+        test.assert_equal_string("http://a/~x%2F%C3%BC?q=~%2F#~", normal("http://a/%7ex%2f%c3%bc?q=%7E%2f#%7e"));
+        test.assert_equal_string("http://us~er%3A@a/", normal("http://us%7Eer%3a@a/"));
+        // An unreserved letter decoded from the host is lowercased; other triplets keep uppercase hex.
+        test.assert_equal_string("http://ab%2C/", normal("http://%41B%2c/"));
+    };
+
+    export let test_hosts = func {
+        test.assert_equal_string("http://[fe80::abcd]/", normal("http://[FE80::ABCD]/"));
+        test.assert_equal_string("http://[fe80::a%25En1]/", normal("http://[FE80::A%25En1]/"));
+        // Non-ASCII registered names go through Idna.to_ascii; python3 -I:
+        // 'bücher.example'.encode('idna') == b'xn--bcher-kva.example'.
+        test.assert_equal_string("http://xn--bcher-kva.example/", normal("http://bücher.example/"));
+        test.assert_equal_string("http://xn--bcher-kva.example/", normal("http://b%C3%BCcher.example/"));
+        test.assert(parse("http://bücher.example/").equivalent(parse("http://xn--bcher-kva.example")));
+        // ASCII bytes a registered name does not allow stay percent-encoded after the IDNA step, so the host
+        // reads back as one host (Idna.to_ascii without STD3 rules keeps '@' and '/').
+        last at_sign = normal("http://bü%40x/");
+        test.assert(!strings.contains(at_sign, "@"));
+        last at_uri = parse(at_sign);
+        test.assert_none<string>(at_uri.userinfo);
+        test.assert_equal_string("bü@x", test.assert_ok<string>(idna.to_unicode(test.assert_ok<string>(at_uri.decoded_host()))));
+        last slash = normal("http://b%C3%BCcher%2Fx.example/");
+        test.assert_equal_string("/", parse(slash).path);
+        // A name the IDNA step cannot take (uppercase non-ASCII needs UTS 46 mapping) fails to normalize.
+        test.assert_err<uris.Uri>(parse("http://BÜCHER.example/").normalize());
+    };
+
+    export let test_dot_segments_only_with_scheme = func {
+        test.assert_equal_string("http://a/b/c", normal("http://a/b/./x/../c"));
+        test.assert_equal_string("x:a/c", normal("x:a/./b/../c"));
+        // A relative reference keeps its dot segments: they mean something until it is resolved.
+        test.assert_equal_string("../a/./b", normal("../a/./b"));
+        test.assert_equal_string("x:/.//g", normal("x:/.//g"));
+    };
+
+    // Every normalize and resolve output reads back as the same components.
+    export let test_outputs_reparse = func {
+        last inputs: string[] = [
+            "eXAMPLE://a/./b/../b/%63/%7bfoo%7d", "HTTP://www.EXAMPLE.com:80", "http://bü%40x/a/../b?%7e#%2f",
+            "http://b%C3%BCcher%2Fx.example/", "http://[FE80::A%25En1]:8080/", "x:/.//g", "../x/./y", "//h:0/p",
+            "http://u%3a@%41B%2c/", "file:///a/b/../c"
+        ];
+        for (let text in inputs) {
+            last n = test.assert_ok<uris.Uri>(parse(text).normalize());
+            test.assert(parse(n.to_string()).equals(n));
+        }
+        last base = parse("http://a/b/c/d;p?q");
+        last references: string[] = ["//g", "?y", "..", "../../../../g", "g?y/./x", "http:g", "#s", "", "//x:9/./y"];
+        for (let reference in references) {
+            last target = test.assert_ok<uris.Uri>(base.resolve(parse(reference)));
+            test.assert(parse(target.to_string()).equals(target));
+        }
+    };
+
+    export let test_normalize_is_idempotent = func {
+        last inputs: string[] = [
+            "eXAMPLE://a/./b/../b/%63/%7bfoo%7d", "HTTP://www.EXAMPLE.com:80", "http://bücher.example/a/../b?%7e#%2f",
+            "../x/./y", "mailto:Joe@Example.COM"
+        ];
+        for (let text in inputs) {
+            last once = normal(text);
+            test.assert_equal_string(once, normal(once));
+        }
+        // RFC 3986 section 6.2.3 notes mailto:Joe@Example.COM equals mailto:Joe@example.com only by mailto
+        // rules, which generic normalization does not apply.
+        test.assert(!parse("mailto:Joe@Example.COM").equivalent(parse("mailto:Joe@example.com")));
+    };
+);

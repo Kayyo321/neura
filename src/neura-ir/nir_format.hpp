@@ -14,10 +14,31 @@ namespace neura {
 // specifies the encoding. Reading what write_nir produced yields a program
 // equal to the original in every symbol, type, region, operand, and span.
 inline constexpr std::uint16_t nir_major_version = 1;
+// ConformanceCall (docs/design/Records030.md) is written under this minor
+// version, assigned to static interface requirements.
+inline constexpr std::uint16_t nir_records_minor = 13;
+// NeuraIR 1.12, the matching milestone (docs/design/Matching030.md): a
+// return inside a scoped value, which the postfix `?` lowers to, and the
+// type `any` with its operations. A file uses it only when its program
+// does.
+inline constexpr std::uint16_t nir_any_minor = 12;
+// NeuraIR 1.14, the lifetime milestone (docs/design/Lifetime030.md): the
+// operations Cleanup, Pending and Yield and the attribute generator.resume.
+// A file uses it only when its program does.
+inline constexpr std::uint16_t nir_lifetime_minor = 14;
+// NeuraIR 1.15, the 0.3.0 expressions (docs/design/Expressions030.md): the
+// operations ConcatText (tag 73) and TypeOf (tag 74). A file uses it only
+// when its program does.
+inline constexpr std::uint16_t nir_expressions_minor = 15;
 // The highest minor version this code reads and writes. The writer emits the
 // lowest minor version that can represent the program, so a program that
 // uses no newer feature is written as 1.0.
-inline constexpr std::uint16_t nir_minor_version = 10;
+inline constexpr std::uint16_t nir_minor_version = nir_expressions_minor;
+
+// The minor version that adds class hooks (docs/design/Hooks030.md): the
+// attributes hook.get, hook.set and hook.of. A module that declares a clause
+// is written with it, so that an older reader refuses the module.
+inline constexpr std::uint16_t nir_hooks_minor = 11;
 
 std::vector<std::uint8_t> write_nir(const IrProgram& program);
 

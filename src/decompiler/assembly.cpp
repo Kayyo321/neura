@@ -15,8 +15,8 @@ namespace {
 
 using nvr::absent;
 
-constexpr std::array<std::string_view, 11> type_kinds{"void", "bool", "unsigned", "signed", "text", "bytes",
-                                                       "object", "array", "list", "float", "bfloat"};
+constexpr std::array<std::string_view, 12> type_kinds{"void", "bool", "unsigned", "signed", "text", "bytes",
+                                                       "object", "array", "list", "float", "bfloat", "aggregate"};
 constexpr std::array<std::string_view, 8> exit_kinds{
     "continue", "call", "return", "state", "host", "trap", "message-trap", "scheduler",
 };
@@ -27,6 +27,9 @@ constexpr std::array<std::string_view, nvr::state_op_count> state_ops{
     "write-element",   "append-element",   "remove-element", "construct-text", "read-version",
     "text-slice",      "text-from-utf8",   "text-equal",    "class-hash",     "class-text",
     "class-is",        "class-cast",       "scalar-text", "repeat-collection", "kernel",
+    "read-component",  "write-component",
+    "enter-region",    "release-region",   "region-object", "region-collection", "region-repeat",
+    "move-to-region",  "hook-enter",       "hook-leave",    "concat-text",
 };
 constexpr std::array<std::string_view, 3> value_kinds{"slot", "constant", "lanes"};
 
@@ -105,7 +108,11 @@ std::string constant_comment(const nvr::Image& image, const nvr::Constant& const
         return std::to_string(value);
     }
     case nvr::TypeKind::Text: return quoted(std::string(constant.payload.begin(), constant.payload.end()));
-    case nvr::TypeKind::Object: return constant.payload.empty() ? "nil" : std::string{};
+    case nvr::TypeKind::Object:
+        if (nvr::is_static_object_constant(type, constant)) return "static L" + std::to_string(type.reference);
+        return constant.payload.empty() ? "nil" : std::string{};
+    case nvr::TypeKind::Array:
+    case nvr::TypeKind::List: return constant.payload.empty() ? "nil" : std::string{};
     default: return {};
     }
 }
@@ -350,6 +357,7 @@ std::string disassemble(const nvr::Image& image) {
         case nvr::TypeKind::Float:
         case nvr::TypeKind::BFloat: out << " " << static_cast<unsigned>(type.width); break;
         case nvr::TypeKind::Object:
+        case nvr::TypeKind::Aggregate:
         case nvr::TypeKind::Array:
         case nvr::TypeKind::List: out << " " << type.reference; break;
         default: break;
@@ -403,7 +411,10 @@ std::string disassemble(const nvr::Image& image) {
     for (std::size_t f = 0; f < image.functions.size(); ++f) {
         const auto& function = image.functions[f];
         out << "\nfunction " << f << " parameters " << function.parameter_count << " result "
-            << function.result_type << " frame " << indices(function.frame_types) << "\n";
+            << function.result_type;
+        // Absent for a single word, so every earlier text keeps its bytes.
+        if (!function.more_results.empty()) out << " more " << indices(function.more_results);
+        out << " frame " << indices(function.frame_types) << "\n";
         for (std::size_t b = 0; b < function.blocks.size(); ++b) {
             const auto& block = function.blocks[b];
             out << "  block " << b << " graph " << block.graph << " selector " << block.selector_start
@@ -531,12 +542,16 @@ nvr::Image assemble(std::string_view text) {
             in.expect_index(static_cast<std::uint32_t>(image.types.size()), "type");
             nvr::Type type;
             type.kind = static_cast<nvr::TypeKind>(in.choice(type_kinds, "type kind"));
+            if (type.kind == nvr::TypeKind::Aggregate && image.minor_version < 7) {
+                in.error("aggregate types require NVR 1.7");
+            }
             switch (type.kind) {
             case nvr::TypeKind::Unsigned:
             case nvr::TypeKind::Signed:
             case nvr::TypeKind::Float:
             case nvr::TypeKind::BFloat: type.width = in.number<std::uint8_t>("width"); break;
             case nvr::TypeKind::Object:
+            case nvr::TypeKind::Aggregate:
             case nvr::TypeKind::Array:
             case nvr::TypeKind::List: type.reference = in.index("type reference"); break;
             default: break;
@@ -644,6 +659,11 @@ nvr::Image assemble(std::string_view text) {
             function.parameter_count = in.index("parameter count");
             in.keyword("result");
             function.result_type = in.index("result type");
+            if (in.peek("more")) {
+                in.keyword("more");
+                if (image.minor_version < 7) in.error("several result words require NVR 1.7");
+                function.more_results = in.indices("result word type");
+            }
             in.keyword("frame");
             function.frame_types = in.indices("frame slot type");
             image.functions.push_back(std::move(function));
@@ -707,6 +727,19 @@ nvr::Image assemble(std::string_view text) {
                 exit.operation = static_cast<nvr::StateOp>(in.choice(state_ops, "state operation"));
                 if (exit.operation == nvr::StateOp::Kernel && image.minor_version < 6) {
                     in.error("kernel exits require NVR 1.6");
+                }
+                if ((exit.operation == nvr::StateOp::ReadComponent || exit.operation == nvr::StateOp::WriteComponent) &&
+                    image.minor_version < 7) {
+                    in.error("component operations require NVR 1.7");
+                }
+                if (nvr::is_region_operation(exit.operation) && image.minor_version < 7) {
+                    in.error("region operations require NVR 1.7");
+                }
+                if (nvr::is_hook_operation(exit.operation) && image.minor_version < nvr::hooks_minor_version) {
+                    in.error("class hook operations require NVR 1." + std::to_string(nvr::hooks_minor_version));
+                }
+                if (exit.operation == nvr::StateOp::ConcatText && image.minor_version < nvr::concat_minor_version) {
+                    in.error("concat-text requires NVR 1." + std::to_string(nvr::concat_minor_version));
                 }
                 in.keyword("immediate");
                 exit.immediate = in.index("immediate");

@@ -165,7 +165,7 @@ The final parameter `name: ...T` packs zero or more arguments into a new `T[]`. 
 <!-- example: check -->
 ```neura
 let make_adder = func(offset: int) -> func(int) -> int {
-    return func(value: int) -> int {
+    return new func(value: int) -> int {
         return value + offset;
     };
 };
@@ -330,7 +330,7 @@ let classify = func(x: int, y: int) -> string {
 <!-- example: check -->
 ```neura
 let numbers = {0 .. 5};                 // int[]: 0, 1, 2, 3, 4
-let evens: int[list] = 0 .. 8 : 2;      // list: 0, 2, 4, 6
+let evens: int[list] = new(0 .. 8 : 2);      // list: 0, 2, 4, 6
 let descending = 5 .. 0 : -2;           // 5, 3, 1
 let wide: int64[] = 0 .. 3;             // the expected type picks the element type
 let total = func -> int {
@@ -349,8 +349,8 @@ let total = func -> int {
 <!-- example: check -->
 ```neura
 let names: string[] = ["Ada", "Lin"];          // array: fixed length
-let queue: string[list] = ["first", "second"]; // list: grows and shrinks
-let empty: string[list] = [];                  // empty literal needs a type
+let queue: string[list] = new(["first", "second"]); // list: grows and shrinks
+let empty: string[list] = new;                  // empty literal needs a type
 let rows: string[][] = [["a", "b"], ["c"]];    // jagged
 
 let edit = func {
@@ -416,7 +416,11 @@ export let Light = enum (Red, Yellow, Green);           // fieldless
 let Optional = enum<T> (None, Some(T));                 // generic
 let IntOptional = Optional<int>;                        // overlay of an instance
 
-let Tree = enum (Empty, Leaf(int), Branch { left: Tree, right: Tree });  // payloads
+let TreeLink = class (                                  // an enum is stored inline: hold a link in a class
+    export last tree: Tree;
+    export let init = func(value: Tree) { tree = value; };
+);
+let Tree = enum (Empty, Leaf(int), Branch { left: TreeLink, right: TreeLink });  // payloads
 
 let next = func(current: Light) -> Light {
     if (current == Light.Red) {                         // fieldless enums support ==
@@ -431,7 +435,7 @@ let sum = func(tree: Tree) -> int {
     return match (tree) {                               // match expression
         Tree.Empty => 0,
         Tree.Leaf(value) => value,
-        Tree.Branch { left, right } => sum(left) + sum(right),
+        Tree.Branch { left, right } => sum(left.tree) + sum(right.tree),
     };
 };
 
@@ -449,7 +453,7 @@ let describe = func(tree: Tree) -> string {
     }
 };
 
-let tree = Tree.Branch { right: Tree.Leaf(2), left: Tree.Leaf(1) };
+let tree = Tree.Branch { right: new TreeLink(Tree.Leaf(2)), left: new TreeLink(Tree.Leaf(1)) };
 let maybe: IntOptional = IntOptional.Some(4);
 let five = Optional<int>.Some(5);                       // generic constructor needs <int>
 ```
@@ -460,6 +464,7 @@ let five = Optional<int>.Some(5);                       // generic constructor n
 - No nested patterns (`Some(Leaf(x))` is a syntax error) and no guards (`pattern if cond`). Bind, then `match` or `if` again.
 - Pattern bindings are constants scoped to their arm.
 - Payload enums have no built-in `==` and no `as` conversion.
+- An enum value is stored inline, so an enum cannot contain itself, directly or through tuples and other enums (`E0448`). Hold the link in a class, which is a reference, or in a list.
 
 ## Classes
 

@@ -1,0 +1,7 @@
+error[E0202]: expected an identifier
+ --> $DIR/is-not-without-type.nra:6:56
+  |
+6 | let check = func(shape: Shape) -> bool => (shape is not);
+  |                                                        ^ expected an identifier, found ')'
+
+For more information about this error, try `neura explain E0202`.

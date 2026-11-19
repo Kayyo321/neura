@@ -18,7 +18,7 @@ export let Scalars = module (
     /// argument: not a Unicode scalar value" for a surrogate or a value above 0x10FFFF.
     #[Pure, ThreadSafe]
     export let utf8_length = func(scalar: uint32) -> int {
-        if (!is_valid(scalar)) {
+        if (not is_valid(scalar)) {
             trap_with_message("invalid argument: not a Unicode scalar value");
         }
         if (scalar < 128) {
@@ -27,10 +27,7 @@ export let Scalars = module (
         if (scalar < 2048) {
             return 2;
         }
-        if (scalar < 65536) {
-            return 3;
-        }
-        return 4;
+        return if (scalar < 65536) -> 3 else -> 4;
     };
 
     /// @brief Tests whether a value is below U+0080.
@@ -117,10 +114,7 @@ export let Scalars = module (
         if (value < 0 || value >= radix) {
             trap_with_message("invalid argument: digit out of range");
         }
-        if (value < 10) {
-            return (value + 48) as uint32;
-        }
-        return (value + 87) as uint32;
+        return if (value < 10) -> (value + 48) as uint32 else -> (value + 87) as uint32;
     };
 
     /// @brief Traps unless the radix is between 2 and 36 inclusive.

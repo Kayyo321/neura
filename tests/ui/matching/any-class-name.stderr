@@ -1,0 +1,9 @@
+error[E0311]: 'any' is a reserved type name
+ --> $DIR/any-class-name.nra:4:5
+  |
+4 | let any = class ( );
+  |     ^^^ 'any' is the built-in type, so no type, module or alias takes its name
+  |
+  = help: choose another name
+
+For more information about this error, try `neura explain E0311`.

@@ -1,0 +1,91 @@
+let.promote _ = import:Std.Time.Duration;
+
+/// @brief Ping/pong heartbeat supervision as a state machine over monotonic time (RFC 6455 sections 5.5.2 and
+/// 5.5.3).
+///
+/// The machine reads no clock: each call passes the current monotonic time (`Std.Time.Clock.monotonic`), so a
+/// test drives it with a `FixedClock` and a connection with any clock. When nothing has been received for
+/// `interval`, `poll` answers `SendPing` once and starts waiting; anything received from the peer (a pong, a
+/// ping, data, any frame) proves it alive and ends the wait; when the wait reaches `timeout`, `poll` answers
+/// `PeerDead`, and keeps answering it.
+/// @see [Std.Net.Realtime.Ws.Heartbeat](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-Ws-Heartbeat)
+#Since("0.3.0")
+export let Heartbeat = module (
+    /// @brief What the connection should do now.
+    export let HeartbeatAction = enum (Wait, SendPing, PeerDead);
+
+    /// @brief The supervision state of one connection.
+    #[Final, NotThreadSafe]
+    export let Heartbeat = class (
+        /// @brief The idle time after which a ping is sent.
+        export last interval: Duration;
+        /// @brief How long a ping may go unanswered.
+        export last timeout: Duration;
+        /// @brief When the peer was last heard from.
+        let last_heard: Duration;
+        /// @brief Whether a ping is outstanding.
+        let waiting: bool = false;
+        /// @brief When the outstanding ping was sent.
+        let ping_sent_at: Duration = of_nanos(0);
+        /// @brief Set once the peer was declared dead.
+        let dead: bool = false;
+        /// @brief The number of pings `poll` asked for.
+        export let pings: int = 0;
+            | get: pings;
+
+        /// @brief A supervisor started at monotonic time `now`. A non-positive interval or timeout traps with
+        /// "invalid argument: heartbeat duration".
+        export let init = func(every: Duration, patience: Duration, now: Duration) {
+            if (every.to_nanos() <= 0 || patience.to_nanos() <= 0) {
+                trap_with_message("invalid argument: heartbeat duration");
+            }
+            interval = every;
+            timeout = patience;
+            last_heard = now;
+        };
+
+        /// @brief Whether a ping is waiting for an answer.
+        #NoDiscard
+        export let awaiting_pong = func -> bool => waiting;
+
+        /// @brief Records that something arrived from the peer at `now`.
+        export let record_activity = func(now: Duration) {
+            if (dead) {
+                return;
+            }
+            last_heard = now;
+            waiting = false;
+        };
+
+        /// @brief The action due at `now`. `SendPing` marks the ping as sent at `now`.
+        #NoDiscard
+        export let poll = func(now: Duration) -> HeartbeatAction {
+            if (dead) {
+                return HeartbeatAction.PeerDead;
+            }
+            if (waiting) {
+                if (now.to_nanos() - ping_sent_at.to_nanos() >= timeout.to_nanos()) {
+                    dead = true;
+                    return HeartbeatAction.PeerDead;
+                }
+                return HeartbeatAction.Wait;
+            }
+            if (now.to_nanos() - last_heard.to_nanos() >= interval.to_nanos()) {
+                waiting = true;
+                ping_sent_at = now;
+                pings++;
+                return HeartbeatAction.SendPing;
+            }
+            return HeartbeatAction.Wait;
+        };
+
+        /// @brief The monotonic time of the next action: the ping deadline, or the timeout of the outstanding ping.
+        #NoDiscard
+        export let next_deadline = func -> Duration => waiting ? ping_sent_at.plus(timeout) : last_heard.plus(interval);
+
+        /// @brief The interval, timeout and state.
+        export let.override to_string = func -> string =>
+            "Heartbeat(every " .. interval.to_string() .. ", timeout " .. timeout.to_string() .. ", "
+            .. (dead ? "dead" : (waiting ? "awaiting pong" : "idle")) .. ")";
+    );
+);

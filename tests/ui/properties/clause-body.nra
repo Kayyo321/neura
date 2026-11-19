@@ -1,0 +1,5 @@
+// A clause in an interface has no body (edge case 64).
+let Named = interface (
+    let name: string;
+        | get: "x";
+);

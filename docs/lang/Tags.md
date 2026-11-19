@@ -20,7 +20,7 @@ let Shapes = module (
 );
 ```
 
-`neura tags` prints every tag with its arguments, the declarations it applies to, and its status; `neura tags <Name>` prints one. The registry holds 85 tags: 16 implemented, 17 informational, and 52 reserved. The [catalogue](#catalogue) below lists them all.
+`neura tags` prints every tag with its arguments, the declarations it applies to, and its status; `neura tags <Name>` prints one. The registry holds 87 tags: 18 implemented, 20 informational, and 49 reserved. The [catalogue](#catalogue) below lists them all.
 
 ## Syntax
 
@@ -162,7 +162,7 @@ A generic function is checked with each set of type arguments it is used with, a
 ```neura
 #Pure
 let squares = func(count: int32) -> int64[list] {
-    let result: int64[list] = [];
+    let result: int64[list] = new;
     for (let i = 0; i < count; i++) {
         result.append((i as int64) * (i as int64));
     }
@@ -175,6 +175,10 @@ The optimizer uses the property the compiler infers, so an untagged pure functio
 ### Immutable
 
 `#Immutable` on a class says that no field of an instance changes after construction. The compiler checks that every instance field is declared `last` or `const` (`E0918`) and has an immutable type (`E0919`): `bool`, a number, `string`, a tuple or enum whose parts are immutable, or a class marked `#Immutable`. An `#Immutable` class extends only `#Immutable` classes, and every class that extends it is `#Immutable` (`E0920`). A field whose type is a type parameter counts as immutable here; a specialization whose type arguments are mutable, such as `Pair<int32[list]>` of an `#Immutable` class `Pair<T>`, is not immutable, so tasks cannot share it. Tasks may share the instances of an `#Immutable` class ([Concurrency](Concurrency.md#51-transferable-types)).
+
+### Frozen
+
+`#Frozen` belongs to the standard library: only `Std.Collections.Frozen` and `Std.Ui` may write it, and anywhere else it is `E0581`. On a class it says that every type argument given to the class is deeply immutable ([Collections](Collections.md#frozenlist)): a written argument that is not is `E0580`, and a type parameter written as such an argument carries the requirement to the arguments of its own declaration. On a `last` field of list type it marks frozen storage: the constructor assigns it once, from a list the constructor created and only filled, and the class's code reads it only by index and length; any other use is `E0581`. The `#Immutable` check accepts a frozen field whose element type is immutable. `FrozenList<T>` and `ui.State<T>` carry it.
 
 ### ThreadSafe and NotThreadSafe
 
@@ -208,6 +212,10 @@ let Tally = class (
     };
 );
 ```
+
+### HostEffects
+
+`#HostEffects(allocates: bool = true, traps: bool = true, scheduler: bool = true, retains: bool = true)` declares what a call of a host binding may do. The standard library writes it on a function that is bound to a host service and has no body, which has nothing for the compiler to summarize: the compiler records the four answers as the function's `host.effects` attribute ([NeuraIR format](../NirFormat.md#revision-110-symbol-attributes-and-deferred-initialization)), and the [effect summary](../IrOptimization.md#effect-summaries) of the binding, and of every function that calls it, reads them. A call of a host binding is always a host request, so there is no argument for that. An argument that is left out says the effect may happen, so no omission asserts a guarantee. A binding without the tag is unknown in every fact. The tag is a promise that nothing checks: the host implements the service. On a function that has a body, a function bound to a kernel, or any function that is not a host binding it is error `E0923`, because a function with a body is summarized from its body and a kernel from its signature.
 
 ### Inline and NoInline
 
@@ -269,6 +277,7 @@ Each table gives a tag's signature, the declarations it applies to, its status, 
 | `#Requires(condition: string)` | functions, methods | reserved, repeatable | A precondition checked on entry. Instead: check the condition at the start of the body and call trap_with_message. |
 | `#Ensures(condition: string)` | functions, methods | reserved, repeatable | A postcondition checked on return. Instead: check the condition before each return. |
 | `#Invariant(condition: string)` | classes | reserved, repeatable | A condition that holds between method calls. Instead: write a validate() method and call it in tests. |
+| `#Frozen` | classes, fields | implemented | Standard library only: on a class, its type arguments are deeply immutable (E0580); on a `last` list field, storage assigned once from a list the constructor created and never exposed (E0581). |
 
 ### Optimization
 
@@ -355,7 +364,7 @@ Each table gives a tag's signature, the declarations it applies to, its status, 
 | Tag | Applies to | Status | Meaning |
 | --- | --- | --- | --- |
 | `#RequiresCapability(capability: name...)` | modules, functions, methods | reserved, repeatable | Callers need the named runtime capability. Instead: capabilities are granted per run (`neura run --deny-*`); document the requirement. |
-| `#Sensitive` | classes, fields, file and module bindings, locals, parameters | reserved | A secret kept out of traces, dumps, and to_string. Instead: avoid printing the value; --record and --task-dump may contain it. |
+| `#Sensitive` | classes, fields, file and module bindings, locals, parameters | informational | A secret: on a field or class, [`Std.Reflect.Codec`](Stdlib.md#22-stdreflect) writes a placeholder instead of the value. On other declarations it is only recorded; `to_string`, traces, `--record` and `--task-dump` do not read the tag. |
 | `#Untrusted` | functions, methods, fields, file and module bindings, parameters | reserved | Data from outside the program that must be validated before use. Instead: validate the value where it enters the program. |
 | `#ConstantTime` | functions, methods | reserved | Runs in time independent of secret inputs. Instead: write the comparison without early exits; no analysis proves it yet. |
 
@@ -364,8 +373,8 @@ Each table gives a tag's signature, the declarations it applies to, its status, 
 | Tag | Applies to | Status | Meaning |
 | --- | --- | --- | --- |
 | `#Serializable` | classes, enums | reserved | Can be written and read by Std serializers. Instead: write to_json and from_json with Std.Encoding.Json explicitly. |
-| `#SerialName(name: string)` | classes, variants, fields | reserved | The name used when serialized. Instead: choose the key in the explicit to_json. |
-| `#Skip` | fields | reserved | Left out when serialized. Instead: leave the field out of the explicit to_json. |
+| `#SerialName(name: string)` | classes, variants, fields | informational | The name [`Std.Reflect.Codec`](Stdlib.md#22-stdreflect) uses for a field or variant, and for a class in schemas. `derive json.Codec` does not read it. |
+| `#Skip` | fields | informational | Left out when [`Std.Reflect.Codec`](Stdlib.md#22-stdreflect) serializes. `derive json.Codec` does not read it. |
 | `#SerialDefault(value: literal)` | fields | reserved | The value used when the input has no entry. Instead: supply the default in the explicit from_json. |
 
 ### Resource management
@@ -375,6 +384,7 @@ Each table gives a tag's signature, the declarations it applies to, its status, 
 | `#Resource` | classes | reserved | Instances must be destroyed before they become unreachable. Instead: destroy the instance explicitly or bind it in a scope block. |
 | `#NoAlloc` | functions, methods | reserved | Never allocates heap cells. Instead: measure peak_heap_cells with `neura run --stats`. |
 | `#MaxSteps(steps: integer)` | functions, methods | reserved | A step budget for each call. Instead: bound the whole run with --max-steps. |
+| `#HostEffects(allocates: bool = true, traps: bool = true, scheduler: bool = true, retains: bool = true)` | functions | implemented | What a call of this host binding may do; an omitted argument says it may (E0923). |
 
 ### Numerics
 

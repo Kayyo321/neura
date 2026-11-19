@@ -1,0 +1,81 @@
+// Deferred calls in the other statement blocks (docs/design/Lifetime030.md,
+// `defer`): a statement match arm, a select arm, a for-each body and a do
+// body each run their deferred calls when they are left.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let channels = import:Std.Concurrent.Channel;
+
+let say = func(text: string) -> void {
+    console.print_line(text);
+};
+
+let Shape = enum (Dot, Line(int));
+
+let DeferStatements = module:program.Entry (
+    let describe = func(shape: Shape) -> void {
+        match (shape) {
+            Shape.Dot => {
+                defer say("end of the dot arm");
+                say("a dot");
+            },
+            Shape.Line(length) => {
+                defer say("end of the line arm " + length.to_string());
+                if (length > 3) {
+                    say("a long line");
+                    return;
+                }
+                say("a short line");
+            },
+        }
+        say("after the match");
+    };
+
+    let each = func(items: int[list]) -> void {
+        for (let item: int in items) {
+            defer say("end of item " + item.to_string());
+            if (item == 2) {
+                continue;
+            }
+            say("item " + item.to_string());
+        }
+    };
+
+    let repeat = func(times: int) -> void {
+        let count = 0;
+        do {
+            defer say("end of round " + count.to_string());
+            count = count + 1;
+            if (count == times) {
+                break;
+            }
+        }
+        say("rounds " + count.to_string());
+    };
+
+    let choose = func() -> void {
+        const [sender, receiver, closer] = channels.open<int>(1);
+        sender.send(7);
+        select {
+            let value = receiver.receive() => {
+                defer say("end of the receive arm");
+                say("received a value");
+            },
+            _ => {
+                defer say("end of the default arm");
+                say("nothing ready");
+            },
+        }
+        say("after the select");
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        describe(Shape.Dot);
+        describe(Shape.Line(2));
+        describe(Shape.Line(5));
+        let items: int[list] = new([1, 2, 3]);
+        each(items);
+        repeat(3);
+        choose();
+        return program.ExitCode.Ok;
+    };
+);

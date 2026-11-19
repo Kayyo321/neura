@@ -1,0 +1,17 @@
+// docs/design/Expressions030.md, Narrowing: the binding after an 'if' is declared in the enclosing block.
+let Shape = class (
+    export let sides: int = 0;
+);
+let Circle = class : Shape (
+    export let radius: int = 1;
+);
+let Other = class (
+    export let value: int = 0;
+);
+let check = func(shape: Shape) -> int {
+    let circle = 3;
+    if (shape is not circle: Circle) {
+        return 0;
+    }
+    return circle;
+};

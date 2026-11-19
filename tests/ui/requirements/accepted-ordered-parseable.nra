@@ -1,0 +1,12 @@
+// Integers and bool conform to Ordered and Parseable through their companions'
+// existing compare and parse (docs/design/Records030.md, Primitive
+// conformance and the contracts).
+let.promote _ = import:Std.Core.Arithmetic;
+let.promote _ = import:Std.Core.Ordering;
+let larger = func<T: Ordered<T>>(a: T, b: T) -> T => T.compare(a, b) == Ordering.Less ? b : a;
+let valid = func<T: Parseable<T>>(text: string) -> bool => true;
+let a = larger<int8>(3, 4);
+let b = larger<uint64>(3, 4);
+let c = larger(true, false);
+let d = valid<float32>("1.5");
+let e = valid<bool>("true");

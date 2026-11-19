@@ -1,0 +1,633 @@
+let errors = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let http_headers = import:Std.Net.Http.Headers;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let wire = import:Std.Net.Http.Wire;
+
+/// @brief Multipart bodies (RFC 2046 section 5.1) and `multipart/form-data` (RFC 7578): the boundary parameter, a
+/// streaming parser and form parts.
+///
+/// The parser follows RFC 2046 section 5.1.1: the preamble before the first boundary delimiter line and the
+/// epilogue after the close delimiter are ignored; a delimiter is CRLF, "--" and the boundary (the first may start
+/// the body without the CRLF), followed by transport padding (spaces and tabs) and CRLF, or by "--" for the close
+/// delimiter. Any other byte after a delimiter is 400. A part's header section ends at its first empty line and may
+/// be empty; its lines end in CRLF and its fields are checked as HTTP header fields are (no folding), and must be
+/// UTF-8. Data is passed on as it arrives, holding back only bytes that could begin a delimiter, so a large part
+/// never needs to be buffered. Errors use the "http.status.NNN" codes of `Wire.rejection`: 415 for a media type
+/// that is not multipart, 413 past a limit (part count, header bytes, header fields), 400 otherwise.
+/// @see [Std.Net.Http.Multipart](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-Multipart)
+#Since("0.3.0")
+export let Multipart = module (
+    /// @brief What the parser found, in order: each part is PartStart, zero or more Data, PartEnd; Done follows the
+    /// close delimiter.
+    export let MultipartEvent = enum (
+        /// @brief A part begins; its header fields.
+        PartStart(http_headers.Headers),
+            /// @brief The next bytes of the current part's body.
+            Data(uint8[list]),
+            /// @brief The current part ended.
+            PartEnd,
+            /// @brief The close delimiter was read; the rest is the epilogue.
+            Done
+    );
+
+    /// @brief The limits of a multipart parser. The defaults are 1,000 parts, 16,384 bytes of each part's header
+    /// section (padding after its delimiter included) and 100 fields per part.
+    #[Final, Immutable, ThreadSafe]
+    export let MultipartLimits = class (
+        /// @brief The most parts.
+        export last max_parts: int;
+        /// @brief The most bytes of one part's header section, its empty line included.
+        export last max_header_bytes: int;
+        /// @brief The most header fields of one part.
+        export last max_header_fields: int;
+
+        /// @brief The default limits.
+        export let init = func {
+            max_parts = 1000;
+            max_header_bytes = 16384;
+            max_header_fields = 100;
+        }
+        /// @brief The given limits, each positive; otherwise traps with "invalid argument: <name>".
+        or func(parts: int, header_bytes: int, header_fields: int) {
+            if (parts <= 0) {
+                trap_with_message("invalid argument: parts");
+            }
+            if (header_bytes <= 0) {
+                trap_with_message("invalid argument: header_bytes");
+            }
+            if (header_fields <= 0) {
+                trap_with_message("invalid argument: header_fields");
+            }
+            max_parts = parts;
+            max_header_bytes = header_bytes;
+            max_header_fields = header_fields;
+        };
+
+        /// @brief Equal when every limit is equal.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not limits: MultipartLimits) {
+                return false;
+            }
+            return max_parts == limits.max_parts && max_header_bytes == limits.max_header_bytes
+                && max_header_fields == limits.max_header_fields;
+        };
+
+        /// @brief Combines every limit.
+        export let.override hash_code = func -> uint32 {
+            let hash = hashing.combine(17, max_parts as uint32);
+            hash = hashing.combine(hash, max_header_bytes as uint32);
+            return hashing.combine(hash, max_header_fields as uint32);
+        };
+
+        /// @brief The limits as text.
+        export let.override to_string = func -> string =>
+            $"MultipartLimits{{parts={max_parts}, header_bytes={max_header_bytes}, header_fields={max_header_fields}}}";
+    );
+
+    /// @brief One complete part: its header fields and body bytes.
+    #[Final, NotThreadSafe]
+    export let Part = class (
+        /// @brief The part's header fields.
+        export last headers: http_headers.Headers;
+        /// @brief The part's body; the list is shared, not copied.
+        export last body: uint8[list];
+
+        /// @brief A part of the given fields and body.
+        export let init = func(fields: http_headers.Headers, content: uint8[list]) {
+            headers = fields;
+            body = content;
+        };
+
+        /// @brief The disposition type of Content-Disposition in lowercase ("form-data" in a form, RFC 7578
+        /// section 4.2), or None when the field is absent.
+        #NoDiscard
+        export let disposition = func -> Optional<string> {
+            match (headers.get("Content-Disposition")) {
+                Optional.Some(value) => {
+                    last kind = value.slice(0, type_end(value));
+                    return Optional<string>.Some(strings.to_ascii_lower(http_headers.trim_value(kind)));
+                },
+                Optional.None => {
+                    return Optional<string>.None;
+                },
+            }
+        };
+
+        /// @brief The "name" parameter of Content-Disposition, quoted-pairs undone (RFC 7578 section 4.2); None when
+        /// the field or parameter is absent or the field is malformed.
+        #NoDiscard
+        export let name = func -> Optional<string> => disposition_parameter(headers, "name");
+
+        /// @brief The "filename" parameter of Content-Disposition, as `name` reads it. It is not percent-decoded and
+        /// not checked as a path (RFC 7578 section 4.2 leaves both to the application).
+        #NoDiscard
+        export let filename = func -> Optional<string> => disposition_parameter(headers, "filename");
+
+        /// @brief The Content-Type field, or "text/plain" when absent (RFC 7578 section 4.4, RFC 2046 section
+        /// 5.1.1).
+        export let content_type = func -> string => match (headers.get("Content-Type")) {
+            Optional.Some(value) => value,
+            Optional.None => "text/plain",
+        };
+
+        /// @brief Equal header maps and equal body bytes.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not part: Part) {
+                return false;
+            }
+            if (not headers.equals(part.headers) || body.length != part.body.length) {
+                return false;
+            }
+            for (let i = 0; i < body.length; i++) {
+                if (body[i] != part.body[i]) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        /// @brief Combines the header map and the body bytes.
+        export let.override hash_code = func -> uint32 {
+            let hash = hashing.combine(17, headers.hash_code());
+            for (let b in body) {
+                hash = hashing.combine(hash, b as uint32);
+            }
+            return hash;
+        };
+
+        /// @brief The header map and the body length.
+        export let.override to_string = func -> string =>
+            "Part{" .. headers.to_string() .. ", " .. body.length.to_string() .. " bytes}";
+    );
+
+    /// @brief A streaming parser of one multipart body.
+    ///
+    /// Feed the body in pieces split anywhere; each `feed` returns the events its bytes completed. After the close
+    /// delimiter, further bytes are the epilogue and are ignored. Call `finish` at the end of the body. After an
+    /// error every call returns the same error.
+    #[Final, NotThreadSafe]
+    export let MultipartParser = class (
+        /// @brief The limits applied.
+        last limits: MultipartLimits;
+        /// @brief The limits passed to the field parser: strict CRLF.
+        last field_limits: wire.Limits;
+        /// @brief CRLF "--" boundary.
+        last delimiter: uint8[list] = new;
+        /// @brief Received bytes not yet consumed.
+        let buffer: uint8[list] = new;
+        /// @brief Preamble, AfterDelimiter, InHeaders, InBody or Finished.
+        let state: int = Preamble;
+        /// @brief Header-section bytes already scanned for its end.
+        let scanned: int = 0;
+        /// @brief The parts started.
+        let parts: int = 0;
+        /// @brief The status of the failure, or 0.
+        let failed_status: int = 0;
+        /// @brief The message of the failure.
+        let failed_message: string = "";
+
+        /// @brief A parser for `boundary` with the default limits. Traps with "invalid argument: boundary" unless
+        /// `is_boundary(boundary)`.
+        export let init = func(boundary: string) {
+            limits = new MultipartLimits();
+            field_limits = field_limits_of(limits);
+            start(boundary);
+        }
+        /// @brief A parser for `boundary` with the given limits; traps as the other constructor does.
+        or func(boundary: string, applied: MultipartLimits) {
+            limits = applied;
+            field_limits = field_limits_of(applied);
+            start(boundary);
+        };
+
+        /// @brief Parses the next bytes of the body; Ok holds the events they completed, possibly none.
+        #NoDiscard
+        export let feed = func(chunk: uint8[list]) -> Result<MultipartEvent[list]> {
+            if (failed_status != 0) {
+                return failure();
+            }
+            last events: MultipartEvent[list] = new;
+            if (state == Finished) {
+                return Result<MultipartEvent[list]>.Ok(events);
+            }
+            for (let b in chunk) {
+                buffer.append(b);
+            }
+            last length = buffer.length;
+            let pos = 0;
+            while (true) {
+                if (state == Preamble || state == InBody) {
+                    last at = find_delimiter(pos);
+                    last found = at >= 0;
+                    last end = found ? at : -at - 1;
+                    if (state == InBody && end > pos) {
+                        events.append(MultipartEvent.Data(copy_range(buffer, pos, end)));
+                    }
+                    if (not found) {
+                        pos = end;
+                        break;
+                    }
+                    if (state == InBody) {
+                        events.append(MultipartEvent.PartEnd);
+                    }
+                    pos = end + delimiter.length;
+                    state = AfterDelimiter;
+                } else if (state == AfterDelimiter) {
+                    if (length - pos < 2) {
+                        break;
+                    }
+                    if (buffer[pos] == 45 && buffer[pos + 1] == 45) {
+                        events.append(MultipartEvent.Done);
+                        state = Finished;
+                        pos = length;
+                        break;
+                    }
+                    let j = pos;
+                    while (j < length && (buffer[j] == 32 || buffer[j] == 9)) {
+                        j++;
+                    }
+                    if (j - pos > limits.max_header_bytes) {
+                        return fail(413, $"part header section is over {limits.max_header_bytes} bytes");
+                    }
+                    if (j + 1 >= length) {
+                        if (j < length && buffer[j] != 13) {
+                            return fail(400, "unexpected bytes after a boundary delimiter");
+                        }
+                        break;
+                    }
+                    if (buffer[j] != 13 || buffer[j + 1] != 10) {
+                        return fail(400, "unexpected bytes after a boundary delimiter");
+                    }
+                    pos = j + 2;
+                    state = InHeaders;
+                    scanned = 0;
+                } else if (state == InHeaders) {
+                    last end = header_end(pos);
+                    if (end < 0) {
+                        if (length - pos > limits.max_header_bytes) {
+                            return fail(413, $"part header section is over {limits.max_header_bytes} bytes");
+                        }
+                        break;
+                    }
+                    if (end - pos > limits.max_header_bytes) {
+                        return fail(413, $"part header section is over {limits.max_header_bytes} bytes");
+                    }
+                    parts++;
+                    if (parts > limits.max_parts) {
+                        return fail(413, $"more than {limits.max_parts} parts");
+                    }
+                    // The section without its final empty line.
+                    let [valid, text] = string.from_utf8(copy_range(buffer, pos, end - 2));
+                    return fail(400, "part header section is not UTF-8") unless valid;
+                    match (wire.parse_field_section(text, field_limits, false)) {
+                        Result.Ok(fields) => {
+                            events.append(MultipartEvent.PartStart(fields));
+                        },
+                        Result.Err(e) => {
+                            last status = wire.rejection_status(e);
+                            return fail(status == 431 ? 413 : 400, "part header: " .. errors.message(e));
+                        },
+                    }
+                    pos = end;
+                    state = InBody;
+                } else {
+                    break;
+                }
+            }
+            if (state == Finished) {
+                buffer = new;
+            } else {
+                buffer = copy_range(buffer, pos, length);
+                if (state == InHeaders) {
+                    scanned = buffer.length;
+                }
+            }
+            return Result<MultipartEvent[list]>.Ok(events);
+        };
+
+        /// @brief Ends the body: Ok with no events after the close delimiter, else 400 (the close delimiter is
+        /// missing).
+        #NoDiscard
+        export let finish = func -> Result<MultipartEvent[list]> {
+            if (failed_status != 0) {
+                return failure();
+            }
+            return if (state != Finished) -> fail(400, "multipart body ends before the close delimiter")
+                else -> Result<MultipartEvent[list]>.Ok(new MultipartEvent[list]());
+        };
+
+        /// @brief Whether the close delimiter has been read.
+        export let is_done = func -> bool => state == Finished;
+
+        /// @brief The parser's progress as text.
+        export let.override to_string = func -> string =>
+            $"MultipartParser{{state={state}, parts={parts}, buffered={buffer.length}, failed={failed_status}}}";
+
+        /// @brief Sets up the delimiter and the virtual CRLF before the body.
+        let start = func(boundary: string) {
+            if (not is_boundary(boundary)) {
+                trap_with_message("invalid argument: boundary");
+            }
+            delimiter.append(13);
+            delimiter.append(10);
+            delimiter.append(45);
+            delimiter.append(45);
+            for (let i = 0; i < boundary.byte_length; i++) {
+                delimiter.append(boundary.byte_at(i));
+            }
+            // A delimiter at the very start of the body has no CRLF before it.
+            buffer.append(13);
+            buffer.append(10);
+        };
+
+        /// @brief The offset of the first full delimiter at or after `from`; otherwise -(n + 1) where n is where
+        /// a possible delimiter starts at the end of the buffer, or the buffer length.
+        let find_delimiter = func(from: int) -> int {
+            last length = buffer.length;
+            last size = delimiter.length;
+            for (let i = from; i < length; i++) {
+                if (buffer[i] == 13) {
+                    let k = 0;
+                    while (k < size && i + k < length && buffer[i + k] == delimiter[k]) {
+                        k++;
+                    }
+                    if (k == size) {
+                        return i;
+                    }
+                    if (i + k == length) {
+                        return -i - 1;
+                    }
+                }
+            }
+            return -length - 1;
+        };
+
+        /// @brief The offset after the empty line ending the header section that starts at `from`, or -1.
+        let header_end = func(from: int) -> int {
+            last length = buffer.length;
+            if (length - from >= 2 && buffer[from] == 13 && buffer[from + 1] == 10) {
+                return from + 2;
+            }
+            let i = from + scanned - 3;
+            if (i < from) {
+                i = from;
+            }
+            while (i + 3 < length) {
+                if (buffer[i] == 13 && buffer[i + 1] == 10 && buffer[i + 2] == 13 && buffer[i + 3] == 10) {
+                    return i + 4;
+                }
+                i++;
+            }
+            return -1;
+        };
+
+        /// @brief Records a failure and returns it.
+        let fail = func(status: int, message: string) -> Result<MultipartEvent[list]> {
+            failed_status = status;
+            failed_message = message;
+            return failure();
+        };
+
+        /// @brief The recorded failure.
+        let failure = func -> Result<MultipartEvent[list]> =>
+            Result<MultipartEvent[list]>.Err(wire.rejection(failed_status, failed_message));
+    );
+
+    /// @brief The boundary parameter of a multipart Content-Type value such as `multipart/form-data;
+    /// boundary=AaB03x`, quoted or not (RFC 2046 section 5.1.1, RFC 7578 section 4.1).
+    ///
+    /// 415 when the media type is not multipart/<subtype>; 400 when the parameters are malformed (RFC 9110
+    /// section 5.6.6: an unquoted value must be a token), the boundary is missing or given twice, or it is not
+    /// 1 to 70 bchars without a final space (`is_boundary`).
+    #[NoDiscard, Pure, ThreadSafe]
+    export let boundary_of = func(content_type: string) -> Result<string> {
+        last semicolon = strings.index_of(content_type, ";");
+        last media = http_headers.trim_value(semicolon < 0 ? content_type : content_type.slice(0, semicolon));
+        last slash = strings.index_of(media, "/");
+        if (slash < 0 || not strings.equals_ignore_ascii_case(media.slice(0, slash), "multipart")
+            || not http_headers.is_token(media.slice(slash + 1, media.byte_length))) {
+            return Result<string>.Err(wire.rejection(415, "not a multipart media type"));
+        }
+        last names: string[list] = new;
+        last values: string[list] = new;
+        return Result<string>.Err(wire.rejection(400, "malformed Content-Type parameters")) unless parse_parameters(content_type, names, values);
+        let boundary = "";
+        let count = 0;
+        for (let i = 0; i < names.length; i++) {
+            if (names[i] == "boundary") {
+                boundary = values[i];
+                count++;
+            }
+        }
+        if (count != 1) {
+            last problem = count == 0 ? "no boundary parameter" : "more than one boundary parameter";
+            return Result<string>.Err(wire.rejection(400, problem));
+        }
+        return Result<string>.Err(wire.rejection(400, "invalid boundary")) unless is_boundary(boundary);
+        return Result<string>.Ok(boundary);
+    };
+
+    /// @brief Whether `text` is a boundary: 1 to 70 bchars (digits, letters, space and '()+_,-./:=?) not ending in
+    /// a space (RFC 2046 section 5.1.1).
+    #[Pure, ThreadSafe]
+    export let is_boundary = func(text: string) -> bool {
+        last length = text.byte_length;
+        if (length < 1 || length > 70 || text.byte_at(length - 1) == 32) {
+            return false;
+        }
+        for (let i = 0; i < length; i++) {
+            last b = text.byte_at(i);
+            last alnum = (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122);
+            // ' ( ) + _ , - . / : = ? and space
+            if (not alnum && not (b == 39 or 40 or 41 or 43 or 95 or 44 or 45 or 46 or 47 or 58 or 61 or 63 or 32)) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    /// @brief The value of parameter `name` (compared without case) of a field value of the form `type *( ";"
+    /// name "=" value )` (RFC 9110 section 5.6.6), where type is a token or token "/" token, quoted-pairs undone.
+    /// Ok(None) when absent; 400 when the parameters are malformed.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let parameter = func(value: string, name: string) -> Result<Optional<string>> {
+        last names: string[list] = new;
+        last values: string[list] = new;
+        return Result<Optional<string>>.Err(wire.rejection(400, "malformed parameters")) unless parse_parameters(value, names, values);
+        last key = strings.to_ascii_lower(name);
+        for (let i = 0; i < names.length; i++) {
+            if (names[i] == key) {
+                return Result<Optional<string>>.Ok(Optional<string>.Some(values[i]));
+            }
+        }
+        return Result<Optional<string>>.Ok(Optional<string>.None);
+    };
+
+    /// @brief The parts of a complete multipart body with `boundary`. 400 for an invalid boundary or a missing close
+    /// delimiter; other errors as `MultipartParser.feed`. A part's body is held in memory; use `MultipartParser`
+    /// for large parts.
+    #NoDiscard
+    export let parse_all = func(body: uint8[list], boundary: string, limits: MultipartLimits) -> Result<Part[list]> {
+        return Result<Part[list]>.Err(wire.rejection(400, "invalid boundary")) unless is_boundary(boundary);
+        last parser = new MultipartParser(boundary, limits);
+        last events = parser.feed(body)?;
+        parser.finish()?;
+        last parts: Part[list] = new;
+        let fields = new http_headers.Headers();
+        let content: uint8[list] = new;
+        for (let event in events) {
+            match (event) {
+                MultipartEvent.PartStart(h) => {
+                    fields = h;
+                    content = new;
+                },
+                MultipartEvent.Data(bytes) => {
+                    for (let b in bytes) {
+                        content.append(b);
+                    }
+                },
+                MultipartEvent.PartEnd => {
+                    parts.append(new Part(fields, content));
+                },
+                MultipartEvent.Done => {},
+            }
+        }
+        return Result<Part[list]>.Ok(parts);
+    }
+    /// @brief `parse_all` with the default limits.
+    or func(body: uint8[list], boundary: string) -> Result<Part[list]> {
+        return parse_all(body, boundary, new MultipartLimits());
+    };
+
+    /// @brief Parser state: before the first delimiter.
+    const Preamble: int = 0;
+    /// @brief Parser state: after a delimiter, before its line end.
+    const AfterDelimiter: int = 1;
+    /// @brief Parser state: in a part's header section.
+    const InHeaders: int = 2;
+    /// @brief Parser state: in a part's body.
+    const InBody: int = 3;
+    /// @brief Parser state: after the close delimiter.
+    const Finished: int = 4;
+
+    /// @brief Field limits for part heads: the part limits, strict CRLF.
+    let field_limits_of = func(limits: MultipartLimits) -> wire.Limits =>
+        new wire.Limits(limits.max_header_bytes, limits.max_header_fields, 1, 1, 1, false, ["GET"]);
+
+    /// @brief A parameter of Content-Disposition, or None when absent or malformed.
+    let disposition_parameter = func(fields: http_headers.Headers, name: string) -> Optional<string> {
+        return match (fields.get("Content-Disposition")) {
+            Optional.Some(value) => match (parameter(value, name)) {
+                Result.Ok(found) => found,
+                Result.Err(_) => Optional<string>.None,
+            },
+            Optional.None => Optional<string>.None,
+        };
+    };
+
+    /// @brief Reads the parameters after the first ";" of `value` into lowercase names and values; false when
+    /// malformed. What precedes the first ";" must be a token or token "/" token; a value is a token or a
+    /// quoted-string; empty parameters (";;") are allowed.
+    let parse_parameters = func(value: string, names: string[list], values: string[list]) -> bool {
+        last length = value.byte_length;
+        let k = type_end(value);
+        last kind = http_headers.trim_value(value.slice(0, k));
+        last slash = strings.index_of(kind, "/");
+        if (slash < 0) {
+            return false unless http_headers.is_token(kind);
+        } else if (not http_headers.is_token(kind.slice(0, slash))
+            || not http_headers.is_token(kind.slice(slash + 1, kind.byte_length))) {
+            return false;
+        }
+        while (true) {
+            k = skip_space(value, k);
+            if (k >= length) {
+                return true;
+            }
+            if (value.byte_at(k) != 59) {
+                return false;
+            }
+            k = skip_space(value, k + 1);
+            if (k >= length) {
+                return true;
+            }
+            if (value.byte_at(k) == 59) {
+                continue;
+            }
+            last name_start = k;
+            while (k < length && http_headers.is_tchar(value.byte_at(k))) {
+                k++;
+            }
+            if (k == name_start || k >= length || value.byte_at(k) != 61) {
+                return false;
+            }
+            last name = strings.to_ascii_lower(value.slice(name_start, k));
+            k++;
+            if (k < length && value.byte_at(k) == 34) {
+                let text = "";
+                let segment = k + 1;
+                let j = k + 1;
+                let closed = false;
+                while (j < length) {
+                    last c = value.byte_at(j);
+                    if (c == 34) {
+                        closed = true;
+                        break;
+                    }
+                    if (c == 92) {
+                        if (j + 1 >= length || value.byte_at(j + 1) >= 128) {
+                            return false;
+                        }
+                        text ..= value.slice(segment, j) .. value.slice(j + 1, j + 2);
+                        j += 2;
+                        segment = j;
+                        continue;
+                    }
+                    j++;
+                }
+                return false unless closed;
+                names.append(name);
+                values.append(text .. value.slice(segment, j));
+                k = j + 1;
+            } else {
+                last value_start = k;
+                while (k < length && http_headers.is_tchar(value.byte_at(k))) {
+                    k++;
+                }
+                if (k == value_start) {
+                    return false;
+                }
+                names.append(name);
+                values.append(value.slice(value_start, k));
+            }
+        }
+        return false;
+    };
+
+    /// @brief The offset of the first ";" (the media or disposition type has no quotes), or the length.
+    let type_end = func(value: string) -> int {
+        last at = strings.index_of(value, ";");
+        return at < 0 ? value.byte_length : at;
+    };
+
+    /// @brief The offset of the first byte at or after `k` that is not SP or HTAB.
+    let skip_space = func(value: string, k: int) -> int {
+        let j = k;
+        while (j < value.byte_length && (value.byte_at(j) == 32 || value.byte_at(j) == 9)) {
+            j++;
+        }
+        return j;
+    };
+
+    /// @brief A new list holding bytes[start, end).
+    let copy_range = func(bytes: uint8[list], start: int, end: int) -> uint8[list] {
+        last out: uint8[list] = new;
+        for (let i = start; i < end; i++) {
+            out.append(bytes[i]);
+        }
+        return out;
+    };
+);

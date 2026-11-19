@@ -28,7 +28,7 @@ let ArrayListTests = module (
     };
 
     let numbers = func() -> array_list.ArrayList<int> {
-        return array_list.of<int>([3, 1, 4, 1, 5]);
+        return array_list.of<int>(new([3, 1, 4, 1, 5]));
     };
 
     let text = func(items: array_list.ArrayList<int>) -> string {
@@ -40,7 +40,7 @@ let ArrayListTests = module (
         test.assert_equal_int32(0, empty.size());
         test.assert(empty.is_empty());
 
-        let source: int[list] = [1, 2];
+        let source: int[list] = new([1, 2]);
         let copied = array_list.of<int>(source);
         source.append(3);
         test.assert_equal_string("[1, 2]", text(copied));
@@ -48,7 +48,7 @@ let ArrayListTests = module (
         test.assert_equal_string("[7, 7, 7]", text(array_list.filled<int>(3, 7)));
         test.assert_equal_string("[]", text(array_list.filled<int>(0, 7)));
 
-        let shared: int[list] = [1];
+        let shared: int[list] = new([1]);
         let wrapped = array_list.wrap<int>(shared);
         shared.append(2);
         wrapped.add(3);
@@ -86,12 +86,12 @@ let ArrayListTests = module (
     };
 
     export let test_add_all = func() -> void {
-        let items = array_list.of<int>([1, 2]);
-        items.add_all([3, 4]);
+        let items = array_list.of<int>(new([1, 2]));
+        items.add_all(new([3, 4]));
         test.assert_equal_string("[1, 2, 3, 4]", text(items));
         items.add_all(items.items());
         test.assert_equal_string("[1, 2, 3, 4, 1, 2, 3, 4]", text(items));
-        let empty: int[list] = [];
+        let empty: int[list] = new;
         items.add_all(empty);
         test.assert_equal_int32(8, items.size());
     };
@@ -116,7 +116,7 @@ let ArrayListTests = module (
         test.assert_equal_string("[5, 1, 4, 1, 3]", text(items));
         items.reverse();
         test.assert_equal_string("[3, 1, 4, 1, 5]", text(items));
-        let even = array_list.of<int>([1, 2, 3, 4]);
+        let even = array_list.of<int>(new([1, 2, 3, 4]));
         even.reverse();
         test.assert_equal_string("[4, 3, 2, 1]", text(even));
         let empty = array_list.create<int>();
@@ -143,7 +143,7 @@ let ArrayListTests = module (
 
     // clear and truncate shorten the same backing list the wrapper adopted.
     export let test_clear_and_truncate_through_wrapped_list = func() -> void {
-        let backing: int[list] = [1, 2, 3, 4];
+        let backing: int[list] = new([1, 2, 3, 4]);
         let wrapped = array_list.wrap<int>(backing);
         let version = backing.version;
         wrapped.truncate(2);
@@ -182,7 +182,7 @@ let ArrayListTests = module (
     };
 
     export let test_iterator = func() -> void {
-        let items = array_list.of<int>([1, 2]);
+        let items = array_list.of<int>(new([1, 2]));
         let walk = items.iterator();
         test.assert(walk.has_next());
         test.assert(walk.has_next());
@@ -190,7 +190,7 @@ let ArrayListTests = module (
         test.assert_equal_int32(2, walk.next());
         test.assert(!walk.has_next());
         test.assert(!walk.has_next());
-        let seen: int[list] = [];
+        let seen: int[list] = new;
         for (let value in items) {
             seen.append(value);
         }
@@ -222,7 +222,7 @@ let ArrayListTests = module (
     };
 
     export let test_for_each_order = func() -> void {
-        let seen: int[list] = [];
+        let seen: int[list] = new;
         numbers().for_each(func(value: int) -> void {
             seen.append(value);
         });
@@ -231,7 +231,7 @@ let ArrayListTests = module (
 
     export let test_remove_if_and_retain_if = func() -> void {
         let items = numbers();
-        let seen: int[list] = [];
+        let seen: int[list] = new;
         let removed = items.remove_if(func(value: int) -> bool {
             seen.append(value);
             return value == 1;
@@ -290,7 +290,7 @@ let ArrayListTests = module (
     };
 
     export let test_binary_search = func() -> void {
-        let items = array_list.of<int>([1, 3, 3, 3, 5, 7]);
+        let items = array_list.of<int>(new([1, 3, 3, 3, 5, 7]));
         test.assert_equal_int32(1, items.binary_search(3, compare));
         test.assert_equal_int32(0, items.binary_search(1, compare));
         test.assert_equal_int32(5, items.binary_search(7, compare));
@@ -308,37 +308,37 @@ let ArrayListTests = module (
         test.assert_equal_int32(3, items.last_index_of(1));
         test.assert_equal_int32(-1, items.index_of(9));
         test.assert_equal_int32(-1, items.last_index_of(9));
-        test.assert(items.contains_all([1, 5]));
-        test.assert(!items.contains_all([1, 2]));
+        test.assert(items.contains_all(new([1, 5])));
+        test.assert(!items.contains_all(new([1, 2])));
 
         let nan = float64.from_bits(9221120237041090561);
-        let floats = array_list.of<float64>([0.0, nan]);
+        let floats = array_list.of<float64>(new([0.0, nan]));
         test.assert_equal_int32(1, floats.index_of(float64.from_bits(9218868437227405313)));
         test.assert_equal_int32(-1, floats.index_of(-0.0));
 
         let marker: class = new Tagged(1, 0);
-        let objects = array_list.of<class>([nil, marker]);
+        let objects = array_list.of<class>(new([nil, marker]));
         test.assert_equal_int32(0, objects.index_of(nil));
         test.assert_equal_int32(1, objects.index_of(marker));
         test.assert(!objects.contains(new Tagged(1, 0)));
     };
 
     export let test_equality_hash_and_text = func() -> void {
-        let a = array_list.of<int>([1, 2]);
-        let b = array_list.of<int>([1, 2]);
+        let a = array_list.of<int>(new([1, 2]));
+        let b = array_list.of<int>(new([1, 2]));
         test.assert(a.equals(b));
         test.assert(a != b);
         test.assert_equal_int32(994, a.hash_code() as int);
         test.assert_equal_int32(994, b.hash_code() as int);
-        test.assert(!a.equals(array_list.of<int>([1, 2, 3])));
-        test.assert(!a.equals(array_list.of<int>([2, 1])));
-        test.assert(!a.equals(array_list.of<int64>([1, 2])));
+        test.assert(!a.equals(array_list.of<int>(new([1, 2, 3]))));
+        test.assert(!a.equals(array_list.of<int>(new([2, 1]))));
+        test.assert(!a.equals(array_list.of<int64>(new([1, 2]))));
         test.assert(!a.equals(nil));
         test.assert(!a.equals(new Tagged(1, 0)));
         test.assert_equal_int32(1, array_list.create<int>().hash_code() as int);
         test.assert_equal_string("[]", array_list.create<int>().to_string());
-        test.assert_equal_string("[a, b]", array_list.of<string>(["a", "b"]).to_string());
-        test.assert_equal_string("[0.5, -0.0]", array_list.of<float64>([0.5, -0.0]).to_string());
+        test.assert_equal_string("[a, b]", array_list.of<string>(new(["a", "b"])).to_string());
+        test.assert_equal_string("[0.5, -0.0]", array_list.of<float64>(new([0.5, -0.0])).to_string());
         let as_class: class = a;
         test.assert_equal_string("[1, 2]", as_class.to_string());
         test.assert(as_class.equals(b));
@@ -346,7 +346,7 @@ let ArrayListTests = module (
 
     export let test_self_containment_text = func() -> void {
         let outer = array_list.create<class>();
-        let inner = array_list.of<int>([1]);
+        let inner = array_list.of<int>(new([1]));
         outer.add(outer);
         outer.add(inner);
         outer.add(nil);
@@ -361,10 +361,10 @@ let ArrayListTests = module (
     export let test_interfaces = func() -> void {
         let items: mutable_list.MutableList<int> = numbers();
         test.assert(items.add(9));
-        items.add_all([2]);
+        items.add_all(new([2]));
         items.sort(compare);
         test.assert_equal_string("[1, 1, 2, 3, 4, 5, 9]", items.to_list().to_string());
-        test.assert(items.contains_all([9, 2]));
+        test.assert(items.contains_all(new([9, 2])));
         test.assert_equal_int32(1, items.remove_first());
         let view: collection.Collection<int> = items;
         let total = 0;

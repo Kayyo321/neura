@@ -1,0 +1,364 @@
+let error = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let header_map = import:Std.Net.Http.Headers;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief HTTP/2 (RFC 9113) wire data: the connection preface, frame types and flags, settings and error codes,
+/// and the codecs of the 9-octet frame header and the SETTINGS payload. Connections and HPACK are stubs.
+///
+/// The frame header is Length (24), Type (8), Flags (8), Reserved (1), Stream Identifier (31) (section 4.1); the
+/// reserved bit is ignored on receipt and never sent. A SETTINGS payload is a sequence of 6-octet entries, a
+/// 16-bit identifier and a 32-bit value (section 6.5.1); `decode_settings` applies the value checks of section
+/// 6.5.2 and RFC 8441 section 3 and reports a violation as `error.custom(<HTTP/2 error name>, <reason>)`.
+/// Unknown identifiers are kept (receivers ignore them). Opening a connection needs TCP and TLS with ALPN "h2"
+/// from the runtime; HPACK (RFC 7541) header compression is not implemented.
+/// @see [Std.Net.Http.H2](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-H2)
+#Since("0.3.0")
+export let H2 = module (
+    /// @brief The client connection preface, "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n" (section 3.4).
+    export const Preface: string = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+
+    /// @brief The size of a frame header in octets (section 4.1).
+    export const FrameHeaderSize: int = 9;
+
+    /// @brief DATA, 0x00 (section 6.1).
+    export const FrameData: int = 0;
+    /// @brief HEADERS, 0x01 (section 6.2).
+    export const FrameHeaders: int = 1;
+    /// @brief PRIORITY, 0x02 (section 6.3, deprecated).
+    export const FramePriority: int = 2;
+    /// @brief RST_STREAM, 0x03 (section 6.4).
+    export const FrameRstStream: int = 3;
+    /// @brief SETTINGS, 0x04 (section 6.5).
+    export const FrameSettings: int = 4;
+    /// @brief PUSH_PROMISE, 0x05 (section 6.6).
+    export const FramePushPromise: int = 5;
+    /// @brief PING, 0x06 (section 6.7).
+    export const FramePing: int = 6;
+    /// @brief GOAWAY, 0x07 (section 6.8).
+    export const FrameGoaway: int = 7;
+    /// @brief WINDOW_UPDATE, 0x08 (section 6.9).
+    export const FrameWindowUpdate: int = 8;
+    /// @brief CONTINUATION, 0x09 (section 6.10).
+    export const FrameContinuation: int = 9;
+
+    /// @brief Flag END_STREAM (DATA, HEADERS) and ACK (SETTINGS, PING), 0x01.
+    export const FlagEndStream: int = 1;
+    /// @brief Flag ACK of SETTINGS and PING, 0x01 (sections 6.5, 6.7).
+    export const FlagAck: int = 1;
+    /// @brief Flag END_HEADERS, 0x04 (sections 6.2, 6.6, 6.10).
+    export const FlagEndHeaders: int = 4;
+    /// @brief Flag PADDED, 0x08 (sections 6.1, 6.2, 6.6).
+    export const FlagPadded: int = 8;
+    /// @brief Flag PRIORITY of HEADERS, 0x20 (section 6.2).
+    export const FlagPriority: int = 32;
+
+    /// @brief SETTINGS_HEADER_TABLE_SIZE, 0x01; initial value 4,096 (section 6.5.2).
+    export const SettingHeaderTableSize: int = 1;
+    /// @brief SETTINGS_ENABLE_PUSH, 0x02; initial value 1, only 0 or 1.
+    export const SettingEnablePush: int = 2;
+    /// @brief SETTINGS_MAX_CONCURRENT_STREAMS, 0x03; initially unlimited.
+    export const SettingMaxConcurrentStreams: int = 3;
+    /// @brief SETTINGS_INITIAL_WINDOW_SIZE, 0x04; initial value 65,535, at most 2^31-1.
+    export const SettingInitialWindowSize: int = 4;
+    /// @brief SETTINGS_MAX_FRAME_SIZE, 0x05; initial value 16,384, 16,384 through 16,777,215.
+    export const SettingMaxFrameSize: int = 5;
+    /// @brief SETTINGS_MAX_HEADER_LIST_SIZE, 0x06; initially unlimited.
+    export const SettingMaxHeaderListSize: int = 6;
+    /// @brief SETTINGS_ENABLE_CONNECT_PROTOCOL, 0x08; only 0 or 1 (RFC 8441 section 3).
+    export const SettingEnableConnectProtocol: int = 8;
+
+    /// @brief The initial SETTINGS_HEADER_TABLE_SIZE.
+    export const InitialHeaderTableSize: int64 = 4096;
+    /// @brief The initial SETTINGS_INITIAL_WINDOW_SIZE, 2^16-1.
+    export const InitialWindowSize: int64 = 65535;
+    /// @brief The initial and smallest SETTINGS_MAX_FRAME_SIZE, 2^14.
+    export const MinMaxFrameSize: int64 = 16384;
+    /// @brief The largest SETTINGS_MAX_FRAME_SIZE and frame length, 2^24-1.
+    export const MaxFrameLength: int64 = 16777215;
+    /// @brief The largest flow-control window, 2^31-1.
+    export const MaxWindowSize: int64 = 2147483647;
+
+    /// @brief NO_ERROR, 0x00 (section 7).
+    export const ErrorNoError: int = 0;
+    /// @brief PROTOCOL_ERROR, 0x01.
+    export const ErrorProtocol: int = 1;
+    /// @brief INTERNAL_ERROR, 0x02.
+    export const ErrorInternal: int = 2;
+    /// @brief FLOW_CONTROL_ERROR, 0x03.
+    export const ErrorFlowControl: int = 3;
+    /// @brief SETTINGS_TIMEOUT, 0x04.
+    export const ErrorSettingsTimeout: int = 4;
+    /// @brief STREAM_CLOSED, 0x05.
+    export const ErrorStreamClosed: int = 5;
+    /// @brief FRAME_SIZE_ERROR, 0x06.
+    export const ErrorFrameSize: int = 6;
+    /// @brief REFUSED_STREAM, 0x07.
+    export const ErrorRefusedStream: int = 7;
+    /// @brief CANCEL, 0x08.
+    export const ErrorCancel: int = 8;
+    /// @brief COMPRESSION_ERROR, 0x09.
+    export const ErrorCompression: int = 9;
+    /// @brief CONNECT_ERROR, 0x0a.
+    export const ErrorConnect: int = 10;
+    /// @brief ENHANCE_YOUR_CALM, 0x0b.
+    export const ErrorEnhanceYourCalm: int = 11;
+    /// @brief INADEQUATE_SECURITY, 0x0c.
+    export const ErrorInadequateSecurity: int = 12;
+    /// @brief HTTP_1_1_REQUIRED, 0x0d.
+    export const ErrorHttp11Required: int = 13;
+
+    /// @brief A frame header (section 4.1).
+    #[Final, Immutable, ThreadSafe]
+    export let FrameHeader = class (
+        /// @brief The payload length, 0 through 2^24-1.
+        export last length: int;
+        /// @brief The frame type, 0 through 255.
+        export last frame_type: int;
+        /// @brief The flags, 0 through 255.
+        export last flags: int;
+        /// @brief The stream identifier, 0 through 2^31-1.
+        export last stream_id: int64;
+
+        /// @brief Stores the fields; `encode_frame_header` checks their ranges.
+        export let init = func(size: int, kind: int, flag_bits: int, stream: int64) {
+            length = size;
+            frame_type = kind;
+            flags = flag_bits;
+            stream_id = stream;
+        };
+
+        /// @brief Whether every bit of `flag` is set.
+        export let has_flag = func(flag: int) -> bool => (flags & flag) == flag;
+
+        /// @brief Equal fields.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: FrameHeader) {
+                return false;
+            }
+            return length == that.length && frame_type == that.frame_type && flags == that.flags
+                && stream_id == that.stream_id;
+        };
+
+        /// @brief Combines the fields.
+        export let.override hash_code = func -> uint32 => hashing.combine(17, strings.hash(to_string()));
+
+        /// @brief The fields by name.
+        export let.override to_string = func -> string =>
+            "FrameHeader{length=" .. length.to_string() .. ", type=" .. frame_type.to_string() .. ", flags="
+            .. flags.to_string() .. ", stream=" .. stream_id.to_string() .. "}";
+    );
+
+    /// @brief The identifiers and values of a SETTINGS frame, in order.
+    #[Final, NotThreadSafe]
+    export let Settings = class (
+        /// @brief The identifiers, 0 through 65,535.
+        export last ids: int[list] = new;
+        /// @brief The values, 0 through 2^32-1, parallel to `ids`.
+        export last values: int64[list] = new;
+
+        /// @brief An empty list.
+        export let init = func {
+        };
+
+        /// @brief Appends a setting. Traps with "invalid argument: setting" when the identifier or value does
+        /// not fit 16 or 32 bits.
+        export let add = func(id: int, value: int64) {
+            if (id < 0 || id > 65535 || value < 0 || value > 4294967295) {
+                trap_with_message("invalid argument: setting");
+            }
+            ids.append(id);
+            values.append(value);
+        };
+
+        /// @brief The last value of `id` (later entries override earlier ones, section 6.5.3), or `fallback`.
+        export let get_or = func(id: int, fallback: int64) -> int64 {
+            let found = fallback;
+            for (let i = 0; i < ids.length; i++) {
+                if (ids[i] == id) {
+                    found = values[i];
+                }
+            }
+            return found;
+        };
+
+        /// @brief Equal settings in the same order.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: Settings) {
+                return false;
+            }
+            return to_string() == that.to_string();
+        };
+
+        /// @brief The hash of the text form.
+        export let.override hash_code = func -> uint32 => hashing.combine(17, strings.hash(to_string()));
+
+        /// @brief "Settings{id=value, ...}".
+        export let.override to_string = func -> string {
+            let text = "Settings{";
+            for (let i = 0; i < ids.length; i++) {
+                if (i > 0) {
+                    text ..= ", ";
+                }
+                text ..= ids[i].to_string() .. "=" .. values[i].to_string();
+            }
+            return text .. "}";
+        };
+    );
+
+    /// @brief The preface as bytes.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let preface_bytes = func -> uint8[list] {
+        last bytes: uint8[list] = new;
+        for (let i = 0; i < Preface.byte_length; i++) {
+            bytes.append(Preface.byte_at(i));
+        }
+        return bytes;
+    };
+
+    /// @brief The 9 octets of `header`, the reserved bit unset. Traps with "invalid argument: frame header" when
+    /// a field is out of range.
+    #[NoDiscard]
+    export let encode_frame_header = func(header: FrameHeader) -> uint8[list] {
+        if (header.length < 0 || (header.length as int64) > MaxFrameLength || header.frame_type < 0
+            || header.frame_type > 255 || header.flags < 0 || header.flags > 255 || header.stream_id < 0
+            || header.stream_id > MaxWindowSize) {
+            trap_with_message("invalid argument: frame header");
+        }
+        last bytes: uint8[list] = new;
+        bytes.append((header.length >> 16) as uint8);
+        bytes.append(((header.length >> 8) & 255) as uint8);
+        bytes.append((header.length & 255) as uint8);
+        bytes.append(header.frame_type as uint8);
+        bytes.append(header.flags as uint8);
+        last stream = header.stream_id;
+        bytes.append((stream >> 24) as uint8);
+        bytes.append(((stream >> 16) & 255) as uint8);
+        bytes.append(((stream >> 8) & 255) as uint8);
+        bytes.append((stream & 255) as uint8);
+        return bytes;
+    };
+
+    /// @brief The frame header at `offset`; the reserved bit is ignored. Err (UnexpectedEnd) when fewer than 9
+    /// bytes remain.
+    #[NoDiscard]
+    export let decode_frame_header = func(bytes: uint8[list], offset: int) -> Result<FrameHeader> {
+        if (offset < 0 || offset + FrameHeaderSize > bytes.length) {
+            return Result<FrameHeader>.Err(error.Error.Parse {
+                kind: error.ParseErrorKind.UnexpectedEnd, offset: bytes.length, message: "truncated frame header" });
+        }
+        last length = ((bytes[offset] as int) << 16) | ((bytes[offset + 1] as int) << 8) | (bytes[offset + 2] as int);
+        last stream = (((bytes[offset + 5] & 127) as int64) << 24) | ((bytes[offset + 6] as int64) << 16)
+            | ((bytes[offset + 7] as int64) << 8) | (bytes[offset + 8] as int64);
+        return Result<FrameHeader>.Ok(
+            new FrameHeader(length, bytes[offset + 3] as int, bytes[offset + 4] as int, stream));
+    };
+
+    /// @brief The SETTINGS payload holding `settings` in order (section 6.5.1).
+    #[NoDiscard]
+    export let encode_settings = func(settings: Settings) -> uint8[list] {
+        last bytes: uint8[list] = new;
+        for (let i = 0; i < settings.ids.length; i++) {
+            last id = settings.ids[i];
+            last value = settings.values[i];
+            bytes.append((id >> 8) as uint8);
+            bytes.append((id & 255) as uint8);
+            bytes.append((value >> 24) as uint8);
+            bytes.append(((value >> 16) & 255) as uint8);
+            bytes.append(((value >> 8) & 255) as uint8);
+            bytes.append((value & 255) as uint8);
+        }
+        return bytes;
+    };
+
+    /// @brief The settings of a SETTINGS payload. Errors are `error.custom` with the HTTP/2 error name as the
+    /// code: FRAME_SIZE_ERROR for a length that is not a multiple of 6 (section 6.5); PROTOCOL_ERROR for
+    /// ENABLE_PUSH or ENABLE_CONNECT_PROTOCOL other than 0 or 1, or MAX_FRAME_SIZE outside 16,384 through
+    /// 16,777,215; FLOW_CONTROL_ERROR for INITIAL_WINDOW_SIZE above 2^31-1 (section 6.5.2).
+    #[NoDiscard]
+    export let decode_settings = func(payload: uint8[list]) -> Result<Settings> {
+        if (payload.length % 6 != 0) {
+            return Result<Settings>.Err(error.custom("FRAME_SIZE_ERROR", "SETTINGS length is not a multiple of 6"));
+        }
+        last settings = new Settings();
+        for (let at = 0; at < payload.length; at += 6) {
+            last id = ((payload[at] as int) << 8) | (payload[at + 1] as int);
+            last value = ((payload[at + 2] as int64) << 24) | ((payload[at + 3] as int64) << 16)
+                | ((payload[at + 4] as int64) << 8) | (payload[at + 5] as int64);
+            if ((id == SettingEnablePush || id == SettingEnableConnectProtocol) && value > 1) {
+                return Result<Settings>.Err(
+                    error.custom("PROTOCOL_ERROR", "setting " .. id.to_string() .. " must be 0 or 1"));
+            }
+            if (id == SettingInitialWindowSize && value > MaxWindowSize) {
+                return Result<Settings>.Err(error.custom("FLOW_CONTROL_ERROR", "initial window size above 2^31-1"));
+            }
+            if (id == SettingMaxFrameSize && (value < MinMaxFrameSize || value > MaxFrameLength)) {
+                return Result<Settings>.Err(error.custom("PROTOCOL_ERROR", "max frame size out of range"));
+            }
+            settings.add(id, value);
+        }
+        return Result<Settings>.Ok(settings);
+    };
+
+    /// @brief An HTTP/2 connection over TLS.
+    #[Final, NotThreadSafe]
+    export let H2Connection = class (
+        /// @brief The authority the connection was opened to.
+        export last authority: string;
+
+        /// @brief Records the authority; only `connect` creates connections.
+        export let init = func(target: string) {
+            authority = target;
+        };
+
+        /// @brief Writes one frame: its header, then the payload.
+        /// @stub needs TLS transport; connection management is not implemented
+        export let send_frame = func(header: FrameHeader, payload: uint8[list]) -> Result<Unit> =>
+            host_write(encode_frame_header(header), payload);
+
+        /// @brief Sends GOAWAY with `error_code` and closes the connection (section 6.8).
+        /// @stub needs TLS transport; connection management is not implemented
+        export let close = func(error_code: int) -> Result<Unit> => host_close(error_code);
+
+        /// @brief The authority.
+        export let.override to_string = func -> string => "H2Connection{" .. authority .. "}";
+    );
+
+    /// @brief Opens an HTTP/2 connection to `authority` (host:port): TCP, TLS with ALPN "h2", the preface and
+    /// a SETTINGS frame holding `settings` (sections 3.2, 3.4).
+    /// @stub needs TLS transport; connection management is not implemented
+    #NoDiscard
+    export let connect = func(authority: string, settings: Settings) -> Result<H2Connection> =>
+        host_connect(authority, encode_settings(settings));
+
+    /// @brief The HPACK encoding of a field section (RFC 7541).
+    /// @stub HPACK (RFC 7541) header compression is not implemented
+    #NoDiscard
+    export let hpack_encode = func(fields: header_map.Headers) -> uint8[list] {
+        trap_with_message("unsupported: Std.Net.Http.H2.hpack_encode is not implemented in Neura 0.3.0 (HPACK (RFC 7541) header compression is not implemented)");
+    };
+
+    /// @brief The field section of an HPACK header block (RFC 7541).
+    /// @stub HPACK (RFC 7541) header compression is not implemented
+    #NoDiscard
+    export let hpack_decode = func(block: uint8[list]) -> Result<header_map.Headers> {
+        trap_with_message("unsupported: Std.Net.Http.H2.hpack_decode is not implemented in Neura 0.3.0 (HPACK (RFC 7541) header compression is not implemented)");
+    };
+
+    /// @brief Host binding for `connect`: a TLS connection with ALPN h2, then the preface and SETTINGS bytes.
+    let host_connect = func(authority: string, settings_payload: uint8[list]) -> Result<H2Connection> {
+        trap_with_message("unsupported: Std.Net.Http.H2.connect is not implemented in Neura 0.3.0 (needs TLS transport; connection management is not implemented)");
+    };
+
+    /// @brief Host binding for `H2Connection.send_frame`: writes the bytes to the TLS stream.
+    let host_write = func(header: uint8[list], payload: uint8[list]) -> Result<Unit> {
+        trap_with_message("unsupported: Std.Net.Http.H2.H2Connection.send_frame is not implemented in Neura 0.3.0 (needs TLS transport; connection management is not implemented)");
+    };
+
+    /// @brief Host binding for `H2Connection.close`: sends GOAWAY and closes the TLS stream.
+    let host_close = func(error_code: int) -> Result<Unit> {
+        trap_with_message("unsupported: Std.Net.Http.H2.H2Connection.close is not implemented in Neura 0.3.0 (needs TLS transport; connection management is not implemented)");
+    };
+);

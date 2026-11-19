@@ -1,0 +1,12 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: ristretto255 scalar reduction requires 64 bytes
+// run-options: --gpu=off
+let program = import:Std.Program;
+let ristretto = import:Std.Crypto.Advanced.Ristretto255;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = ristretto.scalar_reduce(new([0]));
+        return program.ExitCode.Ok;
+    };
+);

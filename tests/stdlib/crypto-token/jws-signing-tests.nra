@@ -1,0 +1,118 @@
+// test-options: --gpu=off --deny-entropy --max-steps 5000000000
+let base64 = import:Std.Encoding.Base64;
+let ecdsa = import:Std.Crypto.Asymmetric.Ecdsa;
+let ed448 = import:Std.Crypto.Asymmetric.Ed448;
+let hex = import:Std.Encoding.Hex;
+let jwk = import:Std.Crypto.Token.Jwk;
+let jws = import:Std.Crypto.Token.Jws;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let cases = import:JwsSigningTestCases;
+let vectors = import:JwsSigningVectors;
+
+let JwsSigningTests = module (
+    let hmac_algorithm = func(name: string) -> jwk.HmacAlgorithm {
+        if (name == "HS256") {
+            return jwk.HmacAlgorithm.Hs256;
+        }
+        if (name == "HS384") {
+            return jwk.HmacAlgorithm.Hs384;
+        }
+        return jwk.HmacAlgorithm.Hs512;
+    };
+
+    export let test_hmac_signing_matches_rfc_and_reference_tokens = func {
+        last rows = vectors.hmac_cases;
+        for (let i = 0; i < rows.length; i += 6) {
+            last alg = hmac_algorithm(rows[i + 1]);
+            last text = cases.text(rows[i + 2]);
+            let key = test.assert_ok(jwk.parse_hmac_signing(text, alg));
+            defer key.wipe();
+            last payload = cases.bytes(rows[i + 4]);
+            last signed = i < 12
+                ? test.assert_ok(jws.sign_hmac(payload, key, cases.text(rows[i + 3])))
+                : test.assert_ok(jws.sign_hmac(payload, key));
+            test.assert_equal_string(rows[i + 5], signed);
+            let verifier = test.assert_ok(jwk.parse_hmac(text, alg));
+            defer verifier.wipe();
+            test.assert_equal_string(rows[i + 4], hex.encode(test.assert_ok(jws.verify<jwk.HmacKey>(signed, verifier))));
+        }
+    };
+
+    export let test_octet_jwk_permissions_and_protected_headers = func {
+        last alg = jwk.HmacAlgorithm.Hs256;
+        last jwk_json = cases.text(vectors.hmac_cases[2]);
+        last prefix = jwk_json.slice(0, jwk_json.byte_length - 1);
+        last sign_only = prefix .. ",\"use\":\"sig\",\"key_ops\":[\"sign\"]}";
+        last verify_only = prefix .. ",\"key_ops\":[\"verify\"]}";
+        let key = test.assert_ok(jwk.parse_hmac_signing(sign_only, alg));
+        defer key.wipe();
+        let _ = test.assert_err(jwk.parse_hmac(sign_only, alg));
+        let _ = test.assert_err(jwk.parse_hmac_signing(verify_only, alg));
+        let _ = test.assert_err(jwk.parse_hmac_signing(prefix .. ",\"use\":\"sig\",\"key_ops\":[\"sign\",\"encrypt\"]}", alg));
+        last dual = test.assert_ok(jwk.parse_hmac_signing(prefix .. ",\"key_ops\":[\"sign\",\"verify\"]}", alg));
+        dual.wipe();
+        let _ = test.assert_err(jwk.parse_hmac_signing(prefix .. ",\"key_ops\":[\"sign\",\"sign\"]}", alg));
+        let _ = test.assert_err(jwk.parse_hmac_signing(prefix .. ",\"use\":\"enc\"}", alg));
+        let _ = test.assert_err(jwk.parse_hmac_signing("{\"kty\":\"oct\",\"k\":\"AA\"}", alg));
+        for (let header in ["{\"alg\":\"none\"}", "{\"alg\":\"HS384\"}", "{}", "[]", "{",
+            "{\"alg\":\"HS256\",\"alg\":\"HS256\"}", "{\"alg\":\"HS256\",\"crit\":[\"kid\"],\"kid\":\"other\"}",
+            "{\"alg\":\"HS256\",\"b64\":false}"]) {
+            let _ = test.assert_err(jws.sign_hmac(new, key, header));
+        }
+        let _ = test.assert_ok(jws.sign_hmac(new, key, "{\"alg\":\"HS256\",\"kid\":\"correct\"}"));
+    };
+
+    export let test_ecdsa_signing_matches_deterministic_openssl = func {
+        last rows = vectors.ec_cases;
+        for (let i = 0; i < rows.length; i += 7) {
+            last algorithm = rows[i + 1];
+            last curve = algorithm == "ES256" ? ecdsa.Curve.P256
+                : (algorithm == "ES384" ? ecdsa.Curve.P384 : ecdsa.Curve.P521);
+            let key = test.assert_ok(ecdsa.parse_private_key(curve, cases.bytes(rows[i + 2])));
+            defer key.wipe();
+            last payload = cases.bytes(rows[i + 5]);
+            last signed = algorithm == "ES384" ? test.assert_ok(jws.sign_ec(payload, key))
+                : test.assert_ok(jws.sign_ec(payload, key, cases.text(rows[i + 4])));
+            test.assert_equal_string(rows[i + 6], signed);
+            last parts = strings.split(signed, ".");
+            last raw = test.assert_ok(base64.decode_url_unpadded(parts[2]));
+            test.assert(raw.length == (algorithm == "ES256" ? 64 : (algorithm == "ES384" ? 96 : 132)));
+            last verifier = test.assert_ok(jwk.parse_ec(cases.text(rows[i + 3]), curve));
+            test.assert_equal_string(rows[i + 5], hex.encode(test.assert_ok(jws.verify<jwk.EcKey>(signed, verifier))));
+            let _ = test.assert_err(jws.sign_ec(payload, key, "{\"alg\":\"RS256\"}"));
+
+            last der = test.assert_ok(ecdsa.raw_to_der(curve, raw));
+            let _ = test.assert_err(jws.verify<jwk.EcKey>(parts[0] .. "." .. parts[1] .. "." .. cases.base64(der), verifier));
+        }
+    };
+
+    export let test_ecdsa_rejects_an_unsupported_curve_before_signing = func {
+        let scalar: uint8[list] = new;
+        for (let i in 0 .. 31) {
+            scalar.append(0);
+        }
+        scalar.append(2);
+        let key = test.assert_ok(ecdsa.parse_private_key(ecdsa.Curve.Secp256k1, scalar));
+        defer key.wipe();
+        let _ = test.assert_err(jws.sign_ec(new, key));
+        let _ = test.assert_err(jws.sign_ec(new, key, "{\"alg\":\"ES256\"}"));
+    };
+
+    export let test_ed448_uses_the_fully_specified_name_and_pure_signature = func {
+        last row = vectors.ed448_case;
+        let key: ed448.Ed448PrivateKey = new(cases.bytes(row[0]));
+        defer key.wipe();
+        last payload = cases.bytes(row[2]);
+        last encoded = test.assert_ok(jws.sign_ed448(payload, key));
+        test.assert_equal_string(row[3], encoded);
+        last parts = strings.split(encoded, ".");
+        test.assert(test.assert_ok(base64.decode_url_unpadded(parts[2])).length == 114);
+        last verifier = test.assert_ok(jwk.parse_ed448(cases.text(row[1])));
+        test.assert(verifier.equals(new jwk.Ed448Key(key.public_key())));
+        test.assert_equal_string(row[2], hex.encode(test.assert_ok(jws.verify<jwk.Ed448Key>(encoded, verifier))));
+        let _ = test.assert_err(jwk.parse_ed25519(cases.text(row[1])));
+        let _ = test.assert_err(jws.sign_ed448(payload, key, "{\"alg\":\"EdDSA\"}"));
+        let _ = test.assert_err(jws.verify<jwk.Ed448Key>("eyJhbGciOiJFZERTQSJ9" .. "." .. parts[1] .. "." .. parts[2], verifier));
+    };
+);

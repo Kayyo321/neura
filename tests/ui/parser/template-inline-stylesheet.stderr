@@ -1,0 +1,7 @@
+error[E0251]: not allowed in a template
+ --> $DIR/template-inline-stylesheet.nra:1:21
+  |
+1 | let view = html() { <style>.a { color: red; }</style> };
+  |                     ^^^^^^ declare a separate CSS stylesheet
+
+For more information about this error, try `neura explain E0251`.

@@ -61,9 +61,10 @@ jobs:
   build-and-test:
     name: Build and test (Linux x86-64)
     runs-on: ubuntu-24.04
-    # The build and the full suite take 20 minutes on an idle runner and up to
-    # 30 when several pull requests build at once; 45 leaves room for that.
-    timeout-minutes: 45
+    # The 0.3.0 suite takes about 55 minutes on this runner (release trial 21's
+    # x86-64 Linux leg: 3,152 s of tests) after a 6-minute build; 120 leaves
+    # room for a busy runner.
+    timeout-minutes: 120
     env:
       CC: gcc-14
       CXX: g++-14
@@ -84,8 +85,32 @@ jobs:
           sudo apt-get install --yes --no-install-recommends \
             gcc-14 g++-14 libffi-dev libclang1-19 libclang-common-19-dev
 
+      # This job builds with the server components of the release archives
+      # (TLS, HTTP/2 and the PostgreSQL provider), so every pull request runs
+      # the HTTPS, HTTP/2 and PostgreSQL tests. The built libraries are
+      # cached under a key of the component lock and the script that builds
+      # them; release.yml rebuilds them from verified sources every time.
+      - name: Restore the server components
+        id: server-components
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/server-components
+          key: server-components-${{ runner.os }}-${{ runner.arch }}-gcc-14-${{ hashFiles('packaging/server-components.lock.toml', 'packaging/build-server-components.sh') }}
+
+      - name: Build the server components
+        if: ${{ steps.server-components.outputs.cache-hit != 'true' }}
+        run: sh packaging/build-server-components.sh --jobs "$(nproc)" "$HOME/server-components"
+
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        run: >
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          -DNEURA_ENABLE_SERVER_TLS=ON "-DOPENSSL_ROOT_DIR=$HOME/server-components/openssl"
+          -DNEURA_ENABLE_SERVER_HTTP2=ON "-DNEURA_NGHTTP2_ROOT=$HOME/server-components/nghttp2"
+          -DNEURA_ENABLE_POSTGRES=ON "-DNEURA_LIBPQ_SOURCE=$HOME/server-components/postgresql"
+          "-DNEURA_LIBPQ_BUILD=$HOME/server-components/postgresql"
+          "-DNEURA_COMPONENT_LICENSES=$HOME/server-components/licenses"
+          "-DNEURA_SERVER_TEST_OPENSSL=$HOME/server-components/openssl/bin/openssl"
+          -DNEURA_TEST_TIMEOUT_SCALE=3
 
       - name: Build
         run: cmake --build build --parallel "$(nproc)" 2>&1 | tee build/build.log
@@ -100,6 +125,9 @@ jobs:
       - name: Check that the kernels call no libm or stateful libc function
         run: scripts/check-kernels.sh build
 
+      - name: Check that the execution core links no compiler code
+        run: python3 scripts/check-core-closure.py build
+
       # The runner's AppArmor profile forbids unprivileged user namespaces,
       # which native-install uses to run a static executable in an empty root.
       - name: Allow unprivileged user namespaces
@@ -112,7 +140,7 @@ jobs:
 
       - name: Require every test to have run
         if: ${{ !cancelled() }}
-        run: python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 177
+        run: python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 326
 
       - name: Upload the test report
         if: ${{ !cancelled() }}
@@ -126,6 +154,51 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  # The execution core alone (docs/design/Products030.md): a build without
+  # the SDK needs neither the libclang submodule nor any compiler library.
+  runtime-only:
+    name: Runtime-only build (Linux x86-64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      CC: gcc-14
+      CXX: g++-14
+    steps:
+      - name: Check out the repository without its submodule
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends gcc-14 g++-14 libffi-dev
+
+      - name: Configure without the SDK
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNEURA_SDK=OFF
+
+      - name: Build
+        run: cmake --build build --parallel "$(nproc)" 2>&1 | tee build/build.log
+
+      - name: Require a build of Neura's sources without compiler warnings
+        run: |
+          if grep -F "warning:" build/build.log | grep -v -F "/third_party/"; then
+            echo "::error::The build reported the compiler warnings above in Neura's sources."
+            exit 1
+          fi
+
+      - name: Check the core tools and their components
+        run: |
+          python3 scripts/check-core-closure.py build
+          cmake --install build --component core --prefix stage
+          stage/bin/neura --version
+          stage/bin/neura doctor
+          if stage/bin/neura build x.nra -o x.nvr 2> build/missing.txt; then
+            echo "::error::neura build succeeded without the SDK"
+            exit 1
+          fi
+          grep -F "part of the Neura-sdk component" build/missing.txt
+
   # The one status check that branch rules require. It fails unless every
   # job above succeeded, so a skipped or cancelled job cannot pass for it.
   tier1:
@@ -134,6 +207,7 @@ jobs:
     needs:
       - repository
       - build-and-test
+      - runtime-only
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

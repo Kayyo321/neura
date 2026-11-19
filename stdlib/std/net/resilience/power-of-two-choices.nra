@@ -1,0 +1,81 @@
+let durations = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let balancers = import:Std.Net.Resilience.LoadBalancer;
+let randoms = import:Std.Random.Random;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief A load balancer by the power of two random choices (M. Mitzenmacher, "The Power of Two Choices in
+/// Randomized Load Balancing", IEEE TPDS 12(10), 2001): pick two distinct endpoints at random and use the one with
+/// fewer pending requests.
+///
+/// With `n` endpoints the first is `a = next_int_below(n)` and the second `b = next_int_below(n - 1)`, plus one when
+/// `b >= a`, so the two are distinct and uniform; both draws come from the injected generator. A tie goes to `a`.
+/// One endpoint is picked without drawing.
+/// @see [Std.Net.Resilience.PowerOfTwoChoices](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-PowerOfTwoChoices)
+#Since("0.3.0")
+export let PowerOfTwoChoices = module (
+    /// @brief Least pending of two random endpoints.
+    #[Final, NotThreadSafe]
+    export let PowerOfTwoChoices = class<Endpoint> implements balancers.LoadBalancer<Endpoint> (
+        /// @brief The endpoints, copied at construction.
+        last endpoints: Endpoint[list] = new;
+        /// @brief Pending requests per endpoint.
+        last waiting: int[list] = new;
+        /// @brief The random source.
+        last random: randoms.Random;
+
+        /// @brief A balancer over a copy of `targets` drawing from `source`.
+        export let init = func(targets: Endpoint[list], source: randoms.Random) {
+            for (let i = 0; i < targets.length; i++) {
+                endpoints.append(targets[i]);
+                waiting.append(0);
+            }
+            random = source;
+        };
+
+        /// @brief The less loaded of two random distinct endpoints.
+        export let pick = func -> Result<balancers.Selection<Endpoint>> {
+            last count = endpoints.length;
+            if (count == 0) {
+                return Result<balancers.Selection<Endpoint>>.Err(errors.custom(balancers.NoEndpointsCode,
+                    "the balancer has no endpoints"));
+            }
+            let index = 0;
+            if (count > 1) {
+                last a = random.next_int_below(count);
+                let b = random.next_int_below(count - 1);
+                if (b >= a) {
+                    b++;
+                }
+                index = waiting[b] < waiting[a] ? b : a;
+            }
+            waiting[index] = waiting[index] + 1;
+            return Result<balancers.Selection<Endpoint>>.Ok(new balancers.Selection<Endpoint>(index, endpoints[index]));
+        };
+
+        /// @brief Ends the pending request.
+        export let report = func(selection: balancers.Selection<Endpoint>, latency: durations.Duration, success: bool)
+            -> Result<Unit> {
+            if (waiting[selection.index] > 0) {
+                waiting[selection.index] = waiting[selection.index] - 1;
+            }
+            return Result<Unit>.Ok(Unit.Value);
+        };
+
+        /// @brief The number of endpoints.
+        export let size = func -> int => endpoints.length;
+
+        /// @brief The pending requests of endpoint `index`.
+        export let pending = func(index: int) -> int => waiting[index];
+
+        /// @brief Text such as "PowerOfTwoChoices(3 endpoints)".
+        export let.override to_string = func -> string =>
+            "PowerOfTwoChoices(" .. endpoints.length.to_string() .. " endpoints)";
+    );
+
+    /// @brief A P2C balancer over a copy of `endpoints`.
+    #NoDiscard
+    export let of = func<Endpoint>(endpoints: Endpoint[list], random: randoms.Random) -> PowerOfTwoChoices<Endpoint> =>
+        new PowerOfTwoChoices<Endpoint>(endpoints, random);
+);

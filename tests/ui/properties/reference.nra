@@ -1,0 +1,9 @@
+// A property has no storage (edge case 71).
+let Counter = interface (
+    let count: int;
+        | get;
+        | set;
+);
+let refer = func(value: Counter) {
+    let r: &int = value.count;
+};

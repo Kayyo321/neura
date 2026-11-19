@@ -1,0 +1,11 @@
+// E0542: each `return` of a block clause gives a reference of its class.
+let Other = class ();
+
+let Session = class (
+    | set: {
+        if (value == nil) {
+            return new Other();
+        }
+        return value;
+    };
+);

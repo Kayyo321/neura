@@ -1,0 +1,7 @@
+error[E1003]: modifier not valid for this event
+ --> $DIR/bad-event-modifier.nra:2:73
+  |
+2 | ... = html(receive: func(ui.InputEvent) -> void) { <input on:input.prevent_default={receive}> };
+  |                                                                    ^^^^^^^^^^^^^^^ use each supported modifier once on 'input'
+
+For more information about this error, try `neura explain E1003`.

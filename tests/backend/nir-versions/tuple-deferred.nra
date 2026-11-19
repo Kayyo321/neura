@@ -1,0 +1,35 @@
+// A deferred `last` tuple local: its words are slots that stay uninitialized until the first store. No source
+// construct reaches a read before the store, so the test deletes the store of one `pair` at a time in C++ and
+// checks that reading any word of it, alone or with the others, traps as an uninitialized slot.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Deferred = module:program.Entry (
+    let first = func() -> int32 {
+        let pair: [int32, string] = [3, "three"];
+        return pair[0];
+    };
+
+    let second = func() -> int32 {
+        let pair: [int32, string] = [3, "three"];
+        return pair[1].byte_length;
+    };
+
+    let whole = func() -> int32 {
+        let pair: [int32, string] = [3, "three"];
+        let copy: [int32, string] = pair;
+        return copy[0];
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("start");
+        if (args.length == 0) {
+            console.print_line(first().to_string());
+        } else if (args.length == 1) {
+            console.print_line(second().to_string());
+        } else {
+            console.print_line(whole().to_string());
+        }
+        return program.ExitCode.Ok;
+    };
+);

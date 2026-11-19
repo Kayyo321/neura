@@ -1,0 +1,20 @@
+// Edge cases 80 to 83 compile, and an event emitted after the guard is
+// left is accepted (docs/design/Lifetime030.md, Events).
+let events = import:Std.Events.Event;
+let guards = import:Std.Concurrent.Guarded;
+
+let update = func(state: guards.Guarded<int>, event: events.Event<int>) {
+    last next = state.with<int>(func(value: int) -> int => value + 1);
+    event.emit(next);
+};
+
+let Counter = class (
+    let count: int = 0;
+    let changed = new events.Event<[int, int]>();
+    export let increment = func {
+        last before = count;
+        count = count + 1;
+        changed.emit([before, count]);
+    };
+    export let on_change = func -> events.EventView<[int, int]> => changed.view();
+);

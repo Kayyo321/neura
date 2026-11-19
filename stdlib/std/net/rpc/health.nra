@@ -1,0 +1,272 @@
+let calls = import:Std.Net.Rpc.Call;
+let.promote _ = import:Std.Time.Duration;
+let grpc = import:Std.Net.Rpc.Grpc;
+let meta = import:Std.Net.Rpc.Metadata;
+let optional = import:Std.Core.Optional;
+let proto = import:Std.Net.Rpc.ProtoWire;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Net.Service;
+let statuses = import:Std.Net.Rpc.Status;
+
+/// @brief The gRPC health checking protocol `grpc.health.v1` (grpc/grpc doc/health-checking.md, fetched to
+/// std-net/rfc/grpc-health-checking.md).
+///
+/// A `HealthService` keeps a serving status per service name, the empty name standing for the whole server.
+/// `check` answers a registered name's status and fails with NOT_FOUND for any other name; `watch` reports the
+/// current status at once (SERVICE_UNKNOWN for an unregistered name) and then every change. The messages are
+/// `HealthCheckRequest { string service = 1; }` and `HealthCheckResponse { ServingStatus status = 1; }`, encoded
+/// with `Std.Net.Rpc.ProtoWire`; `register` installs `Check` on a `GrpcServer`. The streaming `Watch` RPC needs a
+/// live stream (see `Std.Net.Rpc.Grpc`); in process, watchers are callbacks.
+/// @see [Std.Net.Rpc.Health](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Rpc-Health)
+#Since("0.3.0")
+export let Health = module (
+    /// @brief The service name of the protocol.
+    export const ServiceName: string = "grpc.health.v1.Health";
+
+    /// @brief `HealthCheckResponse.ServingStatus`, numbered 0 to 3 in declaration order.
+    export let ServingStatus = enum (Unknown, Serving, NotServing, ServiceUnknown);
+
+    /// @brief The proto number of a status.
+    #NoDiscard
+    export let number = func(value: ServingStatus) -> int => match (value) {
+        ServingStatus.Unknown => 0,
+        ServingStatus.Serving => 1,
+        ServingStatus.NotServing => 2,
+        ServingStatus.ServiceUnknown => 3,
+    };
+
+    /// @brief The status with a proto number; numbers outside 0 to 3 read as UNKNOWN (proto3 open enum).
+    #NoDiscard
+    export let of_number = func(value: int64) -> ServingStatus {
+        if (value == 1) {
+            return ServingStatus.Serving;
+        }
+        if (value == 2) {
+            return ServingStatus.NotServing;
+        }
+        return if (value == 3) -> ServingStatus.ServiceUnknown
+            else -> ServingStatus.Unknown;
+    };
+
+    /// @brief The `Check` method path.
+    #NoDiscard
+    export let check_path = func -> calls.MethodPath => new calls.MethodPath(ServiceName, "Check");
+
+    /// @brief The `Watch` method path.
+    #NoDiscard
+    export let watch_path = func -> calls.MethodPath => new calls.MethodPath(ServiceName, "Watch");
+
+    /// @brief A `HealthCheckRequest` (field 1 omitted for the empty name, as proto3 does).
+    #NoDiscard
+    export let encode_request = func(service: string) -> uint8[list] {
+        last w = proto.writer();
+        if (service.byte_length > 0) {
+            w.write_string(1, service);
+        }
+        return w.to_bytes();
+    };
+
+    /// @brief The service name of a `HealthCheckRequest`; unknown fields are skipped.
+    #NoDiscard
+    export let decode_request = func(bytes: uint8[list]) -> Result<string> {
+        last r = proto.reader(bytes);
+        let service = "";
+        while (r.has_next()) {
+            last key = r.read_key()?;
+            if (key.field == 1 && key.wire_type == proto.LengthDelimited) {
+                service = r.read_string()?;
+            } else {
+                r.skip(key.wire_type)?;
+            }
+        }
+        return Result<string>.Ok(service);
+    };
+
+    /// @brief A `HealthCheckResponse` (field 1 omitted for UNKNOWN).
+    #NoDiscard
+    export let encode_response = func(value: ServingStatus) -> uint8[list] {
+        last w = proto.writer();
+        if (number(value) != 0) {
+            w.write_enum(1, number(value) as int32);
+        }
+        return w.to_bytes();
+    };
+
+    /// @brief The status of a `HealthCheckResponse`; unknown fields are skipped.
+    #NoDiscard
+    export let decode_response = func(bytes: uint8[list]) -> Result<ServingStatus> {
+        last r = proto.reader(bytes);
+        let value = ServingStatus.Unknown;
+        while (r.has_next()) {
+            last key = r.read_key()?;
+            if (key.field == 1 && key.wire_type == proto.Varint) {
+                value = of_number(r.read_int64()?);
+            } else {
+                r.skip(key.wire_type)?;
+            }
+        }
+        return Result<ServingStatus>.Ok(value);
+    };
+
+    /// @brief A registered watcher of one service name.
+    #Final
+    export let Watcher = class (
+        /// @brief The id `watch` returned.
+        export last id: int;
+        /// @brief The watched name.
+        export last service: string;
+        /// @brief Called with each reported status.
+        last callback: func(ServingStatus) -> void;
+
+        /// @brief A watcher with every part given.
+        export let init = func(watcher_id: int, name: string, notify: func(ServingStatus) -> void) {
+            id = watcher_id;
+            service = name;
+            callback = notify;
+        };
+
+        /// @brief Reports `value`.
+        export let report = func(value: ServingStatus) => callback(value);
+
+        /// @brief The id and name.
+        export let.override to_string = func -> string => "Watcher(" .. id.to_string() .. ", '" .. service .. "')";
+    );
+
+    /// @brief Serving statuses by service name, with watchers.
+    #[Final, NotThreadSafe]
+    export let HealthService = class (
+        /// @brief Registered names, parallel to `values`.
+        let names: string[list] = new;
+        /// @brief The status of each name.
+        let values: ServingStatus[list] = new;
+        /// @brief Live watchers.
+        let watchers: Watcher[list] = new;
+        /// @brief The next watcher id.
+        let next_id: int = 1;
+
+        /// @brief A registry with only the server entry `""` set to SERVING.
+        export let init = func {
+            names.append("");
+            values.append(ServingStatus.Serving);
+        };
+
+        /// @brief Sets the status of `service` (registering it) and reports a change to its watchers.
+        export let set_status = func(service: string, value: ServingStatus) {
+            for (let i = 0; i < names.length; i++) {
+                if (names[i] == service) {
+                    if (number(values[i]) != number(value)) {
+                        values[i] = value;
+                        notify(service, value);
+                    }
+                    return;
+                }
+            }
+            names.append(service);
+            values.append(value);
+            notify(service, value);
+        };
+
+        /// @brief Unregisters `service`; its watchers see SERVICE_UNKNOWN.
+        export let clear_status = func(service: string) {
+            last kept_names: string[list] = new;
+            last kept_values: ServingStatus[list] = new;
+            for (let i = 0; i < names.length; i++) {
+                if (names[i] != service) {
+                    kept_names.append(names[i]);
+                    kept_values.append(values[i]);
+                }
+            }
+            if (kept_names.length != names.length) {
+                names = kept_names;
+                values = kept_values;
+                notify(service, ServingStatus.ServiceUnknown);
+            }
+        };
+
+        /// @brief Marks every registered service NOT_SERVING, as a server does when it shuts down.
+        export let shutdown = func {
+            for (let i = 0; i < names.length; i++) {
+                if (number(values[i]) != 2) {
+                    values[i] = ServingStatus.NotServing;
+                    notify(names[i], ServingStatus.NotServing);
+                }
+            }
+        };
+
+        /// @brief The status of a registered `service`, or a NOT_FOUND status error.
+        #NoDiscard
+        export let check = func(service: string) -> Result<ServingStatus> {
+            for (let i = 0; i < names.length; i++) {
+                if (names[i] == service) {
+                    return Result<ServingStatus>.Ok(values[i]);
+                }
+            }
+            return Result<ServingStatus>.Err(statuses.error(statuses.Code.NotFound, "unknown service '" .. service .. "'"));
+        };
+
+        /// @brief Reports the current status of `service` to `callback` at once (SERVICE_UNKNOWN when not
+        /// registered), then every change; returns the watcher id.
+        export let watch = func(service: string, callback: func(ServingStatus) -> void) -> int {
+            last watcher = new Watcher(next_id, service, callback);
+            next_id++;
+            watchers.append(watcher);
+            watcher.report(match (check(service)) {
+                Result.Ok(value) => value,
+                Result.Err(e) => ServingStatus.ServiceUnknown,
+            });
+            return watcher.id;
+        };
+
+        /// @brief Removes a watcher; returns whether it existed.
+        export let cancel_watch = func(id: int) -> bool {
+            last kept: Watcher[list] = new;
+            for (let w in watchers) {
+                if (w.id != id) {
+                    kept.append(w);
+                }
+            }
+            last found = kept.length != watchers.length;
+            watchers = kept;
+            return found;
+        };
+
+        /// @brief The `Check` handler: decodes the request, answers the status or NOT_FOUND.
+        #NoDiscard
+        export let check_handler = func -> Service<calls.RpcRequest, calls.RpcResponse> =>
+            grpc.unary_handler(new bound(answer));
+
+        /// @brief The number of registered names.
+        export let.override to_string = func -> string => "HealthService(" .. names.length.to_string() .. " services)";
+
+        /// @brief Answers one encoded request.
+        let answer = func(request: uint8[list]) -> Result<uint8[list]> {
+            return match (decode_request(request)) {
+                Result.Ok(service) => match (check(service)) {
+                    Result.Ok(value) => Result<uint8[list]>.Ok(encode_response(value)),
+                    Result.Err(e) => Result<uint8[list]>.Err(e),
+                },
+                Result.Err(e) => Result<uint8[list]>.Err(statuses.error(statuses.Code.Internal,
+                    "error parsing request proto")),
+            };
+        };
+
+        /// @brief Reports `value` to the watchers of `service`.
+        let notify = func(service: string, value: ServingStatus) {
+            for (let w in watchers) {
+                if (w.service == service) {
+                    w.report(value);
+                }
+            }
+        };
+    );
+
+    /// @brief Installs the `Check` method of `health` on `server`.
+    export let register = func(health: HealthService, server: grpc.GrpcServer) =>
+        server.add_unary(check_path(), health.check_handler());
+
+    /// @brief Calls `Check` for `service` over `channel`.
+    #NoDiscard
+    export let check_remote = func(channel: grpc.GrpcChannel, service: string, budget: optional.Optional<Duration>)
+        -> Result<ServingStatus> =>
+            decode_response(channel.unary(check_path(), encode_request(service), meta.empty(), budget)?);
+);

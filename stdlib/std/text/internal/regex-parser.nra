@@ -22,9 +22,25 @@ export let RegexParser = module (
         Class { ranges: uint32[list], negated: bool },
         Concat(Node[list]),
         Alternate(Node[list]),
-        Repeat { item: Node, min: int, max: int, greedy: bool },
-        Group { item: Node, index: int },
+        Repeat { item: NodeLink, min: int, max: int, greedy: bool },
+        Group { item: NodeLink, index: int },
         Assert(Anchor)
+    );
+
+    /// @brief The link from a Repeat or Group node to the node it holds. An enum value is stored inline, so a
+    /// Node cannot hold another Node directly; the class holds it by reference instead.
+    #Final
+    export let NodeLink = class (
+        /// @brief The node that the Repeat or Group holds.
+        export last node: Node;
+
+        /// @brief Links to the given node.
+        export let init = func(value: Node) {
+            node = value;
+        };
+
+        /// @brief Names the link.
+        export let.override to_string = func -> string => "NodeLink";
     );
 
     /// @brief The maximum accepted explicit repetition count.
@@ -66,7 +82,7 @@ export let RegexParser = module (
         /// @brief The number of capturing groups, excluding group zero.
         export let groups: int = 0;
         /// @brief The names of capturing groups in order, with empty names for unnamed groups.
-        export let names: string[list] = [];
+        export let names: string[list] = new;
         /// @brief The current group nesting depth.
         let depth: int = 0;
         /// @brief The pattern's UTF-8 byte length.
@@ -96,7 +112,7 @@ export let RegexParser = module (
 
         /// @brief Records only the first parser failure.
         let fail = func(kind: error.ParseErrorKind, offset: int, message: string) {
-            if (!failed) {
+            if (not failed) {
                 failed = true;
                 error_kind = kind;
                 error_offset = offset;
@@ -137,9 +153,9 @@ export let RegexParser = module (
             if (at_end() || peek() != 124) {
                 return [first, first_size];
             }
-            last branches: Node[list] = [first];
+            last branches: Node[list] = new([first]);
             let total = first_size;
-            while (!at_end() && peek() == 124) {
+            while (not at_end() && peek() == 124) {
                 position += 1;
                 let [branch, branch_size] = parse_concat();
                 if (failed) {
@@ -157,9 +173,9 @@ export let RegexParser = module (
 
         /// @brief Parses successive atoms and quantifiers up to an alternative, closing group, or end.
         let parse_concat = func -> [Node, int] {
-            last items: Node[list] = [];
+            last items: Node[list] = new;
             let total = 0;
-            while (!at_end()) {
+            while (not at_end()) {
                 last b = peek();
                 if (b == 124 || b == 41) {
                     break;
@@ -183,10 +199,7 @@ export let RegexParser = module (
             if (items.length == 0) {
                 return [Node.Empty, 0];
             }
-            if (items.length == 1) {
-                return [items[0], total];
-            }
-            return [Node.Concat(items), total];
+            return if (items.length == 1) -> [items[0], total] else -> [Node.Concat(items), total];
         };
 
         /// @brief Parses one literal, group, class, wildcard, anchor, or escape.
@@ -258,11 +271,11 @@ export let RegexParser = module (
                 return [Node.Empty, 0];
             }
             let greedy = true;
-            if (!at_end() && peek() == 63) {
+            if (not at_end() && peek() == 63) {
                 greedy = false;
                 position += 1;
             }
-            if (!at_end()) {
+            if (not at_end()) {
                 last next = peek();
                 if (next == 43) {
                     fail_syntax(position, "possessive quantifiers are not supported");
@@ -278,7 +291,7 @@ export let RegexParser = module (
             if (failed) {
                 return [Node.Empty, 0];
             }
-            return [Node.Repeat { item: atom, min: min, max: max, greedy: greedy }, total];
+            return [Node.Repeat { item: new NodeLink(atom), min: min, max: max, greedy: greedy }, total];
         };
 
         /// @brief {n}, {n,}, or {n,m} at the current position.
@@ -297,10 +310,10 @@ export let RegexParser = module (
                 return [0, 0];
             }
             let high = low;
-            if (!at_end() && peek() == 44) {
+            if (not at_end() && peek() == 44) {
                 position += 1;
                 high = -1;
-                if (!at_end() && peek() != 125) {
+                if (not at_end() && peek() != 125) {
                     high = parse_count();
                     if (failed) {
                         return [0, 0];
@@ -336,7 +349,7 @@ export let RegexParser = module (
         let parse_count = func -> int {
             last start = position;
             let value = 0;
-            while (!at_end() && peek() >= 48 && peek() <= 57) {
+            while (not at_end() && peek() >= 48 && peek() <= 57) {
                 if (value <= MaxRepetition) {
                     value = value * 10 + ((peek() - 48) as int);
                 }
@@ -363,7 +376,7 @@ export let RegexParser = module (
             }
             let capturing = true;
             let name = "";
-            if (!at_end() && peek() == 63) {
+            if (not at_end() && peek() == 63) {
                 position += 1;
                 if (at_end()) {
                     fail_end("missing )");
@@ -389,7 +402,7 @@ export let RegexParser = module (
                             return [Node.Empty, 0];
                         }
                         position += 1;
-                    } else if (!at_end() && (peek() == 61 || peek() == 33)) {
+                    } else if (not at_end() && (peek() == 61 || peek() == 33)) {
                         fail_syntax(open, "lookbehind is not supported");
                         return [Node.Empty, 0];
                     }
@@ -421,22 +434,20 @@ export let RegexParser = module (
             position += 1;
             depth -= 1;
             last_was_assertion = false;
-            if (!capturing) {
-                return [inner, inner_size];
-            }
+            return [inner, inner_size] unless capturing;
             last total = inner_size + 2;
             check_size(total, open);
-            return [Node.Group { item: inner, index: index }, total];
+            return [Node.Group { item: new NodeLink(inner), index: index }, total];
         };
 
         /// @brief An identifier ended by >, unique among the pattern's group names.
         let parse_group_name = func -> string {
             last start = position;
-            while (!at_end() && peek() != 62) {
+            while (not at_end() && peek() != 62) {
                 last b = peek();
                 last letter = (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95;
                 last digit = b >= 48 && b <= 57;
-                if (!letter && !(digit && position > start)) {
+                if (not letter && not (digit && position > start)) {
                     fail_syntax(start, "invalid group name");
                     return "";
                 }
@@ -465,18 +476,18 @@ export let RegexParser = module (
         let parse_class = func -> [Node, int] {
             position += 1;
             let negated = false;
-            if (!at_end() && peek() == 94) {
+            if (not at_end() && peek() == 94) {
                 negated = true;
                 position += 1;
             }
-            last ranges: uint32[list] = [];
+            last ranges: uint32[list] = new;
             let first = true;
             do {
                 if (at_end()) {
                     fail_end("unterminated character class");
                     return [Node.Empty, 0];
                 }
-                if (peek() == 93 && !first) {
+                if (peek() == 93 && not first) {
                     position += 1;
                     break;
                 }
@@ -566,10 +577,7 @@ export let RegexParser = module (
                 return [Node.Class { ranges: shorthand_ranges(b + 32), negated: true }, 1];
             }
             last value = parse_escaped_scalar(escape_start);
-            if (failed) {
-                return [Node.Empty, 0];
-            }
-            return [Node.Literal(value as uint32), 1];
+            return if (failed) -> [Node.Empty, 0] else -> [Node.Literal(value as uint32), 1];
         };
 
         /// @brief The scalar an escape denotes; the position is after the backslash.
@@ -620,7 +628,7 @@ export let RegexParser = module (
             position += 1;
             let value: uint32 = 0;
             let digits = 0;
-            while (!at_end() && peek() != 125) {
+            while (not at_end() && peek() != 125) {
                 last digit = scalar_values.digit_value(peek() as uint32, 16);
                 if (digit < 0 || digits == 6) {
                     fail_syntax(escape_start, "invalid \\u escape");
@@ -639,12 +647,15 @@ export let RegexParser = module (
                 fail_syntax(escape_start, "invalid \\u escape");
                 return 0;
             }
-            if (!scalar_values.is_valid(value)) {
+            if (not scalar_values.is_valid(value)) {
                 fail_syntax(escape_start, "invalid scalar value");
                 return 0;
             }
             return value as int;
         };
+
+        /// @brief Names the parser and its position.
+        export let.override to_string = func -> string => "Parser(at " .. position.to_string() .. ")";
     );
 
     /// @brief The ranges of \d, \w, and \s (by their lowercase letter) or of their negations (by the uppercase
@@ -652,24 +663,24 @@ export let RegexParser = module (
     #Pure
     export let shorthand_ranges = func(letter: uint8) -> uint32[list] {
         if (letter == 100) {
-            return [48, 57];
+            return new([48, 57]);
         }
         if (letter == 119) {
-            return [48, 57, 65, 90, 95, 95, 97, 122];
+            return new([48, 57, 65, 90, 95, 95, 97, 122]);
         }
         if (letter == 115) {
-            return [9, 13, 32, 32];
+            return new([9, 13, 32, 32]);
         }
         if (letter == 68) {
-            return [0, 47, 58, MaxScalar];
+            return new([0, 47, 58, MaxScalar]);
         }
         if (letter == 87) {
-            return [0, 47, 58, 64, 91, 94, 96, 96, 123, MaxScalar];
+            return new([0, 47, 58, 64, 91, 94, 96, 96, 123, MaxScalar]);
         }
         if (letter == 83) {
-            return [0, 8, 14, 31, 33, MaxScalar];
+            return new([0, 8, 14, 31, 33, MaxScalar]);
         }
-        last none: uint32[list] = [];
+        last none: uint32[list] = new;
         return none;
     };
 
@@ -708,8 +719,8 @@ export let RegexParser = module (
             Node.Class { ranges: _, negated: _ } => false,
             Node.Concat(items) => all_nullable(items),
             Node.Alternate(branches) => any_nullable(branches),
-            Node.Repeat { item, min, max: _, greedy: _ } => min == 0 || nullable(item),
-            Node.Group { item, index: _ } => nullable(item),
+            Node.Repeat { item, min, max: _, greedy: _ } => min == 0 || nullable(item.node),
+            Node.Group { item, index: _ } => nullable(item.node),
             Node.Assert(_) => true,
         };
     };
@@ -717,9 +728,7 @@ export let RegexParser = module (
     /// @brief Tests whether every node in a sequence can match without consuming input.
     let all_nullable = func(items: Node[list]) -> bool {
         for (let item in items) {
-            if (!nullable(item)) {
-                return false;
-            }
+            return false unless nullable(item);
         }
         return true;
     };
@@ -736,9 +745,6 @@ export let RegexParser = module (
 
     /// @brief Caps an instruction-count estimate at the given limit.
     let saturate = func(value: int, limit: int) -> int {
-        if (value > limit) {
-            return limit;
-        }
-        return value;
+        return if (value > limit) -> limit else -> value;
     };
 );

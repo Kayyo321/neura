@@ -1,6 +1,7 @@
 #include "monitors.hpp"
 
 #include "attributes.hpp"
+#include "frozen.hpp"
 #include "kernel_signature.hpp"
 #include "purity.hpp"
 #include "tags.hpp"
@@ -158,6 +159,22 @@ void declare_checked_tags(IrProgram& program, SymbolId first, const std::functio
         if (!item.has_body) reject("has no body to synchronize", "remove #Synchronized");
         set_attribute(program.symbols[id], AttributeId::Synchronized, attribute_bool(true));
     }
+    // #HostEffects on a host binding: the contract that its summary takes.
+    for (SymbolId id = first; id < count; ++id) {
+        const auto& item = program.symbols[id];
+        if (item.kind != SymbolKind::Function || !has_tag(item, TagId::HostEffects)) continue;
+        if (!item.host_binding || item.has_body || !item.external) {
+            throw Diagnostic(tag_or(id, TagId::HostEffects),
+                             "#HostEffects on " + quoted(item.name) + ", which is not a host binding without a body")
+                .with_code("E0923").label("#HostEffects given here").label(name_span(id), "declared here")
+                .help("a function with a body is summarized from its body; remove #HostEffects");
+        }
+        const auto flag = [&](std::string_view argument) {
+            return tag_text(item, TagId::HostEffects, argument).value_or("true") != "false";
+        };
+        set_attribute(program.symbols[id], AttributeId::HostEffects,
+                      host_effects_payload({flag("allocates"), flag("traps"), flag("scheduler"), flag("retains")}));
+    }
     // #Synchronized on a class: every exported method with a body.
     for (SymbolId id = first; id < count; ++id) {
         const auto& cls = program.symbols[id];
@@ -282,7 +299,10 @@ void declare_checked_tags(IrProgram& program, SymbolId first, const std::functio
                         .label(tag_or(id, TagId::Immutable), quoted(item.name) + " is marked #Immutable here")
                         .help("declare the field with last or const");
                 }
-                if (!immutable_type(program, member.type)) {
+                const bool frozen_storage = frozen_field(member) && member.type.kind == TypeKind::List &&
+                                            member.type.arguments.size() == 1 &&
+                                            immutable_type(program, member.type.arguments.front());
+                if (!frozen_storage && !immutable_type(program, member.type)) {
                     throw Diagnostic(name_span(field), "field " + quoted(member.name) + " of #Immutable class " +
                                                            quoted(item.name) + " has the mutable type " +
                                                       display(member.type))

@@ -5,5 +5,7 @@ error[E0407]: expected 2 argument(s)
   |     --- 'add' takes 2 parameters
 3 | let three = add(1);
   |             ^^^^^^ expected 2 arguments, found 1
+  |
+  = note: parameter 'b' is not given a value
 
 For more information about this error, try `neura explain E0407`.

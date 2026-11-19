@@ -39,12 +39,11 @@ export let Regex = module (
         export let dot_all: bool = false;
 
         /// @brief Compares flags by their three Boolean values.
-        #Pure
+        /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is RegexFlags)) {
+            if (other is not flags: RegexFlags) {
                 return false;
             }
-            last flags = other as RegexFlags;
             return ignore_ascii_case == flags.ignore_ascii_case &&
                 multi_line == flags.multi_line && dot_all == flags.dot_all;
         };
@@ -57,8 +56,8 @@ export let Regex = module (
         /// @brief Formats the flags as a RegexFlags description.
         #Pure
         export let.override to_string = func -> string =>
-            "RegexFlags(ignore_ascii_case=" + ignore_ascii_case.to_string() +
-                ", multi_line=" + multi_line.to_string() + ", dot_all=" + dot_all.to_string() + ")";
+            "RegexFlags(ignore_ascii_case=" .. ignore_ascii_case.to_string() ..
+            ", multi_line=" .. multi_line.to_string() .. ", dot_all=" .. dot_all.to_string() .. ")";
     );
 
     /// @brief One match: group 0 is the whole match. Immutable.
@@ -95,12 +94,11 @@ export let Regex = module (
         export let text = func -> string => input.slice(start, end);
 
         /// @brief Tests equality of input, capture offsets, and group names.
-        #Pure
+        /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is RegexMatch)) {
+            if (other is not found: RegexMatch) {
                 return false;
             }
-            last found = other as RegexMatch;
             return input == found.input && slots === found.slots && names === found.names;
         };
 
@@ -196,7 +194,7 @@ export let Regex = module (
         /// @brief Successive non-overlapping matches. After an empty match the search resumes one scalar value
         /// later.
         export let find_all = func(input: string) -> RegexMatch[list] {
-            last matches: RegexMatch[list] = [];
+            last matches: RegexMatch[list] = new;
             last length = input.byte_length;
             let pos = 0;
             while (pos <= length) {
@@ -227,7 +225,7 @@ export let Regex = module (
 
         /// @brief Replaces the first match, with the rules of replace_all.
         export let replace_first = func(input: string, replacement: string) -> string {
-            last matches: RegexMatch[list] = [];
+            last matches: RegexMatch[list] = new;
             last first = find(input);
             if (first != nil) {
                 matches.append(first);
@@ -238,7 +236,7 @@ export let Regex = module (
         /// @brief The pieces between the matches of find_all, with the rules of Strings.split: empty pieces are
         /// kept, and an input without a match gives one piece.
         export let split = func(input: string) -> string[list] {
-            last pieces: string[list] = [];
+            last pieces: string[list] = new;
             let start = 0;
             for (let found in find_all(input)) {
                 pieces.append(input.slice(start, found.start));
@@ -249,12 +247,11 @@ export let Regex = module (
         };
 
         /// @brief Tests equality of the original pattern and recorded compilation options.
-        #Pure
+        /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Regex)) {
+            if (other is not expression: Regex) {
                 return false;
             }
-            last expression = other as Regex;
             return pattern == expression.pattern && compile_options() == expression.compile_options();
         };
 
@@ -273,10 +270,7 @@ export let Regex = module (
         /// @brief Searches from a validated byte offset and wraps any matching capture offsets.
         let match_at = func(input: string, offset: int) -> RegexMatch {
             last slots = machine.search(program, input, offset, machine.Leftmost);
-            if (slots.length == 0) {
-                return nil;
-            }
-            return new(input, slots, names);
+            return if (slots.length == 0) -> nil else -> new(input, slots, names);
         };
 
         /// @brief Builds replacement output from the replacement template and supplied matches.
@@ -285,7 +279,7 @@ export let Regex = module (
             if (matches.length == 0) {
                 return input;
             }
-            last bytes: uint8[list] = [];
+            last bytes: uint8[list] = new;
             let start = 0;
             for (let found in matches) {
                 append_bytes(bytes, input, start, found.start);
@@ -348,9 +342,9 @@ export let Regex = module (
 
     /// @brief The replacement as segments: literal text, then a group index or -1.
     let parse_replacement = func(replacement: string, names: string[list]) -> [string, int][list] {
-        last segments: [string, int][list] = [];
+        last segments: [string, int][list] = new;
         last length = replacement.byte_length;
-        let literal: uint8[list] = [];
+        let literal: uint8[list] = new;
         let i = 0;
         while (i < length) {
             last b = replacement.byte_at(i);
@@ -397,7 +391,7 @@ export let Regex = module (
                 trap_with_message("invalid argument: no such group");
             }
             segments.append([text_of(literal), index]);
-            literal = [];
+            literal = new;
         }
         segments.append([text_of(literal), -1]);
         return segments;
@@ -438,10 +432,7 @@ export let Regex = module (
         if (lead < 224) {
             return 2;
         }
-        if (lead < 240) {
-            return 3;
-        }
-        return 4;
+        return if (lead < 240) -> 3 else -> 4;
     };
 
     /// @brief Appends a half-open string byte range to the output list.

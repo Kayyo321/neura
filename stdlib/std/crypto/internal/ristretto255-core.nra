@@ -1,0 +1,182 @@
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Crypto.Algorithm;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let edwards = import:Std.Crypto.Internal.Edwards25519;
+let mp = import:Std.Crypto.Internal.Mp;
+let words = import:Std.Crypto.Internal.Words;
+let xmd = import:Std.Crypto.Internal.HashToCurveXmd;
+
+/// @brief RFC 9496 ristretto255 over the shared Edwards25519 implementation. Internal.
+export let Ristretto255Core = module (
+    /// @brief Field scratch belongs to one operation or task. Scalars are canonical ordinary eight-limb values.
+    #Final
+    export let Group = class (
+        last curve: edwards.Group;
+        last field: mp.Modulus;
+        last d: uint32[list];
+        last sqrt_m1: uint32[list];
+        last sqrt_ad_minus_one: uint32[list];
+        last invsqrt_a_minus_d: uint32[list];
+        last one_minus_d_sq: uint32[list];
+        last d_minus_one_sq: uint32[list];
+        last sqrt_exponent: uint32[list];
+
+        export let init = func {
+            crypto_policy.require(Algorithm.Ristretto255);
+            curve = new;
+            field = curve.field;
+            // RFC 9496 section 4.1, with constants converted to hexadecimal.
+            d = field.to_mont(mp.from_hex("52036cee2b6ffe738cc740797779e89800700a4d4141d8ab75eb4dca135978a3", 8));
+            sqrt_m1 = field.to_mont(mp.from_hex("2b8324804fc1df0b2b4d00993dfbd7a72f431806ad2fe478c4ee1b274a0ea0b0", 8));
+            sqrt_ad_minus_one = field.to_mont(mp.from_hex("376931bf2b8348ac0f3cfcc931f5d1fdaf9d8e0c1b7854bd7e97f6a0497b2e1b", 8));
+            invsqrt_a_minus_d = field.to_mont(mp.from_hex("786c8905cfaffca216c27b91fe01d8409d2f16175a4172be99c8fdaa805d40ea", 8));
+            one_minus_d_sq = field.sub(field.one, field.sqr(d));
+            d_minus_one_sq = field.sqr(field.sub(d, field.one));
+            sqrt_exponent = mp.shift_right(mp.plain_sub(field.m, mp.small(5, 8)), 3);
+        };
+
+        export let identity = func -> edwards.Point => curve.identity();
+        export let base = func -> edwards.Point => curve.base();
+        export let add = func(p: edwards.Point, q: edwards.Point) -> edwards.Point => curve.add(p, q);
+        export let subtract = func(p: edwards.Point, q: edwards.Point) -> edwards.Point => curve.subtract(p, q);
+        export let negate = func(p: edwards.Point) -> edwards.Point => curve.negate(p);
+        export let select = func(choice: uint32, first: edwards.Point, second: edwards.Point) -> edwards.Point =>
+            curve.select(choice, first, second);
+
+        export let multiply = func(scalar: uint32[list], point: edwards.Point) -> edwards.Point =>
+            curve.multiply(scalar, point);
+
+        export let multiply_base = func(scalar: uint32[list]) -> edwards.Point => curve.multiply_base(scalar);
+        /// @brief Shared doublings with indexed table reads. Only use this with public scalars.
+        export let multiply_two = func(a: uint32[list], p: edwards.Point, b: uint32[list], q: edwards.Point)
+            -> edwards.Point => curve.multiply_two(a, p, b, q);
+
+        /// @brief The quotient-group equality of RFC 9496 section 4.3.3.
+        export let equal = func(p: edwards.Point, q: edwards.Point) -> bool {
+            last cross = mp.equal(field.mul(p.x, q.y), field.mul(p.y, q.x));
+            last straight = mp.equal(field.mul(p.y, q.y), field.mul(p.x, q.x));
+            return (cross | straight) == 1;
+        };
+
+        export let is_identity = func(point: edwards.Point) -> bool => equal(point, identity());
+
+        let negative = func(value: uint32[list]) -> uint32 => field.from_mont(value)[0] & 1;
+        let absolute = func(value: uint32[list]) -> uint32[list] =>
+            mp.select(negative(value), field.neg(value), value);
+
+        let sqrt_ratio = func(u: uint32[list], v: uint32[list]) -> [uint32, uint32[list]] {
+            last v3 = field.mul(field.sqr(v), v);
+            last v7 = field.mul(field.sqr(v3), v);
+            last root = field.mul(field.mul(u, v3), field.pow(field.mul(u, v7), sqrt_exponent));
+            last check = field.mul(v, field.sqr(root));
+            last neg_u = field.neg(u);
+            last direct = mp.equal(check, u);
+            last flipped = mp.equal(check, neg_u);
+            last imaginary = mp.equal(check, field.mul(neg_u, sqrt_m1));
+            last corrected = mp.select(flipped | imaginary, field.mul(sqrt_m1, root), root);
+            return [direct | flipped, absolute(corrected)];
+        };
+
+        /// @brief Decodes only canonical public encodings.
+        export let decode = func(bytes: uint8[list]) -> Optional<edwards.Point> {
+            if (bytes.length != 32) {
+                return Optional<edwards.Point>.None;
+            }
+            last plain = mp.from_bytes_le(bytes, 8);
+            if (mp.less(plain, field.m) == 0 || (plain[0] & 1) == 1) {
+                return Optional<edwards.Point>.None;
+            }
+            last s = field.to_mont(plain);
+            last ss = field.sqr(s);
+            last u1 = field.sub(field.one, ss);
+            last u2 = field.add(field.one, ss);
+            last u2_sq = field.sqr(u2);
+            last v = field.sub(field.neg(field.mul(d, field.sqr(u1))), u2_sq);
+            let [was_square, invsqrt] = sqrt_ratio(field.one, field.mul(v, u2_sq));
+            last den_x = field.mul(invsqrt, u2);
+            last den_y = field.mul(field.mul(invsqrt, den_x), v);
+            last x = absolute(field.mul(field.add(s, s), den_x));
+            last y = field.mul(u1, den_y);
+            last t = field.mul(x, y);
+            if (was_square == 0 || negative(t) == 1 || mp.is_zero(y) == 1) {
+                return Optional<edwards.Point>.None;
+            }
+            return Optional<edwards.Point>.Some(new edwards.Point(x, y, field.one, t));
+        };
+
+        /// @brief Canonical compression. Sign selection is branch-free in source; the runtime does not
+        /// guarantee constant time.
+        export let encode = func(point: edwards.Point) -> uint8[list] {
+            last u1 = field.mul(field.add(point.z, point.y), field.sub(point.z, point.y));
+            last u2 = field.mul(point.x, point.y);
+            let [_, invsqrt] = sqrt_ratio(field.one, field.mul(u1, field.sqr(u2)));
+            last den1 = field.mul(invsqrt, u1);
+            last den2 = field.mul(invsqrt, u2);
+            last z_inv = field.mul(field.mul(den1, den2), point.t);
+            last rotate = negative(field.mul(point.t, z_inv));
+            last x = mp.select(rotate, field.mul(point.y, sqrt_m1), point.x);
+            let y = mp.select(rotate, field.mul(point.x, sqrt_m1), point.y);
+            last den_inv = mp.select(rotate, field.mul(den1, invsqrt_a_minus_d), den2);
+            y = mp.select(negative(field.mul(x, z_inv)), field.neg(y), y);
+            last s = absolute(field.mul(den_inv, field.sub(point.z, y)));
+            return mp.to_bytes_le(field.from_mont(s), 32);
+        };
+
+        let map = func(bytes: uint8[list]) -> edwards.Point {
+            let value = mp.from_bytes_le(bytes, 8);
+            value[7] = value[7] & 2147483647;
+            last t = field.to_mont(value);
+            last r = field.mul(sqrt_m1, field.sqr(t));
+            last u = field.mul(field.add(r, field.one), one_minus_d_sq);
+            last minus_one = field.neg(field.one);
+            last v = field.mul(field.sub(minus_one, field.mul(r, d)), field.add(r, d));
+            let [was_square, root] = sqrt_ratio(u, v);
+            last s = mp.select(was_square, root, field.neg(absolute(field.mul(root, t))));
+            last c = mp.select(was_square, minus_one, r);
+            last n = field.sub(field.mul(field.mul(c, field.sub(r, field.one)), d_minus_one_sq), v);
+            last w0 = field.mul(field.add(s, s), v);
+            last w1 = field.mul(n, sqrt_ad_minus_one);
+            last ss = field.sqr(s);
+            last w2 = field.sub(field.one, ss);
+            last w3 = field.add(field.one, ss);
+            return new edwards.Point(field.mul(w0, w3), field.mul(w2, w1), field.mul(w1, w3), field.mul(w0, w2));
+        };
+
+        /// @brief RFC 9496's 64-byte element derivation.
+        export let from_uniform = func(bytes: uint8[list]) -> edwards.Point {
+            if (bytes.length != 64) {
+                trap_with_message("invalid argument: ristretto255 derivation requires 64 bytes");
+            }
+            return curve.add(map(words.slice(bytes, 0, 32)), map(words.slice(bytes, 32, 64)));
+        };
+
+        export let hash_to_group = func(message: uint8[list], dst: uint8[list]) -> edwards.Point =>
+            from_uniform(xmd.expand_sha512(message, dst, 64));
+
+        export let scalar_reduce = func(bytes: uint8[list]) -> uint32[list] => curve.scalar_reduce(bytes);
+        export let scalar_canonical = func(bytes: uint8[list]) -> Optional<uint32[list]> {
+            if (bytes.length != 32) {
+                return Optional<uint32[list]>.None;
+            }
+            return curve.scalar_canonical(bytes);
+        };
+
+        export let scalar_bytes = func(scalar: uint32[list]) -> uint8[list] => curve.scalar_bytes(scalar);
+        export let scalar_order = func -> mp.Modulus => curve.order;
+
+        export let scalar_add = func(a: uint32[list], b: uint32[list]) -> uint32[list] => curve.order.add(a, b);
+        export let scalar_subtract = func(a: uint32[list], b: uint32[list]) -> uint32[list] => curve.order.sub(a, b);
+        export let scalar_multiply = func(a: uint32[list], b: uint32[list]) -> uint32[list] =>
+            curve.order.mul(a, curve.order.to_mont(b));
+
+        export let scalar_invert = func(scalar: uint32[list]) -> uint32[list] {
+            if (mp.is_zero(scalar) == 1) {
+                trap_with_message("invalid argument: cannot invert a zero ristretto255 scalar");
+            }
+            last order = curve.order;
+            return order.from_mont(order.inv(order.to_mont(scalar)));
+        };
+
+        export let.override to_string = func -> string => "Ristretto255.Group";
+    );
+);

@@ -51,3 +51,51 @@ NEURA_ATTRIBUTE(InlineDirective, 8, "inline.directive", on_function, false, "u2"
 NEURA_ATTRIBUTE(Synchronized, 9, "synchronized", on_function, false, "b")
 // A class whose instances may be shared between tasks.
 NEURA_ATTRIBUTE(ClassShareable, 10, "class.shareable", on_class, false, "b")
+// On a function bound to a host service and declared without a body: what a
+// call may do, as the standard library declares with #HostEffects:
+// [may allocate, may trap, uses the scheduler, retains its arguments]. A host
+// call is a host request by definition. Without it every fact is unknown
+// (docs/design/Representation030.md, "Effect and retention summaries").
+NEURA_ATTRIBUTE(HostEffects, 11, "host.effects", on_function, false, "[b b b b]")
+// A constant default of a parameter (docs/design/Calls030.md, Constant
+// defaults): [kind, literal]. Kind 0 Boolean, 1 signed integer, 2 unsigned
+// integer, 3 float (the literal is the value's encoding at the parameter's
+// width, as an unsigned integer), 4 text, 5 nil (the literal is false). A
+// caller that leaves the parameter out passes this value.
+NEURA_ATTRIBUTE(ParameterDefault, 12, "parameter.default", on_parameter, false, "[u5 a]")
+// A default that is an enum variant without payload.
+NEURA_ATTRIBUTE(ParameterDefaultVariant, 13, "parameter.default.variant", on_parameter, false, "s")
+// An extension function (docs/design/Calls030.md, Extension sets): a
+// function that a module enabled with `let.extensions` may call as a member
+// of its first parameter's type. The value is true.
+NEURA_ATTRIBUTE(FunctionExtension, 14, "function.extension", on_function, false, "b")
+// On a class that declares a class hook clause: its hidden hook function.
+NEURA_ATTRIBUTE(HookGet, 15, "hook.get", on_class, false, "s")
+NEURA_ATTRIBUTE(HookSet, 16, "hook.set", on_class, false, "s")
+// On a hidden hook function: [the class that declares the clause, 0 for a
+// getter or 1 for a setter].
+NEURA_ATTRIBUTE(HookOf, 17, "hook.of", on_function, false, "[s u1]")
+// Records, property contracts, static requirements and derivation
+// (docs/design/Records030.md), identifiers 18 to 22.
+//
+// A record class: its generated constructor.
+NEURA_ATTRIBUTE(ClassRecord, 18, "class.record", on_class, false, "s")
+// A bodyless `$get_<name>` or `$set_<name>` function of an interface that a
+// property requirement declares: [the property's name, 0 get or 1 set].
+NEURA_ATTRIBUTE(PropertyRequirement, 19, "property.requirement", on_function, false, "[t u1]")
+// A hidden accessor that establishes a slot a subclass may override.
+NEURA_ATTRIBUTE(AccessorVirtual, 20, "accessor.virtual", on_function, false, "b")
+// A static function that implements a static requirement of an interface:
+// [the requirement, the class or primitive whose declaration lists the
+// conformance]. Repeatable.
+NEURA_ATTRIBUTE(StaticImplements, 21, "static.implements", on_function, true, "[s y]")
+// A symbol a generator produced: [the generator, one of "record",
+// "property.adapter" or "derive:json.codec", and the span of the declaration
+// that caused it].
+NEURA_ATTRIBUTE(Generated, 22, "generated", on_function | on_class | symbol_kind_bit(SymbolKind::Module), false, "[t p]")
+// On the `$resume` method of a generator's state class (docs/design/
+// Lifetime030.md, Generators): the field that holds its resume index. Only
+// such a function may contain Yield.
+NEURA_ATTRIBUTE(GeneratorResume, 23, "generator.resume", on_function, false, "s")
+// Template provenance. Identifiers 12-31 are reserved by the other 0.3 lanes.
+NEURA_ATTRIBUTE(UiFactory, 32, "ui.factory", on_function, false, "s")

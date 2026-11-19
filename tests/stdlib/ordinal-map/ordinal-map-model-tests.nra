@@ -10,8 +10,8 @@ let OrdinalMapModelTests = module (
     const Limit: int = 48;
 
     let Model = class (
-        export let present: bool[list] = [];
-        export let values: int[list] = [];
+        export let present: bool[list] = new;
+        export let values: int[list] = new;
 
         export let init = func() -> void {
             let i = 0;
@@ -33,7 +33,7 @@ let OrdinalMapModelTests = module (
         };
 
         export let entries = func() -> [int, int][list] {
-            let result: [int, int][list] = [];
+            let result: [int, int][list] = new;
             let key = 0;
             while (key < Limit) {
                 if (present[key]) {
@@ -191,8 +191,8 @@ let OrdinalMapModelTests = module (
                 actual.put_all(other);
             } else if (choice < 88) {
                 let expected = model.entries();
-                let keys: int[list] = [];
-                let values: int[list] = [];
+                let keys: int[list] = new;
+                let values: int[list] = new;
                 let copy = ordinal_map.create<int>(Limit);
                 let sum: uint64 = 0;
                 for (let entry in expected) {
@@ -220,7 +220,7 @@ let OrdinalMapModelTests = module (
                 }
                 test.assert_equal_string(text + "}", actual.to_string());
             } else {
-                let seen: [int, int][list] = [];
+                let seen: [int, int][list] = new;
                 actual.for_each(func(k: int, v: int) -> void {
                     seen.append([k, v]);
                 });

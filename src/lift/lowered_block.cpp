@@ -15,6 +15,12 @@
 #define NEURA_LIFT_FLOAT_X86_64 1
 #elif defined(__aarch64__) && (defined(__GNUC__) || defined(__clang__))
 #define NEURA_LIFT_FLOAT_AARCH64 1
+#elif defined(__wasm__)
+// WebAssembly's f32 and f64 instructions are IEEE 754 operations rounded to
+// nearest even, with subnormals and no other environment; only the bits of a
+// NaN result are not fixed, and every NaN result is replaced by the
+// canonical one below.
+#define NEURA_LIFT_FLOAT_WASM 1
 #endif
 
 namespace neura::lift {
@@ -342,7 +348,8 @@ LoweringResult refused(std::string why) {
 } // namespace
 
 bool float_lowering_supported() {
-#if (defined(NEURA_LIFT_FLOAT_X86_64) || defined(NEURA_LIFT_FLOAT_AARCH64)) && defined(FLT_EVAL_METHOD)
+#if (defined(NEURA_LIFT_FLOAT_X86_64) || defined(NEURA_LIFT_FLOAT_AARCH64) || defined(NEURA_LIFT_FLOAT_WASM)) && \
+    defined(FLT_EVAL_METHOD)
     return FLT_EVAL_METHOD == 0 && std::numeric_limits<float>::is_iec559 && std::numeric_limits<double>::is_iec559;
 #else
     return false;
@@ -360,6 +367,9 @@ bool float_environment_is_default() {
     std::uint64_t fpcr = 0;
     __asm__ volatile("mrs %0, fpcr" : "=r"(fpcr));
     return (fpcr & ((std::uint64_t{3} << 22) | (std::uint64_t{1} << 24) | std::uint64_t{3})) == 0;
+#elif defined(NEURA_LIFT_FLOAT_WASM)
+    // WebAssembly has one floating-point environment, the default.
+    return true;
 #else
     return false;
 #endif

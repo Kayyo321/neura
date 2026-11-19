@@ -22,9 +22,9 @@ export let Csv = module (
     /// - UnexpectedEnd, "unterminated quoted field": at the text's length.
     #[NoDiscard, Pure, ThreadSafe]
     export let parse = func(text: string) -> Result<string[list][list]> {
-        last records: string[list][list] = [];
+        last records: string[list][list] = new;
         last count = text.byte_length;
-        let record: string[list] = [];
+        let record: string[list] = new;
         let i = 0;
         while (i < count) {
             // i is at the start of a field.
@@ -36,7 +36,7 @@ export let Csv = module (
                 }
                 record.append(unquote(text, i + 1, end));
                 end++;
-                if (end < count && !is_separator(text, end)) {
+                if (end < count && not is_separator(text, end)) {
                     return failure(ParseErrorKind.Syntax, end, "text after closing quote");
                 }
             } else {
@@ -71,7 +71,7 @@ export let Csv = module (
                 }
             } else {
                 records.append(record);
-                record = [];
+                record = new;
                 if (b == 13) {
                     i = end + 2;
                 } else {
@@ -92,7 +92,7 @@ export let Csv = module (
         for (let row in rows) {
             let first = true;
             for (let field in row) {
-                if (!first) {
+                if (not first) {
                     out.append(",");
                 }
                 first = false;

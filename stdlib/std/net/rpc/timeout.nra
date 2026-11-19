@@ -1,0 +1,93 @@
+let.promote _ = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+
+/// @brief The `grpc-timeout` header (PROTOCOL-HTTP2.md "Timeout"): `TimeoutValue TimeoutUnit`, a decimal of at
+/// most 8 digits and one of `H` (hours), `M` (minutes), `S` (seconds), `m` (milliseconds), `u` (microseconds),
+/// `n` (nanoseconds), to and from `Std.Time.Duration`.
+///
+/// `parse` accepts 1 to 8 digits (0 included, meaning an already expired deadline) and clamps a value whose
+/// nanoseconds exceed the `int64` range of `Duration` (only possible in hours, from 2562048H) to the largest
+/// duration. `format` picks the finest unit whose value fits 8 digits and rounds up, so a peer never sees a
+/// shorter budget than the sender has; a zero or negative duration formats as `0n`.
+/// @see [Std.Net.Rpc.Timeout](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Rpc-Timeout)
+#Since("0.3.0")
+export let Timeout = module (
+    /// @brief The header name.
+    export const Header: string = "grpc-timeout";
+    /// @brief The most digits a TimeoutValue has.
+    export const MaxDigits: int = 8;
+    /// @brief The largest TimeoutValue.
+    export const MaxValue: int64 = 99999999;
+
+    /// @brief The largest `int64`.
+    const MaxNanos: uint64 = 9223372036854775807;
+
+    /// @brief Parses a `grpc-timeout` value. Fails with a Parse error for an empty value, more than 8 digits, a
+    /// non-digit, or a missing or unknown unit.
+    #NoDiscard
+    export let parse = func(text: string) -> Result<Duration> {
+        last length = text.byte_length;
+        if (length < 2 || length > MaxDigits + 1) {
+            return fail(0, "grpc-timeout must be 1 to 8 digits and a unit");
+        }
+        let value: uint64 = 0;
+        for (let i = 0; i < length - 1; i++) {
+            last b = text.byte_at(i);
+            if (b < 48 || b > 57) {
+                return fail(i, "grpc-timeout value must be decimal digits");
+            }
+            value = value * 10 + ((b - 48) as uint64);
+        }
+        last unit = unit_nanos(text.byte_at(length - 1));
+        if (unit == 0) {
+            return fail(length - 1, "unknown grpc-timeout unit");
+        }
+        return if (value > MaxNanos / unit) -> Result<Duration>.Ok(of_nanos(MaxNanos as int64))
+            else -> Result<Duration>.Ok(of_nanos((value * unit) as int64));
+    };
+
+    /// @brief Formats a duration in the finest unit whose value fits 8 digits, rounding up.
+    #NoDiscard
+    export let format = func(span: Duration) -> string {
+        last nanos = span.to_nanos();
+        if (nanos <= 0) {
+            return "0n";
+        }
+        last total = nanos as uint64;
+        for (let unit_char in ["n", "u", "m", "S", "M", "H"]) {
+            last unit = unit_nanos(unit_char.byte_at(0));
+            last count = total % unit == 0 ? total / unit : total / unit + 1;
+            if (count <= (MaxValue as uint64)) {
+                return count.to_string() .. unit_char;
+            }
+        }
+        // Unreachable: the int64 range is under 2562048 hours.
+        return MaxValue.to_string() .. "H";
+    };
+
+    /// @brief The nanoseconds of a unit byte, or 0 for an unknown unit.
+    let unit_nanos = func(unit: uint8) -> uint64 {
+        if (unit == 72) {
+            return 3600000000000;
+        }
+        if (unit == 77) {
+            return 60000000000;
+        }
+        if (unit == 83) {
+            return 1000000000;
+        }
+        if (unit == 109) {
+            return 1000000;
+        }
+        if (unit == 117) {
+            return 1000;
+        }
+        return if (unit == 110) -> 1
+            else -> 0;
+    };
+
+    /// @brief A failed parse at `at`.
+    let fail = func(at: int, message: string) -> Result<Duration> =>
+        Result<Duration>.Err(errors.Error.Parse { kind: errors.ParseErrorKind.Syntax, offset: at, message: message });
+);

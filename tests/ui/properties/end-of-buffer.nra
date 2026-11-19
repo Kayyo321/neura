@@ -1,0 +1,4 @@
+// A clause cut off at the end of the buffer (edge case 143).
+let Named = interface (
+    let name: string;
+        |

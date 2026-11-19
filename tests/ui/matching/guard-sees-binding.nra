@@ -1,0 +1,10 @@
+// Guards see the arm's bindings and nothing of other arms.
+let.promote _ = import:Std.Core.Optional;
+let Shape = enum (Dot, Line(int), Box { size: [int, int], label: Optional<string> });
+let Tree = enum (Leaf(int), Node(Tree, Tree));
+let Light = enum (Red, Yellow, Green);
+let length = func(shape: Shape) -> int => match (shape) {
+    Shape.Line(n) if n > 0 => n,
+    Shape.Box { size: [w, h], label: _ } if n > 0 => w,
+    _ => 1,
+};

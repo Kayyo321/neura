@@ -1,0 +1,219 @@
+// Std.Reflect.Core and Std.Reflect.Type (docs/design/Reflect030.md): type identity, layout, policy, the registry,
+// and descriptors of every type kind.
+let.promote optional = import:Std.Core.Optional;
+let layouts = import:Std.Reflect.Core.MemoryLayout;
+let policies = import:Std.Reflect.Core.ReflectPolicy;
+let registry = import:Std.Reflect.Core.TypeRegistry;
+let type_ids = import:Std.Reflect.Core.TypeId;
+let members = import:Std.Reflect.Member.Members;
+let attributes = import:Std.Reflect.Attribute.Attributes;
+let types = import:Std.Reflect.Type.TypeDescriptor;
+let kinds = import:Std.Reflect.Type.TypeKind;
+let test = import:Std.Test;
+
+let Point = record (x: int32, y: int32);
+
+let Shape = interface (
+    export let area = func -> float64;
+);
+
+let Base = class (
+    export let id: int64 = 0;
+);
+
+#Note("a circle")
+let Circle = class : Base implements Shape (
+    export let radius: float64 = 1.0;
+    export last label: string = "c";
+    #Unit("px")
+    export let width: int32 = 3;
+        | get: width;
+        | set: width = value;
+    export let.override area = func -> float64 => radius * radius * 3.0;
+    export let scaled = func(by: float64) -> Circle {
+        last result = new Circle();
+        result.radius = radius * by;
+        return result;
+    };
+);
+
+let Opaque = class implements policies.Strip (
+    export let secret: int32 = 7;
+);
+
+let Layout = class implements policies.Layout (
+    export let kept: int32 = 7;
+    export let hidden = func -> int32 => kept;
+);
+
+let Color = enum (Red, Green, Blue);
+let Tree = enum (Leaf(int32), Node { value: int32, weight: float64 });
+
+let Box = class<T> (
+    export let item: T;
+    export let init = func(value: T) {
+        item = value;
+    };
+);
+
+let reflectables = import:Std.Reflect.Core.Reflectable;
+
+let Holder = class (
+    export static let kept: Base = new Base();
+);
+
+let CoreTests = module (
+    // Vectors: python3 -c "import hashlib; print(hashlib.sha256(b'abc').hexdigest()[:32])" and the same for
+    // b'7:Point@core-tests.nra'; the halves are the two 16-digit groups read as unsigned integers.
+    export let test_type_id_is_the_sha256_prefix_of_the_identity = func() -> void {
+        last abc = type_ids.of_identity("abc");
+        test.assert(abc.high == 13436514500253700074);
+        test.assert(abc.low == 4702110809750118947);
+        test.assert_equal_string("ba7816bf8f01cfea414140de5dae2223", type_ids.to_hex(abc));
+        last point = types.of<Point>();
+        test.assert_equal_string("7:Point@core-tests.nra", point.identity);
+        test.assert_equal_string("92f14a6d22122dc1fc818b3296d5b226", type_ids.to_hex(point.id));
+        test.assert(point.id === type_ids.of_identity(point.identity));
+    };
+
+    export let test_scalars_have_the_fixed_ordinals = func() -> void {
+        test.assert_equal_int32(1, types.of<bool>().ordinal);
+        test.assert_equal_int32(4, types.of<int32>().ordinal);
+        test.assert_equal_int32(9, types.of<uint64>().ordinal);
+        test.assert_equal_int32(13, types.of<float64>().ordinal);
+        test.assert_equal_int32(14, types.of<string>().ordinal);
+        test.assert(types.of<int64>().kind == kinds.TypeKind.Integer);
+        test.assert_equal_int32(64, types.of<int64>().layout.bits);
+        test.assert(types.of<int64>().layout.plain);
+        test.assert(!types.of<string>().layout.plain);
+    };
+
+    export let test_record_descriptor = func() -> void {
+        last point = types.of_value(new Point(1, 2));
+        test.assert(point.kind == kinds.TypeKind.Record);
+        test.assert_equal_string("Point", point.name);
+        test.assert_equal_int32(2, point.fields.length);
+        test.assert_equal_string("x", point.fields[0].name);
+        test.assert_equal_string("int32", point.fields[1].type_name());
+        test.assert(point.fields[0].is_last);
+        test.assert(!point.fields[0].writable());
+        test.assert_equal_int32(1, point.constructors.length);
+        test.assert_equal_string("init(x: int32, y: int32)", point.constructors[0].to_string());
+        test.assert(point.layout.form == layouts.Form.Reference);
+        test.assert(point.info() === typeof(new Point(1, 2)));
+    };
+
+    export let test_class_descriptor_with_base_interface_property_and_tags = func() -> void {
+        last shape: Shape = new Circle();
+        last circle = types.of_value(shape);
+        test.assert_equal_string("Circle", circle.name);
+        test.assert(circle.kind == kinds.TypeKind.Class);
+        test.assert_equal_string("Base", circle.base().name);
+        test.assert_equal_int32(1, circle.interfaces.length);
+        test.assert(circle.derives_from(types.of<Shape>()));
+        test.assert(circle.derives_from(types.of<Base>()));
+        test.assert(!types.of<Base>().derives_from(circle));
+        // Base fields first, in declaration order.
+        test.assert_equal_string("id", circle.fields[0].name);
+        test.assert_equal_string("radius", circle.fields[1].name);
+        last width = circle.field("width");
+        test.assert(width.is_property());
+        test.assert(members.flags(width).property);
+        test.assert_equal_string("px", test.assert_some(attributes.find(width.attributes, "Unit").argument("name")));
+        test.assert(attributes.has(circle.attributes, "Note"));
+        test.assert(!circle.field("label").writable());
+        test.assert(members.visibility(width) == members.Visibility.Exported);
+        last area = circle.method("area");
+        test.assert(area.invocable);
+        test.assert_equal_string("area() -> float64", area.to_string());
+        test.assert_equal_string("scaled(by: float64) -> Circle", circle.method("scaled").to_string());
+        test.assert_equal_int32(1, members.properties(circle).length);
+    };
+
+    export let test_interface_descriptor = func() -> void {
+        last shape = types.of<Shape>();
+        test.assert(shape.kind == kinds.TypeKind.Interface);
+        test.assert_equal_int32(1, shape.methods.length);
+        test.assert_equal_int32(0, shape.constructors.length);
+    };
+
+    export let test_enums_tuples_lists_and_functions = func() -> void {
+        last color = types.of<Color>();
+        test.assert(color.kind == kinds.TypeKind.Enum);
+        test.assert_equal_int32(3, color.variants.length);
+        test.assert_equal_string("Blue", color.variants[2].name);
+        last tree = types.of<Tree>();
+        test.assert_equal_string("Leaf(0: int32)", tree.variants[0].to_string());
+        test.assert_equal_string("Node(value: int32, weight: float64)", tree.variants[1].to_string());
+        test.assert(tree.layout.form == layouts.Form.Enum);
+        last pair = types.of<[int32, string]>();
+        test.assert(pair.kind == kinds.TypeKind.Tuple);
+        test.assert_equal_string("[int32, string]", pair.name);
+        test.assert_equal_int32(2, pair.elements.length);
+        test.assert(pair.layout.form == layouts.Form.Tuple);
+        last list = types.of<string[list]>();
+        test.assert(list.kind == kinds.TypeKind.List);
+        test.assert_equal_string("string", types.of_ordinal(list.elements[0]).name);
+        last array = types.of<int32[]>();
+        test.assert(array.kind == kinds.TypeKind.Array);
+        last maybe = types.of<Optional<int32>>();
+        test.assert_equal_string("Optional", maybe.generic_origin);
+        test.assert_equal_string("int32", maybe.generic_arguments[0]);
+        last function = types.of<func(int32) -> string>();
+        test.assert(function.kind == kinds.TypeKind.Function);
+    };
+
+    export let test_generic_instance = func() -> void {
+        last box = types.of_value(new Box<string>("x"));
+        test.assert_equal_string("Box<string>", box.name);
+        test.assert_equal_string("Box", box.generic_origin);
+        test.assert_equal_string("string", box.generic_arguments[0]);
+        test.assert_equal_string("string", box.fields[0].type_name());
+    };
+
+    export let test_nil_has_ordinal_zero = func() -> void {
+        last none: Circle = nil;
+        last described = types.of_value(none);
+        test.assert_equal_int32(0, described.ordinal);
+        test.assert(described.kind == kinds.TypeKind.Nil);
+    };
+
+    export let test_policies = func() -> void {
+        last opaque = types.of<Opaque>();
+        test.assert(opaque.policy == policies.Level.Strip);
+        test.assert_equal_int32(0, opaque.fields.length);
+        last layout = types.of<Layout>();
+        test.assert(layout.policy == policies.Level.Layout);
+        test.assert_equal_int32(1, layout.fields.length);
+        test.assert_equal_int32(0, layout.methods.length);
+        test.assert(types.of<Circle>().policy == policies.Level.Full);
+    };
+
+    export let test_registry_lookups = func() -> void {
+        test.assert(registry.count() > 15);
+        last point = types.of<Point>();
+        test.assert(registry.find_name("Point") == point);
+        test.assert(registry.find_id(point.id) == point);
+        test.assert(registry.at(point.ordinal) == point);
+        test.assert(registry.find_name("NoSuchType") == nil);
+        test.assert(types.of_info(typeof(new Point(0, 0))) == point);
+    };
+
+    export let test_reflectable = func() -> void {
+        test.assert(reflectables.descriptor<Point>() == types.of<Point>());
+        test.assert_equal_string("Circle", reflectables.descriptor_of(new Circle() as Shape).name);
+        test.assert_equal_int32(2, reflectables.cursor(new Point(1, 2)).child(1).value().get<int32>());
+    };
+
+    // The descriptor of a value agrees with typeof, which describes an object of a class it cannot name by its
+    // static type (Expressions030 ec829ffd).
+    export let test_descriptor_agrees_with_typeof = func() -> void {
+        last anonymous: Base = new class : Base ( export let extra: int32 = 1; )();
+        test.assert(types.of_value(anonymous).info() === typeof(anonymous));
+        test.assert(types.of_value(Holder.kept).info() === typeof(Holder.kept));
+        last shape: Shape = new Circle();
+        test.assert(types.of_value(shape).info() === typeof(shape));
+        last none: Shape = nil;
+        test.assert(types.of_value(none).info() === typeof(none));
+    };
+);

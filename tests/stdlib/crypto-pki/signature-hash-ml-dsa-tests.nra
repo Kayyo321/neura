@@ -1,0 +1,28 @@
+// test-options: --gpu=off --max-steps 4000000000
+let algorithm_ids = import:Std.Crypto.Pki.AlgorithmIdentifier;
+let algorithm_verifier = import:Std.Crypto.Pki.AlgorithmVerifier;
+let hex = import:Std.Encoding.Hex;
+let public_keys = import:Std.Crypto.Pki.PublicKeyInfo;
+let signature = import:Std.Crypto.Pki.SignatureVerifier;
+let test = import:Std.Test;
+let vectors = import:PqcSignatureVectors;
+
+let SignatureHashMlDsaTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    export let test_hash_ml_dsa_sha512 = func {
+        let verifier: algorithm_verifier.AlgorithmVerifier = new;
+        last rows = vectors.hash_ml_dsa;
+        for (let i = 0; i < rows.length; i += 5) {
+            last algorithm = algorithm_ids.without_parameters(rows[i + 1]);
+            last message = decode(rows[i + 2]);
+            last key = test.assert_ok(public_keys.of(algorithm, decode(rows[i + 3])));
+            last signed = decode(rows[i + 4]);
+            test.assert_with(verifier.verify_signature(algorithm, key, message, signed) == signature.SignatureCheck.Valid,
+                rows[i]);
+            message[0] = message[0] ^ 1;
+            test.assert_with(verifier.verify_signature(algorithm, key, message, signed)
+                == signature.SignatureCheck.Invalid, rows[i]);
+        }
+    };
+);

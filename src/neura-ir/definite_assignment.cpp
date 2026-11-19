@@ -1,4 +1,5 @@
 #include "definite_assignment.hpp"
+#include "parser/html_template.hpp"
 
 #include "parser/syntax.hpp"
 
@@ -153,9 +154,14 @@ private:
             const auto found = lookup(expr.text);
             return found ? *found : std::nullopt;
         }
-        if (expr.kind != ExprKind::Member || !options_.instance_is_receiver) return std::nullopt;
+        if (expr.kind != ExprKind::Member) return std::nullopt;
         const auto& receiver = expr.operands.front();
-        if (receiver.kind != ExprKind::Name || receiver.text != "instance" || lookup("instance")) return std::nullopt;
+        // `$instance` is the receiver written by the constructor shorthand;
+        // no name shadows it.
+        const bool shorthand = receiver.kind == ExprKind::Name && receiver.text == "$instance";
+        if (!shorthand && (!options_.instance_is_receiver || receiver.kind != ExprKind::Name ||
+                           receiver.text != "instance" || lookup("instance")))
+            return std::nullopt;
         for (std::size_t i = 0; i < bindings_.size() && bindings_[i].field; ++i) {
             if (bindings_[i].name == expr.text) return i;
         }
@@ -259,8 +265,14 @@ private:
         if (!flow.reachable) return;
         if (const auto index = tracked(expr)) use(*index, expr.span, flow);
         switch (expr.kind) {
+        case ExprKind::NameOf:
+            // Its operand names a declaration and is not evaluated.
+            return;
         case ExprKind::Lambda:
-            capture(*expr.lambda, expr.span, flow);
+        // A generator captures as a lambda does (docs/design/Lifetime030.md).
+        case ExprKind::Generator:
+        case ExprKind::HtmlFactory:
+            capture(expr, flow);
             return;
         case ExprKind::Conditional: {
             read(expr.operands[0], flow);
@@ -291,6 +303,7 @@ private:
             read(expr.match->expressions.front(), flow);
             for (const auto& arm : expr.match->arms) {
                 begin_arm(arm);
+                if (arm.guard) read(*arm.guard, flow);
                 read(*arm.value, flow);
                 scopes_.pop_back();
             }
@@ -299,9 +312,8 @@ private:
 
     // A closure copies the locals it captures when it is created, and a
     // closure created in a constructor may run before a field is assigned.
-    void capture(const Declaration& lambda, const Span& at, const Flow& flow) {
-        scopes_.emplace_back();
-        for (const auto& parameter : lambda.parameters) hide(parameter.name);
+    void capture(const Expr& closure, const Flow& flow) {
+        const auto& at = closure.span;
         const auto captured = [&](const Expr& expr) {
             const auto index = tracked(expr);
             if (!index || slot(flow, *index).state == State::Assigned) return;
@@ -309,7 +321,7 @@ private:
             const bool maybe = state.state == State::MaybeAssigned;
             auto error = Diagnostic(expr.span, "closure captures " + quoted(*index) + " before it is assigned")
                 .with_code("E0443").label(quoted(*index) + " is captured here")
-                .label(head(at, 4), maybe ? "the closure is created here, where " + quoted(*index) +
+                .label(head(at, closure.kind == ExprKind::Generator ? 8 : 4), maybe ? "the closure is created here, where " + quoted(*index) +
                                                 " may not be assigned yet"
                                           : "the closure is created here, before " + quoted(*index) +
                                                 " is assigned");
@@ -321,8 +333,7 @@ private:
             error.help("assign " + quoted(*index) + " before creating the closure");
             throw error;
         };
-        scan_body(lambda.body, captured);
-        scopes_.pop_back();
+        scan(closure, captured);
     }
 
     using Visit = std::function<void(const Expr&)>;
@@ -330,10 +341,21 @@ private:
     // Visits every name reference in a nested lambda body, with its scopes.
     void scan(const Expr& expr, const Visit& visit) {
         visit(expr);
-        if (expr.kind == ExprKind::Lambda) {
+        if (expr.kind == ExprKind::Lambda || expr.kind == ExprKind::Generator) {
             scopes_.emplace_back();
             for (const auto& parameter : expr.lambda->parameters) hide(parameter.name);
             scan_body(expr.lambda->body, visit);
+            scopes_.pop_back();
+            return;
+        }
+        if (expr.html_factory) {
+            const auto& factory = *expr.html_factory;
+            scopes_.emplace_back();
+            for (const auto& parameter : factory.parameters) hide(parameter.name);
+            if (const auto* body = std::get_if<TemplateSyntax>(&factory.source))
+                scan_template(body->nodes, visit);
+            else if (factory.external)
+                scan_template(factory.external->body.nodes, visit);
             scopes_.pop_back();
             return;
         }
@@ -342,7 +364,33 @@ private:
             scan(expr.match->expressions.front(), visit);
             for (const auto& arm : expr.match->arms) {
                 begin_arm(arm);
+                if (arm.guard) scan(*arm.guard, visit);
                 scan(*arm.value, visit);
+                scopes_.pop_back();
+            }
+        }
+    }
+
+    void scan_template(const std::vector<TemplateNode>& nodes, const Visit& visit) {
+        for (const auto& node : nodes) {
+            if (const auto* hole = std::get_if<TemplateHole>(&node.value)) {
+                scan(hole->expression, visit);
+            } else if (const auto* element = std::get_if<std::shared_ptr<TemplateElement>>(&node.value)) {
+                for (const auto& attr : (*element)->attributes) {
+                    if (const auto* expression = std::get_if<Expr>(&attr.value)) scan(*expression, visit);
+                }
+                scan_template((*element)->children, visit);
+            } else if (const auto* choice = std::get_if<std::shared_ptr<TemplateIf>>(&node.value)) {
+                for (const auto& branch : (*choice)->branches) {
+                    if (branch.condition) scan(*branch.condition, visit);
+                    scan_template(branch.children, visit);
+                }
+            } else if (const auto* loop = std::get_if<std::shared_ptr<TemplateFor>>(&node.value)) {
+                scan((*loop)->head.input, visit);
+                scopes_.emplace_back();
+                hide((*loop)->head.binding.text);
+                scan((*loop)->head.key, visit);
+                scan_template((*loop)->children, visit);
                 scopes_.pop_back();
             }
         }
@@ -370,6 +418,7 @@ private:
         case StmtKind::Match:
             for (const auto& arm : stmt.arms) {
                 begin_arm(arm);
+                if (arm.guard) scan(*arm.guard, visit);
                 scan_body(arm.body, visit);
                 scopes_.pop_back();
             }
@@ -392,7 +441,7 @@ private:
             if (init.kind == StmtKind::Binding) hide(init.declaration->name);
         }
         if (stmt.kind == StmtKind::ForEach) hide(stmt.declaration->name);
-        if (stmt.kind == StmtKind::Scope)
+        if (stmt.kind == StmtKind::Scope || stmt.kind == StmtKind::Using)
             for (const auto& binding : stmt.bindings) hide(binding.text);
         scan_body(stmt.body, visit);
         for (const auto& step : stmt.step) scan_statement(step, visit);
@@ -418,8 +467,20 @@ private:
         auto no = fork(flow);
         yes.reachable &= known.value_or(true);
         no.reachable &= !known.value_or(false);
-        check_body(stmt.body, yes);
-        check_body(stmt.alternative, no);
+        // A narrowing's names hide outer ones in the branch that binds them
+        // and, for `is not` whose true branch cannot complete, after the
+        // `if` (docs/design/Expressions030.md, Narrowing).
+        const auto narrowed = [&](const std::vector<Statement>& body, Flow& path, bool bound) {
+            scopes_.emplace_back();
+            if (bound)
+                for (const auto& binding : stmt.bindings) hide(binding.text);
+            check_body(body, path);
+            scopes_.pop_back();
+        };
+        narrowed(stmt.body, yes, !stmt.negated_narrowing);
+        narrowed(stmt.alternative, no, stmt.negated_narrowing);
+        if (stmt.negated_narrowing && !yes.reachable)
+            for (const auto& binding : stmt.bindings) hide(binding.text);
         flow.reachable = false;
         merge(flow, std::move(yes), Skip{condition.span, "not assigned when this condition is true"});
         merge(flow, std::move(no), Skip{condition.span, "not assigned when this condition is false"});
@@ -433,6 +494,7 @@ private:
         for (const auto& arm : stmt.arms) {
             auto selected = fork(before);
             begin_arm(arm);
+            if (arm.guard) read(*arm.guard, selected);
             for (const auto& child : arm.body) check_statement(child, selected);
             scopes_.pop_back();
             merge(flow, std::move(selected), Skip{head(arm.span, arm.variant.size()), "not assigned in this arm"});
@@ -544,6 +606,7 @@ private:
             check_body(stmt.body, flow);
             break;
         case StmtKind::Scope:
+        case StmtKind::Using:
             scopes_.emplace_back();
             for (const auto& binding : stmt.bindings) hide(binding.text);
             check_body(stmt.body, flow);

@@ -1,0 +1,42 @@
+let certificate = import:Std.Crypto.Pki.Certificate;
+let hex = import:Std.Encoding.Hex;
+let signature = import:Std.Crypto.Pki.SignatureVerifier;
+let test = import:Std.Test;
+
+/// Helpers for the recorded signature certificates.
+export let SignatureTestCases = module (
+    export let read = func(rows: string[], name: string) -> certificate.Certificate {
+        for (let i = 0; i < rows.length; i += 5) {
+            if (rows[i] == name) {
+                return test.assert_ok(certificate.parse(test.assert_ok(hex.decode(rows[i + 1]))));
+            }
+        }
+        test.fail("no signature vector " + name);
+        trap_with_message("missing signature vector");
+    };
+
+    export let verify = func(rows: string[], name: string, verifier: signature.SignatureVerifier) {
+        for (let i = 0; i < rows.length; i += 5) {
+            if (rows[i] == name) {
+                last cert = test.assert_ok(certificate.parse(test.assert_ok(hex.decode(rows[i + 1]))));
+                last actual = verifier.verify_signature(cert.signature_algorithm, cert.public_key, cert.tbs_bytes,
+                    cert.signature);
+                last expected = rows[i + 3] == "unsupported"
+                    ? signature.SignatureCheck.UnsupportedAlgorithm : signature.SignatureCheck.Valid;
+                test.assert_with(actual == expected, name);
+                return;
+            }
+        }
+        test.fail("no signature vector " + name);
+    };
+
+    export let reject_flipped = func(cert: certificate.Certificate, verifier: signature.SignatureVerifier, name: string) {
+        let altered: uint8[list] = new;
+        for (let byte in cert.signature) {
+            altered.append(byte);
+        }
+        altered[altered.length - 1] = altered[altered.length - 1] ^ 1;
+        test.assert_with(verifier.verify_signature(cert.signature_algorithm, cert.public_key, cert.tbs_bytes, altered)
+            == signature.SignatureCheck.Invalid, name);
+    };
+);

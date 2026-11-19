@@ -1,0 +1,412 @@
+let hashing = import:Std.Core.Hash;
+let.promote _ = import:Std.Core.Optional;
+let proto = import:Std.Net.Rpc.ProtoWire;
+let.promote _ = import:Std.Core.Result;
+let status = import:Std.Net.Rpc.Status;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief RPC wire framing, separate from codecs: gRPC length-prefixed messages (PROTOCOL-HTTP2.md
+/// "Length-Prefixed-Message"), varint-delimited messages, and the compressed-message flag.
+///
+/// A gRPC message is a flags byte (bit 0: compressed; bit 7: a gRPC-Web trailer frame, see `Std.Net.Rpc.GrpcWeb`),
+/// a 4-byte big-endian length and the message. Frame boundaries have no relation to transport chunk boundaries,
+/// so both decoders take chunks of any size. A decoder checks a length against its maximum as soon as the
+/// length is read; a larger message fails with RESOURCE_EXHAUSTED, a malformed frame with INTERNAL
+/// (statuscodes.md), both as `Std.Net.Rpc.Status` errors; after a failure the decoder stays failed. Compression
+/// contexts are per message. gzip and deflate are stubs: the standard library has no DEFLATE.
+/// @see [Std.Net.Rpc.Framing](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Rpc-Framing)
+#Since("0.3.0")
+export let Framing = module (
+    /// @brief The size of a gRPC message prefix.
+    export const PrefixSize: int = 5;
+    /// @brief Flag bit 0: the message is compressed with the call's `grpc-encoding`.
+    export const CompressedFlag: int = 1;
+    /// @brief Flag bit 7: a gRPC-Web trailer frame.
+    export const TrailerFlag: int = 128;
+    /// @brief The default largest message a decoder accepts: 4 MiB (a decision of this library, matching common
+    /// gRPC receive limits).
+    export const DefaultMaxMessageSize: int = 4194304;
+
+    /// @brief The `grpc-encoding` of a message.
+    export let Compression = enum (Identity, Gzip, Deflate);
+
+    /// @brief The `grpc-encoding` token: `identity`, `gzip` or `deflate`.
+    #NoDiscard
+    export let compression_name = func(compression: Compression) -> string => match (compression) {
+        Compression.Identity => "identity",
+        Compression.Gzip => "gzip",
+        Compression.Deflate => "deflate",
+    };
+
+    /// @brief The compression named by a `grpc-encoding` token, or `None` for an unknown one (a server answers
+    /// UNIMPLEMENTED).
+    #NoDiscard
+    export let compression_of = func(token: string) -> Optional<Compression> {
+        if (token == "identity") {
+            return Optional<Compression>.Some(Compression.Identity);
+        }
+        if (token == "gzip") {
+            return Optional<Compression>.Some(Compression.Gzip);
+        }
+        return if (token == "deflate") -> Optional<Compression>.Some(Compression.Deflate)
+            else -> Optional<Compression>.None;
+    };
+
+    /// @brief Compresses one message; identity returns the bytes unchanged.
+    #NoDiscard
+    export let compress = func(compression: Compression, payload: uint8[list]) -> Result<uint8[list]> =>
+        match (compression) {
+            Compression.Identity => Result<uint8[list]>.Ok(payload),
+            Compression.Gzip => deflate_compress(true, payload),
+            Compression.Deflate => deflate_compress(false, payload),
+        };
+
+    /// @brief Decompresses one message; identity returns the bytes unchanged.
+    #NoDiscard
+    export let decompress = func(compression: Compression, payload: uint8[list]) -> Result<uint8[list]> =>
+        match (compression) {
+            Compression.Identity => Result<uint8[list]>.Ok(payload),
+            Compression.Gzip => deflate_decompress(true, payload),
+            Compression.Deflate => deflate_decompress(false, payload),
+        };
+
+    /// @brief One length-prefixed frame: its flags byte and its message bytes as sent.
+    #Final
+    export let Frame = class (
+        /// @brief The flags byte.
+        export last flags: int;
+        /// @brief The message bytes (compressed when the compressed flag is set).
+        export last payload: uint8[list];
+
+        /// @brief A frame with flags `bits` (0 to 255; otherwise traps with "invalid argument: flags").
+        export let init = func(bits: int, data: uint8[list]) {
+            if (bits < 0 || bits > 255) {
+                trap_with_message("invalid argument: flags");
+            }
+            flags = bits;
+            payload = data;
+        };
+
+        /// @brief Whether the compressed flag is set.
+        #NoDiscard
+        export let is_compressed = func -> bool => (flags & CompressedFlag) != 0;
+
+        /// @brief Whether this is a gRPC-Web trailer frame.
+        #NoDiscard
+        export let is_trailer = func -> bool => (flags & TrailerFlag) != 0;
+
+        /// @brief Equal when the flags and bytes are.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: Frame) {
+                return false;
+            }
+            if (flags != that.flags || payload.length != that.payload.length) {
+                return false;
+            }
+            for (let i = 0; i < payload.length; i++) {
+                if (payload[i] != that.payload[i]) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        /// @brief Combines the flags and bytes.
+        export let.override hash_code = func -> uint32 {
+            let hash = hashing.combine(17, flags as uint32);
+            for (let b in payload) {
+                hash = hashing.combine(hash, b as uint32);
+            }
+            return hash;
+        };
+
+        /// @brief The flags and size.
+        export let.override to_string = func -> string =>
+            "Frame(flags " .. flags.to_string() .. ", " .. payload.length.to_string() .. " bytes)";
+    );
+
+    /// @brief Appends a length-prefixed frame with `flags` to `out`. A payload of 2^32 bytes or more traps with
+    /// "invalid argument: message too large".
+    export let append_frame = func(out: uint8[list], flags: int, payload: uint8[list]) {
+        last length = payload.length as uint64;
+        if (length > 4294967295) {
+            trap_with_message("invalid argument: message too large");
+        }
+        out.append(flags as uint8);
+        out.append(((length >> 24) & 255) as uint8);
+        out.append(((length >> 16) & 255) as uint8);
+        out.append(((length >> 8) & 255) as uint8);
+        out.append((length & 255) as uint8);
+        for (let b in payload) {
+            out.append(b);
+        }
+    };
+
+    /// @brief The length-prefixed encoding of one message.
+    #NoDiscard
+    export let encode_message = func(payload: uint8[list], compressed: bool) -> uint8[list] {
+        last out: uint8[list] = new;
+        append_frame(out, compressed ? CompressedFlag : 0, payload);
+        return out;
+    };
+
+    /// @brief Compresses `payload` with `compression` (unless identity) and frames it with the matching flag.
+    #NoDiscard
+    export let encode_with = func(compression: Compression, payload: uint8[list]) -> Result<uint8[list]> {
+        last identity = match (compression) {
+            Compression.Identity => true,
+            _ => false,
+        };
+        return Result<uint8[list]>.Ok(encode_message(compress(compression, payload)?, not identity));
+    };
+
+    /// @brief The message bytes of a frame received on a call whose `grpc-encoding` is `compression`: fails with
+    /// INTERNAL when the compressed flag is set on an identity call (PROTOCOL-HTTP2.md "Compressed-Flag").
+    #NoDiscard
+    export let message_of = func(frame: Frame, compression: Compression) -> Result<uint8[list]> {
+        return Result<uint8[list]>.Ok(frame.payload) unless frame.is_compressed();
+        return match (compression) {
+            Compression.Identity => Result<uint8[list]>.Err(status.error(status.Code.Internal,
+                "compressed flag set without grpc-encoding")),
+            _ => decompress(compression, frame.payload),
+        };
+    };
+
+    /// @brief Decodes length-prefixed frames from chunks of any size.
+    ///
+    /// With `web` false only flags 0 and 1 are valid; with `web` true flags 128 and 129 (trailer frames) are
+    /// too. Any other flags byte fails.
+    #[Final, NotThreadSafe]
+    export let MessageDecoder = class (
+        /// @brief The largest message accepted.
+        last max_size: int;
+        /// @brief Whether gRPC-Web trailer flags are valid.
+        last web: bool;
+        /// @brief Received bytes from `offset` on.
+        let buffer: uint8[list] = new;
+        /// @brief The start of the unconsumed bytes.
+        let offset: int = 0;
+        /// @brief Set once a frame failed.
+        let failed: bool = false;
+
+        /// @brief A decoder; a maximum below 0 traps with "invalid argument: max_size".
+        export let init = func(max_message_size: int, grpc_web: bool) {
+            if (max_message_size < 0) {
+                trap_with_message("invalid argument: max_size");
+            }
+            max_size = max_message_size;
+            web = grpc_web;
+        };
+
+        /// @brief Adds received bytes.
+        export let push = func(chunk: uint8[list]) {
+            for (let b in chunk) {
+                buffer.append(b);
+            }
+        };
+
+        /// @brief The number of bytes not yet decoded.
+        #NoDiscard
+        export let buffered = func -> int => buffer.length - offset;
+
+        /// @brief The next whole frame, `None` when more bytes are needed, or the failure of a bad frame.
+        #NoDiscard
+        export let next = func -> Result<Optional<Frame>> {
+            if (failed) {
+                return fail(status.Code.Internal, "the decoder already failed");
+            }
+            if (buffer.length - offset < PrefixSize) {
+                return Result<Optional<Frame>>.Ok(Optional<Frame>.None);
+            }
+            last flags = buffer[offset] as int;
+            last valid = flags == 0 or 1 || (web && flags == 128 or 129);
+            return fail(status.Code.Internal, "invalid message flags " .. flags.to_string()) unless valid;
+            let length: uint64 = 0;
+            for (let i = 1; i < PrefixSize; i++) {
+                length = (length << 8) | (buffer[offset + i] as uint64);
+            }
+            if (length > (max_size as uint64)) {
+                return fail(status.Code.ResourceExhausted, "message of " .. length.to_string()
+                    .. " bytes exceeds the limit of " .. max_size.to_string());
+            }
+            last size = length as int;
+            last start = offset + PrefixSize;
+            if (buffer.length - start < size) {
+                return Result<Optional<Frame>>.Ok(Optional<Frame>.None);
+            }
+            last payload: uint8[list] = new;
+            for (let i = 0; i < size; i++) {
+                payload.append(buffer[start + i]);
+            }
+            offset = start + size;
+            compact();
+            return Result<Optional<Frame>>.Ok(Optional<Frame>.Some(new Frame(flags, payload)));
+        };
+
+        /// @brief Checks the stream ended on a frame boundary: leftover bytes fail with INTERNAL.
+        #NoDiscard
+        export let finish = func -> Result<Unit> {
+            if (failed || buffer.length > offset) {
+                failed = true;
+                return Result<Unit>.Err(status.error(status.Code.Internal, "stream ended inside a message"));
+            }
+            return Result<Unit>.Ok(Unit.Value);
+        };
+
+        /// @brief The buffered byte count.
+        export let.override to_string = func -> string =>
+            "MessageDecoder(" .. buffered().to_string() .. " bytes buffered)";
+
+        /// @brief Drops the consumed prefix once it is at least half the buffer.
+        let compact = func {
+            if (offset == 0 || offset * 2 < buffer.length) {
+                return;
+            }
+            last rest: uint8[list] = new;
+            for (let i = offset; i < buffer.length; i++) {
+                rest.append(buffer[i]);
+            }
+            buffer = rest;
+            offset = 0;
+        };
+
+        /// @brief Marks the decoder failed.
+        let fail = func(code: status.Code, message: string) -> Result<Optional<Frame>> {
+            failed = true;
+            return Result<Optional<Frame>>.Err(status.error(code, message));
+        };
+    );
+
+    /// @brief Every frame of a complete body; fails on a bad frame or a body that ends inside a frame.
+    #NoDiscard
+    export let decode_all = func(body: uint8[list], max_message_size: int, grpc_web: bool) -> Result<Frame[list]> {
+        last decoder = new MessageDecoder(max_message_size, grpc_web);
+        decoder.push(body);
+        last frames: Frame[list] = new;
+        let more = true;
+        while (more) {
+            match (decoder.next()?) {
+                Optional.Some(frame) => {
+                    frames.append(frame);
+                },
+                Optional.None => {
+                    more = false;
+                },
+            }
+        }
+        decoder.finish()?;
+        return Result<Frame[list]>.Ok(frames);
+    };
+
+    /// @brief The varint-delimited encoding of one message: a base-128 varint length, then the bytes (the
+    /// protobuf `writeDelimitedTo` form).
+    #NoDiscard
+    export let encode_delimited = func(payload: uint8[list]) -> uint8[list] {
+        last out: uint8[list] = new;
+        proto.append_varint(out, payload.length as uint64);
+        for (let b in payload) {
+            out.append(b);
+        }
+        return out;
+    };
+
+    /// @brief Decodes varint-delimited messages from chunks of any size.
+    #[Final, NotThreadSafe]
+    export let DelimitedDecoder = class (
+        /// @brief The largest message accepted.
+        last max_size: int;
+        /// @brief Received bytes from `offset` on.
+        let buffer: uint8[list] = new;
+        /// @brief The start of the unconsumed bytes.
+        let offset: int = 0;
+        /// @brief Set once a message failed.
+        let failed: bool = false;
+
+        /// @brief A decoder; a maximum below 0 traps with "invalid argument: max_size".
+        export let init = func(max_message_size: int) {
+            if (max_message_size < 0) {
+                trap_with_message("invalid argument: max_size");
+            }
+            max_size = max_message_size;
+        };
+
+        /// @brief Adds received bytes.
+        export let push = func(chunk: uint8[list]) {
+            for (let b in chunk) {
+                buffer.append(b);
+            }
+        };
+
+        /// @brief The next whole message, `None` when more bytes are needed, or a failure: a varint over 10 bytes
+        /// or 64 bits (INTERNAL) or a length above the maximum (RESOURCE_EXHAUSTED).
+        #NoDiscard
+        export let next = func -> Result<Optional<uint8[list]>> {
+            if (failed) {
+                return fail(status.Code.Internal, "the decoder already failed");
+            }
+            let length: uint64 = 0;
+            let i = 0;
+            let done = false;
+            while (not done) {
+                if (i == proto.MaxVarintBytes) {
+                    return fail(status.Code.Internal, "length varint longer than 10 bytes");
+                }
+                if (offset + i >= buffer.length) {
+                    return Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.None);
+                }
+                last b = buffer[offset + i] as uint64;
+                if (i == 9 && b > 1) {
+                    return fail(status.Code.Internal, "length varint exceeds 64 bits");
+                }
+                length = length | ((b & 127) << ((i * 7) as uint64));
+                i++;
+                done = b < 128;
+            }
+            if (length > (max_size as uint64)) {
+                return fail(status.Code.ResourceExhausted, "message of " .. length.to_string()
+                    .. " bytes exceeds the limit of " .. max_size.to_string());
+            }
+            last size = length as int;
+            last start = offset + i;
+            if (buffer.length - start < size) {
+                return Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.None);
+            }
+            last payload: uint8[list] = new;
+            for (let k = 0; k < size; k++) {
+                payload.append(buffer[start + k]);
+            }
+            offset = start + size;
+            if (offset * 2 >= buffer.length) {
+                last rest: uint8[list] = new;
+                for (let k = offset; k < buffer.length; k++) {
+                    rest.append(buffer[k]);
+                }
+                buffer = rest;
+                offset = 0;
+            }
+            return Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.Some(payload));
+        };
+
+        /// @brief The buffered byte count.
+        export let.override to_string = func -> string =>
+            "DelimitedDecoder(" .. (buffer.length - offset).to_string() .. " bytes buffered)";
+
+        /// @brief Marks the decoder failed.
+        let fail = func(code: status.Code, message: string) -> Result<Optional<uint8[list]>> {
+            failed = true;
+            return Result<Optional<uint8[list]>>.Err(status.error(code, message));
+        };
+    );
+
+    /// @brief Compresses one message with gzip (RFC 1952) or raw deflate (RFC 1951).
+    /// @stub no DEFLATE (RFC 1951) compressor in the standard library
+    let deflate_compress = func(gzip: bool, payload: uint8[list]) -> Result<uint8[list]> {
+        trap_with_message("unsupported: Std.Net.Rpc.Framing.compress is not implemented in Neura 0.3.0 (no DEFLATE (RFC 1951) compressor in the standard library)");
+    };
+
+    /// @brief Decompresses one gzip (RFC 1952) or deflate (RFC 1951) message.
+    /// @stub no DEFLATE (RFC 1951) decompressor in the standard library
+    let deflate_decompress = func(gzip: bool, payload: uint8[list]) -> Result<uint8[list]> {
+        trap_with_message("unsupported: Std.Net.Rpc.Framing.decompress is not implemented in Neura 0.3.0 (no DEFLATE (RFC 1951) decompressor in the standard library)");
+    };
+);

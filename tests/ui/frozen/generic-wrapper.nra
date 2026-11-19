@@ -1,0 +1,8 @@
+// A type parameter passed on to FrozenList carries the requirement to the
+// outermost written argument (E0580).
+let frozen = import:Std.Collections.Frozen;
+
+let wrap = func<T>(items: T[]) -> frozen.FrozenList<T> => frozen.copy_of<T>(items);
+let count = func<U>(items: U[]) -> int => wrap<U>(items).length();
+
+let total = count<int32[]>([[1], [2]]);

@@ -21,21 +21,21 @@ let StringsKernelOracle = module (
     // ASCII letters of both cases, every Strings.is_space byte, other
     // control bytes up to 32, DEL, and two-, three-, and four-byte scalars.
     let pieces = func -> string[list] {
-        let list: string[list] = ["a", "b", "z", "A", "B", "Z", "@", "[", "`", "{", "ab", "Ab", "aB", "é", "É", "€",
-            "😀", "ü", "ß"];
+        let list: string[list] = new(["a", "b", "z", "A", "B", "Z", "@", "[", "`", "{", "ab", "Ab", "aB", "é", "É", "€",
+            "😀", "ü", "ß"]);
         for (let scalar in [9, 10, 11, 12, 13, 32, 0, 1, 8, 14, 28, 31, 127, 133, 160]) {
-            list.append(strings.from_scalars([scalar as uint32]));
+            list.append(strings.from_scalars(new([scalar as uint32])));
         }
         return list;
     };
 
     let corpus = func -> string[list] {
-        let space = strings.from_scalars([32, 9, 10, 11, 12, 13]);
-        let blank = strings.from_scalars([0, 1, 31, 32, 9]);
-        return ["", " ", "a", "A", "é", "😀", "abc", "ABC", "aBc", "a b c", space, blank, space + "x" + space,
+        let space = strings.from_scalars(new([32, 9, 10, 11, 12, 13]));
+        let blank = strings.from_scalars(new([0, 1, 31, 32, 9]));
+        return new(["", " ", "a", "A", "é", "😀", "abc", "ABC", "aBc", "a b c", space, blank, space + "x" + space,
             blank + "x" + blank, space + blank, blank + space, "  é😀  ", "abcabcabc", "aaaa", "éééé", "€€",
-            "😀a😀", "Hello, World!", "x" + strings.from_scalars([133]) + "y", strings.from_scalars([160, 65, 160]),
-            ",", ",,", "a,b,,c,", "\n", "\r\n", "a\r\nb\n", "a\n\n", "a\r\r\nb\r", "\n\r\n\n"];
+            "😀a😀", "Hello, World!", "x" + strings.from_scalars(new([133])) + "y", strings.from_scalars(new([160, 65, 160])),
+            ",", ",,", "a,b,,c,", "\n", "\r\n", "a\r\nb\n", "a\n\n", "a\r\r\nb\r", "\n\r\n\n"]);
     };
 
     // A text of up to `count` random pieces.

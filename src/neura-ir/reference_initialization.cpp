@@ -101,8 +101,9 @@ private:
             if (shadowed(expr.text)) return std::nullopt;
         } else if (expr.kind == ExprKind::Member) {
             const auto& receiver = expr.operands.front();
-            if (!options_.instance_is_receiver || receiver.kind != ExprKind::Name ||
-                receiver.text != "instance" || shadowed("instance"))
+            const bool shorthand = receiver.kind == ExprKind::Name && receiver.text == "$instance";
+            if (!shorthand && (!options_.instance_is_receiver || receiver.kind != ExprKind::Name ||
+                               receiver.text != "instance" || shadowed("instance")))
                 return std::nullopt;
         } else {
             return std::nullopt;
@@ -125,7 +126,7 @@ private:
             throw Diagnostic(expr.span, "reference field '" + fields_[*field].name +
                                         "' may be read before it is bound").with_code("E0513");
         }
-        if (expr.kind == ExprKind::Lambda) return;
+        if (expr.kind == ExprKind::Lambda || expr.kind == ExprKind::Generator) return;
         if (expr.kind == ExprKind::Conditional) {
             read(expr.operands[0], flow);
             const auto selected = literal_condition(expr.operands[0]);
@@ -145,6 +146,7 @@ private:
             read(expr.match->expressions.front(), flow);
             for (const auto& arm : expr.match->arms) {
                 begin_arm(arm);
+                if (arm.guard) read(*arm.guard, flow);
                 read(*arm.value, flow);
                 names_.pop_back();
             }
@@ -186,8 +188,18 @@ private:
         auto no = fork(flow);
         yes.reachable &= condition.value_or(true);
         no.reachable &= !condition.value_or(false);
-        check_body(stmt.body, yes, in_loop);
-        check_body(stmt.alternative, no, in_loop);
+        // A narrowing's names (docs/design/Expressions030.md, Narrowing).
+        const auto narrowed = [&](const std::vector<Statement>& body, Flow& path, bool bound) {
+            names_.emplace_back();
+            if (bound)
+                for (const auto& binding : stmt.bindings) names_.back().insert(binding.text);
+            check_body(body, path, in_loop);
+            names_.pop_back();
+        };
+        narrowed(stmt.body, yes, !stmt.negated_narrowing);
+        narrowed(stmt.alternative, no, stmt.negated_narrowing);
+        if (stmt.negated_narrowing && !yes.reachable)
+            for (const auto& binding : stmt.bindings) names_.back().insert(binding.text);
         flow.reachable = false;
         merge(flow, yes);
         merge(flow, no);
@@ -205,6 +217,7 @@ private:
         for (const auto& arm : stmt.arms) {
             auto selected = fork(before);
             begin_arm(arm);
+            if (arm.guard) read(*arm.guard, selected);
             for (const auto& child : arm.body) check_statement(child, selected, in_loop);
             names_.pop_back();
             merge(flow, selected);

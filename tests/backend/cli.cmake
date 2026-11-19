@@ -110,13 +110,14 @@ same_bytes("repeated source builds" "${TEST_DIR}/hello.nvr" "${TEST_DIR}/hello-a
 build_image("${TEST_DIR}/hello-from-nir-again.nvr" "${TEST_DIR}/hello.nir")
 same_bytes("repeated .nir builds" "${TEST_DIR}/hello.nvr" "${TEST_DIR}/hello-from-nir-again.nvr")
 
-# Std.Program's ExitCode is a payload enum, so every program now needs NVR
-# 1.2. Images built before the standard library existed are NVR 1.0 and still
-# run: the legacy fixtures are lossless disassemblies of a SysIo Hello World
-# and of a program that used the retired Test assertion services.
+# Std.Program's ExitCode is a payload enum, stored inline as two words, so
+# every program's main returns two result words and needs NVR 1.7. Images
+# built before the standard library existed are NVR 1.0 and still run: the
+# legacy fixtures are lossless disassemblies of a SysIo Hello World and of a
+# program that used the retired Test assertion services.
 file(READ "${TEST_DIR}/hello.nvr" hello_version OFFSET 4 LIMIT 4 HEX)
-if(NOT hello_version STREQUAL "01000200")
-    message(FATAL_ERROR "Hello World should be an NVR 1.2 image, found version bytes ${hello_version}")
+if(NOT hello_version STREQUAL "01000700")
+    message(FATAL_ERROR "Hello World should be an NVR 1.7 image, found version bytes ${hello_version}")
 endif()
 neura(legacy "${TEST_DIR}" assemble "${tests}/legacy/legacy-hello.nvra" -o "${TEST_DIR}/legacy-hello.nvr")
 if(NOT legacy_status STREQUAL "0")
@@ -186,11 +187,11 @@ endfunction()
 # The step-count lines of a fixed run are those of the runtime without the
 # time line, which follows them.
 string(CONCAT hello_tier_lines
-    "tier: blocks 59, hinted 1, attempted 0, lifted 0 (0 by hint, 0 by search), hints rejected 0; proving 0.0 ms, searching 0.0 ms\n"
-    "tier: steps 24: tier 2 0.0% (in regions 0), tier 1 91.7% (lifted 0, wired 0, empty 22), tier 0 8.3% (reference 2, declined 0)\n"
+    "tier: blocks 49, hinted 1, attempted 0, lifted 0 (0 by hint, 0 by search), hints rejected 0; proving 0.0 ms, searching 0.0 ms\n"
+    "tier: steps 18: tier 2 0.0% (in regions 0), tier 1 88.9% (lifted 0, wired 0, empty 16), tier 0 11.1% (reference 2, declined 0)\n"
     "tier: jit off\n"
-    "tier: tier 0 steps 1 in function 2 block 9: below the threshold\n"
-    "tier: tier 0 steps 1 in function 0 block 11: below the threshold\n")
+    "tier: tier 0 steps 1 in function 2 block 3: below the threshold\n"
+    "tier: tier 0 steps 1 in function 0 block 10: below the threshold\n")
 # The lines are those of a run without tier 3: --jit=off leaves the default
 # tier 3 off, and the exact text holds whatever the environment of the suite
 # asks (NEURA_TIER3, NEURA_TIER_EAGER, NEURA_TIER_PROGRAMS change the lines).
@@ -449,6 +450,16 @@ build_image("${TEST_DIR}/multi-file.nvr" -I "${SOURCE_DIR}/examples/modules/mult
     "${SOURCE_DIR}/examples/modules/multi-file/main.nra")
 expect_run("multi-file" "${TEST_DIR}/multi-file.nvr" "Hello, Neura!\n" 0 "")
 
+# Generic specializations for two classes of one name in different modules,
+# which share the specialization's name (copy_of_list<Row>), optimized and
+# unoptimized.
+build_image("${TEST_DIR}/specializations.nvr" -I "${tests}/specializations/lib" "${tests}/specializations/main.nra")
+build_image("${TEST_DIR}/specializations-unoptimized.nvr" --no-optimize -I "${tests}/specializations/lib"
+    "${tests}/specializations/main.nra")
+foreach(variant IN ITEMS "" -unoptimized)
+    expect_run("same-named specializations${variant}" "${TEST_DIR}/specializations${variant}.nvr" "abb\n1ba1\n" 0 "")
+endforeach()
+
 # Field accessors (Types.md, Accessors), optimized and unoptimized.
 build_image("${TEST_DIR}/accessors.nvr" "${SOURCE_DIR}/examples/types/accessors.nra")
 build_image("${TEST_DIR}/accessors-unoptimized.nvr" --no-optimize "${SOURCE_DIR}/examples/types/accessors.nra")
@@ -495,6 +506,9 @@ foreach(quantum IN ITEMS 1 64 1024)
 endforeach()
 
 # Target-typed new, typed destructuring, and an anonymous class.
+build_image("${TEST_DIR}/primitive-reference-example.nvr" "${SOURCE_DIR}/examples/types/primitive-references.nra")
+expect_run("primitive references example" "${TEST_DIR}/primitive-reference-example.nvr" "Hello, World!\n" 0 "")
+
 build_image("${TEST_DIR}/construction.nvr" "${SOURCE_DIR}/examples/types/construction.nra")
 expect_run("construction example" "${TEST_DIR}/construction.nvr"
     "Ada has 250\nGrace has 10\n4 accounts, 260 in total\n" 0 "")
@@ -553,6 +567,47 @@ foreach(mode IN ITEMS "" --no-optimize)
     file(READ "${tests}/initialization-cycle/main.out" expected)
     expect_run("initialization cycle ${mode}" "${TEST_DIR}/initialization-cycle${mode}.nvr" "${expected}" 0 "")
 endforeach()
+# Startup blocks (Modules.md, Startup blocks): source order across files, a
+# file imported twice, an unused file, an import cycle, a module's block, and
+# a class first used in a block, from source and from .nir, and a library
+# whose blocks a second .nir module links again runs them once.
+foreach(mode IN ITEMS "" --no-optimize)
+    build_image("${TEST_DIR}/startup${mode}.nvr" ${mode} "${tests}/startup/main.nra")
+    file(READ "${tests}/startup/main.out" expected)
+    expect_run("startup blocks ${mode}" "${TEST_DIR}/startup${mode}.nvr" "${expected}" 0 "")
+endforeach()
+neura(emit "${TEST_DIR}" emit-ir "${tests}/startup/main.nra" -o "${TEST_DIR}/startup.nir")
+build_image("${TEST_DIR}/startup-from-nir.nvr" "${TEST_DIR}/startup.nir")
+same_bytes("startup blocks from .nir" "${TEST_DIR}/startup.nvr" "${TEST_DIR}/startup-from-nir.nvr")
+file(MAKE_DIRECTORY "${TEST_DIR}/startup-nir")
+neura(emit "${TEST_DIR}" emit-ir "${tests}/startup/registry.nra" -o "${TEST_DIR}/startup-nir/registry.nir")
+file(WRITE "${TEST_DIR}/startup-nir/user.nra" [=[
+let registry = import:"registry.nir";
+export let User = module (
+    export let count = func() -> int32 => registry.count;
+);
+]=])
+neura(emit "${TEST_DIR}/startup-nir" emit-ir "${TEST_DIR}/startup-nir/user.nra" -o "${TEST_DIR}/startup-nir/user.nir")
+file(WRITE "${TEST_DIR}/startup-nir/app.nra" [=[
+let registry = import:"registry.nir";
+let user = import:"user.nir";
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line((registry.count + user.count()).to_string());
+        return program.ExitCode.Ok;
+    };
+);
+]=])
+build_image("${TEST_DIR}/startup-nir/app.nvr" "${TEST_DIR}/startup-nir/app.nra")
+expect_run("startup blocks of a .nir module linked twice" "${TEST_DIR}/startup-nir/app.nvr"
+    "registry: block, count 2\n4\n" 0 "")
+expect_build_failure("startup library" "error(\\[E0803\\])?: the program has no entry point"
+    "${TEST_DIR}/startup-library.nvr" "${tests}/startup/registry.nra")
+file(READ "${tests}/testing/startup-suite.out" expected)
+expect_tests("startup blocks run again for each test" "${expected}" 0 "${tests}/testing/startup-suite.nra")
+
 foreach(library IN ITEMS guide/core guide/errors testing/math-tests types/classes types/collections
                          types/overlay types/polymorphism modules/multi-file/acme/greetings
                          modules/multi-file/acme/greetings/punctuation)
@@ -578,10 +633,17 @@ foreach(program IN LISTS programs)
     endforeach()
 endforeach()
 
+# An iteration releases its allocations on continue and on break. The
+# successful bound stays below what a hundred retained iterations would use.
+expect_run("array-region stack reclamation" "${TEST_DIR}/array-regions.nvr" "" 0 "" --max-stack-cells 64)
+expect_failure("array-region stack limit" "stack limit exceeded" run --max-stack-cells 4
+               "${TEST_DIR}/array-regions.nvr")
+
 # The new source constructs produce the same image after a NIR round trip.
 foreach(name IN ITEMS operators closures aggregates class-nil generic-closures generic-enums interfaces
                       stdlib-primitives control-and-updates ranges-and-variadics overloads primitive-references
-                      last-bindings target-typed-new anonymous-classes)
+                      last-bindings target-typed-new anonymous-classes inline-tuples inline-tuples-tasks inline-enums
+                      inline-enums-tasks array-regions)
     neura(emit "${TEST_DIR}" emit-ir "${tests}/programs/${name}.nra" -o "${TEST_DIR}/${name}.nir")
     if(NOT emit_status STREQUAL "0")
         message(FATAL_ERROR "${name}: emitting NIR failed with status ${emit_status}\n${emit_stderr}")
@@ -645,6 +707,62 @@ foreach(trap IN LISTS traps)
     build_image("${TEST_DIR}/${name}.nvr" "${trap}")
     expect_run("trap ${name}" "${TEST_DIR}/${name}.nvr" "${expected}" "${status}" "${pattern}" ${options})
 endforeach()
+
+# Storage regions (NVR 1.7): --stats reports the peak stack cells of an image that uses regions and
+# of no other, --max-stack-cells limits them, and a trap of the region operations is the status of
+# its class. The compiler does not emit regions yet, so the images are assembled from text.
+set(region_output "2\n1\n300\n5\n77\n18\n150\n42\n43\n44\n100\n99\n8\n")
+neura(region_assemble "${TEST_DIR}" assemble "${tests}/tier/region-storage.nvra" -o "${TEST_DIR}/region-storage.nvr")
+if(NOT region_assemble_status STREQUAL "0")
+    message(FATAL_ERROR "assembling the region image failed\n${region_assemble_stderr}")
+endif()
+neura(region_tasks_assemble "${TEST_DIR}" assemble "${tests}/tier/region-tasks.nvra" -o "${TEST_DIR}/region-tasks.nvr")
+neura(region_stats "${TEST_DIR}" run --stats --tier=0 "${TEST_DIR}/region-storage.nvr")
+if(NOT region_stats_status STREQUAL "0" OR NOT region_stats_stdout STREQUAL region_output OR
+   NOT region_stats_stderr MATCHES "stats: steps [0-9]+, peak heap cells [0-9]+, peak stack cells 160, host requests 13,")
+    message(FATAL_ERROR "--stats of a region image\n${region_stats_stdout}${region_stats_stderr}")
+endif()
+neura(plain_stats "${TEST_DIR}" run --stats "${TEST_DIR}/hello.nvr")
+if(plain_stats_stderr MATCHES "stack cells")
+    message(FATAL_ERROR "--stats of an image without regions mentions stack cells\n${plain_stats_stderr}")
+endif()
+neura(task_stats "${TEST_DIR}" run --stats "${TEST_DIR}/region-tasks.nvr")
+if(NOT task_stats_stdout STREQUAL "11\n22\n5\n" OR NOT task_stats_stderr MATCHES "peak heap cells [0-9]+, peak stack cells 10,")
+    message(FATAL_ERROR "--stats of a region image with tasks\n${task_stats_stdout}${task_stats_stderr}")
+endif()
+file(WRITE "${TEST_DIR}/region-lists.txt" "one\n")
+neura(region_each "${TEST_DIR}" run --stats --each "${TEST_DIR}/region-lists.txt" "${TEST_DIR}/region-storage.nvr")
+if(NOT region_each_stderr MATCHES "peak heap cells [0-9]+, peak stack cells 160,")
+    message(FATAL_ERROR "--stats of --each over a region image\n${region_each_stderr}")
+endif()
+foreach(tier IN ITEMS 0 1 2)
+    expect_run("region image at tier ${tier}" "${TEST_DIR}/region-storage.nvr" "${region_output}" 0 "" --tier=${tier})
+endforeach()
+expect_run("stack limit" "${TEST_DIR}/region-storage.nvr" "${region_output}" 0 "" --max-stack-cells 160)
+neura(stack_limit "${TEST_DIR}" run --max-stack-cells 159 "${TEST_DIR}/region-storage.nvr")
+if(NOT stack_limit_status STREQUAL "139" OR NOT stack_limit_stderr MATCHES "trap: stack limit exceeded: region allocation of 4 cells")
+    message(FATAL_ERROR "--max-stack-cells 159: status ${stack_limit_status}\n${stack_limit_stderr}")
+endif()
+neura(region_trap "${TEST_DIR}" run "${TEST_DIR}/region-storage.nvr" -- x)
+if(NOT region_trap_status STREQUAL "139" OR NOT region_trap_stdout STREQUAL "${region_output}" OR
+   NOT region_trap_stderr MATCHES "trap: released storage accessed: handle [0-9]+")
+    message(FATAL_ERROR "a read after release: status ${region_trap_status}\n${region_trap_stderr}")
+endif()
+neura(region_replay_record "${TEST_DIR}" run --record "${TEST_DIR}/region-trap.trace" "${TEST_DIR}/region-storage.nvr" -- x)
+neura(region_replay "${TEST_DIR}" run --replay "${TEST_DIR}/region-trap.trace" "${TEST_DIR}/region-storage.nvr" -- x)
+if(NOT region_replay_status STREQUAL "139" OR NOT region_replay_stderr MATCHES "trap: released storage accessed")
+    message(FATAL_ERROR "replay of a region trap: status ${region_replay_status}\n${region_replay_stderr}")
+endif()
+file(READ "${TEST_DIR}/region-trap.trace" region_trace)
+if(NOT region_trace MATCHES "outcome trap released-storage ")
+    message(FATAL_ERROR "the trace file does not name the trap\n${region_trace}")
+endif()
+neura(invalid_region "${TEST_DIR}" run "${TEST_DIR}/region-storage.nvr" -- x x x x)
+if(NOT invalid_region_status STREQUAL "132" OR NOT invalid_region_stderr MATCHES "trap: invalid region operation: region [0-9]+ does not enclose")
+    message(FATAL_ERROR "a move to a region that does not enclose: ${invalid_region_status}\n${invalid_region_stderr}")
+endif()
+expect_failure("--max-stack-cells on build" "--max-stack-cells applies only with --native" build --max-stack-cells 5 "${hello}" -o "${TEST_DIR}/never.nvr")
+expect_failure("--max-stack-cells needs a number" "expected a positive integer" run --max-stack-cells 0 "${TEST_DIR}/hello.nvr")
 
 # Unsupported operations fail before an image is published.
 file(GLOB unsupported "${tests}/unsupported/*.nra")

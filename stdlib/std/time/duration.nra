@@ -45,10 +45,7 @@ export let Duration = module (
         /// @brief Returns the nonnegative magnitude. The most negative duration traps.
         #Pure
         export let abs = func -> Duration {
-            if (total < 0) {
-                return new(-total);
-            }
-            return new(total);
+            return if (total < 0) -> new(-total) else -> new(total);
         };
 
         /// @brief Reports whether the nanosecond count is zero.
@@ -86,16 +83,16 @@ export let Duration = module (
             if (total < other.total) {
                 return Ordering.Less;
             }
-            if (total > other.total) {
-                return Ordering.Greater;
-            }
-            return Ordering.Equal;
+            return if (total > other.total) -> Ordering.Greater else -> Ordering.Equal;
         };
 
         /// @brief Tests equality of signed nanosecond counts.
-        #Pure
+        /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
-            return other is Duration && total == (other as Duration).total;
+            if (other is not that: Duration) {
+                return false;
+            }
+            return total == that.total;
         };
 
         /// @brief Hashes the signed nanosecond count.
@@ -120,15 +117,15 @@ export let Duration = module (
             last nanos = rest % 1000000000;
             let text = "PT";
             if (hours > 0) {
-                text = text + hours.to_string() + "H";
+                text ..= hours.to_string() .. "H";
             }
             if (minutes > 0) {
-                text = text + minutes.to_string() + "M";
+                text ..= minutes.to_string() .. "M";
             }
             if (seconds > 0 || nanos > 0) {
-                text = text + seconds.to_string() + trimmed_fraction(nanos) + "S";
+                text ..= seconds.to_string() .. trimmed_fraction(nanos) .. "S";
             }
-            return total < 0 ? "-" + text : text;
+            return total < 0 ? "-" .. text : text;
         };
     );
 
@@ -221,13 +218,11 @@ export let Duration = module (
                     more = false;
                 }
             }
-        } else if (!has_days) {
+        } else if (not has_days) {
             scan.unexpected("digit or 'T'");
         }
         scan.finish();
-        if (!scan.ok()) {
-            return result.Result<Duration>.Err(scan.failure());
-        }
+        return result.Result<Duration>.Err(scan.failure()) unless scan.ok();
         return result.Result<Duration>.Ok(new Duration(signed_of(state.magnitude, negative)));
     };
 
@@ -245,7 +240,7 @@ export let Duration = module (
 
         /// @brief Adds value * unit + extra, or reports OutOfRange at `start`.
         export let add = func(scan: calendar.Scanner, start: int, value: uint64, unit: uint64, extra: uint64) {
-            if (!scan.ok()) {
+            if (not scan.ok()) {
                 return;
             }
             if (value > (limit - extra) / unit) {
@@ -259,6 +254,9 @@ export let Duration = module (
             }
             magnitude += part;
         };
+
+        /// @brief Names the accumulator and its magnitude.
+        export let.override to_string = func -> string => "Accumulator(" .. magnitude.to_string() .. ")";
     );
 
     /// @brief Returns the valid time-unit suffixes at the current parser stage.
@@ -266,29 +264,18 @@ export let Duration = module (
         if (stage == 0) {
             return "'H', 'M', 'S', or '.'";
         }
-        if (stage == 1) {
-            return "'M', 'S', or '.'";
-        }
-        return "'S' or '.'";
+        return if (stage == 1) -> "'M', 'S', or '.'" else -> "'S' or '.'";
     };
 
     /// @brief |value| as uint64; the most negative value needs no negation.
     let magnitude_of = func(value: int64) -> uint64 {
-        if (value >= 0) {
-            return value as uint64;
-        }
-        return ((-(value + 1)) as uint64) + 1;
+        return if (value >= 0) -> value as uint64 else -> ((-(value + 1)) as uint64) + 1;
     };
 
     /// @brief The inverse of magnitude_of; the magnitude is within the sign's limit.
     let signed_of = func(magnitude: uint64, negative: bool) -> int64 {
-        if (!negative) {
-            return magnitude as int64;
-        }
-        if (magnitude == 0) {
-            return 0;
-        }
-        return -((magnitude - 1) as int64) - 1;
+        return magnitude as int64 unless negative;
+        return if (magnitude == 0) -> 0 else -> -((magnitude - 1) as int64) - 1;
     };
 
     /// @brief Nine digits without trailing zeros, after a point; empty for zero.
@@ -301,6 +288,6 @@ export let Duration = module (
         while (digits.byte_at(end - 1) == 48) {
             end--;
         }
-        return "." + digits.slice(0, end);
+        return "." .. digits.slice(0, end);
     };
 );

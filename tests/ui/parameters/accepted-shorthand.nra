@@ -1,0 +1,32 @@
+let Point = class (
+    export last x: int;
+    export last y: int;
+    export let sum = func() -> int {
+        return x + y;
+    };
+
+    export let init = func(x, y: int) => set;
+);
+let Named = class (
+    export let name: string = "";
+    export let size: int = 1;
+
+    export let init = func(name: string, size: int) => set;
+);
+let Base = class (
+    export let id: int = 0;
+);
+let Derived = class : Base (
+    export last tag: string;
+
+    export let init = func(tag: string) => set;
+);
+let Shadow = class (
+    export let instance: int = 0;
+
+    // A parameter named like the receiver cannot redirect the store.
+    export let init = func(instance: int) => set;
+);
+let Empty = class (
+    export let init = func() => set;
+);

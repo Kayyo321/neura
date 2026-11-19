@@ -1,0 +1,189 @@
+let base64 = import:Std.Encoding.Base64;
+let errors = import:Std.Core.Error;
+let framing = import:Std.Net.Rpc.Framing;
+let metadata = import:Std.Net.Rpc.Metadata;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let status = import:Std.Net.Rpc.Status;
+let strings = import:Std.Text.Strings;
+
+/// @brief gRPC-Web framing (grpc/grpc doc/PROTOCOL-WEB.md, fetched to std-net/rfc/grpc-PROTOCOL-WEB.md): the
+/// trailer frame and the base64 text variant.
+///
+/// A gRPC-Web response carries its trailers in the body as the last length-prefixed frame, with flags 0x80
+/// (0x81 when compressed); the frame's payload is an HTTP/1 header block without the final empty line, one
+/// `name: value\r\n` per trailer, names lower-case. The text variant (`application/grpc-web-text`) base64-encodes
+/// the byte stream; a sender may flush with padding at any point, so the decoder works in 4-character groups and
+/// accepts padding inside the stream.
+/// @see [Std.Net.Rpc.GrpcWeb](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Rpc-GrpcWeb)
+#Since("0.3.0")
+export let GrpcWeb = module (
+    /// @brief The binary content type prefix (`+proto`, `+json` follow).
+    export const ContentType: string = "application/grpc-web";
+    /// @brief The text (base64) content type prefix.
+    export const TextContentType: string = "application/grpc-web-text";
+    /// @brief The flags of an uncompressed trailer frame.
+    export const TrailerFrameFlags: int = 128;
+
+    /// @brief The payload of a trailer frame: `name: value\r\n` for each entry, in order.
+    #NoDiscard
+    export let trailer_block = func(trailers: metadata.Metadata) -> uint8[list] {
+        last out: uint8[list] = new;
+        for (let pair in trailers.entries()) {
+            last line = strings.to_ascii_lower(pair[0]) .. ": " .. pair[1] .. "\r\n";
+            for (let i = 0; i < line.byte_length; i++) {
+                out.append(line.byte_at(i));
+            }
+        }
+        return out;
+    };
+
+    /// @brief The length-prefixed trailer frame (flags 0x80) of `trailers`.
+    #NoDiscard
+    export let encode_trailers = func(trailers: metadata.Metadata) -> uint8[list] {
+        last out: uint8[list] = new;
+        framing.append_frame(out, TrailerFrameFlags, trailer_block(trailers));
+        return out;
+    };
+
+    /// @brief Parses a trailer block: lines ending in CRLF (a final line without one is accepted), each
+    /// `name: value` with optional whitespace around the value. A line without `:` or with an empty name fails
+    /// with a Parse error. Names are lower-cased.
+    #NoDiscard
+    export let parse_trailer_block = func(block: uint8[list]) -> Result<metadata.Metadata> {
+        last decoded = string.from_utf8(block);
+        if (not decoded[0]) {
+            return Result<metadata.Metadata>.Err(errors.Error.Encoding { offset: 0,
+                message: "trailer block is not UTF-8" });
+        }
+        last pairs: [string, string][list] = new;
+        let at = 0;
+        for (let line in strings.split(decoded[1], "\r\n")) {
+            if (line.byte_length > 0) {
+                last colon = strings.index_of(line, ":");
+                if (colon <= 0) {
+                    return Result<metadata.Metadata>.Err(errors.Error.Parse { kind: errors.ParseErrorKind.Syntax,
+                        offset: at, message: "malformed trailer line" });
+                }
+                pairs.append([line.slice(0, colon), strings.trim(line.slice(colon + 1, line.byte_length))]);
+            }
+            at += line.byte_length + 2;
+        }
+        return Result<metadata.Metadata>.Ok(metadata.from_entries(pairs));
+    };
+
+    /// @brief A decoded gRPC-Web response body: its messages in order and its trailers.
+    #Final
+    export let WebBody = class (
+        /// @brief The message frames before the trailers.
+        export last messages: framing.Frame[list];
+        /// @brief The trailers (empty when the body had no trailer frame).
+        export last trailers: metadata.Metadata;
+        /// @brief Whether a trailer frame was present.
+        export last has_trailers: bool;
+
+        /// @brief A body with every part given.
+        export let init = func(frames: framing.Frame[list], trailer_metadata: metadata.Metadata, present: bool) {
+            messages = frames;
+            trailers = trailer_metadata;
+            has_trailers = present;
+        };
+
+        /// @brief The message count and trailers.
+        export let.override to_string = func -> string =>
+            "WebBody(" .. messages.length.to_string() .. " messages, " .. trailers.to_string() .. ")";
+    );
+
+    /// @brief Splits a complete gRPC-Web response body into messages and trailers. Fails with INTERNAL when a
+    /// frame follows the trailer frame, when the trailer frame is compressed (no DEFLATE in this library), or
+    /// when the trailer block is malformed; framing failures as in `Framing.MessageDecoder`.
+    #NoDiscard
+    export let decode_body = func(body: uint8[list], max_message_size: int) -> Result<WebBody> {
+        last frames = framing.decode_all(body, max_message_size, true)?;
+        last messages: framing.Frame[list] = new;
+        let trailers = metadata.empty();
+        let seen = false;
+        for (let frame in frames) {
+            if (seen) {
+                return Result<WebBody>.Err(status.error(status.Code.Internal, "a frame follows the trailers"));
+            }
+            if (frame.is_trailer()) {
+                if (frame.is_compressed()) {
+                    return Result<WebBody>.Err(status.error(status.Code.Internal,
+                        "compressed trailer frames are not supported"));
+                }
+                match (parse_trailer_block(frame.payload)) {
+                    Result.Ok(parsed) => {
+                        trailers = parsed;
+                    },
+                    Result.Err(e) => {
+                        return Result<WebBody>.Err(status.error(status.Code.Internal, "malformed trailer frame"));
+                    },
+                }
+                seen = true;
+            } else {
+                messages.append(frame);
+            }
+        }
+        return Result<WebBody>.Ok(new WebBody(messages, trailers, seen));
+    };
+
+    /// @brief The text variant of bytes: padded standard base64. A sender may encode each flush separately and
+    /// concatenate the texts.
+    #NoDiscard
+    export let encode_text = func(bytes: uint8[list]) -> string => base64.encode(bytes);
+
+    /// @brief Decodes a text-variant stream that arrives in chunks: whole 4-character groups are decoded as they
+    /// arrive, and padding may end any group, not only the last.
+    #[Final, NotThreadSafe]
+    export let TextDecoder = class (
+        /// @brief Characters of an incomplete group.
+        let pending: string = "";
+
+        /// @brief An empty decoder.
+        export let init = func {
+        };
+
+        /// @brief Decodes the whole groups of `pending + chunk`; keeps the rest. A non-ASCII byte or a group with
+        /// characters outside the alphabet fails with an Encoding error.
+        #NoDiscard
+        export let push = func(chunk: string) -> Result<uint8[list]> {
+            for (let i = 0; i < chunk.byte_length; i++) {
+                if (chunk.byte_at(i) >= 128) {
+                    return Result<uint8[list]>.Err(errors.Error.Encoding { offset: i,
+                        message: "non-ASCII byte in a grpc-web-text body" });
+                }
+            }
+            last text = pending + chunk;
+            last whole = text.byte_length - text.byte_length % 4;
+            last out: uint8[list] = new;
+            for (let i = 0; i < whole; i += 4) {
+                for (let b in base64.decode(text.slice(i, i + 4))?) {
+                    out.append(b);
+                }
+            }
+            pending = text.slice(whole, text.byte_length);
+            return Result<uint8[list]>.Ok(out);
+        };
+
+        /// @brief Whether the stream ended on a group boundary.
+        #NoDiscard
+        export let is_complete = func -> bool => pending.byte_length == 0;
+
+        /// @brief The pending character count.
+        export let.override to_string = func -> string =>
+            "TextDecoder(" .. pending.byte_length.to_string() .. " characters pending)";
+    );
+
+    /// @brief Decodes a complete text-variant body; fails on bad base64 or a body that ends inside a group.
+    #NoDiscard
+    export let decode_text = func(text: string) -> Result<uint8[list]> {
+        last decoder = new TextDecoder();
+        last bytes = decoder.push(text)?;
+        if (not decoder.is_complete()) {
+            return Result<uint8[list]>.Err(errors.Error.Encoding { offset: text.byte_length,
+                message: "text body ends inside a base64 group" });
+        }
+        return Result<uint8[list]>.Ok(bytes);
+    };
+);

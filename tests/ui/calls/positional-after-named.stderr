@@ -1,0 +1,13 @@
+error[E0225]: a positional argument cannot follow a named one
+ --> $DIR/positional-after-named.nra:3:23
+  |
+3 | let size = area(a: 1, 2);
+  |                       ^ this argument has no label
+  |                 - arguments are named from this one on
+  |
+help: name it
+  |
+3 | let size = area(a: 1, b: 2);
+  |                       +++
+
+For more information about this error, try `neura explain E0225`.

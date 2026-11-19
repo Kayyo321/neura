@@ -54,19 +54,15 @@ export let LocalDateTime = module (
         #Pure
         export let compare_to = func(other: LocalDateTime) -> Ordering {
             last by_date = date.compare_to(other.date);
-            if (by_date != Ordering.Equal) {
-                return by_date;
-            }
-            return time.compare_to(other.time);
+            return if (by_date != Ordering.Equal) -> by_date else -> time.compare_to(other.time);
         };
 
         /// @brief Tests whether both date and time components are equal.
-        #Pure
+        /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is LocalDateTime)) {
+            if (other is not moment: LocalDateTime) {
                 return false;
             }
-            last moment = other as LocalDateTime;
             return date === moment.date && time === moment.time;
         };
 
@@ -78,7 +74,7 @@ export let LocalDateTime = module (
 
         /// @brief The date, T, and the time.
         #Pure
-        export let.override to_string = func -> string => date.to_string() + "T" + time.to_string();
+        export let.override to_string = func -> string => date.to_string() .. "T" .. time.to_string();
     );
 
     /// @brief Combines a date and time of day without applying an offset.
@@ -95,9 +91,7 @@ export let LocalDateTime = module (
         scan.expect(84, "'T'");
         last nanos = calendar.read_time(scan);
         scan.finish();
-        if (!scan.ok()) {
-            return result.Result<LocalDateTime>.Err(scan.failure());
-        }
+        return result.Result<LocalDateTime>.Err(scan.failure()) unless scan.ok();
         last moment = new LocalDateTime(local_date.of(year as int, month, day), local_time.of_nano_of_day(nanos));
         return result.Result<LocalDateTime>.Ok(moment);
     };

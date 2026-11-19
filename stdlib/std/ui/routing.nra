@@ -1,0 +1,506 @@
+let error = import:Std.Core.Error;
+let frozen = import:Std.Collections.Frozen;
+let result = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let ui = import:Std.Ui;
+
+/// @brief The router: path patterns mapped to components, a location kept in a `ui.State`, and the
+/// document's history through the root's `ui.HistoryHost`.
+/// A pattern is an absolute path whose segments are literal text or a parameter `{name}`
+/// (`/parts/{id}`); there are no wildcards. The router is a component that embeds the component
+/// of the route its location matches, and replaces that child when the location changes. Mounted
+/// on a host that keeps history, it starts at the host's location (a deep link), `navigate` adds a
+/// history entry, and a navigation the program did not make (back, forward) moves it in a turn.
+#Since("0.3.0")
+export let Routing = module (
+    /// @brief The parameter values of a matched route, by name, percent-decoded.
+    #[Final, Immutable]
+    export let Params = class (
+        last names: frozen.FrozenList<string>;
+        last values: frozen.FrozenList<string>;
+
+        #Internal
+        export let init = func(names: frozen.FrozenList<string>, values: frozen.FrozenList<string>) => set;
+
+        /// @brief The value of the parameter `name`; traps when the route has no such parameter.
+        export let get = func(name: string) -> string {
+            last at = names.index_of(name);
+            if (at < 0) {
+                trap_with_message("the route has no parameter '" .. name .. "'");
+            }
+            return values.get(at);
+        };
+
+        /// @brief Reports whether the route has a parameter `name`.
+        export let has = func(name: string) -> bool => names.index_of(name) >= 0;
+
+        /// @brief The number of parameters.
+        export let count = func -> int => names.length();
+
+        /// @brief `{name=value, ...}` in the pattern's order.
+        export let.override to_string = func -> string {
+            let text = "{";
+            for (let i = 0; i < names.length(); i++) {
+                if (i > 0) {
+                    text ..= ", ";
+                }
+                text ..= names.get(i) .. "=" .. values.get(i);
+            }
+            return text .. "}";
+        };
+
+        /// @brief Other parameters with equal names and values in the same order.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: Params) {
+                return false;
+            }
+            return to_string() == that.to_string();
+        };
+
+        /// @brief The hash of the text.
+        export let.override hash_code = func -> uint32 => to_string().hash_code();
+    );
+
+    /// @brief Where the router is: the path, the query after `?`, the pattern it matched (empty when
+    /// none did) and the route's parameters.
+    #[Final, Immutable]
+    export let Location = class (
+        export last path: string;
+        export last query: string;
+        export last route: string;
+        export last params: Params;
+
+        #Internal
+        export let init = func(path: string, query: string, route: string, params: Params) => set;
+
+        /// @brief Reports whether a route matched.
+        export let matched = func -> bool => route != "";
+
+        /// @brief The path, with `?` and the query when there is one.
+        export let.override to_string = func -> string {
+            return if (query == "") -> path else -> path .. "?" .. query;
+        };
+
+        /// @brief Another location with the same path, query and route.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: Location) {
+                return false;
+            }
+            return path == that.path && query == that.query && route == that.route;
+        };
+
+        /// @brief Combines the hashes of the path, query and route.
+        export let.override hash_code = func -> uint32 => path.hash_code() ^ query.hash_code() ^ route.hash_code();
+    );
+
+    /// One route: its pattern, the pattern's segments, and the factory of its component.
+    #[Final, NotThreadSafe]
+    let Route = class (
+        export last pattern: string;
+        export last segments: string[list];
+        export last make: func(Params) -> ui.Component;
+
+        export let init = func(pattern: string, segments: string[list], make: func(Params) -> ui.Component) => set;
+
+        /// @brief `Route(` the pattern `)`.
+        export let.override to_string = func -> string => "Route(" .. pattern .. ")";
+    );
+
+    let empty_view = html() {
+        <div hidden></div>
+    };
+
+    let outlet_view = html(page: ui.View) {
+        {page}
+    };
+
+    /// @brief Paths to components, and the location that chooses one. Build it, `add` the routes,
+    /// and mount `component()` (or embed it with `ui.slot`).
+    #[Final, NotThreadSafe]
+    export let Router = class (
+        let routes: Route[list] = new;
+        let fallback: func(string) -> ui.Component;
+        let has_fallback: bool = false;
+        /// @brief The current location; the router's component renders it.
+        export last location: ui.State<Location>;
+        let outlet: ui.Component = nil;
+        let page: ui.Component = nil;
+        let page_key: string = "";
+        let page_made: bool = false;
+        let history: ui.HistoryHost = nil;
+        // Set when `href` answered in the hash form before the router knew its host.
+        let early_links: bool = false;
+        let listening: ui.Subscription = nil;
+
+        /// @brief A router with no routes, at `/`.
+        export let init = func {
+            location = new ui.State<Location>(new Location("/", "", "", no_params()));
+            fallback = new func(path: string) -> ui.Component =>
+                ui.component<bool>(new ui.State<bool>(false), new func(unused: bool) -> ui.View => empty_view());
+        };
+
+        /// @brief Adds a route. `pattern` is absolute, with literal segments and `{name}` parameters
+        /// of distinct names (`/`, `/parts`, `/parts/{id}`). An invalid pattern, or one with the same
+        /// shape as an earlier route (`/{a}` after `/{b}`), traps. `make` is retained.
+        export let add = func(pattern: string, make: func(Params) -> ui.Component) {
+            last segments = pattern_segments(pattern);
+            last shape = shape_of(segments);
+            for (let i = 0; i < routes.length; i++) {
+                if (shape_of(routes[i].segments) == shape) {
+                    trap_with_message("route " .. pattern .. " conflicts with route " .. routes[i].pattern);
+                }
+            }
+            routes.append(new Route(pattern, segments, make));
+            location.set(resolve(location.get().to_string()));
+        };
+
+        /// @brief Sets the component shown when no route matches; it receives the path. The default
+        /// shows an empty, hidden element. `make` is retained.
+        export let otherwise = func(make: func(string) -> ui.Component) {
+            fallback = make;
+            has_fallback = true;
+        };
+
+        /// @brief The router's component, made on the first call. It embeds the component of the
+        /// current route.
+        export let component = func -> ui.Component {
+            if (outlet != nil) {
+                return outlet;
+            }
+            last self = instance;
+            outlet = ui.component<Location>(location, new func(at: Location) -> ui.View =>
+                outlet_view(ui.slot(self.page_for(at))));
+            outlet.mount_actions.append(new func(root: ui.Root) {
+                self.attach(root);
+            });
+            outlet.unmount_actions.append(new func() {
+                self.detach();
+            });
+            return outlet;
+        };
+
+        /// @brief Goes to `path`: adds a history entry when the router is mounted on a host that keeps
+        /// history, and sets the location. `path` is absolute and may end with a query; an invalid
+        /// path traps.
+        export let navigate = func(path: string) {
+            check_path(path);
+            let current = path;
+            if (history != nil) {
+                current = history.push_location(path);
+            }
+            location.set(resolve(current));
+        };
+
+        /// @brief As `navigate`, but replaces the current history entry.
+        export let replace = func(path: string) {
+            check_path(path);
+            let current = path;
+            if (history != nil) {
+                current = history.replace_location(path);
+            }
+            location.set(resolve(current));
+        };
+
+        /// @brief The `href` of a link to `path`: the host's form when mounted on a host that keeps
+        /// history (`#/parts/7` for hash routing), and the hash form otherwise.
+        export let link = func(path: string) -> ui.Url => ui.url(href(path));
+
+        /// @brief The text of `link(path)`.
+        export let href = func(path: string) -> string {
+            check_path(path);
+            if (history != nil) {
+                return history.link(path);
+            }
+            early_links = true;
+            return "#" .. path;
+        };
+
+        /// @brief A click handler that navigates to `path`; bind it with `on:click.prevent_default`
+        /// on the link whose `href` is `link(path)`.
+        export let on_link = func(path: string) -> func(ui.ClickEvent) -> void {
+            check_path(path);
+            last self = instance;
+            return new func(event: ui.ClickEvent) {
+                self.navigate(path);
+            };
+        };
+
+        /// @brief The location `path` resolves to with the current routes: the route that matches it,
+        /// a literal segment winning over a parameter, and its parameters.
+        export let resolve = func(path: string) -> Location {
+            check_path(path);
+            let target = path;
+            let query = "";
+            last hash = strings.index_of(target, "#");
+            if (hash >= 0) {
+                target = target.slice(0, hash);
+            }
+            last question = strings.index_of(target, "?");
+            if (question >= 0) {
+                query = target.slice(question + 1, target.byte_length);
+                target = target.slice(0, question);
+            }
+            last parts = path_segments(target);
+            let best: Route = nil;
+            let best_values: string[list] = new;
+            for (let i = 0; i < routes.length; i++) {
+                last route = routes[i];
+                last values: string[list] = new;
+                if (matches(route.segments, parts, values) && (best == nil || more_specific(route, best))) {
+                    best = route;
+                    best_values = values;
+                }
+            }
+            if (best == nil) {
+                return new Location(target, query, "", no_params());
+            }
+            last names: string[list] = new;
+            for (let i = 0; i < best.segments.length; i++) {
+                if (is_parameter(best.segments[i])) {
+                    last segment = best.segments[i];
+                    names.append(segment.slice(1, segment.byte_length - 1));
+                }
+            }
+            return new Location(target, query, best.pattern,
+                new Params(frozen.copy_of_list<string>(names), frozen.copy_of_list<string>(best_values)));
+        };
+
+        /// @brief The number of routes.
+        export let route_count = func -> int => routes.length;
+
+        /// @brief The component of the current route as last rendered, or nil before the first render.
+        export let current_page = func -> ui.Component => page;
+
+        #Internal
+        export let page_for = func(at: Location) -> ui.Component {
+            last key = at.route .. " " .. at.to_string();
+            if (page_made && key == page_key) {
+                return page;
+            }
+            if (at.matched()) {
+                for (let i = 0; i < routes.length; i++) {
+                    if (routes[i].pattern == at.route) {
+                        last make = routes[i].make;
+                        page = make(at.params);
+                    }
+                }
+            } else {
+                last make = fallback;
+                page = make(at.path);
+            }
+            page_key = key;
+            page_made = true;
+            return page;
+        };
+
+        #Internal
+        export let attach = func(root: ui.Root) {
+            history = root.history();
+            if (history != nil) {
+                location.set(resolve(history.location()));
+                // A parent that rendered its links before this router mounted wrote them in the hash form; under
+                // another routing form, the turn renders them again.
+                if (early_links && history.link("/") != "#/") {
+                    root.render_all_again();
+                }
+            }
+            early_links = false;
+            last self = instance;
+            listening = root.on_navigation(new func(path: string) {
+                self.location.set(self.resolve(path));
+            });
+        };
+
+        #Internal
+        export let detach = func {
+            if (listening != nil) {
+                listening.close();
+                listening = nil;
+            }
+            history = nil;
+        };
+
+        /// @brief `Router(` the number of routes `, at ` the location `)`.
+        export let.override to_string = func -> string =>
+            "Router(" .. routes.length.to_string() .. " routes, at " .. location.get().to_string() .. ")";
+    );
+
+    let no_params = func -> Params => new Params(frozen.empty<string>(), frozen.empty<string>());
+
+    let is_parameter = func(segment: string) -> bool =>
+        segment.byte_length >= 2 && segment.byte_at(0) == 123 && segment.byte_at(segment.byte_length - 1) == 125;
+
+    // `/` is no segment; `/parts/7` is two. A trailing slash adds none.
+    let path_segments = func(path: string) -> string[list] {
+        last parts: string[list] = new;
+        if (path == "/") {
+            return parts;
+        }
+        last pieces = strings.split(path.slice(1, path.byte_length), "/");
+        for (let i = 0; i < pieces.length; i++) {
+            if (not (i == pieces.length - 1 && pieces[i] == "")) {
+                parts.append(pieces[i]);
+            }
+        }
+        return parts;
+    };
+
+    let pattern_segments = func(pattern: string) -> string[list] {
+        if (pattern.byte_length == 0 || pattern.byte_at(0) != 47) {
+            trap_with_message("invalid route pattern '" .. pattern .. "': a pattern begins with '/'");
+        }
+        if (pattern == "/") {
+            return new;
+        }
+        last pieces = strings.split(pattern.slice(1, pattern.byte_length), "/");
+        last names: string[list] = new;
+        for (let i = 0; i < pieces.length; i++) {
+            last piece = pieces[i];
+            if (piece == "") {
+                trap_with_message("invalid route pattern '" .. pattern .. "': a segment is empty");
+            }
+            if (is_parameter(piece)) {
+                last name = piece.slice(1, piece.byte_length - 1);
+                if (not is_name(name)) {
+                    trap_with_message("invalid route pattern '" .. pattern .. "': '" .. name .. "' is not a parameter name");
+                }
+                for (let j = 0; j < names.length; j++) {
+                    if (names[j] == name) {
+                        trap_with_message("invalid route pattern '" .. pattern .. "': the parameter '" .. name
+                            .. "' appears twice");
+                    }
+                }
+                names.append(name);
+            } else {
+                for (let k = 0; k < piece.byte_length; k++) {
+                    last byte = piece.byte_at(k);
+                    if (byte <= 32 || byte == 127 || byte == 123 || byte == 125 || byte == 42 || byte == 63
+                        || byte == 35 || byte == 37) {
+                        trap_with_message("invalid route pattern '" .. pattern .. "': segment '" .. piece
+                            .. "' has a character a literal segment cannot have");
+                    }
+                }
+            }
+        }
+        return pieces;
+    };
+
+    let is_name = func(name: string) -> bool {
+        if (name.byte_length == 0) {
+            return false;
+        }
+        for (let i = 0; i < name.byte_length; i++) {
+            last byte = name.byte_at(i);
+            last letter = (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95;
+            last digit = byte >= 48 && byte <= 57;
+            if (not letter && not (digit && i > 0)) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    // The pattern with every parameter written `{}`: two routes of one shape match the same paths.
+    let shape_of = func(segments: string[list]) -> string {
+        let text = "";
+        for (let i = 0; i < segments.length; i++) {
+            if (is_parameter(segments[i])) {
+                text ..= "/{}";
+            } else {
+                text ..= "/" .. segments[i];
+            }
+        }
+        return text;
+    };
+
+    // A literal segment wins over a parameter at the first position where the two routes differ.
+    let more_specific = func(candidate: Route, best: Route) -> bool {
+        for (let i = 0; i < candidate.segments.length; i++) {
+            last literal = not is_parameter(candidate.segments[i]);
+            last other = not is_parameter(best.segments[i]);
+            if (literal != other) {
+                return literal;
+            }
+        }
+        return false;
+    };
+
+    let matches = func(segments: string[list], parts: string[list], values: string[list]) -> bool {
+        if (segments.length != parts.length) {
+            return false;
+        }
+        for (let i = 0; i < segments.length; i++) {
+            if (is_parameter(segments[i])) {
+                if (parts[i] == "") {
+                    return false;
+                }
+                match (percent_decode(parts[i])) {
+                    result.Result.Ok(value) => {
+                        values.append(value);
+                    },
+                    result.Result.Err(_) => {
+                        return false;
+                    },
+                }
+            } else if (segments[i] != parts[i]) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    let hex_value = func(byte: uint8) -> int {
+        if (byte >= 48 && byte <= 57) {
+            return (byte - 48) as int;
+        }
+        if (byte >= 65 && byte <= 70) {
+            return (byte - 55) as int;
+        }
+        return if (byte >= 97 && byte <= 102) -> (byte - 87) as int else -> -1;
+    };
+
+    // `%2F` and the other escapes become their bytes; a malformed escape or invalid UTF-8 is Err.
+    let percent_decode = func(text: string) -> result.Result<string> {
+        if (strings.index_of(text, "%") < 0) {
+            return result.Result<string>.Ok(text);
+        }
+        last bytes: uint8[list] = new;
+        let i = 0;
+        while (i < text.byte_length) {
+            last byte = text.byte_at(i);
+            if (byte == 37) {
+                if (i + 2 >= text.byte_length) {
+                    return result.Result<string>.Err(error_of("a percent escape is cut short"));
+                }
+                last high = hex_value(text.byte_at(i + 1));
+                last low = hex_value(text.byte_at(i + 2));
+                if (high < 0 || low < 0) {
+                    return result.Result<string>.Err(error_of("a percent escape is not hexadecimal"));
+                }
+                bytes.append((high * 16 + low) as uint8);
+                i += 3;
+            } else {
+                bytes.append(byte);
+                i += 1;
+            }
+        }
+        return strings.from_bytes(bytes);
+    };
+
+    let error_of = func(message: string) -> error.Error => error.custom("ui.route", message);
+
+    let check_path = func(path: string) {
+        if (path.byte_length == 0 || path.byte_at(0) != 47) {
+            trap_with_message("invalid route path '" .. path .. "': a path begins with '/'");
+        }
+        if (path.byte_length > 8192) {
+            trap_with_message("invalid route path: a path is at most 8 KiB");
+        }
+        for (let i = 0; i < path.byte_length; i++) {
+            last byte = path.byte_at(i);
+            if (byte < 32 || byte == 127) {
+                trap_with_message("invalid route path: a path has no control characters");
+            }
+        }
+    };
+);

@@ -1,0 +1,6 @@
+// A requirement is not called through a value (edge case 105).
+let Additive = interface<T> (
+    static let zero = func() -> T;
+    static let add = func(left: T, right: T) -> T;
+);
+let make = func(value: Additive<int>) -> int => value.zero();

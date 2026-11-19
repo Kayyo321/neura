@@ -27,6 +27,46 @@ Field initializers run before the body of their declaring class's `init`. A fiel
 
 For a derived class, `super.init(...)` must be the first statement of each declared constructor. It initializes the direct base before derived field initializers and the rest of the derived constructor execute. A class without a declared constructor implicitly invokes the base's zero-argument constructor. `new Derived(...)` selects from the constructors declared by `Derived`, and `super.init(...)` selects from the direct base. Both use [function overload resolution](CoreLanguage.md#function-overloads). Failure during construction and the state of a partially constructed object are not specified.
 
+### Constructor shorthand
+
+`init = func(x, y: int) => set;` is a constructor that stores each parameter in the instance field of the same name. It is the constructor written with those assignments, in parameter order and after the class's field initializers have run. It adds no constructor and changes no visibility.
+
+<!-- example: run -->
+```neura
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Point = class (
+    export last x: int;
+    export last y: int;
+
+    export let init = func(x, y: int) => set;
+);
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let point = new Point(3, 4);
+        console.print_line((point.x + point.y).to_string());
+        return program.ExitCode.Ok;
+    };
+);
+```
+
+```text
+7
+```
+
+| Rule | Detail |
+| --- | --- |
+| Only an instance `init` has it. | `set` is contextual. Elsewhere it is an ordinary name, and a constructor whose expression body is the name `set` is written as a block. |
+| Each parameter names a field. | The field is an instance field the class declares itself, and the parameter's type is assignable to the field's. An inherited field, a static member, a method, or a missing name is `E0537` at the parameter; an incompatible type is `E0403` there. |
+| The stores bind the class's own fields. | A parameter or local named like the receiver, `instance`, cannot redirect them, and a field accessor is bypassed as a store inside the class is. |
+| It expands before binding and definite assignment. | A `last` field that has a value cannot be set again (`E0401`), and every `last` field without a value is still assigned by the shorthand or an initializer (`E0446`). A [reference field](Types.md#primitive-references) is bound as by the written assignment. |
+| A derived class calls `super.init()` first. | The direct base needs a constructor that takes no arguments; without one the shorthand is `E0506`, and the constructor is written as a block that calls `super.init(...)`. |
+| Each store has the span of its parameter. | A diagnostic or a debugger stop points at the parameter. |
+
+In the editor, renaming a field renames the shorthand parameter with it, and renaming the parameter alone is refused, because that would change which field it sets. The [coding style](../style/CodingStyle.md) advice to name constructor parameters differently from fields applies to constructors written with assignments, not to the shorthand.
+
 ### `last` fields
 
 A field declared `last` is assigned once. `last name: T = value;` is assigned by its initializer, and no constructor or method can assign it again (`E0401`). `last name: T;` has no initializer, and every `init` of its class assigns it exactly once, as `name = value;` or `instance.name = value;`, under the [deferred assignment](CoreLanguage.md#deferred-assignment) rules:
@@ -78,6 +118,8 @@ The class to construct is the expected type of the `new`, which comes from:
 - the parameter, for a call argument, once the callee is known. Among overloads, a target-typed `new` fits every alternative whose parameter is a class it can construct, as a contextual argument, and an ambiguity is the usual [overload error](CoreLanguage.md#function-overloads);
 - the element type of a collection literal whose type is expected, and the arms of a conditional expression whose type is expected.
 
+Where the expected type, or the type written after `new`, is a list, `new` constructs a list, not an object: its one argument is the initializer, a list literal or a range, as in `new([1, 2, 3])`, `new(0 .. count)` and `new int[list]([1, 2, 3])`, and `new` alone is an empty list ([Arrays and lists](Collections.md#construction-and-length)). Among overloads, a `new(...)` of that form fits an alternative whose parameter is a list that its literal fits, and also a class it can construct, so write the type, `new int[list](...)`, where both fit.
+
 A generic class takes its type arguments from the expected type, so `let box: Box<string> = new("text");` constructs `Box<string>`. The expected type must be a concrete class. With no expected type, or with an interface, the umbrella type `class`, a singleton, a type parameter, or a type that is not a class, the `new` is [E0420](../diagnostics/E0420.md). An abstract class is rejected as for `new T()`.
 
 <!-- example: check -->
@@ -116,7 +158,7 @@ let make = func() -> Point {
 
 A class may declare a zero-argument `deinit` function returning `void`. The `destroy object;` statement ends the object's lifetime and invokes cleanup from the most-derived class toward its bases, regardless of the static type of the reference. Each class's `deinit` runs at most once; base cleanup is automatic and must not be called explicitly. A class without `deinit` has no cleanup body of its own. Cleanup should release resources owned by that class, not resources it merely borrows.
 
-Destruction invalidates the object for every alias. The VM traps with `invalid reference handle` if an operation subsequently dereferences the invalid handle. The example uses `destroy` only after the last use of its object. The compiler performs no ownership or alias check, and nothing in the language specifies cleanup on errors, destructor visibility, the behavior of failing cleanup, or calls to overridable methods during cleanup.
+A [record](Types.md#records) cannot be destroyed ([E0514](../diagnostics/E0514.md)): a [copy](Types.md#copy-construction) shares its source's children, so the collector owns every record. Destruction invalidates the object for every alias. The VM traps with `invalid reference handle` if an operation subsequently dereferences the invalid handle. The example uses `destroy` only after the last use of its object. The compiler performs no ownership or alias check, and nothing in the language specifies cleanup on errors, destructor visibility, the behavior of failing cleanup, or calls to overridable methods during cleanup.
 
 The VM automatically reclaims unreachable heap storage, including cyclic object graphs. Reclamation can occur at allocation and list growth. It does not run `deinit`, and leaving a source scope does not schedule cleanup. Use explicit `destroy` for cleanup with program-visible effects. [Garbage collection in NVM](../runtime/NVM.md#garbage-collection) describes which references retain an object and how reclamation interacts with runtime limits.
 

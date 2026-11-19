@@ -172,6 +172,8 @@ bool append_inline(Context& context, std::uint64_t entry, std::uint64_t value, b
     const auto live = *context.live_cells;
     const auto next = *context.next_collection;
     if (live >= next) return false;
+    // A region list (NVR 1.7) counts stack cells: the reference path appends.
+    if ((load(entry + Heap::flags_offset(), 1) & Heap::region_entry_flag()) != 0) return false;
     const auto storage = static_cast<unsigned>(load(entry + Heap::storage_width_offset(), 1));
     if (storage < 8 && (value >> (8 * storage)) != 0) return false;
     const auto count = load(entry + Heap::count_offset(), 8);
@@ -344,11 +346,18 @@ Result interpret(Context& context, const Program& program, std::uint32_t entry_i
                 values[id] = result.value;
                 break;
             }
+            case Op::ResultWord:
+                // The words a Return left for the Call that precedes this op.
+                values[id] = context.result_words[in.imm - 1];
+                break;
             case Op::Return: {
                 const bool has_value = in.operands[1] != none;
                 const auto value = has_value ? values[in.operands[1]] : 0;
+                // A function with several result words hands the others over in
+                // the context, for the helper and for the caller's ResultWords.
+                for (std::uint32_t i = 0; i < in.count; ++i) context.result_words[i] = values[fn.extras[in.extra + i]];
                 if (in.operands[2] != none) context.K = operand(2);
-                if (helpers.ret(&context, value, has_value, operand(0)) == Status::Fault) {
+                if (helpers.ret(&context, value, has_value, operand(0), in.count) == Status::Fault) {
                     return deoptimize(in, Reason::Exits);
                 }
                 if (from_native) return {Outcome::Return, value};

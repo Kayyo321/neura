@@ -1,0 +1,1366 @@
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.Core.SecretBytes;
+let.promote _ = import:Std.Crypto.SecretMemory;
+let aes_block = import:Std.Crypto.Symmetric.AesBlock;
+let aes_gcm = import:Std.Crypto.Symmetric.AesGcm;
+let cbc = import:Std.Crypto.Internal.PkiCbc;
+let constant_time = import:Std.Crypto.Core.ConstantTime;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let ecdsa = import:Std.Crypto.Asymmetric.Ecdsa;
+let entropy = import:Std.Crypto.Random.Entropy;
+let error = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let hmac = import:Std.Crypto.Mac.Hmac;
+let json = import:Std.Encoding.Json;
+let jose = import:Std.Crypto.Internal.JoseJson;
+let jwe_ecdh = import:Std.Crypto.Internal.JweEcdh;
+let jwe_json = import:Std.Crypto.Internal.JweJson;
+let pbkdf2 = import:Std.Crypto.Kdf.Pbkdf2;
+let rsa = import:Std.Crypto.Asymmetric.Rsa;
+let rsa_oaep = import:Std.Crypto.Asymmetric.RsaOaep;
+let sha2 = import:Std.Crypto.Hash.Sha2;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief Compact JSON Web Encryption and authenticated opening of JWE JSON (RFC 7516 and RFC 7518).
+///
+/// A caller supplies a key bound to direct encryption, AES Key Wrap, AES-GCM wrapping, PBES2, RSA-OAEP-256, or ECDH-ES. The protected
+/// header must agree with that key's algorithms. The original compact protected-header segment is authenticated
+/// as received. This module accepts no critical extensions or compression and ignores noncritical metadata
+/// when selecting keys. The CBC-HMAC modes verify the full wire tag before attempting decryption.
+/// For JSON opening a caller supplies the recipient index and expected external authenticated data.
+/// The tag and key-wrap-integrity comparisons are branch-free in source. The runtime does not guarantee
+/// constant time.
+/// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+#Since("0.3.0")
+export let Jwe = module (
+    /// @brief The content encryption algorithm bound to a JWE key.
+    /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+    #Since("0.3.0")
+    export let ContentEncryption = enum (A128Gcm, A192Gcm, A256Gcm, A128CbcHs256, A192CbcHs384, A256CbcHs512);
+
+    /// @brief The AES Key Wrap algorithm bound to a JWE wrapping key.
+    /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+    #Since("0.3.0")
+    export let WrapAlgorithm = enum (A128Kw, A192Kw, A256Kw);
+
+    /// @brief ECDH-ES direct key agreement and ECDH-ES with AES Key Wrap (RFC 7518, section 4.6).
+    /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+    #Since("0.3.0")
+    export let EcdhAlgorithm = enum (Es, EsA128Kw, EsA192Kw, EsA256Kw);
+
+    const InvalidJwe = "crypto.invalid_jwe";
+
+    let content_name = func(enc: ContentEncryption) -> string => match (enc) {
+        ContentEncryption.A128Gcm => "A128GCM",
+        ContentEncryption.A192Gcm => "A192GCM",
+        ContentEncryption.A256Gcm => "A256GCM",
+        ContentEncryption.A128CbcHs256 => "A128CBC-HS256",
+        ContentEncryption.A192CbcHs384 => "A192CBC-HS384",
+        ContentEncryption.A256CbcHs512 => "A256CBC-HS512",
+    };
+
+    let wrap_name = func(alg: WrapAlgorithm) -> string => match (alg) {
+        WrapAlgorithm.A128Kw => "A128KW",
+        WrapAlgorithm.A192Kw => "A192KW",
+        WrapAlgorithm.A256Kw => "A256KW",
+    };
+
+    let cbc_mode = func(enc: ContentEncryption) -> bool => match (enc) {
+        ContentEncryption.A128Gcm => false,
+        ContentEncryption.A192Gcm => false,
+        ContentEncryption.A256Gcm => false,
+        _ => true,
+    };
+
+    let cek_length = func(enc: ContentEncryption) -> int => match (enc) {
+        ContentEncryption.A128Gcm => 16,
+        ContentEncryption.A192Gcm => 24,
+        ContentEncryption.A256Gcm => 32,
+        ContentEncryption.A128CbcHs256 => 32,
+        ContentEncryption.A192CbcHs384 => 48,
+        ContentEncryption.A256CbcHs512 => 64,
+    };
+
+    let kek_length = func(alg: WrapAlgorithm) -> int => match (alg) {
+        WrapAlgorithm.A128Kw => 16,
+        WrapAlgorithm.A192Kw => 24,
+        WrapAlgorithm.A256Kw => 32,
+    };
+
+    let iv_length = func(enc: ContentEncryption) -> int => cbc_mode(enc) ? 16 : 12;
+    let tag_length = func(enc: ContentEncryption) -> int => cbc_mode(enc) ? cek_length(enc) / 2 : 16;
+
+    let require_encryption = func(enc: ContentEncryption) {
+        crypto_policy.require(match (enc) {
+            ContentEncryption.A128Gcm => Algorithm.Aes128Gcm,
+            ContentEncryption.A192Gcm => Algorithm.Aes192Gcm,
+            ContentEncryption.A256Gcm => Algorithm.Aes256Gcm,
+            ContentEncryption.A128CbcHs256 => Algorithm.Aes128,
+            ContentEncryption.A192CbcHs384 => Algorithm.Aes192,
+            ContentEncryption.A256CbcHs512 => Algorithm.Aes256,
+        });
+        if (cbc_mode(enc)) {
+            crypto_policy.require(Algorithm.Hmac);
+            crypto_policy.require(match (enc) {
+                ContentEncryption.A128CbcHs256 => Algorithm.Sha256,
+                ContentEncryption.A192CbcHs384 => Algorithm.Sha384,
+                _ => Algorithm.Sha512,
+            });
+        }
+    };
+
+    let require_wrap = func(alg: WrapAlgorithm) {
+        crypto_policy.require(match (alg) {
+            WrapAlgorithm.A128Kw => Algorithm.Aes128,
+            WrapAlgorithm.A192Kw => Algorithm.Aes192,
+            WrapAlgorithm.A256Kw => Algorithm.Aes256,
+        });
+    };
+
+    /// @brief A direct JWE content encryption key. The only permitted key management algorithm is dir.
+    /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+    #[Final, Since("0.3.0")]
+    export let DirectKey = class implements SecretMemory<uint8[list]> (
+        /// @brief The expected content encryption algorithm.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export last encryption: ContentEncryption;
+        last material: SecretBytes;
+
+        /// @brief Copies the key. Its length must match the specified encryption algorithm.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export let init = func(enc: ContentEncryption, bytes: uint8[list]) {
+            require_encryption(enc);
+            if (bytes.length != cek_length(enc)) {
+                trap_with_message("invalid argument: wrong length for JWE direct key");
+            }
+            encryption = enc;
+            material = new(bytes);
+        };
+
+        /// @brief A copy of the key. Exposing a wiped key traps.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #[NoDiscard, Since("0.3.0")]
+        export let expose = func -> uint8[list] => words.copy(material.expose());
+
+        /// @brief Overwrites and invalidates the stored key.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export let wipe = func => material.wipe();
+
+        /// @brief Whether the stored key has been invalidated.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #[NoDiscard, Since("0.3.0")]
+        export let is_wiped = func -> bool => material.is_wiped();
+
+        /// @brief Requests the underlying SecretBytes storage lock.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export let lock = func => material.lock();
+
+        /// @brief A fixed placeholder for the key.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "Jwe.DirectKey(<redacted>)";
+    );
+
+    /// @brief An AES JWE key-encryption key with both expected algorithms fixed by the caller.
+    /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+    #[Final, Since("0.3.0")]
+    export let WrappingKey = class implements SecretMemory<uint8[list]> (
+        /// @brief The expected key wrap algorithm.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export last algorithm: WrapAlgorithm;
+        /// @brief The expected content encryption algorithm.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export last encryption: ContentEncryption;
+        last material: SecretBytes;
+
+        /// @brief Copies the wrapping key. Its length must match the specified wrap algorithm.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export let init = func(alg: WrapAlgorithm, enc: ContentEncryption, bytes: uint8[list]) {
+            require_wrap(alg);
+            require_encryption(enc);
+            if (bytes.length != kek_length(alg)) {
+                trap_with_message("invalid argument: wrong length for JWE wrapping key");
+            }
+            algorithm = alg;
+            encryption = enc;
+            material = new(bytes);
+        };
+
+        /// @brief A copy of the key. Exposing a wiped key traps.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #[NoDiscard, Since("0.3.0")]
+        export let expose = func -> uint8[list] => words.copy(material.expose());
+
+        /// @brief Overwrites and invalidates the stored key.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export let wipe = func => material.wipe();
+
+        /// @brief Whether the stored key has been invalidated.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #[NoDiscard, Since("0.3.0")]
+        export let is_wiped = func -> bool => material.is_wiped();
+
+        /// @brief Requests the underlying SecretBytes storage lock.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export let lock = func => material.lock();
+
+        /// @brief A fixed placeholder for the key.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "Jwe.WrappingKey(<redacted>)";
+    );
+
+    /// @brief The AES-GCM key encryption algorithm bound to a JWE wrapping key.
+    /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+    #Since("0.3.0")
+    export let GcmWrapAlgorithm = enum (A128GcmKw, A192GcmKw, A256GcmKw);
+
+    /// @brief The PBES2 HMAC and AES Key Wrap algorithms bound to a password.
+    /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+    #Since("0.3.0")
+    export let Pbes2Algorithm = enum (Hs256A128Kw, Hs384A192Kw, Hs512A256Kw);
+
+    let gcm_wrap_name = func(alg: GcmWrapAlgorithm) -> string => match (alg) {
+        GcmWrapAlgorithm.A128GcmKw => "A128GCMKW",
+        GcmWrapAlgorithm.A192GcmKw => "A192GCMKW",
+        GcmWrapAlgorithm.A256GcmKw => "A256GCMKW",
+    };
+
+    let gcm_wrap_length = func(alg: GcmWrapAlgorithm) -> int => match (alg) {
+        GcmWrapAlgorithm.A128GcmKw => 16,
+        GcmWrapAlgorithm.A192GcmKw => 24,
+        GcmWrapAlgorithm.A256GcmKw => 32,
+    };
+
+    let pbes2_name = func(alg: Pbes2Algorithm) -> string => match (alg) {
+        Pbes2Algorithm.Hs256A128Kw => "PBES2-HS256+A128KW",
+        Pbes2Algorithm.Hs384A192Kw => "PBES2-HS384+A192KW",
+        Pbes2Algorithm.Hs512A256Kw => "PBES2-HS512+A256KW",
+    };
+
+    let pbes2_wrap = func(alg: Pbes2Algorithm) -> WrapAlgorithm => match (alg) {
+        Pbes2Algorithm.Hs256A128Kw => WrapAlgorithm.A128Kw,
+        Pbes2Algorithm.Hs384A192Kw => WrapAlgorithm.A192Kw,
+        Pbes2Algorithm.Hs512A256Kw => WrapAlgorithm.A256Kw,
+    };
+
+    /// @brief An AES-GCM wrapping key bound to the expected key encryption and content algorithms.
+    /// A wrapping IV must never repeat under a KEK. RFC 7518 limits AES-GCM to 2^32 encryption operations per KEK
+    /// across its users. The caller manages that limit across key objects and processes.
+    /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+    #[Final, Since("0.3.0")]
+    export let GcmWrappingKey = class implements SecretMemory<uint8[list]> (
+        /// @brief The expected key encryption algorithm.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export last algorithm: GcmWrapAlgorithm;
+
+        /// @brief The expected content encryption algorithm.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export last encryption: ContentEncryption;
+        last material: SecretBytes;
+
+        /// @brief Copies the wrapping key. Its byte count must match the key encryption algorithm.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export let init = func(enc: ContentEncryption, alg: GcmWrapAlgorithm, bytes: uint8[list]) {
+            require_encryption(enc);
+            crypto_policy.require(match (alg) {
+                GcmWrapAlgorithm.A128GcmKw => Algorithm.Aes128Gcm,
+                GcmWrapAlgorithm.A192GcmKw => Algorithm.Aes192Gcm,
+                GcmWrapAlgorithm.A256GcmKw => Algorithm.Aes256Gcm,
+            });
+            if (bytes.length != gcm_wrap_length(alg)) {
+                trap_with_message("invalid argument: wrong length for JWE AES-GCM wrapping key");
+            }
+            encryption = enc;
+            algorithm = alg;
+            material = new(bytes);
+        };
+
+        /// @brief Copies the key. Exposing a wiped key traps.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #[NoDiscard, Since("0.3.0")]
+        export let expose = func -> uint8[list] => words.copy(material.expose());
+
+        /// @brief Overwrites and invalidates the stored key.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export let wipe = func => material.wipe();
+
+        /// @brief Whether the stored key has been invalidated.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #[NoDiscard, Since("0.3.0")]
+        export let is_wiped = func -> bool => material.is_wiped();
+
+        /// @brief Requests the underlying SecretBytes storage lock.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export let lock = func => material.lock();
+
+        /// @brief A fixed redacted display.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "Jwe.GcmWrappingKey(<redacted>)";
+    );
+
+    /// @brief A password bound to a PBES2 algorithm, a content algorithm, and a PBKDF2 iteration budget.
+    /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+    #[Final, Since("0.3.0")]
+    export let Pbes2Key = class implements SecretMemory<uint8[list]> (
+        /// @brief The expected key management algorithm.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export last algorithm: Pbes2Algorithm;
+
+        /// @brief The expected content encryption algorithm.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export last encryption: ContentEncryption;
+
+        /// @brief The greatest PBKDF2 iteration count accepted when sealing or opening.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export last iteration_limit: int;
+        last material: SecretBytes;
+
+        /// @brief Copies a password as octets. Encode a textual password in UTF-8 before importing it.
+        /// Supply a positive maximum count independently of token data.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export let init = func(enc: ContentEncryption, alg: Pbes2Algorithm, password: uint8[list], max_iterations: int) {
+            require_encryption(enc);
+            require_wrap(pbes2_wrap(alg));
+            crypto_policy.require(Algorithm.Pbkdf2);
+            crypto_policy.require(Algorithm.Hmac);
+            crypto_policy.require(match (alg) {
+                Pbes2Algorithm.Hs256A128Kw => Algorithm.Sha256,
+                Pbes2Algorithm.Hs384A192Kw => Algorithm.Sha384,
+                Pbes2Algorithm.Hs512A256Kw => Algorithm.Sha512,
+            });
+            if (max_iterations < 1) {
+                trap_with_message("invalid argument: JWE PBES2 needs a positive iteration limit");
+            }
+            encryption = enc;
+            algorithm = alg;
+            iteration_limit = max_iterations;
+            material = new(password);
+        };
+
+        /// @brief Copies the password. Exposing a wiped password traps.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #[NoDiscard, Since("0.3.0")]
+        export let expose = func -> uint8[list] => words.copy(material.expose());
+
+        /// @brief Overwrites and invalidates the stored password.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export let wipe = func => material.wipe();
+
+        /// @brief Whether the stored password has been invalidated.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #[NoDiscard, Since("0.3.0")]
+        export let is_wiped = func -> bool => material.is_wiped();
+
+        /// @brief Requests the underlying SecretBytes storage lock.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export let lock = func => material.lock();
+
+        /// @brief A fixed redacted display.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "Jwe.Pbes2Key(<redacted>)";
+    );
+
+    const RsaOaep256 = "RSA-OAEP-256";
+
+    let require_rsa = func(bits: int, enc: ContentEncryption) {
+        crypto_policy.require(Algorithm.RsaOaep);
+        crypto_policy.require(Algorithm.Sha256);
+        if (bits < 2048) {
+            trap_with_message("invalid argument: RSA-OAEP-256 needs a modulus of at least 2048 bits");
+        }
+        require_encryption(enc);
+    };
+
+    /// @brief An RSA public key bound to RSA-OAEP-256 and one content encryption algorithm.
+    /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+    #[Final, Since("0.3.0")]
+    export let RsaWrappingKey = class (
+        /// @brief The expected content encryption algorithm.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export last encryption: ContentEncryption;
+
+        /// @brief The RSA public key.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export last public_key: rsa.RsaPublicKey;
+
+        /// @brief Binds the public key. A modulus shorter than 2048 bits traps.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export let init = func(enc: ContentEncryption, rsa_key: rsa.RsaPublicKey) {
+            require_rsa(rsa_key.bits(), enc);
+            encryption = enc;
+            public_key = rsa_key;
+        };
+
+        /// @brief Whether the key and the content encryption algorithm are equal.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export let.override equals = func(other: class) -> bool {
+            if (other is not right: RsaWrappingKey) {
+                return false;
+            }
+            return encryption == right.encryption && public_key.equals(right.public_key);
+        };
+
+        /// @brief A hash of the public key and the content algorithm.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export let.override hash_code = func -> uint32 => hashing.combine(public_key.hash_code(), (encryption as int) as uint32);
+
+        /// @brief The key management and content encryption names.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "Jwe.RsaWrappingKey(" .. content_name(encryption) .. ")";
+    );
+
+    /// @brief An RSA private key bound to RSA-OAEP-256 and one content encryption algorithm.
+    /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+    #[Final, Since("0.3.0")]
+    export let RsaUnwrappingKey = class (
+        /// @brief The expected content encryption algorithm.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export last encryption: ContentEncryption;
+        last key: rsa.RsaPrivateKey;
+
+        /// @brief Retains the private key. A modulus shorter than 2048 bits traps.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export let init = func(enc: ContentEncryption, rsa_key: rsa.RsaPrivateKey) {
+            require_rsa(rsa_key.bits(), enc);
+            crypto_policy.require(Algorithm.Sha512);
+            encryption = enc;
+            key = rsa_key;
+        };
+
+        /// @brief Authenticates and decrypts an RSA-OAEP-256 compact JWE. Traps after the underlying key is
+        /// wiped. On failure to recover the expected CEK, it still checks content authentication using a
+        /// pseudorandom substitute derived under the private key, and returns the same authentication error.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #[NoDiscard, Since("0.3.0")]
+        export let open = func(compact: string) -> Result<uint8[list]> {
+            require_live();
+            return open_fields(parse(compact, RsaOaep256, encryption, (key.bits() + 7) / 8)?);
+        };
+
+        #[Internal, Hidden]
+        export let open_json = func(serialized: string, recipient_index: int, aad: uint8[list]) -> Result<uint8[list]> {
+            require_live();
+            return open_fields(parse_json(serialized, recipient_index, aad, RsaOaep256, encryption, (key.bits() + 7) / 8)?);
+        };
+
+        let require_live = func {
+            if (key.is_wiped()) {
+                trap_with_message("invalid state: JWE RSA key is wiped");
+            }
+        };
+
+        let open_fields = func(fields: OpenFields) -> Result<uint8[list]> {
+            last oaep = new rsa_oaep.RsaOaep();
+            last size = cek_length(encryption);
+            let seed_input = words.utf8("Neura JWE RSA-OAEP-256 substitute key");
+            words.append_all(seed_input, fields.wrapped);
+            let seed = hmac.mac<sha2.Sha512>(key.expose(), seed_input);
+            let cek = words.slice(seed, 0, size);
+            words.wipe(seed);
+            let accepted = false;
+            match (oaep.decrypt(key, fields.wrapped, new)) {
+                Result.Ok(bytes) => {
+                    if (bytes.length == size) {
+                        words.wipe(cek);
+                        cek = bytes;
+                        accepted = true;
+                    } else {
+                        words.wipe(bytes);
+                    }
+                },
+                Result.Err(_) => {},
+            }
+            last result = open_content(encryption, cek, fields.iv, fields.ciphertext, fields.tag, fields.aad);
+            words.wipe(cek);
+            return accepted ? result : auth_error<uint8[list]>();
+        };
+
+        /// @brief A fixed placeholder for the key.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "Jwe.RsaUnwrappingKey(<redacted>)";
+    );
+
+    let ecdh_name = func(alg: EcdhAlgorithm) -> string => match (alg) {
+        EcdhAlgorithm.Es => "ECDH-ES",
+        EcdhAlgorithm.EsA128Kw => "ECDH-ES+A128KW",
+        EcdhAlgorithm.EsA192Kw => "ECDH-ES+A192KW",
+        EcdhAlgorithm.EsA256Kw => "ECDH-ES+A256KW",
+    };
+
+    let ecdh_key_length = func(alg: EcdhAlgorithm, enc: ContentEncryption) -> int => match (alg) {
+        EcdhAlgorithm.Es => cek_length(enc),
+        EcdhAlgorithm.EsA128Kw => kek_length(WrapAlgorithm.A128Kw),
+        EcdhAlgorithm.EsA192Kw => kek_length(WrapAlgorithm.A192Kw),
+        EcdhAlgorithm.EsA256Kw => kek_length(WrapAlgorithm.A256Kw),
+    };
+
+    let ecdh_id = func(alg: EcdhAlgorithm, enc: ContentEncryption) -> string =>
+        alg == EcdhAlgorithm.Es ? content_name(enc) : ecdh_name(alg);
+
+    let require_ecdh = func(curve: ecdsa.Curve, alg: EcdhAlgorithm, enc: ContentEncryption) {
+        if (curve == ecdsa.Curve.Secp256k1) {
+            trap_with_message("invalid argument: JWE ECDH-ES requires P-256, P-384, or P-521");
+        }
+        crypto_policy.require(ecdsa.algorithm_of(curve));
+        crypto_policy.require(Algorithm.Sha256);
+        require_encryption(enc);
+        match (alg) {
+            EcdhAlgorithm.Es => {},
+            EcdhAlgorithm.EsA128Kw => {
+                require_wrap(WrapAlgorithm.A128Kw);
+            },
+            EcdhAlgorithm.EsA192Kw => {
+                require_wrap(WrapAlgorithm.A192Kw);
+            },
+            EcdhAlgorithm.EsA256Kw => {
+                require_wrap(WrapAlgorithm.A256Kw);
+            },
+        }
+    };
+
+    /// @brief A P-256, P-384, or P-521 recipient public key bound to ECDH-ES and the expected content algorithm.
+    /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+    #[Final, Since("0.3.0")]
+    export let EcdhEncryptionKey = class (
+        /// @brief The recipient's public key.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export last public_key: ecdsa.EcPublicKey;
+
+        /// @brief Whether the derived key encrypts content directly or first wraps a CEK.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export last algorithm: EcdhAlgorithm;
+
+        /// @brief The expected content encryption algorithm.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export last encryption: ContentEncryption;
+
+        /// @brief Binds the recipient public key to one key-management and one content encryption algorithm.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export let init = func(key: ecdsa.EcPublicKey, alg: EcdhAlgorithm, enc: ContentEncryption) {
+            require_ecdh(key.curve, alg, enc);
+            public_key = key;
+            algorithm = alg;
+            encryption = enc;
+        };
+
+        /// @brief Whether the recipient and both algorithms are equal.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export let.override equals = func(other: class) -> bool {
+            if (other is not right: EcdhEncryptionKey) {
+                return false;
+            }
+            return algorithm == right.algorithm && encryption == right.encryption && public_key.equals(right.public_key);
+        };
+
+        /// @brief A hash of the recipient and both algorithms.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export let.override hash_code = func -> uint32 =>
+            hashing.combine(hashing.combine(public_key.hash_code(), (algorithm as int) as uint32), (encryption as int) as uint32);
+
+        /// @brief The configured algorithm names.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export let.override to_string = func -> string =>
+            "Jwe.EcdhEncryptionKey(" .. ecdh_name(algorithm) .. ", " .. content_name(encryption) .. ")";
+    );
+
+    /// @brief An ECDH-ES recipient private key with a bound key-management and content algorithm.
+    /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+    #[Final, Since("0.3.0")]
+    export let EcdhDecryptionKey = class (
+        last key: ecdsa.EcPrivateKey;
+
+        /// @brief The expected key-management algorithm.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export last algorithm: EcdhAlgorithm;
+
+        /// @brief The expected content encryption algorithm.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export last encryption: ContentEncryption;
+
+        /// @brief Retains the recipient's private key. Wiping that key also disables this decryption key.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export let init = func(recipient: ecdsa.EcPrivateKey, alg: EcdhAlgorithm, enc: ContentEncryption) {
+            require_ecdh(recipient.curve, alg, enc);
+            key = recipient;
+            algorithm = alg;
+            encryption = enc;
+        };
+
+        /// @brief Authenticates and decrypts a compact JWE. Traps after the underlying private key is wiped.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #[NoDiscard, Since("0.3.0")]
+        export let open = func(compact: string) -> Result<uint8[list]> {
+            require_live();
+            last fields = parse(compact, ecdh_name(algorithm), encryption, wrapped_length())?;
+            return open_fields(fields, jwe_ecdh.parse(fields.protected_bytes, key.curve)?);
+        };
+
+        #[Internal, Hidden]
+        export let open_json = func(serialized: string, recipient_index: int, aad: uint8[list]) -> Result<uint8[list]> {
+            require_live();
+            last fields = parse_json(serialized, recipient_index, aad, ecdh_name(algorithm), encryption, wrapped_length())?;
+            return open_fields(fields, jwe_ecdh.parse_members(fields.members, key.curve)?);
+        };
+
+        let require_live = func {
+            if (key.is_wiped()) {
+                trap_with_message("invalid state: JWE ECDH key is wiped");
+            }
+        };
+
+        let wrapped_length = func -> int => algorithm == EcdhAlgorithm.Es ? 0 : cek_length(encryption) + 8;
+
+        let open_fields = func(fields: OpenFields, parameters: jwe_ecdh.Parameters) -> Result<uint8[list]> {
+            let agreed = jwe_ecdh.derive(key, parameters.public_key, ecdh_id(algorithm, encryption),
+                parameters.apu, parameters.apv, ecdh_key_length(algorithm, encryption))?;
+            let cek = agreed;
+            if (algorithm != EcdhAlgorithm.Es) {
+                last unwrapped = unwrap(new aes_block.AesBlock(agreed), fields.wrapped);
+                words.wipe(agreed);
+                cek = unwrapped?;
+            }
+            last result = open_content(encryption, cek, fields.iv, fields.ciphertext, fields.tag, fields.aad);
+            words.wipe(cek);
+            return result;
+        };
+
+        /// @brief A fixed placeholder for the key.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "Jwe.EcdhDecryptionKey(<redacted>)";
+    );
+
+    let auth_error = func<T> -> Result<T> => Result<T>.Err(error.custom("crypto.authentication_failed",
+        "JWE authentication failed"));
+
+    let wrap_iv = func -> uint8[list] => new([166, 166, 166, 166, 166, 166, 166, 166]);
+
+    // RFC 3394 section 2.2.1.
+    let wrap = func(cipher: aes_block.AesBlock, cek: uint8[list]) -> uint8[list] {
+        last count = cek.length / 8;
+        let out = words.concat(wrap_iv(), cek);
+        for (let j in 0 .. 6) {
+            for (let i in 1 ..= count) {
+                last offset = i * 8;
+                let input = words.slice(out, 0, 8);
+                words.append_all(input, words.slice(out, offset, offset + 8));
+                let block = cipher.encrypt_block(input);
+                let first: uint8[list] = new;
+                words.append64_be(first, words.load64_be(block, 0) ^ (count * j + i) as uint64);
+                for (let k in 0 .. 8) {
+                    out[k] = first[k];
+                    out[offset + k] = block[8 + k];
+                }
+                words.wipe(input);
+                words.wipe(block);
+            }
+        }
+        return out;
+    };
+
+    // RFC 3394 section 2.2.2. Discard all unwrapped bytes if the integrity value differs.
+    let unwrap = func(cipher: aes_block.AesBlock, wrapped: uint8[list]) -> Result<uint8[list]> {
+        last count = wrapped.length / 8 - 1;
+        let data = words.copy(wrapped);
+        for (let j in 5 ..= 0 : -1) {
+            for (let i in count .. 0 : -1) {
+                last offset = i * 8;
+                let input: uint8[list] = new;
+                words.append64_be(input, words.load64_be(data, 0) ^ (count * j + i) as uint64);
+                words.append_all(input, words.slice(data, offset, offset + 8));
+                let block = cipher.decrypt_block(input);
+                for (let k in 0 .. 8) {
+                    data[k] = block[k];
+                    data[offset + k] = block[8 + k];
+                }
+                words.wipe(input);
+                words.wipe(block);
+            }
+        }
+        if (not constant_time.ct_eq(words.slice(data, 0, 8), wrap_iv())) {
+            words.wipe(data);
+            return auth_error<uint8[list]>();
+        }
+        last cek = words.slice(data, 8, data.length);
+        words.wipe(data);
+        return Result<uint8[list]>.Ok(cek);
+    };
+
+    let cbc_tag = func(enc: ContentEncryption, cek: uint8[list], aad: uint8[list], iv: uint8[list],
+        ciphertext: uint8[list]) -> uint8[list] {
+        last size = tag_length(enc);
+        let mac_key = words.slice(cek, 0, size);
+        let input = words.concat(aad, iv);
+        words.append_all(input, ciphertext);
+        words.append64_be(input, (aad.length as uint64) * 8);
+        let tag = match (enc) {
+            ContentEncryption.A128CbcHs256 => hmac.mac<sha2.Sha256>(mac_key, input),
+            ContentEncryption.A192CbcHs384 => hmac.mac<sha2.Sha384>(mac_key, input),
+            _ => hmac.mac<sha2.Sha512>(mac_key, input),
+        };
+        words.wipe(mac_key);
+        last truncated = words.slice(tag, 0, size);
+        words.wipe(tag);
+        return truncated;
+    };
+
+    let seal_content = func(enc: ContentEncryption, cek: uint8[list], iv: uint8[list], plaintext: uint8[list],
+        aad: uint8[list]) -> uint8[list] {
+        require_encryption(enc);
+        if (not cbc_mode(enc)) {
+            return new aes_gcm.AesGcm(cek).seal(iv, plaintext, aad);
+        }
+        let aes_key = words.slice(cek, tag_length(enc), cek.length);
+        let ciphertext = cbc.encrypt(aes_key, iv, plaintext);
+        words.wipe(aes_key);
+        words.append_all(ciphertext, cbc_tag(enc, cek, aad, iv, ciphertext));
+        return ciphertext;
+    };
+
+    let open_content = func(enc: ContentEncryption, cek: uint8[list], iv: uint8[list], ciphertext: uint8[list],
+        tag: uint8[list], aad: uint8[list]) -> Result<uint8[list]> {
+        require_encryption(enc);
+        if (not cbc_mode(enc)) {
+            match (new aes_gcm.AesGcm(cek).open(iv, words.concat(ciphertext, tag), aad)) {
+                Result.Ok(plaintext) => {
+                    return Result<uint8[list]>.Ok(plaintext);
+                },
+                Result.Err(_) => {
+                    return auth_error<uint8[list]>();
+                },
+            }
+        }
+        if (not constant_time.ct_eq(cbc_tag(enc, cek, aad, iv, ciphertext), tag)) {
+            return auth_error<uint8[list]>();
+        }
+        let aes_key = words.slice(cek, tag_length(enc), cek.length);
+        last plaintext = cbc.decrypt(aes_key, iv, ciphertext);
+        words.wipe(aes_key);
+        return match (plaintext) {
+            Optional.Some(bytes) => Result<uint8[list]>.Ok(bytes),
+            Optional.None => auth_error<uint8[list]>(),
+        };
+    };
+
+    let validate_header = func(bytes: uint8[list], expected_alg: string, expected_enc: ContentEncryption)
+        -> Result<Unit> => validate_header_members(jose.parse_object_bytes(bytes, InvalidJwe)?, expected_alg, expected_enc);
+
+    let validate_header_members = func(members: [string, json.JsonValue][list], expected_alg: string,
+        expected_enc: ContentEncryption) -> Result<Unit> {
+        last alg = jose.required_text(members, "alg", InvalidJwe)?;
+        last enc = jose.required_text(members, "enc", InvalidJwe)?;
+        if (alg != expected_alg || enc != content_name(expected_enc)) {
+            return jose.fail<Unit>(InvalidJwe, "protected algorithms do not match the JWE key");
+        }
+        if (jose.has(members, "crit")) {
+            return jose.fail<Unit>(InvalidJwe, "JWE critical extensions are unsupported");
+        }
+        if (jose.has(members, "zip")) {
+            return jose.fail<Unit>(InvalidJwe, "JWE compression is unsupported");
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    let header = func(alg: string, enc: ContentEncryption) -> string =>
+        "{\"alg\":" .. jose.quote(alg) .. ",\"enc\":" .. jose.quote(content_name(enc)) .. "}";
+
+    let encode = func(protected: uint8[list], enc: ContentEncryption, cek: uint8[list], encrypted_key: uint8[list],
+        iv: uint8[list], plaintext: uint8[list]) -> string {
+        last header_part = jose.encode(protected);
+        last sealed = seal_content(enc, cek, iv, plaintext, words.utf8(header_part));
+        last split = sealed.length - tag_length(enc);
+        return header_part .. "." .. jose.encode(encrypted_key) .. "." .. jose.encode(iv) .. "."
+            .. jose.encode(words.slice(sealed, 0, split)) .. "." .. jose.encode(words.slice(sealed, split, sealed.length));
+    };
+
+    let OpenFields = class (
+        export last protected_bytes: uint8[list];
+        export last members: [string, json.JsonValue][list];
+        export last aad: uint8[list];
+        export last wrapped: uint8[list];
+        export last iv: uint8[list];
+        export last ciphertext: uint8[list];
+        export last tag: uint8[list];
+
+        export let init = func(protected: uint8[list], header_members: [string, json.JsonValue][list],
+            content_aad, encrypted_key, nonce, body, authentication_tag: uint8[list]) {
+            protected_bytes = protected;
+            members = header_members;
+            aad = content_aad;
+            wrapped = encrypted_key;
+            iv = nonce;
+            ciphertext = body;
+            tag = authentication_tag;
+        };
+
+        export let.override to_string = func -> string => "Jwe.OpenFields";
+    );
+
+    let decode_part = func(part: string, message: string) -> Result<uint8[list]> =>
+        jose.decode(part, InvalidJwe, message);
+
+    let decode_encrypted_key = func(part: string, expected_length: int) -> Result<uint8[list]> {
+        if (expected_length == 0) {
+            return part == "" ? Result<uint8[list]>.Ok(new)
+                : jose.fail<uint8[list]>(InvalidJwe, "a direct JWE must have an empty encrypted-key segment");
+        }
+        // RFC 7516 section 11.5 requires one failure for an invalid encrypted key.
+        return match (decode_part(part, "invalid encrypted key")) {
+            Result.Ok(bytes) if bytes.length == expected_length => Result<uint8[list]>.Ok(bytes),
+            _ => auth_error<uint8[list]>(),
+        };
+    };
+
+    let parse = func(compact: string, expected_alg: string, expected_enc: ContentEncryption, wrapped_length: int)
+        -> Result<OpenFields> {
+        last parts = jose.split_dots(compact);
+        if (parts.length != 5) {
+            return jose.fail<OpenFields>(InvalidJwe, "compact JWE must have five segments");
+        }
+        last protected = decode_part(parts[0], "invalid protected header")?;
+        last members = jose.parse_object_bytes(protected, InvalidJwe)?;
+        validate_header_members(members, expected_alg, expected_enc)?;
+        return decode_fields(protected, members, words.utf8(parts[0]), parts[1], parts[2], parts[3], parts[4],
+            expected_enc, wrapped_length);
+    };
+
+    let parse_json = func(serialized: string, recipient_index: int, aad: uint8[list], expected_alg: string,
+        expected_enc: ContentEncryption, wrapped_length: int) -> Result<OpenFields> {
+        last envelope = jwe_json.parse(serialized, recipient_index, content_name(expected_enc))?;
+        validate_header_members(envelope.members, expected_alg, expected_enc)?;
+        if (not constant_time.ct_eq(envelope.external_aad, aad)) {
+            return auth_error<OpenFields>();
+        }
+        return decode_fields(new, envelope.members, envelope.aad, envelope.encrypted_key, envelope.iv, envelope.ciphertext,
+            envelope.tag, expected_enc, wrapped_length);
+    };
+
+    let decode_fields = func(protected: uint8[list], members: [string, json.JsonValue][list], aad: uint8[list],
+        key_segment, iv_segment, body_segment, tag_segment: string, expected_enc: ContentEncryption, wrapped_length: int)
+        -> Result<OpenFields> {
+        last wrapped = decode_encrypted_key(key_segment, wrapped_length)?;
+        last iv = decode_part(iv_segment, "invalid initialization vector")?;
+        last ciphertext = decode_part(body_segment, "invalid ciphertext")?;
+        last tag = decode_part(tag_segment, "invalid authentication tag")?;
+        if (iv.length != iv_length(expected_enc) || tag.length != tag_length(expected_enc)) {
+            return jose.fail<OpenFields>(InvalidJwe, "incorrect JWE segment length");
+        }
+        if (cbc_mode(expected_enc) && (ciphertext.length == 0 || ciphertext.length % 16 != 0)) {
+            return jose.fail<OpenFields>(InvalidJwe, "invalid JWE CBC ciphertext length");
+        }
+        return Result<OpenFields>.Ok(new OpenFields(protected, members, aad, wrapped, iv, ciphertext, tag));
+    };
+
+    let check_content_material = func(enc: ContentEncryption, cek, iv: uint8[list]) {
+        check_iv(enc, iv);
+        if (cek.length != cek_length(enc)) {
+            trap_with_message("invalid argument: wrong length for JWE content encryption key");
+        }
+    };
+
+    let gcm_parameters = func(members: [string, json.JsonValue][list]) -> Result<[uint8[list], uint8[list]]> {
+        last iv = jose.required_bytes(members, "iv", InvalidJwe)?;
+        last tag = jose.required_bytes(members, "tag", InvalidJwe)?;
+        if (iv.length != 12 || tag.length != 16) {
+            return jose.fail<[uint8[list], uint8[list]]>(InvalidJwe, "incorrect JWE AES-GCM wrapping IV or tag length");
+        }
+        return Result<[uint8[list], uint8[list]]>.Ok([iv, tag]);
+    };
+
+    let check_gcm_material = func(enc: ContentEncryption, cek, content_iv, wrapping_iv: uint8[list]) {
+        check_content_material(enc, cek, content_iv);
+        if (wrapping_iv.length != 12) {
+            trap_with_message("invalid argument: JWE AES-GCM wrapping IV must be 12 bytes");
+        }
+    };
+
+    let wrap_gcm = func(key: GcmWrappingKey, cek, wrapping_iv: uint8[list]) -> [uint8[list], uint8[list]] {
+        let kek = key.expose();
+        if (constant_time.ct_eq(cek, kek)) {
+            words.wipe(kek);
+            trap_with_message("invalid argument: JWE content encryption key must differ from its AES-GCM wrapping key");
+        }
+        defer words.wipe(kek);
+        last sealed = new aes_gcm.AesGcm(kek).seal(wrapping_iv, cek, new);
+        return [words.slice(sealed, 0, cek.length), words.slice(sealed, cek.length, sealed.length)];
+    };
+
+    let seal_gcm = func(key: GcmWrappingKey, plaintext, cek, content_iv, wrapping_iv: uint8[list]) -> Result<string> {
+        check_gcm_material(key.encryption, cek, content_iv, wrapping_iv);
+        let [encrypted_key, tag] = wrap_gcm(key, cek, wrapping_iv);
+        last protected = words.utf8("{\"alg\":" .. jose.quote(gcm_wrap_name(key.algorithm))
+            .. ",\"enc\":" .. jose.quote(content_name(key.encryption)) .. ",\"iv\":" .. jose.quote(jose.encode(wrapping_iv))
+            .. ",\"tag\":" .. jose.quote(jose.encode(tag)) .. "}");
+        return Result<string>.Ok(encode(protected, key.encryption, cek, encrypted_key, content_iv, plaintext));
+    };
+
+    let seal_gcm_protected = func(key: GcmWrappingKey, plaintext, cek, content_iv, wrapping_iv: uint8[list],
+        header_text: string) -> Result<string> {
+        check_gcm_material(key.encryption, cek, content_iv, wrapping_iv);
+        last protected = words.utf8(header_text);
+        validate_header(protected, gcm_wrap_name(key.algorithm), key.encryption)?;
+        let [header_iv, header_tag] = gcm_parameters(jose.parse_object_bytes(protected, InvalidJwe)?)?;
+        if (not constant_time.ct_eq(wrapping_iv, header_iv)) {
+            return jose.fail<string>(InvalidJwe, "protected JWE AES-GCM wrapping IV differs from the supplied IV");
+        }
+        let [encrypted_key, tag] = wrap_gcm(key, cek, wrapping_iv);
+        if (not constant_time.ct_eq(tag, header_tag)) {
+            return jose.fail<string>(InvalidJwe, "protected JWE AES-GCM wrapping tag differs from the generated tag");
+        }
+        return Result<string>.Ok(encode(protected, key.encryption, cek, encrypted_key, content_iv, plaintext));
+    };
+
+    let seal_gcm_random = func(key: GcmWrappingKey, plaintext: uint8[list], random: uint8[list]) -> Result<string> {
+        defer words.wipe(random);
+        last split = cek_length(key.encryption);
+        last iv_end = split + iv_length(key.encryption);
+        let cek = words.slice(random, 0, split);
+        defer words.wipe(cek);
+        last iv = words.slice(random, split, iv_end);
+        last wrapping_iv = words.slice(random, iv_end, random.length);
+        return seal_gcm(key, plaintext, cek, iv, wrapping_iv);
+    };
+
+    let open_gcm = func(key: GcmWrappingKey, fields: OpenFields) -> Result<uint8[list]> {
+        let [wrapping_iv, wrapping_tag] = gcm_parameters(fields.members)?;
+        let kek = key.expose();
+        defer words.wipe(kek);
+        last unwrapped = new aes_gcm.AesGcm(kek).open(wrapping_iv, words.concat(fields.wrapped, wrapping_tag), new);
+        match (unwrapped) {
+            Result.Ok(cek) => {
+                defer words.wipe(cek);
+                return open_content(key.encryption, cek, fields.iv, fields.ciphertext, fields.tag, fields.aad);
+            },
+            Result.Err(_) => {
+                return auth_error<uint8[list]>();
+            },
+        }
+    };
+
+    let pbes2_iterations = func(members: [string, json.JsonValue][list], limit: int) -> Result<int> {
+        match (json.member(members, "p2c")) {
+            Optional.Some(json.JsonValue.Number(text)) => {
+                match (json.number_to_int64(text)) {
+                    Optional.Some(count) if count > 0 => {
+                        if (count > (limit as int64)) {
+                            return jose.fail<int>(InvalidJwe, "JWE PBES2 iteration count exceeds the recipient budget");
+                        }
+                        return Result<int>.Ok(count as int);
+                    },
+                    _ => {},
+                }
+            },
+            _ => {},
+        }
+        return jose.fail<int>(InvalidJwe, "JWE PBES2 p2c must be a positive JSON integer");
+    };
+
+    let pbes2_parameters = func(members: [string, json.JsonValue][list], limit: int) -> Result<[uint8[list], int]> {
+        last iterations = pbes2_iterations(members, limit)?;
+        last salt = jose.required_bytes(members, "p2s", InvalidJwe)?;
+        if (salt.length < 8) {
+            return jose.fail<[uint8[list], int]>(InvalidJwe, "JWE PBES2 salt input must be at least 8 bytes");
+        }
+        return Result<[uint8[list], int]>.Ok([salt, iterations]);
+    };
+
+    let derive_pbes2 = func(key: Pbes2Key, salt_input: uint8[list], iterations: int) -> uint8[list] {
+        let salt = words.utf8(pbes2_name(key.algorithm));
+        salt.append(0);
+        words.append_all(salt, salt_input);
+        let password = key.expose();
+        defer words.wipe(password);
+        return match (key.algorithm) {
+            Pbes2Algorithm.Hs256A128Kw => pbkdf2.derive<sha2.Sha256>(password, salt, iterations, 16),
+            Pbes2Algorithm.Hs384A192Kw => pbkdf2.derive<sha2.Sha384>(password, salt, iterations, 24),
+            Pbes2Algorithm.Hs512A256Kw => pbkdf2.derive<sha2.Sha512>(password, salt, iterations, 32),
+        };
+    };
+
+    let check_pbes2_iterations = func(key: Pbes2Key, iterations: int) {
+        if (iterations < 1000 || iterations > key.iteration_limit) {
+            trap_with_message("invalid argument: JWE PBES2 sealing needs at least 1000 iterations within the key budget");
+        }
+    };
+
+    let seal_pbes2_protected = func(key: Pbes2Key, plaintext, cek, iv, salt: uint8[list], iterations: int,
+        header_text: string) -> Result<string> {
+        check_content_material(key.encryption, cek, iv);
+        check_pbes2_iterations(key, iterations);
+        if (salt.length < 8) {
+            trap_with_message("invalid argument: JWE PBES2 salt input must be at least 8 bytes");
+        }
+        last protected = words.utf8(header_text);
+        validate_header(protected, pbes2_name(key.algorithm), key.encryption)?;
+        let [header_salt, header_count] = pbes2_parameters(jose.parse_object_bytes(protected, InvalidJwe)?, key.iteration_limit)?;
+        if (iterations != header_count || not constant_time.ct_eq(salt, header_salt)) {
+            return jose.fail<string>(InvalidJwe, "protected JWE PBES2 parameters differ from the supplied parameters");
+        }
+        let kek = derive_pbes2(key, salt, iterations);
+        defer words.wipe(kek);
+        last encrypted_key = wrap(new aes_block.AesBlock(kek), cek);
+        return Result<string>.Ok(encode(protected, key.encryption, cek, encrypted_key, iv, plaintext));
+    };
+
+    let seal_pbes2 = func(key: Pbes2Key, plaintext, cek, iv, salt: uint8[list], iterations: int)
+        -> Result<string> {
+        last protected = "{\"alg\":" .. jose.quote(pbes2_name(key.algorithm))
+            .. ",\"enc\":" .. jose.quote(content_name(key.encryption)) .. ",\"p2s\":" .. jose.quote(jose.encode(salt))
+            .. ",\"p2c\":" .. iterations.to_string() .. "}";
+        return seal_pbes2_protected(key, plaintext, cek, iv, salt, iterations, protected);
+    };
+
+    let seal_pbes2_random = func(key: Pbes2Key, plaintext: uint8[list], iterations: int, random: uint8[list])
+        -> Result<string> {
+        defer words.wipe(random);
+        last split = cek_length(key.encryption);
+        last iv_end = split + iv_length(key.encryption);
+        let cek = words.slice(random, 0, split);
+        defer words.wipe(cek);
+        last iv = words.slice(random, split, iv_end);
+        last salt = words.slice(random, iv_end, random.length);
+        return seal_pbes2(key, plaintext, cek, iv, salt, iterations);
+    };
+
+    let open_pbes2 = func(key: Pbes2Key, fields: OpenFields) -> Result<uint8[list]> {
+        let [salt, iterations] = pbes2_parameters(fields.members, key.iteration_limit)?;
+        let kek = derive_pbes2(key, salt, iterations);
+        defer words.wipe(kek);
+        let cek = unwrap(new aes_block.AesBlock(kek), fields.wrapped)?;
+        defer words.wipe(cek);
+        return open_content(key.encryption, cek, fields.iv, fields.ciphertext, fields.tag, fields.aad);
+    };
+
+    let check_iv = func(enc: ContentEncryption, iv: uint8[list]) {
+        if (iv.length != iv_length(enc)) {
+            trap_with_message("invalid argument: wrong length for JWE initialization vector");
+        }
+    };
+
+    let ecdh_random_length = func(key: EcdhEncryptionKey) -> int =>
+        ecdh_cek_input_length(key) + iv_length(key.encryption);
+
+    let ecdh_cek_input_length = func(key: EcdhEncryptionKey) -> int =>
+        key.algorithm == EcdhAlgorithm.Es ? 0 : cek_length(key.encryption);
+
+    let check_ephemeral = func(key: EcdhEncryptionKey, ephemeral: ecdsa.EcPrivateKey, cek, iv: uint8[list]) {
+        if (ephemeral.is_wiped()) {
+            trap_with_message("invalid state: JWE ECDH ephemeral key is wiped");
+        }
+        if (ephemeral.curve != key.public_key.curve) {
+            trap_with_message("invalid argument: JWE ECDH ephemeral key must use the recipient curve");
+        }
+        if (constant_time.ct_eq(ephemeral.public_key_bytes(), key.public_key.to_sec1(false))) {
+            trap_with_message("invalid argument: JWE ECDH ephemeral key must differ from the recipient key");
+        }
+        check_iv(key.encryption, iv);
+        if (cek.length != ecdh_cek_input_length(key)) {
+            trap_with_message("invalid argument: wrong length for JWE content encryption key");
+        }
+    };
+
+    let seal_ecdh_body = func(key: EcdhEncryptionKey, plaintext: uint8[list], ephemeral: ecdsa.EcPrivateKey,
+        cek, iv, protected, apu, apv: uint8[list]) -> Result<string> {
+        let agreed = jwe_ecdh.derive(ephemeral, key.public_key, ecdh_id(key.algorithm, key.encryption), apu, apv,
+            ecdh_key_length(key.algorithm, key.encryption))?;
+        if (key.algorithm == EcdhAlgorithm.Es) {
+            last compact = encode(protected, key.encryption, agreed, new, iv, plaintext);
+            words.wipe(agreed);
+            return Result<string>.Ok(compact);
+        }
+        last wrapped = wrap(new aes_block.AesBlock(agreed), cek);
+        words.wipe(agreed);
+        return Result<string>.Ok(encode(protected, key.encryption, cek, wrapped, iv, plaintext));
+    };
+
+    let seal_ecdh = func(key: EcdhEncryptionKey, plaintext: uint8[list], ephemeral: ecdsa.EcPrivateKey,
+        cek, iv, apu, apv: uint8[list]) -> Result<string> {
+        check_ephemeral(key, ephemeral, cek, iv);
+        jwe_ecdh.check_parties(apu, apv, apu.length > 0 && apv.length > 0)?;
+        last protected = jwe_ecdh.header(ecdh_name(key.algorithm), content_name(key.encryption), ephemeral, apu, apv);
+        return seal_ecdh_body(key, plaintext, ephemeral, cek, iv, protected, apu, apv);
+    } or func(key: EcdhEncryptionKey, plaintext: uint8[list], ephemeral: ecdsa.EcPrivateKey,
+        cek, iv: uint8[list], protected: string) -> Result<string> {
+        check_ephemeral(key, ephemeral, cek, iv);
+        last bytes = words.utf8(protected);
+        validate_header(bytes, ecdh_name(key.algorithm), key.encryption)?;
+        last parameters = jwe_ecdh.parse(bytes, key.public_key.curve)?;
+        if (not constant_time.ct_eq(parameters.public_key.to_sec1(false), ephemeral.public_key_bytes())) {
+            return jose.fail<string>(InvalidJwe, "JWE epk does not match the supplied ephemeral key");
+        }
+        return seal_ecdh_body(key, plaintext, ephemeral, cek, iv, bytes, parameters.apu, parameters.apv);
+    };
+
+    let seal_ecdh_random = func(key: EcdhEncryptionKey, plaintext: uint8[list], ephemeral: ecdsa.EcPrivateKey,
+        apu, apv: uint8[list], random: Result<uint8[list]>) -> Result<string> {
+        match (random) {
+            Result.Err(cause) => {
+                ephemeral.wipe();
+                return Result<string>.Err(cause);
+            },
+            Result.Ok(bytes) => {
+                last split = ecdh_cek_input_length(key);
+                let cek = words.slice(bytes, 0, split);
+                last iv = words.slice(bytes, split, bytes.length);
+                words.wipe(bytes);
+                last result = seal_ecdh(key, plaintext, ephemeral, cek, iv, apu, apv);
+                words.wipe(cek);
+                ephemeral.wipe();
+                return result;
+            },
+        }
+    };
+
+    /// @brief Deterministic compact encryption with a caller-supplied IV, and a CEK when using a wrapping key.
+    /// The RSA-OAEP-256 overload also takes a 32-byte seed. Never reuse an IV under the same CEK. With a caller-supplied protected JSON header,
+    /// its exact UTF-8 bytes are authenticated, and a malformed or mismatching header returns an error.
+    /// ECDH-ES takes a fresh private ephemeral key on the recipient curve for each message. The direct mode
+    /// derives its CEK and the wrapping modes take one. Party information is supplied as bytes, with an empty
+    /// value omitted. For exact protected JSON, the header's epk must match the supplied ephemeral key.
+    /// AES-GCM key wrapping takes a separate 12-byte wrapping IV and binds it and its tag in the header.
+    /// An AES-GCM wrapping key must differ from the content encryption key.
+    /// PBES2 takes fresh salt input of at least eight bytes and an iteration count of at least 1000 within
+    /// the recipient's limit. An incorrect length or out-of-policy sealing count traps.
+    /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+    #[NoDiscard, Since("0.3.0")]
+    export let seal_with = func(key: DirectKey, plaintext: uint8[list], iv: uint8[list]) -> Result<string> =>
+        seal_with(key, plaintext, iv, header("dir", key.encryption))
+        or func(key: DirectKey, plaintext: uint8[list], iv: uint8[list], protected: string) -> Result<string> {
+            check_iv(key.encryption, iv);
+            last bytes = words.utf8(protected);
+            validate_header(bytes, "dir", key.encryption)?;
+            let cek = key.expose();
+            last compact = encode(bytes, key.encryption, cek, new, iv, plaintext);
+            words.wipe(cek);
+            return Result<string>.Ok(compact);
+        } or func(key: WrappingKey, plaintext: uint8[list], cek: uint8[list], iv: uint8[list]) -> Result<string> =>
+            seal_with(key, plaintext, cek, iv, header(wrap_name(key.algorithm), key.encryption))
+            or func(key: WrappingKey, plaintext: uint8[list], cek: uint8[list], iv: uint8[list], protected: string) -> Result<string> {
+                check_iv(key.encryption, iv);
+                if (cek.length != cek_length(key.encryption)) {
+                    trap_with_message("invalid argument: wrong length for JWE content encryption key");
+                }
+                last bytes = words.utf8(protected);
+                validate_header(bytes, wrap_name(key.algorithm), key.encryption)?;
+                let kek = key.expose();
+                last wrapped = wrap(new aes_block.AesBlock(kek), cek);
+                words.wipe(kek);
+                return Result<string>.Ok(encode(bytes, key.encryption, cek, wrapped, iv, plaintext));
+            } or func(key: RsaWrappingKey, plaintext: uint8[list], cek: uint8[list], iv: uint8[list],
+                oaep_seed: uint8[list]) -> Result<string> =>
+                    seal_with(key, plaintext, cek, iv, oaep_seed, header(RsaOaep256, key.encryption))
+                or func(key: RsaWrappingKey, plaintext: uint8[list], cek: uint8[list], iv: uint8[list],
+                    oaep_seed: uint8[list], protected: string) -> Result<string> {
+                    check_iv(key.encryption, iv);
+                    if (cek.length != cek_length(key.encryption)) {
+                        trap_with_message("invalid argument: wrong length for JWE content encryption key");
+                    }
+                    if (oaep_seed.length != 32) {
+                        trap_with_message("invalid argument: JWE RSA-OAEP-256 seed must be 32 bytes");
+                    }
+                    last bytes = words.utf8(protected);
+                    validate_header(bytes, RsaOaep256, key.encryption)?;
+                    last wrapped = new rsa_oaep.RsaOaep().encrypt_with_seed(key.public_key, cek, new, oaep_seed);
+                    return Result<string>.Ok(encode(bytes, key.encryption, cek, wrapped, iv, plaintext));
+                } or func(key: EcdhEncryptionKey, plaintext: uint8[list], ephemeral: ecdsa.EcPrivateKey,
+                    iv, apu, apv: uint8[list]) -> Result<string> => seal_ecdh(key, plaintext, ephemeral, new, iv, apu, apv)
+                    or func(key: EcdhEncryptionKey, plaintext: uint8[list], ephemeral: ecdsa.EcPrivateKey,
+                        iv: uint8[list], protected: string) -> Result<string> => seal_ecdh(key, plaintext, ephemeral, new, iv, protected)
+                    or func(key: EcdhEncryptionKey, plaintext: uint8[list], ephemeral: ecdsa.EcPrivateKey,
+                        cek, iv, apu, apv: uint8[list]) -> Result<string> => seal_ecdh(key, plaintext, ephemeral, cek, iv, apu, apv)
+                    or func(key: EcdhEncryptionKey, plaintext: uint8[list], ephemeral: ecdsa.EcPrivateKey,
+                        cek, iv: uint8[list], protected: string) -> Result<string> => seal_ecdh(key, plaintext, ephemeral, cek, iv, protected)
+                    or func(key: GcmWrappingKey, plaintext, cek, iv, wrapping_iv: uint8[list]) -> Result<string> =>
+                        seal_gcm(key, plaintext, cek, iv, wrapping_iv)
+                    or func(key: GcmWrappingKey, plaintext, cek, iv, wrapping_iv: uint8[list], protected: string) -> Result<string> =>
+                        seal_gcm_protected(key, plaintext, cek, iv, wrapping_iv, protected)
+                    or func(key: Pbes2Key, plaintext, cek, iv, salt_input: uint8[list], iterations: int) -> Result<string> =>
+                        seal_pbes2(key, plaintext, cek, iv, salt_input, iterations)
+                    or func(key: Pbes2Key, plaintext, cek, iv, salt_input: uint8[list], iterations: int, protected: string) -> Result<string> =>
+                        seal_pbes2_protected(key, plaintext, cek, iv, salt_input, iterations, protected);
+
+    let seal_rsa_random = func(key: RsaWrappingKey, plaintext: uint8[list], random: uint8[list]) -> Result<string> {
+        last split = cek_length(key.encryption);
+        last iv_end = split + iv_length(key.encryption);
+        let cek = words.slice(random, 0, split);
+        last iv = words.slice(random, split, iv_end);
+        let oaep_seed = words.slice(random, iv_end, random.length);
+        words.wipe(random);
+        last result = seal_with(key, plaintext, cek, iv, oaep_seed);
+        words.wipe(cek);
+        words.wipe(oaep_seed);
+        return result;
+    };
+
+    let seal_with_random = func(key: WrappingKey, plaintext: uint8[list], random: uint8[list]) -> Result<string> {
+        last split = cek_length(key.encryption);
+        let cek = words.slice(random, 0, split);
+        last iv = words.slice(random, split, random.length);
+        words.wipe(random);
+        last result = seal_with(key, plaintext, cek, iv);
+        words.wipe(cek);
+        return result;
+    };
+
+    /// @brief Compact encryption with fresh IV and, for a wrapping key, a fresh CEK. An OS entropy failure is
+    /// returned to the caller. A direct AES-GCM key using random IVs is limited to 2^32 seal operations across
+    /// all users of that key. Overloads accept a caller's DRBG. ECDH-ES generates a fresh ephemeral key each
+    /// time and accepts optional producer and recipient information as separate byte strings.
+    /// AES-GCM wrapping generates a separate fresh wrapping IV. PBES2 generates a 16-byte salt input
+    /// and takes an explicit sealing count.
+    /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+    #[NoDiscard, Since("0.3.0")]
+    export let seal = func(key: DirectKey, plaintext: uint8[list]) -> Result<string> =>
+        seal_with(key, plaintext, entropy.os_bytes(iv_length(key.encryption))?)
+        or func(key: DirectKey, plaintext: uint8[list], random: drbg.ChaCha20Drbg) -> Result<string> =>
+            seal_with(key, plaintext, random.fill(iv_length(key.encryption)))
+        or func(key: WrappingKey, plaintext: uint8[list]) -> Result<string> =>
+            seal_with_random(key, plaintext, entropy.os_bytes(cek_length(key.encryption) + iv_length(key.encryption))?)
+        or func(key: WrappingKey, plaintext: uint8[list], random: drbg.ChaCha20Drbg) -> Result<string> =>
+            seal_with_random(key, plaintext, random.fill(cek_length(key.encryption) + iv_length(key.encryption)))
+        or func(key: RsaWrappingKey, plaintext: uint8[list]) -> Result<string> =>
+            seal_rsa_random(key, plaintext, entropy.os_bytes(cek_length(key.encryption) + iv_length(key.encryption) + 32)?)
+        or func(key: RsaWrappingKey, plaintext: uint8[list], random: drbg.ChaCha20Drbg) -> Result<string> =>
+            seal_rsa_random(key, plaintext, random.fill(cek_length(key.encryption) + iv_length(key.encryption) + 32))
+        or func(key: EcdhEncryptionKey, plaintext: uint8[list]) -> Result<string> => seal(key, plaintext, new, new)
+        or func(key: EcdhEncryptionKey, plaintext: uint8[list], random: drbg.ChaCha20Drbg) -> Result<string> =>
+            seal(key, plaintext, new, new, random)
+        or func(key: EcdhEncryptionKey, plaintext, apu, apv: uint8[list]) -> Result<string> {
+            jwe_ecdh.check_parties(apu, apv, apu.length > 0 && apv.length > 0)?;
+            last ephemeral = ecdsa.generate_key_pair(key.public_key.curve)?;
+            return seal_ecdh_random(key, plaintext, ephemeral, apu, apv, entropy.os_bytes(ecdh_random_length(key)));
+        } or func(key: EcdhEncryptionKey, plaintext, apu, apv: uint8[list], random: drbg.ChaCha20Drbg) -> Result<string> {
+            jwe_ecdh.check_parties(apu, apv, apu.length > 0 && apv.length > 0)?;
+            last ephemeral = ecdsa.generate_key_pair(key.public_key.curve, random)?;
+            return seal_ecdh_random(key, plaintext, ephemeral, apu, apv,
+                Result<uint8[list]>.Ok(random.fill(ecdh_random_length(key))));
+        } or func(key: GcmWrappingKey, plaintext: uint8[list]) -> Result<string> =>
+            seal_gcm_random(key, plaintext, entropy.os_bytes(cek_length(key.encryption) + iv_length(key.encryption) + 12)?)
+            or func(key: GcmWrappingKey, plaintext: uint8[list], random: drbg.ChaCha20Drbg) -> Result<string> =>
+                seal_gcm_random(key, plaintext, random.fill(cek_length(key.encryption) + iv_length(key.encryption) + 12))
+            or func(key: Pbes2Key, plaintext: uint8[list], iterations: int) -> Result<string> {
+                check_pbes2_iterations(key, iterations);
+                last length = cek_length(key.encryption) + iv_length(key.encryption) + 16;
+                return seal_pbes2_random(key, plaintext, iterations, entropy.os_bytes(length)?);
+            } or func(key: Pbes2Key, plaintext: uint8[list], iterations: int, random: drbg.ChaCha20Drbg) -> Result<string> {
+                check_pbes2_iterations(key, iterations);
+                last length = cek_length(key.encryption) + iv_length(key.encryption) + 16;
+                return seal_pbes2_random(key, plaintext, iterations, random.fill(length));
+            };
+
+    let open_direct = func(key: DirectKey, fields: OpenFields) -> Result<uint8[list]> {
+        let cek = key.expose();
+        last result = open_content(key.encryption, cek, fields.iv, fields.ciphertext, fields.tag, fields.aad);
+        words.wipe(cek);
+        return result;
+    };
+
+    let open_wrapped = func(key: WrappingKey, fields: OpenFields) -> Result<uint8[list]> {
+        let kek = key.expose();
+        last unwrapped = unwrap(new aes_block.AesBlock(kek), fields.wrapped);
+        words.wipe(kek);
+        let cek = unwrapped?;
+        last result = open_content(key.encryption, cek, fields.iv, fields.ciphertext, fields.tag, fields.aad);
+        words.wipe(cek);
+        return result;
+    };
+
+    /// @brief Authenticates and decrypts a compact JWE using the caller's expected algorithms.
+    /// Malformed input and an algorithm mismatch return crypto.invalid_jwe. Integrity and decryption failures
+    /// return crypto.authentication_failed, with no unauthenticated plaintext.
+    /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+    #[NoDiscard, Since("0.3.0")]
+    export let open = func(key: DirectKey, compact: string) -> Result<uint8[list]> =>
+        open_direct(key, parse(compact, "dir", key.encryption, 0)?)
+        or func(key: WrappingKey, compact: string) -> Result<uint8[list]> =>
+            open_wrapped(key, parse(compact, wrap_name(key.algorithm), key.encryption, cek_length(key.encryption) + 8)?)
+        or func(key: RsaUnwrappingKey, compact: string) -> Result<uint8[list]> => key.open(compact)
+        or func(key: EcdhDecryptionKey, compact: string) -> Result<uint8[list]> => key.open(compact)
+        or func(key: GcmWrappingKey, compact: string) -> Result<uint8[list]> =>
+            open_gcm(key, parse(compact, gcm_wrap_name(key.algorithm), key.encryption, cek_length(key.encryption))?)
+        or func(key: Pbes2Key, compact: string) -> Result<uint8[list]> =>
+            open_pbes2(key, parse(compact, pbes2_name(key.algorithm), key.encryption, cek_length(key.encryption) + 8)?);
+
+    /// @brief Authenticates and decrypts one explicitly selected recipient in flattened or general JWE JSON.
+    /// The recipient index is zero-based and must be zero for flattened JWE. Supply the expected external AAD
+    /// as bytes, or omit it when the expected AAD is empty. Mismatching AAD returns crypto.authentication_failed.
+    /// The caller's key fixes both algorithms. Header key identifiers and locators do not choose keys or grant
+    /// trust. The encoded protected and external AAD segments are authenticated as received.
+    /// The profile accepts up to 4 MiB of serialized JSON, 64 recipients and 64 members per combined JOSE header.
+    /// The protected segment may contain up to 64 KiB, and each JSON parse accepts up to 16,384 structural tokens.
+    /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+    #[NoDiscard, Since("0.3.0")]
+    export let open_json = func(key: DirectKey, serialized: string, recipient_index: int, aad: uint8[list]) -> Result<uint8[list]> =>
+        open_direct(key, parse_json(serialized, recipient_index, aad, "dir", key.encryption, 0)?)
+        or func(key: WrappingKey, serialized: string, recipient_index: int, aad: uint8[list]) -> Result<uint8[list]> =>
+            open_wrapped(key, parse_json(serialized, recipient_index, aad, wrap_name(key.algorithm), key.encryption,
+                cek_length(key.encryption) + 8)?)
+        or func(key: RsaUnwrappingKey, serialized: string, recipient_index: int, aad: uint8[list]) -> Result<uint8[list]> =>
+            key.open_json(serialized, recipient_index, aad)
+        or func(key: EcdhDecryptionKey, serialized: string, recipient_index: int, aad: uint8[list]) -> Result<uint8[list]> =>
+            key.open_json(serialized, recipient_index, aad)
+        or func(key: GcmWrappingKey, serialized: string, recipient_index: int, aad: uint8[list]) -> Result<uint8[list]> =>
+            open_gcm(key, parse_json(serialized, recipient_index, aad, gcm_wrap_name(key.algorithm), key.encryption,
+                cek_length(key.encryption))?)
+        or func(key: Pbes2Key, serialized: string, recipient_index: int, aad: uint8[list]) -> Result<uint8[list]> =>
+            open_pbes2(key, parse_json(serialized, recipient_index, aad, pbes2_name(key.algorithm), key.encryption,
+                cek_length(key.encryption) + 8)?)
+        or func(key: DirectKey, serialized: string, recipient_index: int) -> Result<uint8[list]> =>
+            open_json(key, serialized, recipient_index, new)
+        or func(key: WrappingKey, serialized: string, recipient_index: int) -> Result<uint8[list]> =>
+            open_json(key, serialized, recipient_index, new)
+        or func(key: RsaUnwrappingKey, serialized: string, recipient_index: int) -> Result<uint8[list]> =>
+            open_json(key, serialized, recipient_index, new)
+        or func(key: EcdhDecryptionKey, serialized: string, recipient_index: int) -> Result<uint8[list]> =>
+            open_json(key, serialized, recipient_index, new)
+        or func(key: GcmWrappingKey, serialized: string, recipient_index: int) -> Result<uint8[list]> =>
+            open_json(key, serialized, recipient_index, new)
+        or func(key: Pbes2Key, serialized: string, recipient_index: int) -> Result<uint8[list]> =>
+            open_json(key, serialized, recipient_index, new);
+);

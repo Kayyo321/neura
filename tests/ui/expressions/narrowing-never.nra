@@ -1,0 +1,16 @@
+// Edge case 18 of docs/design/Expressions030.md: a type the subject never has is E0490.
+let Shape = class (
+    export let sides: int = 0;
+);
+let Circle = class : Shape (
+    export let radius: int = 1;
+);
+let Other = class (
+    export let value: int = 0;
+);
+let check = func(shape: Shape) -> int {
+    if (shape is other: Other) {
+        return other.value;
+    }
+    return 0;
+};

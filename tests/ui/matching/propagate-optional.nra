@@ -1,0 +1,10 @@
+// Edge case 91: '?' on an Optional.
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote errors = import:Std.Core.Error;
+let parse = func(text: string) -> Result<int> => Result<int>.Ok(1);
+let lookup = func(key: string) -> Optional<int> => Optional<int>.None;
+let read = func(key: string) -> Result<int> {
+    let value = lookup(key)?;
+    return Result<int>.Ok(value);
+};

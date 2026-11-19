@@ -1,0 +1,19 @@
+// A counted int32 range loop longer than the int32 maximum fails before its
+// first iteration with the length failure of the built range
+// (docs/lang/CoreLanguage.md, Loops). The body prints and leaves, so a
+// missing length check shows as output instead of a long loop.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("before");
+        let top = 2147483647;
+        for (let value in -top - 1 .. top) {
+            console.print_line(value.to_string());
+            break;
+        }
+        console.print_line("after");
+        return program.ExitCode.Ok;
+    };
+);

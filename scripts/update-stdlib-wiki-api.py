@@ -302,7 +302,8 @@ def main():
         parts = source.relative_to(STDLIB).parts
         if len(parts) > 1:
             areas.add(area_name(parts[0]))
-        name = f"Stdlib-{area_name(parts[0])}-{module}.md" if len(parts) > 1 else f"Stdlib-{module}.md"
+        # Every directory names a level: net/core/uri.nra is Stdlib-Net-Core-Uri.
+        name = "-".join(["Stdlib", *(area_name(part) for part in parts[:-1]), module]) + ".md"
         expected.add(name)
         page = WIKI / name
         if not page.exists():

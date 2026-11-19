@@ -1,0 +1,3 @@
+// Case 40. Value equality on a payload enum uses ===.
+let Choice = enum (Number(int));
+let equal = func(left: Choice, right: Choice) -> bool => left == right;

@@ -209,7 +209,7 @@ std::vector<Type> read_types(Reader& in) {
     return in.vector(1, "type table", [](Reader& r) {
         Type type;
         const auto kind = r.u8();
-        if (kind > static_cast<std::uint8_t>(TypeKind::BFloat)) {
+        if (kind > static_cast<std::uint8_t>(TypeKind::Aggregate)) {
             fail(Kind::Malformed, "TYPE: invalid type kind " + std::to_string(kind));
         }
         type.kind = static_cast<TypeKind>(kind);
@@ -234,6 +234,7 @@ std::vector<Type> read_types(Reader& in) {
             }
             break;
         case TypeKind::Object:
+        case TypeKind::Aggregate:
         case TypeKind::Array:
         case TypeKind::List:
             type.reference = r.u32();
@@ -270,7 +271,7 @@ std::vector<Graph> read_graphs(Reader& in) {
     });
 }
 
-std::vector<Function> read_functions(Reader& in, const std::vector<Type>& types) {
+std::vector<Function> read_functions(Reader& in, const std::vector<Type>& types, std::uint16_t minor) {
     return in.vector(function_size, "function table", [&](Reader& r) {
         Function function;
         function.parameter_count = r.u32();
@@ -279,7 +280,30 @@ std::vector<Function> read_functions(Reader& in, const std::vector<Type>& types)
             fail(Kind::Invalid, "FUNC: function result type " + std::to_string(function.result_type) +
                                     " is out of range");
         }
-        const bool returns_value = types[function.result_type].kind != TypeKind::Void;
+        if (types[function.result_type].kind == TypeKind::Aggregate) {
+            fail(Kind::Invalid, "FUNC: an aggregate is not a result type");
+        }
+        // The extra result words exist only in a 1.7 record; earlier records
+        // go straight to the frame list.
+        if (minor >= 7) {
+            function.more_results = r.indices("result word list");
+            if (!function.more_results.empty() && types[function.result_type].kind == TypeKind::Void) {
+                fail(Kind::Invalid, "FUNC: a function with several result words has a void first word");
+            }
+            for (const auto word : function.more_results) {
+                if (word >= types.size()) {
+                    fail(Kind::Invalid, "FUNC: result word type " + std::to_string(word) + " is out of range");
+                }
+                if (types[word].kind == TypeKind::Void) {
+                    fail(Kind::Invalid, "FUNC: a result word cannot be void");
+                }
+                if (types[word].kind == TypeKind::Aggregate) {
+                    fail(Kind::Invalid, "FUNC: an aggregate is not a result type");
+                }
+            }
+        }
+        const std::size_t result_words =
+            (types[function.result_type].kind != TypeKind::Void ? 1 : 0) + function.more_results.size();
         function.frame_types = r.indices("frame slot list");
         function.blocks = r.vector(block_size, "block list", [&](Reader& b) {
             Block block;
@@ -315,7 +339,7 @@ std::vector<Function> read_functions(Reader& in, const std::vector<Type>& types)
                     exit.resume = e.u32();
                     break;
                 case ExitKind::Return:
-                    if (returns_value) {
+                    for (std::size_t word = 0; word < result_words; ++word) {
                         exit.arguments.push_back(read_value(e));
                     }
                     break;
@@ -416,8 +440,21 @@ private:
     }
 
     void value_type(std::uint32_t index, const std::string& where) const {
-        if (type(index, where).kind == TypeKind::Void) {
+        const auto kind = type(index, where).kind;
+        if (kind == TypeKind::Void) {
             invalid(where + ": void is not a value type");
+        }
+        // An aggregate is the element of a collection and nothing else.
+        if (kind == TypeKind::Aggregate) {
+            invalid(where + ": an aggregate is valid only as the element of an array or list");
+        }
+    }
+
+    // A type that is not void and not an aggregate, as an import or kernel
+    // result may be void only where its table says so.
+    void not_aggregate(std::uint32_t index, const std::string& where) const {
+        if (type(index, where).kind == TypeKind::Aggregate) {
+            invalid(where + ": an aggregate is valid only as the element of an array or list");
         }
     }
 
@@ -442,6 +479,8 @@ private:
     void value(const Function& function, const Block& block, const Value& item, const std::string& where) const;
     void assign(std::uint32_t actual, std::uint32_t expected, const std::string& where) const;
     void result(const Function& function, std::uint32_t slot, std::uint32_t produced, const std::string& where) const;
+    void call_result(const Function& function, std::uint32_t slot, const Function& callee,
+                     const std::string& where) const;
     void state(const Function& function, const Exit& exit, const std::string& where) const;
     void scheduler(const Function& function, const Exit& exit, const std::string& where) const;
     void continuation(const Function& function, std::uint32_t target, const std::string& where) const;
@@ -450,6 +489,10 @@ private:
 
     const Image& image_;
     std::unique_ptr<TypeSystem> system_;
+    // Per function, the slots a region token can be in (NVR 1.7): the result
+    // slots of EnterRegion and, by assignment, the slots they are copied to.
+    // Flow-insensitive; one byte per slot.
+    std::vector<std::vector<std::uint8_t>> token_slots_;
 };
 
 void Validator::run() {
@@ -486,6 +529,9 @@ void Validator::callbacks() {
         }
         if (callback.function == image_.entry) {
             invalid(where + ": the entry function cannot be a callback");
+        }
+        if (!image_.functions[callback.function].more_results.empty()) {
+            invalid(where + ": a callback cannot return several words");
         }
     }
 }
@@ -532,11 +578,14 @@ void Validator::types() {
     for (std::size_t i = 0; i < count; ++i) {
         const auto& t = image_.types[i];
         const auto where = "type " + std::to_string(i);
-        if (t.kind == TypeKind::Object && t.reference >= image_.layouts.size()) {
+        if ((t.kind == TypeKind::Object || t.kind == TypeKind::Aggregate) && t.reference >= image_.layouts.size()) {
             invalid(where + ": layout " + std::to_string(t.reference) + " is out of range");
         }
         if (t.kind == TypeKind::Array || t.kind == TypeKind::List) {
-            value_type(t.reference, where + " element");
+            // The one place an aggregate may appear.
+            if (type(t.reference, where + " element").kind != TypeKind::Aggregate) {
+                value_type(t.reference, where + " element");
+            }
         }
     }
     for (std::size_t start = 0; start < count; ++start) {
@@ -586,6 +635,36 @@ void Validator::layouts() {
         }
         for (auto field : layout.fields) {
             value_type(field, where + " field");
+        }
+    }
+    // An aggregate's layout lists the words of one element: no parent, no
+    // interface, and no object of its own.
+    std::vector<std::uint8_t> aggregate_layout(count, 0);
+    for (std::size_t i = 0; i < image_.types.size(); ++i) {
+        const auto& t = image_.types[i];
+        if (t.kind != TypeKind::Aggregate) continue;
+        const auto where = "type " + std::to_string(i) + " (aggregate)";
+        const auto& layout = image_.layouts[t.reference];
+        if (layout.parent != absent || !layout.interfaces.empty()) {
+            invalid(where + ": the layout has a parent or interfaces");
+        }
+        if (layout.fields.size() < 2 || layout.fields.size() > max_aggregate_components) {
+            invalid(where + ": an aggregate has 2 to " + std::to_string(max_aggregate_components) +
+                    " components, not " + std::to_string(layout.fields.size()));
+        }
+        aggregate_layout[t.reference] = 1;
+    }
+    for (std::size_t i = 0; i < count; ++i) {
+        const auto& layout = image_.layouts[i];
+        if ((layout.parent != absent && aggregate_layout[layout.parent]) ||
+            std::ranges::any_of(layout.interfaces, [&](std::uint32_t item) { return aggregate_layout[item] != 0; })) {
+            invalid("layout " + std::to_string(i) + ": an aggregate layout cannot be a parent or interface");
+        }
+    }
+    for (std::size_t i = 0; i < image_.types.size(); ++i) {
+        const auto& t = image_.types[i];
+        if (t.kind == TypeKind::Object && aggregate_layout[t.reference]) {
+            invalid("type " + std::to_string(i) + ": an object cannot use an aggregate's layout");
         }
     }
     std::vector<std::uint32_t> ready;
@@ -649,7 +728,20 @@ void Validator::constants() {
         case TypeKind::Bytes:
             break;
         case TypeKind::Object:
-            if (size != 0) invalid(where + ": a nil object constant has no payload");
+            if (is_static_object_constant(t, constant)) {
+                if (image_.minor_version < 7) invalid(where + ": static object constants require NVR 1.7");
+                if (!image_.layouts[t.reference].fields.empty())
+                    invalid(where + ": a static object constant requires a fieldless layout");
+            } else if (size != 0) {
+                invalid(where + ": a nil object constant has no payload");
+            }
+            break;
+        case TypeKind::Array:
+        case TypeKind::List:
+            // NVR 1.7: the nil collection, the value of a payload enum's word
+            // that the enum's variant does not use.
+            if (image_.minor_version < 7) invalid(where + ": collection constants require NVR 1.7");
+            if (size != 0) invalid(where + ": a nil collection constant has no payload");
             break;
         default:
             invalid(where + ": constants cannot have this type");
@@ -721,6 +813,8 @@ void Validator::imports() {
         }
         type(import.success_type, where + " success");
         type(import.error_type, where + " error");
+        not_aggregate(import.success_type, where + " success");
+        not_aggregate(import.error_type, where + " error");
     }
 }
 
@@ -754,6 +848,7 @@ void Validator::kernel_entries() {
         }
         for (auto parameter : entry.parameter_types) value_type(parameter, where + " parameter");
         type(entry.result_type, where + " result");
+        not_aggregate(entry.result_type, where + " result");
         const auto* info = kernels::find_kernel(entry.name, entry.abi_version);
         if (!info) {
             fail(Kind::Unsupported, where + ": this runtime has no kernel " + entry.name + " version " +
@@ -846,6 +941,27 @@ void Validator::result(const Function& function, std::uint32_t slot, std::uint32
         invalid(where + ": a nonvoid result requires a slot in the frame");
     }
     assign(produced, function.frame_types[slot], where + " result");
+}
+
+void Validator::call_result(const Function& function, std::uint32_t slot, const Function& callee,
+                            const std::string& where) const {
+    if (callee.more_results.empty()) {
+        result(function, slot, callee.result_type, where);
+        return;
+    }
+    // Several words land in consecutive slots from the result slot; an absent
+    // slot discards all of them, which a single word cannot do.
+    if (slot == absent) {
+        return;
+    }
+    if (slot >= function.frame_types.size() || callee.more_results.size() >= function.frame_types.size() - slot) {
+        invalid(where + ": the result words do not fit the frame from slot " + std::to_string(slot));
+    }
+    assign(callee.result_type, function.frame_types[slot], where + " result word 0");
+    for (std::size_t i = 0; i < callee.more_results.size(); ++i) {
+        assign(callee.more_results[i], function.frame_types[slot + 1 + i],
+               where + " result word " + std::to_string(i + 1));
+    }
 }
 
 void Validator::continuation(const Function& function, std::uint32_t target, const std::string& where) const {
@@ -1001,6 +1117,9 @@ void Validator::scheduler(const Function& function, const Exit& exit, const std:
             invalid(where + ": function " + std::to_string(exit.target) + " is out of range");
         }
         const auto& callee = image_.functions[exit.target];
+        if (!callee.more_results.empty()) {
+            invalid(where + ": a parallel item cannot return several words");
+        }
         arity(3);
         if (callee.parameter_count != 1) invalid(where + ": a parallel item's function takes one argument");
         assign(exit.arguments[0].type, callee.frame_types[0], where + " argument 0");
@@ -1018,11 +1137,17 @@ void Validator::scheduler(const Function& function, const Exit& exit, const std:
     case SchedulerOp::ParallelFinish:
         // A list of item identities in, the array of their results out. Each
         // result is checked against the array's element type as it arrives.
-        arity(1);
+        if (image_.minor_version >= 7 && exit.arguments.size() == 2) {
+            typed_operand(1, unsigned64, "a uint64 region token");
+        } else {
+            arity(1);
+        }
         typed_operand(0, [&](std::uint32_t type) {
             return image_.types[type].kind == TypeKind::List && is_unsigned(image_.types[type].reference, 64);
         }, "a list of uint64");
-        require_slot_type([&](std::uint32_t type) { return image_.types[type].kind == TypeKind::Array; }, "an array");
+        require_slot_type([&](std::uint32_t type) {
+            return image_.types[type].kind == TypeKind::Array && !collection_components(image_, type);
+        }, "an array");
         break;
     case SchedulerOp::Select: {
         // Flags in the target: bit 0 says a default arm follows the listed
@@ -1068,6 +1193,10 @@ void Validator::scheduler(const Function& function, const Exit& exit, const std:
             invalid(where + ": function " + std::to_string(exit.target) + " is out of range");
         }
         const auto& callee = image_.functions[exit.target];
+        // A task's result crosses the task boundary as one transferable word.
+        if (!callee.more_results.empty()) {
+            invalid(where + ": a spawned task cannot return several words");
+        }
         arity(callee.parameter_count);
         for (std::size_t i = 0; i < exit.arguments.size(); ++i) {
             const auto actual = exit.arguments[i].type;
@@ -1123,6 +1252,12 @@ void Validator::state(const Function& function, const Exit& exit,
             invalid(where + ": argument " + std::to_string(argument) + " must be an unsigned 64-bit index");
         }
     };
+    auto require_token = [&](std::size_t argument) {
+        // A region token is a uint64 (NVR 1.7); any other operand type is not one.
+        if (!is_unsigned(args[argument].type, 64)) {
+            invalid(where + ": argument " + std::to_string(argument) + " must be a uint64 region token");
+        }
+    };
     auto no_result = [&] {
         if (exit.result_slot != absent) {
             invalid(where + ": a void result requires an absent slot");
@@ -1139,8 +1274,123 @@ void Validator::state(const Function& function, const Exit& exit,
         return image_.layouts[image_.types[args[argument].type].reference].fields;
     };
     auto element_type = [&](std::size_t argument) { return image_.types[args[argument].type].reference; };
+    // The component types of the aggregate elements of the collection that
+    // argument names, or null for a collection of single words.
+    auto components = [&](std::size_t argument) { return collection_components(image_, args[argument].type); };
+    auto single_words = [&](std::size_t argument, const char* operation) {
+        if (components(argument) != nullptr) {
+            invalid(where + ": " + operation + " cannot address an aggregate element; use a component operation");
+        }
+    };
 
+    const bool extended = extended_reference_state(exit);
+    if (extended && image_.minor_version < hooks_minor_version)
+        invalid(where + ": reference state operation requires NVR 1.8");
     switch (exit.operation) {
+    case StateOp::ReadComponent:
+    case StateOp::WriteComponent: {
+        const bool write = exit.operation == StateOp::WriteComponent;
+        if (!extended) arity(write ? 3 : 2);
+        require_kind(0, {TypeKind::Array, TypeKind::List});
+        const auto* words = components(0);
+        if (words == nullptr) invalid(where + ": a component operation needs a collection of aggregates");
+        if (exit.immediate >= words->size()) {
+            invalid(where + ": component " + std::to_string(exit.immediate) + " is out of range");
+        }
+        require_index(1);
+        if (write) {
+            if (args.size() - 2 > words->size() - exit.immediate) invalid(where + ": component write exceeds element");
+            for (std::size_t i = 2; i < args.size(); ++i)
+                assign(args[i].type, (*words)[exit.immediate + i - 2], where + " component value");
+            no_result();
+        } else {
+            result_of((*words)[exit.immediate]);
+        }
+        break;
+    }
+    case StateOp::HookEnter:
+        if (args.size() == 3) {
+            require_kind(2, {TypeKind::Text});
+            if (args[2].kind != ValueKind::Constant) invalid(where + ": a policy name must be a text constant");
+        } else arity(2);
+        if (exit.immediate > 1) invalid(where + ": a class hook event is a get (0) or a set (1)");
+        if (!is_unsigned(args[0].type, 32)) invalid(where + ": argument 0 must be a uint32 policy word");
+        if (image_.types[args[1].type].kind != TypeKind::Object)
+            invalid(where + ": argument 1 must be a class reference");
+        no_result();
+        break;
+    case StateOp::ConcatText:
+        if (args.size() < 2) invalid(where + ": a text concatenation takes at least two arguments");
+        zero_immediate();
+        for (std::size_t i = 0; i < args.size(); ++i) require_kind(i, {TypeKind::Text});
+        require_slot_type([&](std::uint32_t slot) { return image_.types[slot].kind == TypeKind::Text; }, "text");
+        break;
+    case StateOp::HookLeave:
+        arity(0);
+        zero_immediate();
+        no_result();
+        break;
+    case StateOp::EnterRegion:
+        arity(0);
+        zero_immediate();
+        require_slot_type([&](std::uint32_t slot) { return is_unsigned(slot, 64); }, "uint64");
+        break;
+    case StateOp::ReleaseRegion:
+        arity(1);
+        zero_immediate();
+        require_token(0);
+        no_result();
+        break;
+    case StateOp::RegionObject:
+        arity(1);
+        require_token(0);
+        if (exit.immediate >= image_.layouts.size()) {
+            invalid(where + ": layout " + std::to_string(exit.immediate) + " is out of range");
+        }
+        require_slot_type([&](std::uint32_t slot) {
+            const auto& t = image_.types[slot];
+            return t.kind == TypeKind::Object && system_->derives(exit.immediate, t.reference);
+        }, "a reference to the allocated layout");
+        break;
+    case StateOp::RegionCollection:
+    case StateOp::RegionRepeat: {
+        if (args.empty()) invalid(where + ": expects a region token");
+        require_token(0);
+        if (exit.immediate >= image_.types.size()) {
+            invalid(where + ": type " + std::to_string(exit.immediate) + " is out of range");
+        }
+        const auto& collection = image_.types[exit.immediate];
+        if (collection.kind != TypeKind::Array && collection.kind != TypeKind::List) {
+            invalid(where + ": immediate must name an array or list type");
+        }
+        // The words follow the token, as the operands of the allocation that
+        // does not take one.
+        const auto* words = collection_components(image_, exit.immediate);
+        const std::size_t width = words ? words->size() : 1;
+        std::size_t first = 1;
+        if (exit.operation == StateOp::RegionRepeat) {
+            arity(2 + width);
+            require_index(1);
+            first = 2;
+        } else if ((args.size() - 1) % width != 0) {
+            invalid(where + ": " + std::to_string(args.size() - 1) + " words are not a whole number of " +
+                    std::to_string(width) + "-component elements");
+        }
+        for (std::size_t i = first; i < args.size(); ++i) {
+            const auto expected = words ? (*words)[(i - first) % width] : collection.reference;
+            assign(args[i].type, expected, where + " element " + std::to_string(i));
+        }
+        result_of(exit.immediate);
+        break;
+    }
+    case StateOp::MoveToRegion:
+        arity(2);
+        if (exit.immediate > 1) invalid(where + ": unknown move-to-region mode");
+        if (exit.immediate == 1) require_kind(0, {TypeKind::Array});
+        else require_kind(0, {TypeKind::Object, TypeKind::Array, TypeKind::List});
+        require_token(1);
+        no_result();
+        break;
     case StateOp::Kernel: {
         if (exit.immediate >= image_.kernels.size()) {
             invalid(where + ": kernel " + std::to_string(exit.immediate) + " is out of range");
@@ -1170,20 +1420,23 @@ void Validator::state(const Function& function, const Exit& exit,
         require_slot_type([&](std::uint32_t slot) { return is_unsigned(slot, 32); }, "uint32");
         break;
     case StateOp::ReadField:
-        arity(1);
+        arity(extended ? 2 : 1);
         require_kind(0, {TypeKind::Object});
         if (exit.immediate >= field_types(0).size()) {
             invalid(where + ": field " + std::to_string(exit.immediate) + " is out of range");
         }
+        if (extended) assign(args[1].type, field_types(0)[exit.immediate], where + " fallback");
         result_of(field_types(0)[exit.immediate]);
         break;
     case StateOp::WriteField:
-        arity(2);
+        if (!extended) arity(2);
         require_kind(0, {TypeKind::Object});
         if (exit.immediate >= field_types(0).size()) {
             invalid(where + ": field " + std::to_string(exit.immediate) + " is out of range");
         }
-        assign(args[1].type, field_types(0)[exit.immediate], where + " field value");
+        if (args.size() - 1 > field_types(0).size() - exit.immediate) invalid(where + ": field write exceeds layout");
+        for (std::size_t i = 1; i < args.size(); ++i)
+            assign(args[i].type, field_types(0)[exit.immediate + i - 1], where + " field value");
         no_result();
         break;
     case StateOp::FreeObject:
@@ -1193,18 +1446,21 @@ void Validator::state(const Function& function, const Exit& exit,
         no_result();
         break;
     case StateOp::ReadGlobal:
-        arity(0);
+        arity(extended ? 1 : 0);
         if (exit.immediate >= image_.globals.size()) {
             invalid(where + ": global " + std::to_string(exit.immediate) + " is out of range");
         }
+        if (extended) assign(args[0].type, image_.globals[exit.immediate].type, where + " fallback");
         result_of(image_.globals[exit.immediate].type);
         break;
     case StateOp::WriteGlobal:
-        arity(1);
+        if (!extended) arity(1);
         if (exit.immediate >= image_.globals.size()) {
             invalid(where + ": global " + std::to_string(exit.immediate) + " is out of range");
         }
-        assign(args[0].type, image_.globals[exit.immediate].type, where + " global value");
+        if (args.size() > image_.globals.size() - exit.immediate) invalid(where + ": global write exceeds table");
+        for (std::size_t i = 0; i < args.size(); ++i)
+            assign(args[i].type, image_.globals[exit.immediate + i].type, where + " global value");
         no_result();
         break;
     case StateOp::RepeatCollection:
@@ -1217,13 +1473,20 @@ void Validator::state(const Function& function, const Exit& exit,
             invalid(where + ": immediate must name an array or list type");
         }
         std::size_t first = 0;
+        const auto* words = collection_components(image_, exit.immediate);
+        const std::size_t width = words ? words->size() : 1;
         if (exit.operation == StateOp::RepeatCollection) {
-            arity(2);
+            if (words) arity(1 + width);
+            else arity(2);
             require_index(0);
             first = 1;
+        } else if (args.size() % width != 0) {
+            invalid(where + ": " + std::to_string(args.size()) + " words are not a whole number of " +
+                    std::to_string(width) + "-component elements");
         }
         for (std::size_t i = first; i < args.size(); ++i) {
-            assign(args[i].type, collection.reference, where + " element " + std::to_string(i));
+            const auto expected = words ? (*words)[(i - first) % width] : collection.reference;
+            assign(args[i].type, expected, where + " element " + std::to_string(i));
         }
         result_of(exit.immediate);
         break;
@@ -1238,6 +1501,7 @@ void Validator::state(const Function& function, const Exit& exit,
         arity(2);
         zero_immediate();
         require_kind(0, {TypeKind::Array, TypeKind::List, TypeKind::Text, TypeKind::Bytes});
+        single_words(0, "read-element");
         require_index(1);
         if (kind_of(0) == TypeKind::Text || kind_of(0) == TypeKind::Bytes) {
             require_slot_type([&](std::uint32_t slot) { return is_unsigned(slot, 8); }, "uint8");
@@ -1249,17 +1513,28 @@ void Validator::state(const Function& function, const Exit& exit,
         arity(3);
         zero_immediate();
         require_kind(0, {TypeKind::Array, TypeKind::List});
+        single_words(0, "write-element");
         require_index(1);
         assign(args[2].type, element_type(0), where + " element value");
         no_result();
         break;
-    case StateOp::AppendElement:
-        arity(2);
+    case StateOp::AppendElement: {
         zero_immediate();
+        if (args.empty()) invalid(where + ": expects 2 argument(s)");
         require_kind(0, {TypeKind::List});
-        assign(args[1].type, element_type(0), where + " element value");
+        // An aggregate element is appended as its components, in order.
+        if (const auto* words = components(0)) {
+            arity(1 + words->size());
+            for (std::size_t i = 0; i < words->size(); ++i) {
+                assign(args[1 + i].type, (*words)[i], where + " component value " + std::to_string(i));
+            }
+        } else {
+            arity(2);
+            assign(args[1].type, element_type(0), where + " element value");
+        }
         no_result();
         break;
+    }
     case StateOp::RemoveElement:
         arity(2);
         zero_immediate();
@@ -1354,7 +1629,8 @@ void Validator::state(const Function& function, const Exit& exit,
         break;
     case StateOp::ClassIs:
     case StateOp::ClassCast:
-        arity(1);
+        arity(extended ? 2 : 1);
+        if (extended && !is_unsigned(args[1].type, 32)) invalid(where + ": cast policy must be uint32");
         require_kind(0, {TypeKind::Object});
         if (exit.immediate >= image_.layouts.size()) invalid(where + ": class layout is out of range");
         require_slot_type([&](std::uint32_t slot) {
@@ -1370,6 +1646,7 @@ void Validator::block(std::uint32_t function_index, std::uint32_t index) {
     const auto& function = image_.functions[function_index];
     const auto& item = function.blocks[index];
     const auto where = "function " + std::to_string(function_index) + " block " + std::to_string(index);
+    const auto& tokens = token_slots_[function_index];
     if (item.graph >= image_.graphs.size()) {
         invalid(where + ": graph " + std::to_string(item.graph) + " is out of range");
     }
@@ -1419,6 +1696,19 @@ void Validator::block(std::uint32_t function_index, std::uint32_t index) {
         for (std::size_t a = 0; a < exit.arguments.size(); ++a) {
             value(function, item, exit.arguments[a], exit_where + " argument " + std::to_string(a));
         }
+        if (exit.kind == ExitKind::Scheduler) {
+            // A region token belongs to the task that entered the region: it
+            // is no task argument, channel value or select operand.
+            const auto token = [&](const Value& operand) {
+                return operand.kind == ValueKind::Slot && tokens[operand.index] != 0;
+            };
+            for (std::size_t i = 0; i < exit.arguments.size(); ++i) {
+                // Parallel finish uses the token in this task to allocate its result.
+                if (exit.scheduler == SchedulerOp::ParallelFinish && i == 1) continue;
+                if (token(exit.arguments[i]))
+                    invalid(exit_where + ": a region token cannot be a task or channel operand");
+            }
+        }
         switch (exit.kind) {
         case ExitKind::Continue:
             continuation(function, exit.resume, exit_where);
@@ -1434,13 +1724,18 @@ void Validator::block(std::uint32_t function_index, std::uint32_t index) {
             for (std::size_t a = 0; a < exit.arguments.size(); ++a) {
                 assign(exit.arguments[a].type, callee.frame_types[a], exit_where + " argument " + std::to_string(a));
             }
-            result(function, exit.result_slot, callee.result_type, exit_where);
+            call_result(function, exit.result_slot, callee, exit_where);
             continuation(function, exit.resume, exit_where);
             break;
         }
         case ExitKind::Return:
+            // The reader took one value per result word.
             if (!exit.arguments.empty()) {
                 assign(exit.arguments.front().type, function.result_type, exit_where + " value");
+            }
+            for (std::size_t i = 0; i < function.more_results.size(); ++i) {
+                assign(exit.arguments[i + 1].type, function.more_results[i],
+                       exit_where + " value " + std::to_string(i + 1));
             }
             break;
         case ExitKind::State:
@@ -1497,6 +1792,37 @@ void Validator::functions() {
             invalid(where + ": a function needs an entry block");
         }
     }
+    token_slots_.assign(image_.functions.size(), {});
+    for (std::size_t f = 0; f < image_.functions.size(); ++f) {
+        const auto& function = image_.functions[f];
+        auto& tokens = token_slots_[f];
+        tokens.assign(function.frame_types.size(), 0);
+        bool any = false;
+        for (const auto& block : function.blocks) {
+            for (const auto& exit : block.exits) {
+                if (exit.kind == ExitKind::State && exit.operation == StateOp::EnterRegion &&
+                    exit.result_slot < tokens.size()) {
+                    tokens[exit.result_slot] = 1;
+                    any = true;
+                }
+            }
+        }
+        for (bool changed = any; changed;) {
+            changed = false;
+            for (const auto& block : function.blocks) {
+                for (const auto& exit : block.exits) {
+                    for (const auto& assignment : exit.assignments) {
+                        if (assignment.value.kind == ValueKind::Slot && assignment.value.index < tokens.size() &&
+                            tokens[assignment.value.index] != 0 && assignment.slot < tokens.size() &&
+                            tokens[assignment.slot] == 0) {
+                            tokens[assignment.slot] = 1;
+                            changed = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
     for (std::uint32_t f = 0; f < image_.functions.size(); ++f) {
         for (std::uint32_t b = 0; b < image_.functions[f].blocks.size(); ++b) {
             block(f, b);
@@ -1510,6 +1836,9 @@ void Validator::entry() {
     }
     const auto& function = image_.functions[image_.entry];
     const auto& result_type = image_.types[function.result_type];
+    if (!function.more_results.empty()) {
+        invalid("the entry function cannot return several words");
+    }
     bool takes_arguments = function.parameter_count == 1;
     if (takes_arguments) {
         const auto& argument = image_.types[function.frame_types[0]];
@@ -1551,6 +1880,11 @@ bool is_transferable(const Image& image, std::uint32_t type) {
     case TypeKind::Void:
     case TypeKind::Array:
     case TypeKind::List:
+        return false;
+    case TypeKind::Aggregate:
+        // An aggregate is the element of a collection, never a value, so it
+        // is not a channel, task or item type; and no collection is
+        // transferable, so a collection of aggregates follows them.
         return false;
     case TypeKind::Object:
         return image.transferable_layouts && std::ranges::binary_search(*image.transferable_layouts, value.reference);
@@ -1784,7 +2118,7 @@ Image load(std::span<const std::uint8_t> bytes, const LoadLimits& limits) {
             return import;
         });
     });
-    section("FUNC", [&](Reader& in) { image.functions = read_functions(in, image.types); });
+    section("FUNC", [&](Reader& in) { image.functions = read_functions(in, image.types, minor); });
     section("META", [&](Reader& in) { image.entry = in.u32(); });
     if (sections.contains("CALB")) {
         section("CALB", [&](Reader& in) {

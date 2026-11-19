@@ -1,0 +1,8 @@
+// A repeated type in a match.is on any.
+let.promote _ = import:Std.Core.Optional;
+let Shape = class ( export let sides: int = 0; );
+let read = func(v: any) -> int => match.is (v) {
+    int => 1,
+    x: int32 => 2,
+    _ => 0,
+};

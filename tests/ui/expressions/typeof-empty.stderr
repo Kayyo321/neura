@@ -1,0 +1,9 @@
+error[E0267]: typeof needs an operand
+ --> $DIR/typeof-empty.nra:3:16
+  |
+3 | let t = typeof();
+  |                ^ expected a value or a type before ')'
+  |
+  = help: write 'typeof(value)' for the type of a value, or 'typeof(Type)' for a type
+
+For more information about this error, try `neura explain E0267`.

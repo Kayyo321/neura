@@ -1,0 +1,380 @@
+let.promote _ = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let header_map = import:Std.Net.Http.Headers;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief HTTP/3 (RFC 9114) wire data: QUIC variable-length integers (RFC 9000 section 16), frame and stream
+/// types, settings and error codes, and the frame header and SETTINGS payload codecs. Connections and QPACK
+/// are stubs.
+///
+/// The codecs are pure and complete: a frame is Type (i), Length (i), Payload (RFC 9114 section 7.1); a
+/// SETTINGS payload is a sequence of Identifier (i), Value (i) pairs (section 7.2.4), where a repeated
+/// identifier and the HTTP/2 identifiers reserved by section 11.2.2 are errors. Opening a connection needs QUIC
+/// transport and TLS 1.3 from the runtime; field-section compression needs QPACK (RFC 9204), which is not
+/// implemented.
+/// @see [Std.Net.Http.H3](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-H3)
+#Since("0.3.0")
+export let H3 = module (
+    /// @brief The largest QUIC variable-length integer, 2^62 - 1 (RFC 9000 section 16).
+    export const MaxVarint: uint64 = 4611686018427387903;
+
+    /// @brief Frame type DATA, 0x00 (RFC 9114 section 7.2.1).
+    export const FrameData: uint64 = 0;
+    /// @brief Frame type HEADERS, 0x01 (section 7.2.2).
+    export const FrameHeaders: uint64 = 1;
+    /// @brief Frame type CANCEL_PUSH, 0x03 (section 7.2.3).
+    export const FrameCancelPush: uint64 = 3;
+    /// @brief Frame type SETTINGS, 0x04 (section 7.2.4).
+    export const FrameSettings: uint64 = 4;
+    /// @brief Frame type PUSH_PROMISE, 0x05 (section 7.2.5).
+    export const FramePushPromise: uint64 = 5;
+    /// @brief Frame type GOAWAY, 0x07 (section 7.2.6).
+    export const FrameGoaway: uint64 = 7;
+    /// @brief Frame type MAX_PUSH_ID, 0x0d (section 7.2.7).
+    export const FrameMaxPushId: uint64 = 13;
+
+    /// @brief Unidirectional stream type of the control stream, 0x00 (section 6.2.1).
+    export const StreamControl: uint64 = 0;
+    /// @brief Unidirectional stream type of a push stream, 0x01 (section 6.2.2).
+    export const StreamPush: uint64 = 1;
+
+    /// @brief SETTINGS_MAX_FIELD_SECTION_SIZE, 0x06 (section 7.2.4.1).
+    export const SettingMaxFieldSectionSize: uint64 = 6;
+    /// @brief SETTINGS_ENABLE_CONNECT_PROTOCOL, 0x08 (RFC 9220 section 3).
+    export const SettingEnableConnectProtocol: uint64 = 8;
+    /// @brief SETTINGS_H3_DATAGRAM, 0x33 (RFC 9297 section 2.1.1).
+    export const SettingH3Datagram: uint64 = 51;
+
+    /// @brief H3_NO_ERROR, 0x0100 (section 8.1).
+    export const ErrorNoError: uint64 = 256;
+    /// @brief H3_GENERAL_PROTOCOL_ERROR, 0x0101.
+    export const ErrorGeneralProtocol: uint64 = 257;
+    /// @brief H3_INTERNAL_ERROR, 0x0102.
+    export const ErrorInternal: uint64 = 258;
+    /// @brief H3_STREAM_CREATION_ERROR, 0x0103.
+    export const ErrorStreamCreation: uint64 = 259;
+    /// @brief H3_CLOSED_CRITICAL_STREAM, 0x0104.
+    export const ErrorClosedCriticalStream: uint64 = 260;
+    /// @brief H3_FRAME_UNEXPECTED, 0x0105.
+    export const ErrorFrameUnexpected: uint64 = 261;
+    /// @brief H3_FRAME_ERROR, 0x0106.
+    export const ErrorFrame: uint64 = 262;
+    /// @brief H3_EXCESSIVE_LOAD, 0x0107.
+    export const ErrorExcessiveLoad: uint64 = 263;
+    /// @brief H3_ID_ERROR, 0x0108.
+    export const ErrorId: uint64 = 264;
+    /// @brief H3_SETTINGS_ERROR, 0x0109.
+    export const ErrorSettings: uint64 = 265;
+    /// @brief H3_MISSING_SETTINGS, 0x010a.
+    export const ErrorMissingSettings: uint64 = 266;
+    /// @brief H3_REQUEST_REJECTED, 0x010b.
+    export const ErrorRequestRejected: uint64 = 267;
+    /// @brief H3_REQUEST_CANCELLED, 0x010c.
+    export const ErrorRequestCancelled: uint64 = 268;
+    /// @brief H3_REQUEST_INCOMPLETE, 0x010d.
+    export const ErrorRequestIncomplete: uint64 = 269;
+    /// @brief H3_MESSAGE_ERROR, 0x010e.
+    export const ErrorMessage: uint64 = 270;
+    /// @brief H3_CONNECT_ERROR, 0x010f.
+    export const ErrorConnect: uint64 = 271;
+    /// @brief H3_VERSION_FALLBACK, 0x0110.
+    export const ErrorVersionFallback: uint64 = 272;
+
+    /// @brief A decoded value and the offset just after it.
+    #[Final, Immutable, ThreadSafe]
+    export let Decoded = class (
+        /// @brief The value.
+        export last value: uint64;
+        /// @brief The offset of the first byte after the value.
+        export last next: int;
+
+        /// @brief Stores the value and the offset.
+        export let init = func(decoded: uint64, after: int) {
+            value = decoded;
+            next = after;
+        };
+
+        /// @brief Equal values and offsets.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: Decoded) {
+                return false;
+            }
+            return value == that.value && next == that.next;
+        };
+
+        /// @brief Combines the value and the offset.
+        export let.override hash_code = func -> uint32 =>
+            hashing.combine(hashing.combine(17, hashing.of_int64((value & 9223372036854775807) as int64)),
+                next.hash_code());
+
+        /// @brief "value@next".
+        export let.override to_string = func -> string => value.to_string() .. "@" .. next.to_string();
+    );
+
+    /// @brief A frame header: the type and the payload length, and the offset of the payload.
+    #[Final, Immutable, ThreadSafe]
+    export let FrameHeader = class (
+        /// @brief The frame type.
+        export last frame_type: uint64;
+        /// @brief The payload length in bytes.
+        export last length: uint64;
+        /// @brief The offset of the first payload byte.
+        export last payload_offset: int;
+
+        /// @brief Stores the fields.
+        export let init = func(kind: uint64, size: uint64, offset: int) {
+            frame_type = kind;
+            length = size;
+            payload_offset = offset;
+        };
+
+        /// @brief Equal fields.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: FrameHeader) {
+                return false;
+            }
+            return frame_type == that.frame_type && length == that.length && payload_offset == that.payload_offset;
+        };
+
+        /// @brief Combines the fields.
+        export let.override hash_code = func -> uint32 => hashing.combine(17, strings.hash(to_string()));
+
+        /// @brief The fields by name.
+        export let.override to_string = func -> string =>
+            "FrameHeader{type=" .. frame_type.to_string() .. ", length=" .. length.to_string() .. ", payload_offset="
+            .. payload_offset.to_string() .. "}";
+    );
+
+    /// @brief The identifiers and values of a SETTINGS frame, in order.
+    #[Final, NotThreadSafe]
+    export let Settings = class (
+        /// @brief The identifiers.
+        export last ids: uint64[list] = new;
+        /// @brief The values, parallel to `ids`.
+        export last values: uint64[list] = new;
+
+        /// @brief An empty list.
+        export let init = func {
+        };
+
+        /// @brief Appends a setting.
+        export let add = func(id: uint64, value: uint64) {
+            ids.append(id);
+            values.append(value);
+        };
+
+        /// @brief The value of `id`, or `fallback` when absent.
+        export let get_or = func(id: uint64, fallback: uint64) -> uint64 {
+            for (let i = 0; i < ids.length; i++) {
+                if (ids[i] == id) {
+                    return values[i];
+                }
+            }
+            return fallback;
+        };
+
+        /// @brief Equal settings in the same order.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: Settings) {
+                return false;
+            }
+            return to_string() == that.to_string();
+        };
+
+        /// @brief The hash of the text form.
+        export let.override hash_code = func -> uint32 => hashing.combine(17, strings.hash(to_string()));
+
+        /// @brief "Settings{id=value, ...}".
+        export let.override to_string = func -> string {
+            let text = "Settings{";
+            for (let i = 0; i < ids.length; i++) {
+                if (i > 0) {
+                    text ..= ", ";
+                }
+                text ..= ids[i].to_string() .. "=" .. values[i].to_string();
+            }
+            return text .. "}";
+        };
+    );
+
+    /// @brief The shortest encoding of `value` (RFC 9000 section 16): 1, 2, 4 or 8 bytes with the length in
+    /// the two high bits. Traps with "invalid argument: varint out of range" above 2^62 - 1.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let encode_varint = func(value: uint64) -> uint8[list] {
+        last bytes: uint8[list] = new;
+        append_varint(bytes, value);
+        return bytes;
+    };
+
+    /// @brief Appends the shortest encoding of `value` to `out`; traps as `encode_varint` does.
+    export let append_varint = func(out: uint8[list], value: uint64) {
+        if (value > MaxVarint) {
+            trap_with_message("invalid argument: varint out of range");
+        }
+        let count = 8;
+        let prefix: uint64 = 3;
+        if (value < 64) {
+            count = 1;
+            prefix = 0;
+        } else if (value < 16384) {
+            count = 2;
+            prefix = 1;
+        } else if (value < 1073741824) {
+            count = 4;
+            prefix = 2;
+        }
+        last shift = ((count - 1) * 8) as uint64;
+        out.append((((value >> shift) & 63) | (prefix << 6)) as uint8);
+        for (let i = count - 2; i >= 0; i--) {
+            out.append(((value >> ((i * 8) as uint64)) & 255) as uint8);
+        }
+    };
+
+    /// @brief The variable-length integer at `offset` (RFC 9000 section 16, Appendix A.1). Err (UnexpectedEnd)
+    /// when the bytes end inside it.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let decode_varint = func(bytes: uint8[list], offset: int) -> Result<Decoded> {
+        if (offset < 0 || offset >= bytes.length) {
+            return Result<Decoded>.Err(failure(ParseErrorKind.UnexpectedEnd, offset, "missing varint"));
+        }
+        last first = bytes[offset];
+        last count = 1 << ((first >> 6) as int);
+        if (offset + count > bytes.length) {
+            return Result<Decoded>.Err(failure(ParseErrorKind.UnexpectedEnd, bytes.length, "truncated varint"));
+        }
+        let value = (first & 63) as uint64;
+        for (let i = 1; i < count; i++) {
+            value = (value << 8) | (bytes[offset + i] as uint64);
+        }
+        return Result<Decoded>.Ok(new Decoded(value, offset + count));
+    };
+
+    /// @brief The frame header Type (i), Length (i) (RFC 9114 section 7.1).
+    #[NoDiscard, Pure, ThreadSafe]
+    export let encode_frame_header = func(frame_type: uint64, length: uint64) -> uint8[list] {
+        last bytes: uint8[list] = new;
+        append_varint(bytes, frame_type);
+        append_varint(bytes, length);
+        return bytes;
+    };
+
+    /// @brief The frame header at `offset`; errors are those of `decode_varint`. The payload may extend past
+    /// the end of `bytes`.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let decode_frame_header = func(bytes: uint8[list], offset: int) -> Result<FrameHeader> {
+        last kind = decode_varint(bytes, offset)?;
+        last size = decode_varint(bytes, kind.next)?;
+        return Result<FrameHeader>.Ok(new FrameHeader(kind.value, size.value, size.next));
+    };
+
+    /// @brief The SETTINGS frame payload holding `settings` in order (section 7.2.4).
+    #[NoDiscard]
+    export let encode_settings = func(settings: Settings) -> uint8[list] {
+        last bytes: uint8[list] = new;
+        for (let i = 0; i < settings.ids.length; i++) {
+            append_varint(bytes, settings.ids[i]);
+            append_varint(bytes, settings.values[i]);
+        }
+        return bytes;
+    };
+
+    /// @brief The settings of a SETTINGS frame payload (section 7.2.4). Err for a truncated pair (UnexpectedEnd),
+    /// a repeated identifier, or an HTTP/2 identifier reserved by section 11.2.2 (0x00, 0x02 through 0x05);
+    /// the last two are H3_SETTINGS_ERROR conditions (Syntax, at the identifier). Unknown identifiers are kept.
+    #[NoDiscard]
+    export let decode_settings = func(payload: uint8[list]) -> Result<Settings> {
+        last settings = new Settings();
+        let at = 0;
+        while (at < payload.length) {
+            last id = decode_varint(payload, at)?;
+            last value = decode_varint(payload, id.next)?;
+            if (is_reserved_setting(id.value)) {
+                return Result<Settings>.Err(failure(ParseErrorKind.Syntax, at, "reserved HTTP/2 setting"));
+            }
+            for (let known in settings.ids) {
+                if (known == id.value) {
+                    return Result<Settings>.Err(failure(ParseErrorKind.Syntax, at, "repeated setting"));
+                }
+            }
+            settings.add(id.value, value.value);
+            at = value.next;
+        }
+        return Result<Settings>.Ok(settings);
+    };
+
+    /// @brief Whether `id` is an HTTP/2 setting identifier reserved in HTTP/3 (section 11.2.2).
+    #[Pure, ThreadSafe]
+    export let is_reserved_setting = func(id: uint64) -> bool => id == 0 || (id >= 2 && id <= 5);
+
+    /// @brief Whether `value` has the form 0x1f * N + 0x21 used for reserved ("grease") types, settings and
+    /// error codes (sections 6.2.3, 7.2.8, 7.2.4.1, 8.1).
+    #[Pure, ThreadSafe]
+    export let is_grease = func(value: uint64) -> bool => value >= 33 && (value - 33) % 31 == 0;
+
+    /// @brief An HTTP/3 connection over QUIC.
+    #[Final, NotThreadSafe]
+    export let H3Connection = class (
+        /// @brief The authority the connection was opened to.
+        export last authority: string;
+
+        /// @brief Records the authority; only `connect` creates connections.
+        export let init = func(target: string) {
+            authority = target;
+        };
+
+        /// @brief Sends one frame on a request stream.
+        /// @stub needs QUIC stream I/O; connection management is not implemented
+        export let send_frame = func(stream_id: uint64, frame_type: uint64, payload: uint8[list]) -> Result<Unit> =>
+            host_stream_write(stream_id, encode_frame_header(frame_type, payload.length as uint64), payload);
+
+        /// @brief Closes the connection with an HTTP/3 error code (section 8.1).
+        /// @stub needs QUIC connection close; connection management is not implemented
+        export let close = func(error_code: uint64) -> Result<Unit> => host_close(error_code);
+
+        /// @brief The authority.
+        export let.override to_string = func -> string => "H3Connection{" .. authority .. "}";
+    );
+
+    /// @brief Opens an HTTP/3 connection to `authority` (host:port): QUIC with TLS 1.3 and ALPN "h3", then the
+    /// control stream and SETTINGS (sections 3.2, 6.2.1).
+    /// @stub needs TLS/QUIC transport; connection management is not implemented
+    #NoDiscard
+    export let connect = func(authority: string, settings: Settings) -> Result<H3Connection> =>
+        host_connect(authority, encode_settings(settings));
+
+    /// @brief The QPACK encoding of a field section (RFC 9204).
+    /// @stub QPACK (RFC 9204) field compression is not implemented
+    #NoDiscard
+    export let encode_field_section = func(fields: header_map.Headers) -> uint8[list] {
+        trap_with_message("unsupported: Std.Net.Http.H3.encode_field_section is not implemented in Neura 0.3.0 (QPACK (RFC 9204) field compression is not implemented)");
+    };
+
+    /// @brief The field section of a QPACK-encoded HEADERS payload (RFC 9204).
+    /// @stub QPACK (RFC 9204) field compression is not implemented
+    #NoDiscard
+    export let decode_field_section = func(encoded: uint8[list]) -> Result<header_map.Headers> {
+        trap_with_message("unsupported: Std.Net.Http.H3.decode_field_section is not implemented in Neura 0.3.0 (QPACK (RFC 9204) field compression is not implemented)");
+    };
+
+    /// @brief Host binding for `connect`: a QUIC connection with ALPN h3 and the encoded local SETTINGS.
+    let host_connect = func(authority: string, settings_payload: uint8[list]) -> Result<H3Connection> {
+        trap_with_message("unsupported: Std.Net.Http.H3.connect is not implemented in Neura 0.3.0 (needs TLS/QUIC transport; connection management is not implemented)");
+    };
+
+    /// @brief Host binding for `H3Connection.send_frame`: writes a frame header and payload to a QUIC stream.
+    let host_stream_write = func(stream_id: uint64, header: uint8[list], payload: uint8[list]) -> Result<Unit> {
+        trap_with_message("unsupported: Std.Net.Http.H3.H3Connection.send_frame is not implemented in Neura 0.3.0 (needs QUIC stream I/O; connection management is not implemented)");
+    };
+
+    /// @brief Host binding for `H3Connection.close`: closes the QUIC connection with an application error code.
+    let host_close = func(error_code: uint64) -> Result<Unit> {
+        trap_with_message("unsupported: Std.Net.Http.H3.H3Connection.close is not implemented in Neura 0.3.0 (needs QUIC connection close; connection management is not implemented)");
+    };
+
+    /// @brief A Parse error.
+    #[Pure, ThreadSafe]
+    let failure = func(kind: ParseErrorKind, offset: int, message: string) -> Error =>
+        Error.Parse { kind: kind, offset: offset, message: message };
+);

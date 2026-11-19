@@ -1,0 +1,7 @@
+error[E1002]: unknown attribute, property or event
+ --> $DIR/bad-attribute.nra:1:26
+  |
+1 | let view = html() { <div href="/items"></div> };
+  |                          ^^^^ 'href' cannot bind this element
+
+For more information about this error, try `neura explain E1002`.

@@ -1,0 +1,83 @@
+let argon2 = import:Std.Crypto.Kdf.Argon2;
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Ordering;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Time.Clock;
+let.promote _ = import:Std.Time.Duration;
+
+/// @brief Tunes Argon2id parameters to a target verification time on this machine (Stdlib.md section 21.6).
+///
+/// The time comes from the clock's monotonic reading, so the result depends on the host and its load; pass
+/// a Std.Time.SystemClock in production and a fixed clock in tests. Measuring runs Argon2id several times,
+/// so a calibration takes a few times the target.
+/// @see [Std.Crypto.Kdf.Calibration](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Kdf-Calibration)
+#Since("0.3.0")
+export let Calibration = module (
+    /// @brief The most passes the calibration tries.
+    const MaxIterations = 10;
+
+    /// @brief The time one Argon2id hash with the parameters takes.
+    let measure = func(clock: Clock, params: argon2.Argon2Params) -> Result<Duration> {
+        last before: Duration;
+        match (clock.monotonic()) {
+            Result.Ok(reading) => {
+                before = reading;
+            },
+            Result.Err(e) => {
+                return Result<Duration>.Err(e);
+            },
+        }
+        let _ = argon2.argon2id(new([112, 97, 115, 115, 119, 111, 114, 100]), new([115, 97, 108, 116, 115, 97, 108, 116]),
+            params);
+        return match (clock.monotonic()) {
+            Result.Ok(after) => Result<Duration>.Ok(after.minus(before)),
+            Result.Err(e) => Result<Duration>.Err(e),
+        };
+    };
+
+    /// @brief Argon2id parameters for `parallelism` lanes and 32-byte tags that take about `target` on this
+    /// clock: starting from 8 KiB per lane and one pass, memory doubles while a hash is faster than the target
+    /// and the memory stays within `max_memory_kib`, then passes grow (up to 10) while it is still faster.
+    /// Memory is preferred to passes, as RFC 9106, section 4 recommends. A clock error is returned.
+    #[NoDiscard, Since("0.3.0")]
+    export let calibrate_argon2id = func(clock: Clock, target: Duration, parallelism: int, max_memory_kib: int)
+        -> Result<argon2.Argon2Params> {
+        let memory = 8 * parallelism;
+        if (max_memory_kib < memory) {
+            trap_with_message("invalid argument: maximum memory below 8 KiB per lane");
+        }
+        let passes = 1;
+        let elapsed: Duration = new(0);
+        match (measure(clock, new argon2.Argon2Params(memory, passes, parallelism, 32))) {
+            Result.Ok(span) => {
+                elapsed = span;
+            },
+            Result.Err(e) => {
+                return Result<argon2.Argon2Params>.Err(e);
+            },
+        }
+        while (elapsed.compare_to(target) == Ordering.Less && memory * 2 <= max_memory_kib) {
+            memory *= 2;
+            match (measure(clock, new argon2.Argon2Params(memory, passes, parallelism, 32))) {
+                Result.Ok(span) => {
+                    elapsed = span;
+                },
+                Result.Err(e) => {
+                    return Result<argon2.Argon2Params>.Err(e);
+                },
+            }
+        }
+        while (elapsed.compare_to(target) == Ordering.Less && passes < MaxIterations) {
+            passes++;
+            match (measure(clock, new argon2.Argon2Params(memory, passes, parallelism, 32))) {
+                Result.Ok(span) => {
+                    elapsed = span;
+                },
+                Result.Err(e) => {
+                    return Result<argon2.Argon2Params>.Err(e);
+                },
+            }
+        }
+        return Result<argon2.Argon2Params>.Ok(new argon2.Argon2Params(memory, passes, parallelism, 32));
+    };
+);

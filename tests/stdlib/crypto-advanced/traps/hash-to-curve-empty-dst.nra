@@ -1,0 +1,12 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: empty hash-to-curve domain separation tag
+// run-options: --gpu=off
+let hash_to_curve = import:Std.Crypto.Advanced.HashToCurve;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = hash_to_curve.hash_to_ristretto255(new, new);
+        return program.ExitCode.Ok;
+    };
+);

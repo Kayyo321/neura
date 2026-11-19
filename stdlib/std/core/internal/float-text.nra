@@ -77,10 +77,7 @@ export let FloatText = module (
         last bias = (1 << (w - 1)) - 1;
         last fraction = bits & fraction_mask(f);
         if (exponent_field == (1 << w) - 1) {
-            if (fraction != 0) {
-                return nan_bits(f, w);
-            }
-            return bits;
+            return if (fraction != 0) -> nan_bits(f, w) else -> bits;
         }
         last sign = bits & sign_mask(f, w);
         last negative = sign != 0;
@@ -98,16 +95,13 @@ export let FloatText = module (
             if (mode == 0) {
                 up = negative;
             } else if (mode == 1) {
-                up = !negative;
+                up = not negative;
             } else if (mode == 3) {
                 up = exponent == -1;
             } else if (mode == 4) {
                 up = exponent == -1 && fraction != 0;
             }
-            if (up) {
-                return sign | ((bias as uint64) << f);
-            }
-            return sign;
+            return if (up) -> sign | ((bias as uint64) << f) else -> sign;
         }
         last count = f - exponent;
         last unit = one << count;
@@ -121,7 +115,7 @@ export let FloatText = module (
         if (mode == 0) {
             up = negative;
         } else if (mode == 1) {
-            up = !negative;
+            up = not negative;
         } else if (mode == 3) {
             up = fractional >= half;
         } else if (mode == 4) {
@@ -158,10 +152,10 @@ export let FloatText = module (
         let text = scaled.to_decimal();
         if (digits > 0) {
             while (text.byte_length <= digits) {
-                text = "0" + text;
+                text = "0" .. text;
             }
             last split = text.byte_length - digits;
-            text = text.slice(0, split) + "." + text.slice(split, text.byte_length);
+            text = text.slice(0, split) .. "." .. text.slice(split, text.byte_length);
         }
         return sign_text(bits, f, w) + text;
     };
@@ -178,7 +172,7 @@ export let FloatText = module (
         last significand = significand_of(bits, f, w);
         last sign = sign_text(bits, f, w);
         if (significand == 0) {
-            return sign + with_point("0" + zeros(digits)) + "e0";
+            return sign .. with_point("0" .. zeros(digits)) .. "e0";
         }
         last exponent = exponent_of(bits, f, w);
         last length = wide.of(significand).bit_length();
@@ -203,14 +197,14 @@ export let FloatText = module (
                 k++;
                 continue;
             }
-            if (doubled.is_odd() && (!exact || floor_value.is_odd())) {
+            if (doubled.is_odd() && (not exact || floor_value.is_odd())) {
                 floor_value.add_small(1);
             }
             if (floor_value.compare(upper) == 0) {
                 floor_value = lower.copy();
                 k++;
             }
-            return sign + with_point(floor_value.to_decimal()) + "e" + k.to_string();
+            return sign .. with_point(floor_value.to_decimal()) .. "e" .. k.to_string();
         }
     };
 
@@ -243,7 +237,7 @@ export let FloatText = module (
             position = 1;
         }
         // value = digits * 10^scale, plus a nonzero tail when `sticky`.
-        last digits: uint8[list] = [];
+        last digits: uint8[list] = new;
         let scale: int64 = 0;
         let sticky = false;
         let seen_digit = false;
@@ -266,11 +260,11 @@ export let FloatText = module (
                     if (digit != 0) {
                         sticky = true;
                     }
-                    if (!seen_point) {
+                    if (not seen_point) {
                         scale++;
                     }
                 }
-            } else if (b == 46 && !seen_point) {
+            } else if (b == 46 && not seen_point) {
                 seen_point = true;
             } else if ((b == 101 || b == 69) && seen_digit) {
                 break;
@@ -280,9 +274,7 @@ export let FloatText = module (
             }
             position++;
         }
-        if (!seen_digit) {
-            return Parsed.Failure(parse_error(ParseErrorKind.UnexpectedEnd, length, "expected a digit"));
-        }
+        return Parsed.Failure(parse_error(ParseErrorKind.UnexpectedEnd, length, "expected a digit")) unless seen_digit;
         if (position < length) {
             // The exponent. Its magnitude saturates far beyond every format's
             // range, so it cannot overflow.
@@ -327,10 +319,7 @@ export let FloatText = module (
         }
         last near = fast_path(digits, scale, sticky, f, w);
         if (near > 0.0) {
-            if (negative) {
-                return Parsed.Near(-near);
-            }
-            return Parsed.Near(near);
+            return if (negative) -> Parsed.Near(-near) else -> Parsed.Near(near);
         }
         return Parsed.Bits(sign | exact_bits(digits, scale, sticky, f, w));
     };
@@ -353,10 +342,7 @@ export let FloatText = module (
             if (scale >= 0 && scale <= 22) {
                 return mantissa * exact_power(scale as int);
             }
-            if (scale < 0 && scale >= -22) {
-                return mantissa / exact_power((-scale) as int);
-            }
-            return 0.0;
+            return if (scale < 0 && scale >= -22) -> mantissa / exact_power((-scale) as int) else -> 0.0;
         }
         let magnitude = scale;
         if (magnitude < 0) {
@@ -376,10 +362,7 @@ export let FloatText = module (
         if (scale < 0) {
             near = mantissa / power;
         }
-        if (near_midpoint(near, f, w)) {
-            return 0.0;
-        }
-        return near;
+        return if (near_midpoint(near, f, w)) -> 0.0 else -> near;
     };
 
     /// @brief Whether a midpoint between two values of the format lies within 16 float64 units of `near`, a
@@ -404,10 +387,7 @@ export let FloatText = module (
         last unit = one << dropped_count;
         last dropped = significand & (unit - 1);
         last half = unit >> 1;
-        if (dropped >= half) {
-            return dropped - half <= 16;
-        }
-        return half - dropped <= 16;
+        return if (dropped >= half) -> dropped - half <= 16 else -> half - dropped <= 16;
     };
 
     /// @brief The magnitude bits of digits * 10^scale (plus a positive tail when `sticky`), rounded once to the
@@ -523,18 +503,12 @@ export let FloatText = module (
         if ((bits & exponent) != exponent) {
             return "";
         }
-        if ((bits & fraction_mask(f)) != 0) {
-            return "NaN";
-        }
-        return sign_text(bits, f, w) + "Infinity";
+        return if ((bits & fraction_mask(f)) != 0) -> "NaN" else -> sign_text(bits, f, w) .. "Infinity";
     };
 
     /// @brief Returns a minus sign when the bit pattern has its sign bit set.
     let sign_text = func(bits: uint64, f: int, w: int) -> string {
-        if ((bits & sign_mask(f, w)) != 0) {
-            return "-";
-        }
-        return "";
+        return if ((bits & sign_mask(f, w)) != 0) -> "-" else -> "";
     };
 
     /// @brief The integer significand of a finite value: value = significand * 2^exponent_of.
@@ -551,10 +525,7 @@ export let FloatText = module (
     let exponent_of = func(bits: uint64, f: int, w: int) -> int {
         last field = ((bits & exponent_mask(f, w)) >> f) as int;
         last bias = (1 << (w - 1)) - 1;
-        if (field == 0) {
-            return 1 - bias - f;
-        }
-        return field - bias - f;
+        return if (field == 0) -> 1 - bias - f else -> field - bias - f;
     };
 
     /// @brief floor(2 * significand * 2^exponent * 10^power) and whether it is exact.
@@ -569,14 +540,14 @@ export let FloatText = module (
         }
         let exact = true;
         if (exponent < 0) {
-            if (!value.low_bits_zero(-exponent)) {
+            if (not value.low_bits_zero(-exponent)) {
                 exact = false;
             }
             value.shift_right(-exponent);
         }
         if (power < 0) {
             // 10^t = 2^t * 5^t: shift first, then divide by the power of five.
-            if (!value.low_bits_zero(-power)) {
+            if (not value.low_bits_zero(-power)) {
                 exact = false;
             }
             value.shift_right(-power);
@@ -601,7 +572,7 @@ export let FloatText = module (
         if (digits.byte_length == 1) {
             return digits;
         }
-        return digits.slice(0, 1) + "." + digits.slice(1, digits.byte_length);
+        return digits.slice(0, 1) .. "." .. digits.slice(1, digits.byte_length);
     };
 
     /// @brief Builds the requested count of decimal zero digits.
@@ -616,10 +587,7 @@ export let FloatText = module (
     /// @brief Divides two integers with the quotient rounded toward negative infinity.
     let floor_div = func(a: int, b: int) -> int {
         last quotient = a / b;
-        if (a % b != 0 && (a < 0) != (b < 0)) {
-            return quotient - 1;
-        }
-        return quotient;
+        return if (a % b != 0 && (a < 0) != (b < 0)) -> quotient - 1 else -> quotient;
     };
 
     /// @brief Creates a parse failure with a UTF-8 byte offset.

@@ -98,7 +98,7 @@ let Loops = module:program.Entry (
     };
 
     let visit_changed = func() -> int32 {
-        let values: int32[list] = [1, 2, 3];
+        let values: int32[list] = new([1, 2, 3]);
         let total: int32 = 0;
         for (let value in values) {
             values[2] = 30;
@@ -114,10 +114,10 @@ let Loops = module:program.Entry (
         report(pairs_until(3) == 10, "for: nested loops with break");
         report(first_power_above(100) == 128, "for (;;) leaves by return");
         report(sum([4, 5, 6]) == 15, "for-each over an array");
-        let empty: int32[list] = [];
+        let empty: int32[list] = new;
         report(first_negative(empty) == 0, "for-each over an empty list");
-        report(first_negative([3, -4, -5]) == -4, "for-each returns early");
-        report(count_until_zero([1, -1, 2, 0, 3]) == 2, "for-each with continue and break");
+        report(first_negative(new([3, -4, -5])) == -4, "for-each returns early");
+        report(count_until_zero(new([1, -1, 2, 0, 3])) == 2, "for-each with continue and break");
         let total: int32 = 0;
         for (let value in make()) {
             total = total + value;

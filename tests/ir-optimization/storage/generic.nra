@@ -1,0 +1,14 @@
+// A generic function that returns its argument is an error only where the
+// argument is an array.
+let Generic = module (
+    export let echo = func<T>(value: T) -> T {
+        return value;
+    };
+
+    export let use = func() -> int {
+        let numbers: int[] = [1];
+        let back = echo<int[]>(numbers);
+        let plain = echo<int>(3);
+        return back[0] + plain;
+    };
+);

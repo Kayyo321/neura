@@ -1,0 +1,31 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    #NoInline
+    let half_bits = func(value: any) -> uint32 => match.is (value) {
+        number: float16 => number.to_bits() as uint32,
+        _ => 65536,
+    };
+
+    #NoInline
+    let brain_bits = func(value: any) -> uint32 => match.is (value) {
+        number: bfloat16 => number.to_bits() as uint32,
+        _ => 65536,
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        for (let bits in [0, 1, 127, 128, 1023, 1024, 31743, 31744, 31745, 32256, 32513, 32639,
+                          32640, 32641, 32704, 32767, 32768, 64512, 64513, 65024, 65408, 65409, 65535]) {
+            let expected = bits as uint16;
+            let half: any = float16.from_bits(expected);
+            let brain: any = bfloat16.from_bits(expected);
+            if (half_bits(half) != bits as uint32 || brain_bits(brain) != bits as uint32) {
+                console.println("bits mismatch {}", bits);
+                return program.ExitCode.Failure;
+            }
+        }
+        console.print_line("bits edges ok");
+        return program.ExitCode.Ok;
+    };
+);

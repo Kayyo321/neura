@@ -1,0 +1,4 @@
+// Without let.extensions the member is unknown, and the help names the set
+// (edge case 57).
+let words = import:App.Words;
+let loud = "ready".shout();

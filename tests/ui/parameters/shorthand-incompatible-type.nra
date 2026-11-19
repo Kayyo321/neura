@@ -1,0 +1,6 @@
+let Account = class (
+    export let owner: string;
+    export let balance: int;
+
+    export let init = func(owner, balance: int) => set;
+);

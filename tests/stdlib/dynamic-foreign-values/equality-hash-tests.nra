@@ -1,0 +1,34 @@
+let arenas = import:Std.DynamicForeign.Arena;
+let layouts = import:Std.DynamicForeign.MemoryLayout;
+let segments = import:Std.DynamicForeign.MemorySegment;
+let descriptors = import:Std.DynamicForeign.FunctionDescriptor;
+let test = import:Std.Test;
+
+let EqualityHashTests = module (
+    let agree = func(a: class, b: class) -> void {
+        test.assert(a.equals(b));
+        test.assert(b.equals(a));
+        test.assert_equal_uint64(a.hash_code() as uint64, b.hash_code() as uint64);
+    };
+
+    export let test_layouts_and_segments_agree = func() -> void {
+        last int_layout = layouts.value(layouts.Carrier.Int32);
+        agree(int_layout, layouts.value(layouts.Carrier.Int32));
+        agree(layouts.struct_layout(int_layout, layouts.padding_layout(4)),
+            layouts.struct_layout(layouts.value(layouts.Carrier.Int32), layouts.padding_layout(4)));
+        test.assert(not int_layout.equals(layouts.value(layouts.Carrier.Int64)));
+        agree(segments.of_address(4096), segments.of_address(4096));
+        test.assert(not segments.of_address(4096).equals(segments.of_address(8192)));
+    };
+
+    export let test_descriptors_agree_and_format = func() -> void {
+        last int_layout = layouts.value(layouts.Carrier.Int32);
+        agree(descriptors.of(int_layout, int_layout), descriptors.of(int_layout, int_layout));
+        test.assert(not descriptors.of(int_layout, int_layout).equals(descriptors.of_void(int_layout)));
+        test.assert_equal_string("MemorySegment(0x1000, 0)", segments.of_address(4096).to_string());
+    };
+
+    export let test_arena_has_a_name = func() -> void {
+        test.assert_equal_string("Arena", arenas.of_confined().to_string());
+    };
+);

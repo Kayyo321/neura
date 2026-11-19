@@ -1,0 +1,6 @@
+// No bound requires the name (edge case 103).
+let Additive = interface<T> (
+    static let zero = func() -> T;
+    static let add = func(left: T, right: T) -> T;
+);
+let make = func<T: Additive<T>>() -> T => T.missing();

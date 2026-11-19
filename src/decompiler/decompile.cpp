@@ -17,7 +17,10 @@ using nvr::absent;
 using ScopeLocation = std::pair<std::uint32_t, std::size_t>;
 using ScopePairs = std::map<const nvr::Exit*, ScopeLocation>;
 
-std::string type_name(const nvr::Image& image, std::uint32_t index) {
+// The name of a type. An aggregate element may hold a collection of its own
+// aggregate (an enum with a payload such as Node[list]); inside its own name
+// that aggregate is named by its layout, as "agg L12".
+std::string type_name(const nvr::Image& image, std::uint32_t index, std::vector<std::uint32_t>& naming) {
     if (index >= image.types.size()) {
         return "t" + std::to_string(index);
     }
@@ -30,12 +33,28 @@ std::string type_name(const nvr::Image& image, std::uint32_t index) {
     case nvr::TypeKind::Text: return "text";
     case nvr::TypeKind::Bytes: return "bytes";
     case nvr::TypeKind::Object: return "L" + std::to_string(t.reference);
-    case nvr::TypeKind::Array: return type_name(image, t.reference) + "[]";
-    case nvr::TypeKind::List: return type_name(image, t.reference) + "[list]";
+    case nvr::TypeKind::Array: return type_name(image, t.reference, naming) + "[]";
+    case nvr::TypeKind::List: return type_name(image, t.reference, naming) + "[list]";
     case nvr::TypeKind::Float: return "float" + std::to_string(t.width);
     case nvr::TypeKind::BFloat: return "bfloat16";
+    case nvr::TypeKind::Aggregate: {
+        if (std::ranges::find(naming, index) != naming.end()) return "agg L" + std::to_string(t.reference);
+        // One array or list element's words, each by its type.
+        naming.push_back(index);
+        std::string text = "(";
+        const auto& fields = image.layouts.at(t.reference).fields;
+        for (std::size_t i = 0; i < fields.size(); ++i)
+            text += (i == 0 ? "" : ", ") + type_name(image, fields[i], naming);
+        naming.pop_back();
+        return text + ")";
+    }
     }
     return "t" + std::to_string(index);
+}
+
+std::string type_name(const nvr::Image& image, std::uint32_t index) {
+    std::vector<std::uint32_t> naming;
+    return type_name(image, index, naming);
 }
 
 std::string quoted(const std::string& text) {
@@ -68,6 +87,7 @@ std::string constant_text(const nvr::Image& image, std::uint32_t index) {
         return quoted(std::string(constant.payload.begin(), constant.payload.end()));
     }
     if (t.kind == nvr::TypeKind::Object && constant.payload.empty()) return "nil";
+    if (nvr::is_static_object_constant(t, constant)) return "static L" + std::to_string(t.reference);
     Expression e;
     e.kind = Expression::Kind::Immediate;
     e.type = constant.type;
@@ -153,16 +173,26 @@ public:
         const auto result = [&](std::uint32_t slot_index) {
             return slot_index == absent ? std::string() : slot(function, slot_index) + " := ";
         };
+        // A multi-word callee fills consecutive slots from the result slot.
+        const auto call_result = [&](const nvr::Exit& call) {
+            const auto& callee = image_.functions.at(call.target);
+            if (callee.more_results.empty() || call.result_slot == absent) return result(call.result_slot);
+            std::string text;
+            for (std::size_t i = 0; i <= callee.more_results.size(); ++i) {
+                text += (i == 0 ? "" : ", ") + slot(function, call.result_slot + static_cast<std::uint32_t>(i));
+            }
+            return text + " := ";
+        };
         const auto& args = exit.arguments;
         const std::string poll = exit.poll ? "poll [decoded]; " : "";
         switch (exit.kind) {
         case nvr::ExitKind::Continue:
             return with(poll + "goto b" + std::to_string(exit.resume));
         case nvr::ExitKind::Call:
-            return with(poll + result(exit.result_slot) + "call " + function_name(exit.target) + "(" +
+            return with(poll + call_result(exit) + "call " + function_name(exit.target) + "(" +
                         values(function, args, lifted, inputs) + "); goto b" + std::to_string(exit.resume));
         case nvr::ExitKind::Return:
-            return with(args.empty() ? "return" : "return " + value(function, args[0], lifted, inputs));
+            return with(args.empty() ? "return" : "return " + values(function, args, lifted, inputs));
         case nvr::ExitKind::Trap:
             return with("trap " + std::to_string(exit.reason) + " (" + reason_name(exit.reason) + ")");
         case nvr::ExitKind::MessageTrap:
@@ -203,25 +233,52 @@ public:
         }
         case nvr::ExitKind::State: {
             const auto a = [&](std::size_t i) { return value(function, args.at(i), lifted, inputs); };
+            // The arguments from `first` on, comma separated: the words of
+            // one element, one for a single-word element.
+            const auto words = [&](std::size_t first) {
+                std::string text;
+                for (std::size_t i = first; i < args.size(); ++i) text += (i == first ? "" : ", ") + a(i);
+                return text;
+            };
             std::string operation;
             switch (exit.operation) {
             case nvr::StateOp::AllocateObject: operation = "new L" + std::to_string(exit.immediate); break;
             case nvr::StateOp::ReadTag: operation = "tag(" + a(0) + ")"; break;
-            case nvr::StateOp::ReadField: operation = a(0) + "." + field(exit, args) ; break;
-            case nvr::StateOp::WriteField: operation = a(0) + "." + field(exit, args) + " = " + a(1); break;
+            case nvr::StateOp::ReadField:
+                operation = a(0) + "." + field(exit, args);
+                if (args.size() == 2) operation = "read_or(" + operation + ", " + a(1) + ")";
+                break;
+            case nvr::StateOp::WriteField:
+                operation = a(0) + "." + field(exit, args) + " = " + a(1);
+                if (args.size() > 2) operation = "write_words(" + a(0) + "." + field(exit, args) + ", " + words(1) + ")";
+                break;
             case nvr::StateOp::FreeObject: operation = "free " + a(0); break;
-            case nvr::StateOp::ReadGlobal: operation = global(exit.immediate); break;
-            case nvr::StateOp::WriteGlobal: operation = global(exit.immediate) + " = " + a(0); break;
+            case nvr::StateOp::ReadGlobal:
+                operation = global(exit.immediate);
+                if (!args.empty()) operation = "read_or(" + operation + ", " + a(0) + ")";
+                break;
+            case nvr::StateOp::WriteGlobal:
+                operation = global(exit.immediate) + " = " + a(0);
+                if (args.size() > 1) operation = "write_words(" + global(exit.immediate) + ", " + words(0) + ")";
+                break;
             case nvr::StateOp::AllocateCollection:
                 operation = type_name(image_, exit.immediate) + " [" + values(function, args, lifted, inputs) + "]";
                 break;
             case nvr::StateOp::RepeatCollection:
-                operation = type_name(image_, exit.immediate) + " repeat(" + a(0) + ", " + a(1) + ")";
+                operation = type_name(image_, exit.immediate) + " repeat(" + a(0) + ", " + words(1) + ")";
                 break;
             case nvr::StateOp::ReadLength: operation = "length(" + a(0) + ")"; break;
             case nvr::StateOp::ReadElement: operation = a(0) + "[" + a(1) + "]"; break;
             case nvr::StateOp::WriteElement: operation = a(0) + "[" + a(1) + "] = " + a(2); break;
-            case nvr::StateOp::AppendElement: operation = "append(" + a(0) + ", " + a(1) + ")"; break;
+            case nvr::StateOp::AppendElement: operation = "append(" + a(0) + ", " + words(1) + ")"; break;
+            case nvr::StateOp::ReadComponent:
+                operation = a(0) + "[" + a(1) + "].c" + std::to_string(exit.immediate);
+                break;
+            case nvr::StateOp::WriteComponent:
+                operation = a(0) + "[" + a(1) + "].c" + std::to_string(exit.immediate);
+                operation = args.size() == 3 ? operation + " = " + a(2)
+                                             : "write_words(" + operation + ", " + words(2) + ")";
+                break;
             case nvr::StateOp::RemoveElement: operation = "remove_at(" + a(0) + ", " + a(1) + ")"; break;
             case nvr::StateOp::ConstructText:
                 operation = type_name(image_, exit.immediate) + "(" + a(0) + ")";
@@ -233,9 +290,34 @@ public:
             case nvr::StateOp::ClassHash: operation = "class_hash(" + a(0) + ")"; break;
             case nvr::StateOp::ClassText: operation = "class_text(" + a(0) + ", " + a(1) + ")"; break;
             case nvr::StateOp::ClassIs: operation = a(0) + " is L" + std::to_string(exit.immediate); break;
-            case nvr::StateOp::ClassCast: operation = a(0) + " as L" + std::to_string(exit.immediate); break;
+            case nvr::StateOp::ClassCast:
+                operation = a(0) + " as L" + std::to_string(exit.immediate);
+                if (args.size() == 2) operation += " with nil policy " + a(1);
+                break;
             case nvr::StateOp::ScalarText:
                 operation = "scalar_text(" + values(function, args, lifted, inputs) + ")";
+                break;
+            // Storage regions (NVR 1.7): the region is the token operand.
+            case nvr::StateOp::EnterRegion: operation = "enter_region()"; break;
+            case nvr::StateOp::ReleaseRegion: operation = "release_region(" + a(0) + ")"; break;
+            case nvr::StateOp::RegionObject: operation = "new L" + std::to_string(exit.immediate) + " in " + a(0); break;
+            case nvr::StateOp::RegionCollection:
+                operation = type_name(image_, exit.immediate) + " [" + words(1) + "] in " + a(0);
+                break;
+            case nvr::StateOp::RegionRepeat:
+                operation = type_name(image_, exit.immediate) + " repeat(" + a(1) + ", " + words(2) + ") in " + a(0);
+                break;
+            case nvr::StateOp::MoveToRegion: operation = "move " + a(0) + " to " + a(1); break;
+            // Class hooks: the event's kind, its policy word, shown as the
+            // class when the image has names, and the reference.
+            case nvr::StateOp::HookEnter:
+                operation = std::string("hook_enter(") + (exit.immediate == 0 ? "get" : "set") + ", " + a(0) +
+                            policy_comment(args.at(0)) + ", " + a(1) + (args.size() == 3 ? ", " + a(2) : "") + ")";
+                break;
+            case nvr::StateOp::HookLeave: operation = "hook_leave()"; break;
+            // A string chain: its operands in order, one allocation.
+            case nvr::StateOp::ConcatText:
+                operation = "concat_text(" + values(function, args, lifted, inputs) + ")";
                 break;
             case nvr::StateOp::Kernel: {
                 // A built-in C kernel: named by its KERN entry and opaque, as
@@ -279,6 +361,19 @@ public:
 private:
     const nvr::Image& image_;
     const std::optional<nvr::Names>& names_;
+
+    // A constant policy word names a layout plus 1; with names, its class.
+    std::string policy_comment(const nvr::Value& word) const {
+        if (word.kind != nvr::ValueKind::Constant || word.index >= image_.constants.size()) return {};
+        std::uint64_t policy = 0;
+        const auto& payload = image_.constants[word.index].payload;
+        for (std::size_t i = 0; i < payload.size() && i < 8; ++i) policy |= std::uint64_t{payload[i]} << (8 * i);
+        if (policy == 0) return " /* no policy */";
+        const auto layout = policy - 1;
+        if (names_ && layout < names_->layouts.size() && !names_->layouts[layout].empty())
+            return " /* policy " + names_->layouts[layout] + " */";
+        return " /* policy L" + std::to_string(layout) + " */";
+    }
     std::map<std::pair<std::uint32_t, std::uint32_t>, std::string> locations_;
 };
 
@@ -435,6 +530,43 @@ const char* evidence_label(const LiftedBlock& lifted) {
     return "?";
 }
 
+// docs/design/Lifetime030.md, Lowering and artifacts: a generator is an
+// ordinary class whose fields hold its state, so nothing in the circuit
+// marks it. With names, a layout named `$generator<N>` that has the state's
+// fields is shown as inferred generator state; without them, or with other
+// fields, it stays an ordinary layout.
+std::string generator_state(const nvr::Names& names, std::uint32_t layout) {
+    const auto& name = names.layouts[layout];
+    const auto dot = name.rfind('.');
+    const auto last = std::string_view(name).substr(dot == std::string::npos ? 0 : dot + 1);
+    if (!last.starts_with("$generator") || last.size() == 10 ||
+        !std::ranges::all_of(last.substr(10), [](char c) { return c >= '0' && c <= '9'; }) ||
+        layout >= names.fields.size())
+        return {};
+    const auto& fields = names.fields[layout];
+    const auto field = [&](std::string_view wanted) -> std::string {
+        for (std::size_t j = 0; j < fields.size(); ++j)
+            if (fields[j] == wanted) return "field" + std::to_string(j);
+        return {};
+    };
+    const auto index = field("$index"), buffer = field("$buffer"), buffered = field("$buffered"),
+               finished = field("$finished"), running = field("$running");
+    if (index.empty() || buffer.empty() || buffered.empty() || finished.empty() || running.empty()) return {};
+    std::string locals;
+    std::size_t temporaries = 0, captures = 0;
+    for (std::size_t j = 0; j < fields.size(); ++j) {
+        const auto& item = fields[j];
+        if (item.starts_with("$local") && item.find(':') != std::string::npos)
+            locals += (locals.empty() ? "" : ", ") + item.substr(item.find(':') + 1) + " field" + std::to_string(j);
+        else if (item.starts_with("$temp")) ++temporaries;
+        else if (!item.empty() && !item.starts_with('$')) ++captures;
+    }
+    return "// inferred from provenance names, not from the circuit: generator state; resume index " + index +
+           ", buffered value " + buffer + ", flags buffered " + buffered + ", finished " + finished + ", running " +
+           running + "; locals live across a yield: " + (locals.empty() ? std::string("none") : locals) +
+           "; hidden temporaries: " + std::to_string(temporaries) + "; other fields: " + std::to_string(captures);
+}
+
 } // namespace
 
 Decompilation decompile(const nvr::Image& image, const DecompileOptions& options) {
@@ -510,6 +642,7 @@ Decompilation decompile(const nvr::Image& image, const DecompileOptions& options
         out << " }";
         if (names && i < names->layouts.size() && !names->layouts[i].empty()) {
             out << "  // provenance: " << names->layouts[i];
+            if (const auto state = generator_state(*names, i); !state.empty()) out << "\n  " << state;
         }
         out << "\n";
     }
@@ -527,7 +660,13 @@ Decompilation decompile(const nvr::Image& image, const DecompileOptions& options
         for (std::uint32_t p = 0; p < function.parameter_count; ++p) {
             out << (p == 0 ? "" : ", ") << printer.slot(f, p) << ": " << type_name(image, function.frame_types[p]);
         }
-        out << ") -> " << type_name(image, function.result_type);
+        if (function.more_results.empty()) {
+            out << ") -> " << type_name(image, function.result_type);
+        } else {
+            out << ") -> (" << type_name(image, function.result_type);
+            for (const auto word : function.more_results) out << ", " << type_name(image, word);
+            out << ")";
+        }
         if (names && f < names->functions.size() && !names->functions[f].empty()) {
             out << "  // provenance: " << names->functions[f];
         }

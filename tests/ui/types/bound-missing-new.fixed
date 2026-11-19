@@ -1,0 +1,8 @@
+let Counter = class (
+    let value: int = 0;
+    export let read = func -> int => value;
+);
+
+let escape = func(counter: Counter) -> func() -> int {
+    return new bound(counter.read);
+};

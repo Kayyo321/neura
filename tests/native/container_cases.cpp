@@ -114,9 +114,10 @@ struct TaskSettings {
 
 // A policy and image as the container stores them, with every length word
 // under the caller's control so that a case can make one of them lie. A
-// version 1 policy has no task settings.
+// version 1 policy has no task settings, and only version 3 has the stack
+// cell limit.
 Bytes policy_payload(std::uint32_t capabilities, std::uint32_t prefix_count, const std::vector<Bytes>& prefixes,
-                     const Bytes& image, std::uint32_t image_length, std::uint32_t version = 2,
+                     const Bytes& image, std::uint32_t image_length, std::uint32_t version = 3,
                      const TaskSettings& tasks = {}) {
     Bytes payload;
     put(payload, 0, 4);
@@ -136,6 +137,7 @@ Bytes policy_payload(std::uint32_t capabilities, std::uint32_t prefix_count, con
         put(payload, tasks.pending_requests, 8);
         put(payload, tasks.workers, 4);
     }
+    if (version >= 3) put(payload, std::uint64_t{1} << 24, 8);
     put(payload, image_length, 4);
     payload.insert(payload.end(), image.begin(), image.end());
     return payload;
@@ -145,7 +147,7 @@ Bytes policy_payload(std::uint32_t capabilities, std::uint32_t prefix_count, con
 // footer's offset or size word away from the truth; the checksum covers the
 // bytes the footer states.
 Bytes assemble(const Bytes& launcher, const Bytes& payload, std::int64_t offset_shift = 0,
-               std::int64_t size_shift = 0, std::uint32_t version = 2) {
+               std::int64_t size_shift = 0, std::uint32_t version = 3) {
     Bytes file = launcher;
     file.insert(file.end(), payload.begin(), payload.end());
     const auto offset = static_cast<std::uint64_t>(static_cast<std::int64_t>(launcher.size()) + offset_shift);
@@ -188,8 +190,8 @@ int main(int argc, char** argv) try {
     write(altered, changed);
     rejects(altered, directory, "wrong checksum", "checksum");
     changed = bytes;
-    check(number(bytes, footer + 20, 4) == 2, "the toolchain writes container version 2");
-    for (const std::uint8_t version : {0, 3}) {
+    check(number(bytes, footer + 20, 4) == 3, "the toolchain writes container version 3");
+    for (const std::uint8_t version : {0, 4}) {
         changed = bytes;
         changed[footer + 20] = version;
         write(altered, changed);
@@ -222,7 +224,8 @@ int main(int argc, char** argv) try {
     // controls must run, and each lie about the policy must be refused.
     const auto launcher_bytes = read(launcher);
     constexpr std::size_t task_settings_size = 36;
-    constexpr std::size_t default_policy_size = 36 + task_settings_size;
+    constexpr std::size_t stack_limit_size = 8;
+    constexpr std::size_t default_policy_size = 36 + task_settings_size + stack_limit_size;
     const Bytes image(bytes.begin() + static_cast<std::ptrdiff_t>(offset + default_policy_size),
                       bytes.begin() + static_cast<std::ptrdiff_t>(footer));
     const auto image_size = static_cast<std::uint32_t>(image.size());
@@ -250,14 +253,24 @@ int main(int argc, char** argv) try {
     rejects(altered, directory, "version 1 policy under a version 2 footer");
     craft(assemble(launcher_bytes, policy_payload(0, 0, {}, image, image_size, 2), 0, 0, 1));
     rejects(altered, directory, "version 2 policy under a version 1 footer");
+    // A version 2 container, which has no stack cell limit, runs with the
+    // default; its bytes under a version 3 footer, or the reverse, are refused.
+    craft(assemble(launcher_bytes, policy_payload(0, 0, {}, image, image_size, 2), 0, 0, 2));
+    const auto second = execute(altered, directory);
+    check(second.exited && second.status == 0 && second.stdout_size != 0,
+          "a version 2 container must run: " + second.stderr_text);
+    craft(assemble(launcher_bytes, policy_payload(0, 0, {}, image, image_size, 2), 0, 0, 3));
+    rejects(altered, directory, "version 2 policy under a version 3 footer");
+    craft(assemble(launcher_bytes, policy_payload(0, 0, {}, image, image_size, 3), 0, 0, 2));
+    rejects(altered, directory, "version 3 policy under a version 2 footer");
 
     for (const auto& settings : {TaskSettings{.max_tasks = 0}, TaskSettings{.quantum = 0},
                                  TaskSettings{.queued_messages = 0}, TaskSettings{.pending_requests = 0},
                                  TaskSettings{.workers = 0}, TaskSettings{.workers = 1025}}) {
-        craft(assemble(launcher_bytes, policy_payload(0, 0, {}, image, image_size, 2, settings)));
+        craft(assemble(launcher_bytes, policy_payload(0, 0, {}, image, image_size, 3, settings)));
         rejects(altered, directory, "invalid task settings", "invalid task settings");
     }
-    craft(assemble(launcher_bytes, policy_payload(0, 0, {}, image, image_size, 2, TaskSettings{.workers = 1024})));
+    craft(assemble(launcher_bytes, policy_payload(0, 0, {}, image, image_size, 3, TaskSettings{.workers = 1024})));
     const auto widest = execute(altered, directory);
     check(widest.exited && widest.status == 0 && widest.stdout_size != 0,
           "a container with 1024 parallel workers must run: " + widest.stderr_text);
@@ -274,7 +287,7 @@ int main(int argc, char** argv) try {
     rejects(altered, directory, "prefix without the files capability", "require the files capability");
 
     const auto remaining_after_count = policy_payload(files_capability, 0, {}, image, image_size).size() - 12;
-    const auto room = static_cast<std::uint32_t>((remaining_after_count - 24 - task_settings_size) / 4);
+    const auto room = static_cast<std::uint32_t>((remaining_after_count - 24 - task_settings_size - stack_limit_size) / 4);
     for (const std::uint32_t count : {room + 1, 0x40000000U, 0xffffffffU}) {
         craft(assemble(launcher_bytes, policy_payload(files_capability, count, {}, image, image_size)));
         rejects(altered, directory, "prefix count " + std::to_string(count), "invalid file-system prefix count");
@@ -297,8 +310,10 @@ int main(int argc, char** argv) try {
 
     craft(assemble(launcher_bytes, {}));
     rejects(altered, directory, "zero-length payload", "invalid payload bounds");
-    craft(assemble(launcher_bytes, Bytes(71, 0)));
+    craft(assemble(launcher_bytes, Bytes(79, 0)));
     rejects(altered, directory, "payload shorter than the fixed policy fields", "invalid payload bounds");
+    craft(assemble(launcher_bytes, Bytes(71, 0), 0, 0, 2));
+    rejects(altered, directory, "version 2 payload shorter than its fixed policy fields", "invalid payload bounds");
     craft(assemble(launcher_bytes, Bytes(35, 0), 0, 0, 1));
     rejects(altered, directory, "version 1 payload shorter than its fixed policy fields", "invalid payload bounds");
     {

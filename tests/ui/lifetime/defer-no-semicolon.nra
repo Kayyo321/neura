@@ -1,0 +1,5 @@
+// Edge case 4: the deferred call needs its ';'.
+let log = func() -> void {};
+let work = func() -> void {
+    defer log()
+};

@@ -1,0 +1,44 @@
+// Calls in 0.3.0 (docs/lang/CoreLanguage.md): named arguments and constant
+// defaults, inferred type arguments and untyped lambdas, an extension
+// function, interpolated strings, and nameof.
+let console = import:Std.Io.Console;
+
+/// @brief A job description built with labels and defaults.
+export let schedule = func(job: string, retries: int = 3, urgent: bool = false) -> string {
+    return $"{job:<8} retries={retries} urgent={urgent}";
+};
+
+/// @brief Applies `convert` to each item; the call infers T and U.
+export let transform = func<T, U>(items: T[list], convert: func(T) -> U) -> U[list] {
+    let result: U[list] = new;
+    for (let item: T in items) {
+        result.append(convert(item));
+    }
+    return result;
+};
+
+/// @brief Repeats an exclamation mark after a text; enabled in this file.
+let.extension shout = func(text: string, marks: int = 1) -> string {
+    let result = text;
+    for (let i: int = 0; i < marks; i++) {
+        result += "!";
+    }
+    return result;
+};
+
+export let Invoice = class (
+    export let total: int64 = 0;
+);
+
+export let describe = func {
+    console.print_line(schedule("backup"));
+    console.print_line(schedule("restore", urgent: true));
+    console.print_line(schedule(retries: 0, job: "verify"));
+
+    let words: string[list] = new(["a", "bc", "def"]);
+    let lengths = transform(words, func(word) => word.byte_length);
+    console.print_line($"lengths {lengths}");
+
+    console.print_line("ready".shout(marks: 2));
+    console.print_line($"field {nameof(Invoice.total)} of {nameof(Invoice)}");
+};

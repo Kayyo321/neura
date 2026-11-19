@@ -1,0 +1,9 @@
+error[E0304]: unknown name 'defer'
+ --> $DIR/defer-alone.nra:3:5
+  |
+3 |     defer;
+  |     ^^^^^ not found in this scope
+  |
+  = help: to defer a call, write 'defer f();' without parentheses around the call; a callee in parentheses is bound to a name first
+
+For more information about this error, try `neura explain E0304`.

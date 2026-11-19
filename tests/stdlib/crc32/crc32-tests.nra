@@ -8,7 +8,7 @@ let test = import:Std.Test;
 let Crc32Tests = module (
     // x = (x * 1103515245 + 12345) mod 2^31; each byte is bits 16 through 23.
     let seeded = func(length: int, seed: uint64) -> uint8[list] {
-        let bytes: uint8[list] = [];
+        let bytes: uint8[list] = new;
         let x = seed;
         for (let i = 0; i < length; i = i + 1) {
             x = (x * 1103515245 + 12345) & 2147483647;
@@ -27,12 +27,12 @@ let Crc32Tests = module (
         // The same bytes added one at a time and in two uneven pieces.
         let running = crc32s.create();
         for (let b in bytes) {
-            running.update([b]);
+            running.update(new([b]));
         }
         test.assert_equal_uint64(expected, running.value() as uint64);
         let split = crc32s.create();
-        let first: uint8[list] = [];
-        let second: uint8[list] = [];
+        let first: uint8[list] = new;
+        let second: uint8[list] = new;
         for (let i = 0; i < length; i = i + 1) {
             if (i < length / 3) {
                 first.append(bytes[i]);
@@ -56,7 +56,7 @@ let Crc32Tests = module (
         check_text("abc", 891568578);
         check_text("message digest", 538287487);
         check_text("The quick brown fox jumps over the lazy dog", 1095738169);
-        let all: uint8[list] = [];
+        let all: uint8[list] = new;
         for (let b = 0; b < 256; b = b + 1) {
             all.append(b as uint8);
         }
@@ -94,7 +94,7 @@ let Crc32Tests = module (
         let crc = new crc32s.Crc32();
         test.assert_equal_uint64(0, crc.value() as uint64);
         crc.update(strings.to_bytes("1234"));
-        crc.update([]);
+        crc.update(new);
         // Reading the value does not end the computation.
         test.assert_equal_uint64(2615402659, crc.value() as uint64);
         crc.update(strings.to_bytes("56789"));

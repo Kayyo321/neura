@@ -1,0 +1,9 @@
+error[E0481]: this lambda returns bool; the expected function type returns int32
+ --> $DIR/untyped-lambda-result.nra:3:28
+  |
+3 | let one = apply(func(x) -> bool => true);
+  |                            ^^^^ expected func(int32) -> int32
+  |
+  = help: remove the result type, or write int32
+
+For more information about this error, try `neura explain E0481`.

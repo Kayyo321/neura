@@ -1,0 +1,3 @@
+// A lone quote at the end of the file is E0261 (docs/design/Expressions030.md,
+// edge case 55).
+let open = '

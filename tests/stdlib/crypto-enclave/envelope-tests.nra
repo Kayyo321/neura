@@ -1,0 +1,176 @@
+// test-options: --gpu=off --max-steps 200000000 --deny-entropy
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+let.promote _ = import:Std.Crypto.Algorithm;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let policy = import:Std.Crypto.Core.CryptoPolicy;
+let envelope = import:Std.Crypto.Enclave.Envelope;
+let hex = import:Std.Encoding.Hex;
+let memory = import:Std.Crypto.Enclave.MemoryKeyStore;
+let test = import:Std.Test;
+let vectors = import:EnvelopeVectors;
+let versioned = import:Std.Crypto.Enclave.VersionedKeyStore;
+
+let EnvelopeTests = module (
+    #NotThreadSafe
+    let CountingStore = class implements versioned.VersionedKeyStore<memory.MemoryKeyHandle> (
+        export last inner: memory.MemoryKeyStore = new;
+        export let wraps: int = 0;
+        export let unwraps: int = 0;
+        export let invalid_wrap: bool = false;
+
+        export let provider_name = func -> string => inner.provider_name();
+
+        export let generate_key = func(algorithm: Algorithm, label: string) -> Result<memory.MemoryKeyHandle> =>
+            inner.generate_key(algorithm, label);
+
+        export let resolve = func(label: string, version: uint32) -> Result<memory.MemoryKeyHandle> =>
+            inner.resolve(label, version);
+
+        export let delete_key = func(key: memory.MemoryKeyHandle) -> Result<Unit> => inner.delete_key(key);
+
+        export let sign = func(key: memory.MemoryKeyHandle, message: uint8[list]) -> Result<uint8[list]> =>
+            inner.sign(key, message);
+
+        export let wrap_key = func(key: memory.MemoryKeyHandle, data_key: uint8[list], associated_data: uint8[list])
+                -> Result<uint8[list]> {
+            wraps++;
+            if (invalid_wrap) {
+                return Result<uint8[list]>.Ok(new);
+            }
+            return inner.wrap_key(key, data_key, associated_data);
+        };
+
+        export let unwrap_key = func(key: memory.MemoryKeyHandle, wrapped: uint8[list], associated_data: uint8[list])
+                -> Result<uint8[list]> {
+            unwraps++;
+            return inner.unwrap_key(key, wrapped, associated_data);
+        };
+
+        export let.override to_string = func -> string => "CountingStore(<redacted>)";
+    );
+
+    let bytes = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let code = func(cause: Error) -> string => match (cause) {
+        Error.Custom(detail) => detail.code(),
+        _ => "",
+    };
+
+    export let test_reference_records_through_both_rotations = func {
+        last rows = vectors.envelopes;
+        last keys = vectors.store;
+        last label = rows[1];
+        last store = new CountingStore();
+        last old = test.assert_ok(store.inner.import_key(Algorithm.Aes512Siv, label, bytes(keys[0])));
+        last crypt = new envelope.Envelope<memory.MemoryKeyHandle>(store, label, 1, 2);
+
+        last first = test.assert_ok(crypt.seal_with_material(bytes(rows[4]), bytes(rows[5]), bytes(rows[3])));
+        test.assert_equal_string(rows[6], hex.encode(first));
+        test.assert_equal_int32(1, store.wraps);
+        // A missing next KEK leaves the cache intact and the current version selected. Entropy is denied.
+        let _ = test.assert_err(crypt.rotate_kek(2));
+        last second = test.assert_ok(crypt.seal(bytes(rows[11]), bytes(rows[12])));
+        test.assert_equal_string(rows[13], hex.encode(second));
+        test.assert_equal_int32(1, store.wraps);
+        let _ = test.assert_err(crypt.seal(bytes(rows[18]), bytes(rows[19])));
+        test.assert_equal_int32(1, store.wraps);
+
+        last third = test.assert_ok(crypt.seal_with_material(bytes(rows[18]), bytes(rows[19]), bytes(rows[17])));
+        test.assert_equal_string(rows[20], hex.encode(third));
+        test.assert_equal_int32(2, store.wraps);
+        last newest = test.assert_ok(store.inner.import_key(Algorithm.Aes512Siv, label, bytes(keys[1])));
+        test.assert_equal_int32(2, newest.version as int32);
+        let _ = test.assert_ok(crypt.rotate_kek(newest.version));
+        test.assert_equal_string("crypto.key_version", code(test.assert_err(crypt.rotate_kek(old.version))));
+        last fourth = test.assert_ok(crypt.seal_with_material(bytes(rows[25]), bytes(rows[26]), bytes(rows[24])));
+        test.assert_equal_string(rows[27], hex.encode(fourth));
+        test.assert_equal_int32(3, store.wraps);
+        test.assert_equal_string("Envelope(<redacted>)", crypt.to_string());
+
+        for (let i = 0; i < rows.length; i += 7) {
+            last opened = test.assert_ok(crypt.open(bytes(rows[i + 6]), bytes(rows[i + 5])));
+            test.assert_equal_string(rows[i + 4], hex.encode(opened));
+        }
+        test.assert_equal_int32(4, store.unwraps);
+        let _ = test.assert_ok(store.delete_key(old));
+        test.assert_equal_string("crypto.authentication", code(test.assert_err(crypt.open(first, bytes(rows[5])))));
+        test.assert_equal_string(rows[25], hex.encode(test.assert_ok(crypt.open(fourth, bytes(rows[26])))));
+        let _ = test.assert_ok(store.delete_key(newest));
+        test.assert_equal_string("crypto.key", code(test.assert_err(crypt.seal(new, new))));
+    };
+
+    export let test_malformed_headers_tampering_and_context = func {
+        last keys = vectors.store;
+        last rows = vectors.envelopes;
+        last label = rows[1];
+        last provider = new memory.MemoryKeyStore();
+        let _ = test.assert_ok(provider.import_key(Algorithm.Aes512Siv, label, bytes(keys[0])));
+        let _ = test.assert_ok(provider.import_key(Algorithm.Aes512Siv, label, bytes(keys[1])));
+        last crypt = new envelope.Envelope<memory.MemoryKeyHandle>(provider, label, 1, 1);
+        last aad = bytes(rows[5]);
+        last sealed = bytes(rows[6]);
+        last rejected = vectors.reject;
+        for (let i = 0; i < rejected.length; i += 3) {
+            test.assert_equal_string(rejected[i + 1], code(test.assert_err(crypt.open(bytes(rejected[i + 2]), aad))));
+        }
+        test.assert_equal_string("crypto.authentication", code(test.assert_err(crypt.open(sealed, new))));
+        test.assert_equal_string("crypto.envelope", code(test.assert_err(crypt.open(new, aad))));
+        last other = new memory.MemoryKeyStore();
+        let _ = test.assert_ok(other.import_key(Algorithm.Aes512Siv, label, bytes(keys[1])));
+        last wrong = new envelope.Envelope<memory.MemoryKeyHandle>(other, label, 1, 1);
+        test.assert_equal_string("crypto.authentication", code(test.assert_err(wrong.open(sealed, aad))));
+    };
+
+    export let test_prepare_failure_has_no_cache_and_clear_requires_entropy = func {
+        last rows = vectors.envelopes;
+        last store = new CountingStore();
+        let _ = test.assert_ok(store.inner.import_key(Algorithm.Aes512Siv, rows[1], bytes(vectors.store[0])));
+        last crypt = new envelope.Envelope<memory.MemoryKeyHandle>(store, rows[1], 1, 2);
+        store.invalid_wrap = true;
+        test.assert_equal_string("crypto.envelope", code(test.assert_err(
+            crypt.seal_with_material(bytes(rows[4]), bytes(rows[5]), bytes(rows[3])))));
+        let _ = test.assert_err(crypt.seal(new, new));
+        test.assert_equal_int32(1, store.wraps);
+        store.invalid_wrap = false;
+        last recovered = test.assert_ok(crypt.seal_with_material(bytes(rows[4]), bytes(rows[5]), bytes(rows[3])));
+        test.assert_equal_string(rows[6], hex.encode(recovered));
+        test.assert_equal_int32(2, store.wraps);
+        crypt.forget_dek();
+        let _ = test.assert_err(crypt.seal(new, new));
+        test.assert_equal_int32(2, store.wraps);
+    };
+
+    export let test_denied_kek_invalidates_warm_cache = func {
+        last rows = vectors.envelopes;
+        last provider = new memory.MemoryKeyStore();
+        let _ = test.assert_ok(provider.import_key(Algorithm.Aes512Siv, rows[1], bytes(vectors.store[0])));
+        last crypt = new envelope.Envelope<memory.MemoryKeyHandle>(provider, rows[1], 1, 2);
+        let _ = test.assert_ok(crypt.seal_with_material(bytes(rows[4]), bytes(rows[5]), bytes(rows[3])));
+        last before = policy.policy();
+        policy.set_policy(policy.Policy.Fips140_3);
+        last denied = crypt.seal(new, new);
+        policy.set_policy(before);
+        test.assert_equal_string("crypto.policy", code(test.assert_err(denied)));
+        // A fresh DEK is required after denial cleared the old cache.
+        let _ = test.assert_err(crypt.seal(new, new));
+    };
+
+    export let test_seeded_generator_only_consumed_when_epoch_changes = func {
+        last rows = vectors.envelopes;
+        last store = new CountingStore();
+        let _ = test.assert_ok(store.inner.import_key(Algorithm.Aes512Siv, rows[1], bytes(vectors.store[0])));
+        last crypt = new envelope.Envelope<memory.MemoryKeyHandle>(store, rows[1], 1, 2);
+        last generator = new drbg.ChaCha20Drbg(bytes(rows[3]));
+        last reference = new drbg.ChaCha20Drbg(bytes(rows[3]));
+        let _ = reference.fill(40);
+        last first = test.assert_ok(crypt.seal_with_drbg(new([1]), new, generator));
+        last second = test.assert_ok(crypt.seal_with_drbg(new([1]), new, generator));
+        test.assert(hex.encode(first) != hex.encode(second));
+        test.assert_equal_int32(1, store.wraps);
+        test.assert_equal_string(hex.encode(reference.fill(8)), hex.encode(generator.fill(8)));
+        test.assert_equal_string("01", hex.encode(test.assert_ok(crypt.open(first, new))));
+        test.assert_equal_string("01", hex.encode(test.assert_ok(crypt.open(second, new))));
+    };
+);

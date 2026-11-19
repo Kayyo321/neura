@@ -1,0 +1,10 @@
+error[E0576]: invalid static requirement
+ --> $DIR/overloads.nra:3:53
+  |
+3 |     static let parse = func(text: string) -> int or func(bytes: uint8[]) -> int;
+  |                                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^ a static requirement is not an overload group
+  |
+  = note: a static requirement is a plain signature that each implementing class declares
+  = help: write it as 'static let parse = func(parameters) -> T;'
+
+For more information about this error, try `neura explain E0576`.

@@ -1,0 +1,201 @@
+let http_headers = import:Std.Net.Http.Headers;
+let multipart = import:Std.Net.Http.Multipart;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let wire = import:Std.Net.Http.Wire;
+
+// Std.Net.Http.Multipart.MultipartParser over arbitrary splits (a delimiter
+// may straddle feeds), the events it emits, and its errors and limits. The
+// sample follows the grammar of RFC 2046 section 5.1.1: a preamble, transport
+// padding after the first delimiter, a file part whose data holds near-misses
+// of the delimiter, and an epilogue.
+let MultipartStreamTests = module (
+    const Sample: string = "preamble\r\n--AaB03x \t\r\n"
+        + "Content-Disposition: form-data; name=\"user\"\r\n\r\n"
+        + "Joe\r\n"
+        + "--AaB03x\r\n"
+        + "Content-Disposition: form-data; name=\"file\"; filename=\"a \\\"b\\\".txt\"\r\n"
+        + "Content-Type: application/octet-stream\r\n\r\n"
+        + "line1\r\n--AaB03\r\n-\r\n--AaB03y\r\r\n"
+        + "--AaB03x--\r\nepilogue";
+
+    const FileData: string = "line1\r\n--AaB03\r\n-\r\n--AaB03y\r";
+
+    let slice = func(bytes: uint8[list], start: int, end: int) -> uint8[list] {
+        last out: uint8[list] = new;
+        for (let i = start; i < end; i++) {
+            out.append(bytes[i]);
+        }
+        return out;
+    };
+
+    // Collects events into parts and counts them, checking their order.
+    let Collector = class (
+        export last parts: multipart.Part[list] = new;
+        export let data_events: int = 0;
+        export let done: bool = false;
+        let fields: http_headers.Headers = new;
+        let content: uint8[list] = new;
+        let open: bool = false;
+
+        export let add = func(events: multipart.MultipartEvent[list]) {
+            for (let event in events) {
+                test.assert(!done);
+                match (event) {
+                    multipart.MultipartEvent.PartStart(h) => {
+                        test.assert(!open);
+                        open = true;
+                        fields = h;
+                        content = new;
+                    },
+                    multipart.MultipartEvent.Data(bytes) => {
+                        test.assert(open);
+                        test.assert(bytes.length > 0);
+                        data_events++;
+                        for (let b in bytes) {
+                            content.append(b);
+                        }
+                    },
+                    multipart.MultipartEvent.PartEnd => {
+                        test.assert(open);
+                        open = false;
+                        parts.append(new multipart.Part(fields, content));
+                    },
+                    multipart.MultipartEvent.Done => {
+                        test.assert(!open);
+                        done = true;
+                    },
+                }
+            }
+        };
+
+        export let.override to_string = func -> string => "Collector";
+    );
+
+    let feed = func(parser: multipart.MultipartParser, collector: Collector, bytes: uint8[list]) {
+        collector.add(test.assert_ok<multipart.MultipartEvent[list]>(parser.feed(bytes)));
+    };
+
+    let check_sample = func(collector: Collector) {
+        test.assert(collector.done);
+        test.assert_equal<int>(2, collector.parts.length);
+        test.assert_equal_string("user", test.assert_some<string>(collector.parts[0].name()));
+        test.assert_equal_string("Joe", strings.from_bytes_lossy(collector.parts[0].body));
+        test.assert_equal_string("file", test.assert_some<string>(collector.parts[1].name()));
+        test.assert_equal_string("a \"b\".txt", test.assert_some<string>(collector.parts[1].filename()));
+        test.assert_equal_string("application/octet-stream", collector.parts[1].content_type());
+        test.assert_equal_string(FileData, strings.from_bytes_lossy(collector.parts[1].body));
+    };
+
+    let status_of = func(result: Result<multipart.MultipartEvent[list]>) -> int =>
+        wire.rejection_status(test.assert_err<multipart.MultipartEvent[list]>(result));
+
+    export let test_whole_body = func {
+        last parser = new multipart.MultipartParser("AaB03x");
+        last collector = new Collector();
+        feed(parser, collector, strings.to_bytes(Sample));
+        test.assert(parser.is_done());
+        collector.add(test.assert_ok<multipart.MultipartEvent[list]>(parser.finish()));
+        check_sample(collector);
+        test.assert_equal<int>(2, collector.data_events);
+        // The epilogue and later bytes are ignored.
+        test.assert_equal<int>(0, test.assert_ok<multipart.MultipartEvent[list]>(parser.feed(strings.to_bytes("--AaB03x\r\n"))).length);
+        test.assert(strings.starts_with(parser.to_string(), "MultipartParser{"));
+    };
+
+    export let test_every_split_in_two = func {
+        last bytes = strings.to_bytes(Sample);
+        for (let split = 0; split <= bytes.length; split++) {
+            last parser = new multipart.MultipartParser("AaB03x");
+            last collector = new Collector();
+            feed(parser, collector, slice(bytes, 0, split));
+            feed(parser, collector, slice(bytes, split, bytes.length));
+            collector.add(test.assert_ok<multipart.MultipartEvent[list]>(parser.finish()));
+            check_sample(collector);
+        }
+    };
+
+    export let test_one_byte_at_a_time = func {
+        last bytes = strings.to_bytes(Sample);
+        last parser = new multipart.MultipartParser("AaB03x");
+        last collector = new Collector();
+        for (let i = 0; i < bytes.length; i++) {
+            feed(parser, collector, slice(bytes, i, i + 1));
+        }
+        collector.add(test.assert_ok<multipart.MultipartEvent[list]>(parser.finish()));
+        check_sample(collector);
+    };
+
+    // A large part arrives as several Data events and is never held whole:
+    // each feed passes on all but the bytes that could start a delimiter.
+    export let test_streaming_data = func {
+        last parser = new multipart.MultipartParser("AaB03x");
+        last collector = new Collector();
+        feed(parser, collector, strings.to_bytes("--AaB03x\r\nContent-Disposition: form-data; name=\"big\"\r\n\r\n"));
+        last block = strings.to_bytes(strings.repeat("x", 500) + "\r\n--AaB0");
+        for (let i = 0; i < 4; i++) {
+            last events = test.assert_ok<multipart.MultipartEvent[list]>(parser.feed(block));
+            test.assert_equal<int>(1, events.length);
+            collector.add(events);
+        }
+        feed(parser, collector, strings.to_bytes("3x--"));
+        check_streamed(collector);
+    };
+
+    let check_streamed = func(collector: Collector) {
+        test.assert(collector.done);
+        test.assert_equal<int>(1, collector.parts.length);
+        last expected = strings.repeat(strings.repeat("x", 500) + "\r\n--AaB0", 3) + strings.repeat("x", 500);
+        test.assert_equal_string(expected, strings.from_bytes_lossy(collector.parts[0].body));
+        test.assert_equal<int>(4, collector.data_events);
+    };
+
+    export let test_structure_errors = func {
+        last missing = new multipart.MultipartParser("AaB03x");
+        test.assert_ok<multipart.MultipartEvent[list]>(missing.feed(strings.to_bytes("--AaB03x\r\n\r\nabc\r\n--AaB03x\r\n\r\n")));
+        test.assert_equal<int>(400, status_of(missing.finish()));
+        test.assert_equal<int>(400, status_of(missing.feed(strings.to_bytes("--AaB03x--"))));
+        last empty = new multipart.MultipartParser("AaB03x");
+        test.assert_ok<multipart.MultipartEvent[list]>(empty.feed(strings.to_bytes("no delimiter here")));
+        test.assert_equal<int>(400, status_of(empty.finish()));
+        last half = new multipart.MultipartParser("AaB03x");
+        test.assert_ok<multipart.MultipartEvent[list]>(half.feed(strings.to_bytes("--AaB03x\r\n\r\nabc\r\n--AaB03x-")));
+        test.assert_equal<int>(400, status_of(half.finish()));
+        for (let bad in ["--AaB03xZ\r\n\r\n", "--AaB03x Z\r\n", "--AaB03x\rX", "--AaB03x\r\nbad\r\n\r\n",
+                "--AaB03x\r\nA: 1\nB: 2\r\n\r\n", "--AaB03x\r\n folded: 1\r\n\r\n", "--AaB03x\r\nA : 1\r\n\r\n"]) {
+            last parser = new multipart.MultipartParser("AaB03x");
+            test.assert_equal<int>(400, status_of(parser.feed(strings.to_bytes(bad))));
+            // The failure is kept.
+            test.assert_equal<int>(400, status_of(parser.feed(strings.to_bytes("--AaB03x--"))));
+        }
+        last bytes = strings.to_bytes("--AaB03x\r\nN: ?\r\n\r\n");
+        bytes[13] = 255;
+        test.assert_equal<int>(400, status_of(new multipart.MultipartParser("AaB03x").feed(bytes)));
+        test.assert_equal<int>(400, wire.rejection_status(test.assert_err<multipart.Part[list]>(
+            multipart.parse_all(strings.to_bytes("--a b\r\n\r\n--a b--"), "a b "))));
+    };
+
+    export let test_limits = func {
+        last two_parts = "--AaB03x\r\nA: 1\r\n\r\none\r\n--AaB03x\r\nA: 2\r\n\r\ntwo\r\n--AaB03x--";
+        test.assert_equal<int>(2, test.assert_ok<multipart.Part[list]>(multipart.parse_all(strings.to_bytes(two_parts), "AaB03x")).length);
+        last one_part = new multipart.MultipartLimits(1, 100, 10);
+        test.assert_equal<int>(413, wire.rejection_status(test.assert_err<multipart.Part[list]>(
+            multipart.parse_all(strings.to_bytes(two_parts), "AaB03x", one_part))));
+        // A header section of 8 bytes ("A: 1" CRLF CRLF) at a limit of 8, then one byte more.
+        last eight = new multipart.MultipartLimits(10, 8, 10);
+        test.assert_equal<int>(2, test.assert_ok<multipart.Part[list]>(multipart.parse_all(strings.to_bytes(two_parts), "AaB03x", eight)).length);
+        test.assert_equal<int>(413, wire.rejection_status(test.assert_err<multipart.Part[list]>(
+            multipart.parse_all(strings.to_bytes("--AaB03x\r\nA: 12\r\n\r\nx\r\n--AaB03x--"), "AaB03x", eight))));
+        // An endless header section fails once the buffer passes the limit.
+        last endless = new multipart.MultipartParser("AaB03x", eight);
+        test.assert_equal<int>(0, test.assert_ok<multipart.MultipartEvent[list]>(endless.feed(strings.to_bytes("--AaB03x\r\nA: 12345"))).length);
+        test.assert_equal<int>(413, status_of(endless.feed(strings.to_bytes("6"))));
+        last padding = new multipart.MultipartParser("AaB03x", eight);
+        test.assert_equal<int>(413, status_of(padding.feed(strings.to_bytes("--AaB03x" + strings.repeat(" ", 9)))));
+        last one_field = new multipart.MultipartLimits(10, 100, 1);
+        test.assert_equal<int>(413, wire.rejection_status(test.assert_err<multipart.Part[list]>(
+            multipart.parse_all(strings.to_bytes("--AaB03x\r\nA: 1\r\nB: 2\r\n\r\nx\r\n--AaB03x--"), "AaB03x", one_field))));
+    };
+);

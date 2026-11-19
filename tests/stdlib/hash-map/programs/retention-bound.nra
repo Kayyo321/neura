@@ -13,7 +13,7 @@ let program = import:Std.Program;
 // and waiting for a table-full compaction would retain hundreds.
 export let Main = module:program.Entry (
     let block = func(seed: int) -> int[list] {
-        let values: int[list] = [];
+        let values: int[list] = new;
         let i = 0;
         while (i < 2000) {
             values.append(seed + i);
@@ -26,7 +26,7 @@ export let Main = module:program.Entry (
         let map = hash_map.with_capacity<int, int[list]>(1000);
         let i = 0;
         while (i < 7) {
-            let small: int[list] = [i];
+            let small: int[list] = new([i]);
             map.set(-1 - i, small);
             i = i + 1;
         }

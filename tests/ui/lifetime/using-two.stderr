@@ -1,0 +1,9 @@
+error[E0220]: 'using' binds one resource: using (name = value) { ... }
+  --> $DIR/using-two.nra:11:22
+   |
+11 |     using (a = open(), b = open()) {
+   |                      ^ a second resource begins here
+   |
+   = help: nest a second 'using' for a second resource
+
+For more information about this error, try `neura explain E0220`.

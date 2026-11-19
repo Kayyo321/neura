@@ -101,11 +101,11 @@ export let ArrayList = module (
 
         /// @brief Appends each element in order. Reads by position up to the starting
         /// length, so adding the list's own items() doubles it.
-        export let add_all = func(values: T[list]) {
-            last count = values.length;
+        export let add_all = func(items: T[list]) {
+            last count = items.length;
             let i = 0;
             while (i < count) {
-                storage.append(values[i]);
+                storage.append(items[i]);
                 i += 1;
             }
         };
@@ -197,7 +197,7 @@ export let ArrayList = module (
             if (start < 0 || start > end || end > storage.length) {
                 trap_with_message("invalid argument: range");
             }
-            last result: T[list] = [];
+            last result: T[list] = new;
             let i = start;
             while (i < end) {
                 result.append(storage[i]);
@@ -208,7 +208,7 @@ export let ArrayList = module (
 
         /// @brief A new built-in list in order.
         export let to_list = func -> T[list] {
-            last result: T[list] = [];
+            last result: T[list] = new;
             last count = storage.length;
             let i = 0;
             while (i < count) {
@@ -346,10 +346,10 @@ export let ArrayList = module (
         /// @brief Another ArrayList with the same element type, size, and equal
         /// elements at each index.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is ArrayList<T>)) {
+            if (other is not that: ArrayList<T>) {
                 return false;
             }
-            return storage.equals((other as ArrayList<T>).items());
+            return storage.equals(that.items());
         };
 
         /// @brief Folds the element hashes in list order from 1, multiplying by 31 before each addition with 32-bit wraparound.
@@ -403,17 +403,21 @@ export let ArrayList = module (
             position += 1;
             return value;
         };
+
+        /// @brief Names the iterator and its position.
+        export let.override to_string = func -> string =>
+            "ArrayListIterator(position " .. position.to_string() .. ")";
     );
 
     /// @brief Creates an empty list with independent backing storage.
     export let create = func<T> -> ArrayList<T> {
-        last values: T[list] = [];
+        last values: T[list] = new;
         return new ArrayList<T>(values);
     };
 
     /// @brief Copies `items`.
     export let of = func<T>(items: T[list]) -> ArrayList<T> {
-        last values: T[list] = [];
+        last values: T[list] = new;
         last count = items.length;
         let i = 0;
         while (i < count) {
@@ -428,7 +432,7 @@ export let ArrayList = module (
         if (count < 0) {
             trap_with_message("invalid argument: negative count");
         }
-        last values: T[list] = [];
+        last values: T[list] = new;
         let i = 0;
         while (i < count) {
             values.append(value);

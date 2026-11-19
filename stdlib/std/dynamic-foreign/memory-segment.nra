@@ -106,11 +106,13 @@ export let MemorySegment = module (
         /// @brief Writes a 16-bit signed integer.
         export let set_int16 = func(offset: int64, value: int16) =>
             store(offset, native.signed_bits(value as int64), 2);
+
         /// @brief Writes a 16-bit unsigned integer.
         export let set_uint16 = func(offset: int64, value: uint16) => store(offset, value as uint64, 2);
         /// @brief Writes a 32-bit signed integer.
         export let set_int32 = func(offset: int64, value: int32) =>
             store(offset, native.signed_bits(value as int64), 4);
+
         /// @brief Writes a 32-bit unsigned integer.
         export let set_uint32 = func(offset: int64, value: uint32) => store(offset, value as uint64, 4);
         /// @brief Writes a 64-bit signed integer.
@@ -120,6 +122,7 @@ export let MemorySegment = module (
         /// @brief Writes an IEEE binary32 float.
         export let set_float32 = func(offset: int64, value: float32) =>
             store(offset, float32s.to_bits(value) as uint64, 4);
+
         /// @brief Writes an IEEE binary64 float.
         export let set_float64 = func(offset: int64, value: float64) => store(offset, float64s.to_bits(value), 8);
         /// @brief Writes the address of `value`.
@@ -136,7 +139,7 @@ export let MemorySegment = module (
                 trap_with_message("invalid argument: unterminated string");
             }
             let [valid, text] = string.from_utf8(native.read(base + offset, count));
-            if (!valid) {
+            if (not valid) {
                 trap_with_message("invalid argument: text is not valid UTF-8");
             }
             return text;
@@ -144,7 +147,7 @@ export let MemorySegment = module (
 
         /// @brief Writes the UTF-8 bytes of `text` and a NUL at `offset`. Traps if `text` contains a NUL.
         export let set_utf8 = func(offset: int64, text: string) {
-            last bytes: uint8[list] = [];
+            last bytes: uint8[list] = new;
             for (let i = 0; i < text.byte_length; i++) {
                 last b = text.byte_at(i);
                 if (b == 0) {
@@ -175,7 +178,7 @@ export let MemorySegment = module (
 
         /// @brief Sets every byte to `value`.
         export let fill = func(value: uint8) {
-            last bytes: uint8[list] = [];
+            last bytes: uint8[list] = new;
             for (let i: int64 = 0; i < length; i++) {
                 bytes.append(value);
             }
@@ -183,23 +186,22 @@ export let MemorySegment = module (
         };
 
         /// @brief Segments are equal when their addresses and sizes are.
-        #Pure
+        /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is MemorySegment)) {
+            if (other is not that: MemorySegment) {
                 return false;
             }
-            last that = other as MemorySegment;
             return base == that.base && length == that.length;
         };
 
         /// @brief Hashes the address and size.
         #Pure
-        export let.override hash_code = func -> uint32 => (base.to_string() + ":" + length.to_string()).hash_code();
+        export let.override hash_code = func -> uint32 => (base.to_string() .. ":" .. length.to_string()).hash_code();
 
         /// @brief `MemorySegment(address, size)` with the address in hexadecimal.
         #Pure
         export let.override to_string = func -> string =>
-            "MemorySegment(0x" + hex(base) + ", " + length.to_string() + ")";
+            "MemorySegment(0x" .. hex(base) .. ", " .. length.to_string() .. ")";
 
         /// @brief Traps unless the scope is open and `size` bytes at `offset` lie inside the segment.
         #Pure
@@ -222,7 +224,7 @@ export let MemorySegment = module (
         /// @brief Writes the low `size` bytes of `bits` at `offset`.
         let store = func(offset: int64, bits: uint64, size: int) {
             check(offset, size as int64);
-            last bytes: uint8[list] = [];
+            last bytes: uint8[list] = new;
             native.put(bytes, bits, size);
             native.write(base + offset, bytes);
         };

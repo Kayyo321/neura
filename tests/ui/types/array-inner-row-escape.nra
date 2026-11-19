@@ -1,0 +1,8 @@
+let run = func -> int {
+    last rows: int[][] = [[1]];
+    {
+        last inner = [2];
+        rows[0] = inner;
+    }
+    return rows[0][0];
+};

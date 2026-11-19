@@ -51,12 +51,14 @@ export let TcpListener = module (
             local_port = bound_port;
         };
 
+        /// @brief `TcpListener(port N, open)` or `TcpListener(port N, closed)`.
+        export let.override to_string = func -> string =>
+            "TcpListener(port " .. local_port.to_string() .. (open_now ? ", open)" : ", closed)");
+
         /// @brief Waits for the next connection. Fails with Cancelled when the task's scope is cancelled first.
         #NoDiscard
         export let accept = func -> Result<TcpStream> {
-            if (!open_now) {
-                return Result<TcpStream>.Err(bytes.closed("listener", handle.address));
-            }
+            return Result<TcpStream>.Err(bytes.closed("listener", handle.address)) unless open_now;
             return match (accept_socket(handle.id)) {
                 IdOutcome.Ok(id) => Result<TcpStream>.Ok(new TcpStream(new socket.Handle(id, ""))),
                 IdOutcome.Error(code) => Result<TcpStream>.Err(host_error.io(code, "accept failed", handle.address)),
@@ -66,9 +68,7 @@ export let TcpListener = module (
         /// @brief Releases the listener. Repeated calls succeed, and an initial close error still leaves it
         /// closed.
         export let close = func -> Result<Unit> {
-            if (!open_now) {
-                return bytes.ok();
-            }
+            return bytes.ok() unless open_now;
             open_now = false;
             return match (close_socket(handle.id)) {
                 DoneOutcome.Ok => bytes.ok(),

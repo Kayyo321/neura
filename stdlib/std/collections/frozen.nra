@@ -1,0 +1,227 @@
+let.promote _ = import:Std.Collections.Iterable;
+let.promote _ = import:Std.Collections.Iterator;
+let optional = import:Std.Core.Optional;
+
+/// @brief Lists that nobody can change, with storage nobody else holds.
+/// A FrozenList copies its elements into private storage when it is built, and every
+/// operation that would change it returns a new list instead. Its element type must be
+/// deeply immutable (E0580), so a UI state may hold one. In 0.3.0 a FrozenList cannot be sent to
+/// another task: the image format admits no list in a transferable layout (E0602).
+#Since("0.3.0")
+export let Frozen = module (
+    /// @brief An ordered list of deeply immutable elements in storage that no other code holds.
+    /// Indexes are zero-based `int` positions; an index out of range traps as a list index does.
+    #[Final, Immutable, Frozen, NoDiscard]
+    export let FrozenList = class<T> implements Iterable<T> (
+        /// @brief The private copy of the elements. Only this class reads it, by index and length.
+        #Frozen
+        last storage: T[list];
+
+        /// @brief Copies `values` into new storage.
+        #Internal
+        export let init = func(values: T[list]) {
+            last copy: T[list] = new;
+            last count = values.length;
+            let i = 0;
+            while (i < count) {
+                copy.append(values[i]);
+                i += 1;
+            }
+            storage = copy;
+        };
+
+        /// @brief Returns the number of elements.
+        export let length = func -> int => storage.length;
+
+        /// @brief Returns true when there are no elements.
+        export let is_empty = func -> bool => storage.length == 0;
+
+        /// @brief Returns the element at zero-based `index`. An index out of range traps as a list index does.
+        export let get = func(index: int) -> T => storage[index];
+
+        /// @brief Returns the first element as `Some`, or `None` when empty.
+        export let first_or_none = func -> optional.Optional<T> {
+            if (storage.length == 0) {
+                return optional.Optional<T>.None;
+            }
+            return optional.Optional<T>.Some(storage[0]);
+        };
+
+        /// @brief Returns the last element as `Some`, or `None` when empty.
+        export let last_or_none = func -> optional.Optional<T> {
+            if (storage.length == 0) {
+                return optional.Optional<T>.None;
+            }
+            return optional.Optional<T>.Some(storage[storage.length - 1]);
+        };
+
+        /// @brief Tests membership by value equality (`===`).
+        export let contains = func(value: T) -> bool => index_of(value) >= 0;
+
+        /// @brief Returns the lowest index of an element equal to `value` by `===`, or -1 when absent.
+        export let index_of = func(value: T) -> int {
+            last count = storage.length;
+            let i = 0;
+            while (i < count) {
+                if (value === storage[i]) {
+                    return i;
+                }
+                i += 1;
+            }
+            return -1;
+        };
+
+        /// @brief Calls `action` once for each element in index order. `action` is not retained.
+        export let for_each = func(action: func(T) -> void) {
+            last count = storage.length;
+            let i = 0;
+            while (i < count) {
+                action(storage[i]);
+                i += 1;
+            }
+        };
+
+        /// @brief A new FrozenList with the elements from `start` inclusive to `end` exclusive.
+        /// Traps with "invalid argument: range" unless 0 <= start <= end <= length().
+        export let slice = func(start: int, end: int) -> FrozenList<T> {
+            if (start < 0 || start > end || end > storage.length) {
+                trap_with_message("invalid argument: range");
+            }
+            last part: T[list] = new;
+            let i = start;
+            while (i < end) {
+                part.append(storage[i]);
+                i += 1;
+            }
+            return new(part);
+        };
+
+        /// @brief A fresh built-in list with the elements in order; changing it changes nothing here.
+        export let to_list = func -> T[list] {
+            last result: T[list] = new;
+            last count = storage.length;
+            let i = 0;
+            while (i < count) {
+                result.append(storage[i]);
+                i += 1;
+            }
+            return result;
+        };
+
+        /// @brief A new FrozenList with `value` after the last element. This list is unchanged.
+        export let appended = func(value: T) -> FrozenList<T> {
+            last next = to_list();
+            next.append(value);
+            return new(next);
+        };
+
+        /// @brief A new FrozenList with `value` at `index`. An index out of range traps as a list index does.
+        export let replaced = func(index: int, value: T) -> FrozenList<T> {
+            last next = to_list();
+            next[index] = value;
+            return new(next);
+        };
+
+        /// @brief A new FrozenList without the element at `index`. An index out of range traps as a list index does.
+        export let removed = func(index: int) -> FrozenList<T> {
+            last next = to_list();
+            next.remove_at(index);
+            return new(next);
+        };
+
+        /// @brief A new FrozenList with this list's elements followed by `other`'s.
+        export let concat = func(other: FrozenList<T>) -> FrozenList<T> {
+            last next = to_list();
+            last count = other.length();
+            let i = 0;
+            while (i < count) {
+                next.append(other.get(i));
+                i += 1;
+            }
+            return new(next);
+        };
+
+        /// @brief Returns an iterator over the elements in index order.
+        export let iterator = func -> Iterator<T> => new FrozenListIterator<T>(instance);
+
+        /// @brief Another FrozenList of the same element type with equal elements (`===`) at each index.
+        /// `==` stays reference identity.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: FrozenList<T>) {
+                return false;
+            }
+            last count = storage.length;
+            if (that.length() != count) {
+                return false;
+            }
+            let i = 0;
+            while (i < count) {
+                if (not (storage[i] === that.get(i))) {
+                    return false;
+                }
+                i += 1;
+            }
+            return true;
+        };
+
+        /// @brief Folds the element hashes in index order, as a built-in list's `hash_code` does.
+        export let.override hash_code = func -> uint32 => to_list().hash_code();
+
+        /// @brief `[a, b, c]`.
+        export let.override to_string = func -> string => to_list().to_string();
+    );
+
+    /// @brief A traversal over a FrozenList in index order.
+    #[Final, NotThreadSafe]
+    let FrozenListIterator = class<T> implements Iterator<T> (
+        /// @brief The list being traversed.
+        last source: FrozenList<T>;
+        /// @brief The zero-based position of the next element.
+        let position: int = 0;
+
+        /// @brief Starts before the first element of `values`.
+        export let init = func(values: FrozenList<T>) {
+            source = values;
+        };
+
+        /// @brief Reports whether another element remains.
+        export let has_next = func -> bool => position < source.length();
+
+        /// @brief Returns the next element and advances. Traps with `no such element` at exhaustion.
+        export let next = func -> T {
+            if (position >= source.length()) {
+                trap_with_message("no such element");
+            }
+            last value = source.get(position);
+            position += 1;
+            return value;
+        };
+
+        /// @brief Names the traversal and its position.
+        export let.override to_string = func -> string => "FrozenListIterator(" .. position.to_string() .. ")";
+    );
+
+    /// @brief Copies the elements of `source` into a new FrozenList.
+    export let copy_of = func<T>(source: T[]) -> FrozenList<T> {
+        last values: T[list] = new;
+        last count = source.length;
+        let i = 0;
+        while (i < count) {
+            values.append(source[i]);
+            i += 1;
+        }
+        return new FrozenList<T>(values);
+    };
+
+    /// @brief Copies the elements of the list `source` into a new FrozenList; later changes to `source` are not seen.
+    export let copy_of_list = func<T>(source: T[list]) -> FrozenList<T> => new FrozenList<T>(source);
+
+    /// @brief Returns a FrozenList with no elements.
+    export let empty = func<T>() -> FrozenList<T> {
+        last values: T[list] = new;
+        return new FrozenList<T>(values);
+    };
+
+    /// @brief Returns a FrozenList of the arguments in order.
+    export let of = func<T>(items: ...T) -> FrozenList<T> => copy_of<T>(items);
+);

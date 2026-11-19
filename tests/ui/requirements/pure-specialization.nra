@@ -1,0 +1,25 @@
+// #Pure on a generic function is decided per specialization (edge case 109).
+let console = import:Std.Io.Console;
+let Additive = interface<T> (
+    static let zero = func() -> T;
+    static let add = func(left: T, right: T) -> T;
+);
+let Loud = class implements Additive<Loud> (
+    export last cents: int64;
+    export let init = func(cents: int64) => set;
+    export static let zero = func() -> Loud => new Loud(0);
+    export static let add = func(left: Loud, right: Loud) -> Loud {
+        console.print_line("add");
+        return new Loud(left.cents + right.cents);
+    };
+);
+let Quiet = class implements Additive<Quiet> (
+    export last cents: int64;
+    export let init = func(cents: int64) => set;
+    export static let zero = func() -> Quiet => new Quiet(0);
+    export static let add = func(left: Quiet, right: Quiet) -> Quiet => new Quiet(left.cents + right.cents);
+);
+#Pure
+let sum = func<T: Additive<T>>(a: T, b: T) -> T => T.add(a, b);
+let quiet = sum<Quiet>(new Quiet(1), new Quiet(2));
+let loud = sum<Loud>(new Loud(1), new Loud(2));

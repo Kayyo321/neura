@@ -1,0 +1,9 @@
+error[E0207]: a variadic parameter is a group of one name
+ --> $DIR/variadic-in-group.nra:2:17
+  |
+2 | let join = func(a, items: ...string) -> string {
+  |                 ^ 'a' would take the variadic type
+  |
+  = help: give 'a' its own type, as in 'func(a: <type>, items: ...<type>)'
+
+For more information about this error, try `neura explain E0207`.

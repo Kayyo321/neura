@@ -1,5 +1,6 @@
 #pragma once
 
+#include "class_hooks.hpp"
 #include "dispatch.hpp"
 #include "ir.hpp"
 
@@ -74,6 +75,7 @@ private:
 
     const IrProgram& program_;
     DispatchTargets dispatch_;
+    std::optional<HookIndex> hooks_;
     std::map<SymbolId, const IrBody*> bodies_;
     std::map<SymbolId, std::vector<SymbolId>> overriders_;
     std::map<SymbolId, std::vector<SymbolId>> fields_;
@@ -127,5 +129,8 @@ private:
     std::optional<Reason> direct(const IrNode& node) const;
     void summarize();
 };
+
+// Check task operations and #ThreadSafe once all implicit callees are present.
+void check_task_safety(const IrProgram& program);
 
 } // namespace neura

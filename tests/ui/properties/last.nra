@@ -1,0 +1,5 @@
+// A property is declared with 'let' (edge case 63).
+let Named = interface (
+    last name: string;
+        | get;
+);

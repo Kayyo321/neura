@@ -1,0 +1,15 @@
+error[E0560]: parameter 'by' is named 'factor' in the method it overrides
+ --> $DIR/override-rename.nra:6:38
+  |
+3 |     export let scale = func(factor: int) -> int => factor;
+  |                             ------ the parameter is named 'factor' here
+...
+6 |     export let.override scale = func(by: int) -> int => by * 2;
+  |                                      ^^ a call may name this parameter 'factor'
+  |
+help: rename it to the base name
+  |
+6 |     export let.override scale = func(factor: int) -> int => by * 2;
+  |                                      ~~~~~~
+
+For more information about this error, try `neura explain E0560`.

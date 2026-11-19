@@ -1,0 +1,440 @@
+let errors = import:Std.Core.Error;
+let http_headers = import:Std.Net.Http.Headers;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let wire = import:Std.Net.Http.Wire;
+
+/// @brief The chunked transfer coding of HTTP/1.1 (RFC 9112 section 7.1): encoding and an incremental decoder.
+///
+/// The decoder takes the body bytes in pieces split anywhere and returns the data as it is decoded. It is strict
+/// about framing: every chunk-size line, chunk-data and trailer line ends in CRLF (a single LF or a CR without LF
+/// is 400), the chunk-size is 1*HEXDIG, and chunk extensions must follow the grammar of RFC 9112 section 7.1.1;
+/// their names and values are then ignored. A chunk that would take the decoded data past
+/// `Limits.max_body_bytes` is 413 before any of its data is read, however many digits its size has, so no size
+/// overflows. A chunk-size line longer than `Limits.max_chunk_line_bytes` is 400, a trailer section longer than
+/// `Limits.max_trailer_bytes` is 431, and trailer fields are checked as header fields are
+/// (`Wire.parse_field_section`). Errors use the "http.status.NNN" codes of `Wire.rejection`.
+/// @see [Std.Net.Http.Chunked](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-Chunked)
+#Since("0.3.0")
+export let Chunked = module (
+    /// @brief An incremental decoder of one chunked body.
+    ///
+    /// After the last chunk and the trailer section, the decoder is done and further bytes, including those of the
+    /// feed that finished it, are kept as the remainder (the next message on the connection). After an error every
+    /// `feed` returns the same error.
+    #[Final, NotThreadSafe]
+    export let ChunkedDecoder = class (
+        /// @brief The limits applied.
+        last limits: wire.Limits;
+        /// @brief The current state: SizeLine, Data, DataCr, DataLf, Trailer or Done.
+        let state: int = SizeLine;
+        /// @brief The chunk-size line read so far, without its CR.
+        let line: uint8[list] = new;
+        /// @brief Whether the size line's CR has been read.
+        let line_cr: bool = false;
+        /// @brief The data bytes left in the current chunk.
+        let remaining: int64 = 0;
+        /// @brief The data bytes of all chunks so far.
+        let total: int64 = 0;
+        /// @brief The trailer section read so far.
+        last trailer: uint8[list] = new;
+        /// @brief The offset in `trailer` of the line being read.
+        let trailer_line: int = 0;
+        /// @brief The trailer fields, once done.
+        let fields: http_headers.Headers = new;
+        /// @brief The bytes after the body.
+        last rest: uint8[list] = new;
+        /// @brief The status of the failure, or 0.
+        let failed_status: int = 0;
+        /// @brief The message of the failure.
+        let failed_message: string = "";
+
+        /// @brief A decoder with the default limits.
+        export let init = func {
+            limits = new wire.Limits();
+        }
+        /// @brief A decoder with the given limits.
+        or func(applied: wire.Limits) {
+            limits = applied;
+        };
+
+        /// @brief Decodes the next bytes of the body; Ok holds the data they completed, possibly empty.
+        #NoDiscard
+        export let feed = func(bytes: uint8[list]) -> Result<uint8[list]> {
+            if (failed_status != 0) {
+                return Result<uint8[list]>.Err(wire.rejection(failed_status, failed_message));
+            }
+            last out: uint8[list] = new;
+            last count = bytes.length;
+            let i = 0;
+            while (i < count) {
+                if (state == Done) {
+                    rest.append(bytes[i]);
+                    i++;
+                    continue;
+                }
+                last b = bytes[i];
+                if (state == Data) {
+                    let take = count - i;
+                    if ((take as int64) > remaining) {
+                        take = remaining as int;
+                    }
+                    for (let k = i; k < i + take; k++) {
+                        out.append(bytes[k]);
+                    }
+                    i += take;
+                    remaining -= take as int64;
+                    if (remaining == 0) {
+                        state = DataCr;
+                    }
+                    continue;
+                }
+                if (state == SizeLine) {
+                    if (line_cr) {
+                        if (b != 10) {
+                            return fail(400, "CR without LF in a chunk-size line");
+                        }
+                        line_cr = false;
+                        last status = size_line();
+                        if (status != 0) {
+                            return Result<uint8[list]>.Err(wire.rejection(failed_status, failed_message));
+                        }
+                    } else if (b == 13) {
+                        line_cr = true;
+                    } else if (b == 10) {
+                        return fail(400, "chunk-size line ends with a bare LF");
+                    } else {
+                        if (line.length >= limits.max_chunk_line_bytes) {
+                            return fail(400, $"chunk-size line is over {limits.max_chunk_line_bytes} bytes");
+                        }
+                        line.append(b);
+                    }
+                } else if (state == DataCr) {
+                    if (b != 13) {
+                        return fail(400, "chunk-data is not followed by CRLF");
+                    }
+                    state = DataLf;
+                } else if (state == DataLf) {
+                    if (b != 10) {
+                        return fail(400, "chunk-data is not followed by CRLF");
+                    }
+                    state = SizeLine;
+                } else {
+                    // Trailer.
+                    last length = trailer.length;
+                    if (length > 0 && trailer[length - 1] == 13 && b != 10) {
+                        return fail(400, "bare CR in the trailer section");
+                    }
+                    if (length >= limits.max_trailer_bytes) {
+                        return fail(431, $"trailer section is over {limits.max_trailer_bytes} bytes");
+                    }
+                    trailer.append(b);
+                    if (b == 10) {
+                        if (length == 0 || trailer[length - 1] != 13) {
+                            return fail(400, "bare LF in the trailer section");
+                        }
+                        if (trailer.length - trailer_line == 2) {
+                            last status = finish_trailer();
+                            if (status != 0) {
+                                return Result<uint8[list]>.Err(wire.rejection(failed_status, failed_message));
+                            }
+                        } else {
+                            trailer_line = trailer.length;
+                        }
+                    }
+                }
+                i++;
+            }
+            return Result<uint8[list]>.Ok(out);
+        };
+
+        /// @brief Whether the last chunk and the trailer section have been read.
+        export let is_done = func -> bool => state == Done;
+
+        /// @brief The trailer fields; empty until done.
+        export let trailers = func -> http_headers.Headers => fields;
+
+        /// @brief The data bytes decoded so far.
+        export let data_length = func -> int64 => total - remaining;
+
+        /// @brief The bytes received after the body, as a new list.
+        #NoDiscard
+        export let remainder = func -> uint8[list] {
+            last out: uint8[list] = new;
+            for (let b in rest) {
+                out.append(b);
+            }
+            return out;
+        };
+
+        /// @brief The decoder's progress as text.
+        export let.override to_string = func -> string =>
+            $"ChunkedDecoder{{state={state}, data={total - remaining}, done={state == Done}, failed={failed_status}}}";
+
+        /// @brief Records a failure and returns it.
+        let fail = func(status: int, message: string) -> Result<uint8[list]> {
+            failed_status = status;
+            failed_message = message;
+            return Result<uint8[list]>.Err(wire.rejection(status, message));
+        };
+
+        /// @brief Records a failure; returns its status.
+        let note = func(status: int, message: string) -> int {
+            failed_status = status;
+            failed_message = message;
+            return status;
+        };
+
+        /// @brief Interprets a complete chunk-size line; returns 0 or the failure status.
+        let size_line = func -> int {
+            last length = line.length;
+            last allowed = limits.max_body_bytes - total;
+            let size: int64 = 0;
+            let over = false;
+            let j = 0;
+            while (j < length && hex_value(line[j]) >= 0) {
+                last digit = hex_value(line[j]) as int64;
+                if (not over) {
+                    if (allowed < digit || size > (allowed - digit) / 16) {
+                        over = true;
+                    } else {
+                        size = size * 16 + digit;
+                    }
+                }
+                j++;
+            }
+            if (j == 0) {
+                return note(400, "chunk-size is not a hexadecimal number");
+            }
+            return note(400, "malformed chunk extension") unless extensions_valid(line, j);
+            if (over) {
+                return note(413, $"chunked body is over the limit of {limits.max_body_bytes} bytes");
+            }
+            line = new;
+            if (size == 0) {
+                state = Trailer;
+            } else {
+                remaining = size;
+                total += size;
+                state = Data;
+            }
+            return 0;
+        };
+
+        /// @brief Parses the completed trailer section; returns 0 or the failure status.
+        let finish_trailer = func -> int {
+            last section: uint8[list] = new;
+            for (let k = 0; k < trailer_line; k++) {
+                section.append(trailer[k]);
+            }
+            let [valid, text] = string.from_utf8(section);
+            return note(400, "trailer section is not UTF-8") unless valid;
+            match (wire.parse_field_section(text, limits, false)) {
+                Result.Ok(parsed) => {
+                    fields = parsed;
+                },
+                Result.Err(e) => {
+                    return note(wire.rejection_status(e), "trailer: " .. errors.message(e));
+                },
+            }
+            state = Done;
+            return 0;
+        };
+    );
+
+    /// @brief One chunk holding `data`: its size in lowercase hex, CRLF, the data, CRLF. Empty data gives an empty
+    /// list, since a zero-size chunk would end the body.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let encode_chunk = func(data: uint8[list]) -> uint8[list] {
+        last out: uint8[list] = new;
+        if (data.length == 0) {
+            return out;
+        }
+        append_text(out, hex(data.length as int64));
+        out.append(13);
+        out.append(10);
+        for (let b in data) {
+            out.append(b);
+        }
+        out.append(13);
+        out.append(10);
+        return out;
+    };
+
+    /// @brief The last chunk "0" CRLF, the trailer fields as "Name: value" CRLF lines, and the final CRLF.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let last_chunk = func(trailer_fields: http_headers.Headers) -> uint8[list] {
+        last out: uint8[list] = new;
+        append_text(out, "0\r\n");
+        for (let i = 0; i < trailer_fields.size(); i++) {
+            append_text(out, trailer_fields.name_at(i) .. ": " .. trailer_fields.value_at(i) .. "\r\n");
+        }
+        append_text(out, "\r\n");
+        return out;
+    };
+
+    /// @brief The whole chunked body of `data` in chunks of `chunk_size` bytes (the last may be shorter), then the
+    /// last chunk with no trailer. Traps with "invalid argument: chunk_size" unless it is positive.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let encode = func(data: uint8[list], chunk_size: int) -> uint8[list] {
+        if (chunk_size <= 0) {
+            trap_with_message("invalid argument: chunk_size");
+        }
+        last out: uint8[list] = new;
+        let start = 0;
+        while (start < data.length) {
+            last end = start + chunk_size < data.length ? start + chunk_size : data.length;
+            last piece: uint8[list] = new;
+            for (let i = start; i < end; i++) {
+                piece.append(data[i]);
+            }
+            for (let b in encode_chunk(piece)) {
+                out.append(b);
+            }
+            start = end;
+        }
+        for (let b in last_chunk(new http_headers.Headers())) {
+            out.append(b);
+        }
+        return out;
+    };
+
+    /// @brief The data of a complete chunked body. 400 when the body ends early or bytes follow it; other errors
+    /// as `ChunkedDecoder.feed`.
+    #NoDiscard
+    export let decode = func(body: uint8[list], limits: wire.Limits) -> Result<uint8[list]> {
+        last decoder = new ChunkedDecoder(limits);
+        last data = decoder.feed(body)?;
+        return Result<uint8[list]>.Err(wire.rejection(400, "chunked body ends before the last chunk")) unless decoder.is_done();
+        return if (decoder.remainder().length > 0) -> Result<uint8[list]>.Err(wire.rejection(400, "bytes after the chunked body"))
+            else -> Result<uint8[list]>.Ok(data);
+    };
+
+    /// @brief Decoder state: reading a chunk-size line.
+    const SizeLine: int = 0;
+    /// @brief Decoder state: reading chunk-data.
+    const Data: int = 1;
+    /// @brief Decoder state: expecting the CR after chunk-data.
+    const DataCr: int = 2;
+    /// @brief Decoder state: expecting the LF after chunk-data.
+    const DataLf: int = 3;
+    /// @brief Decoder state: reading the trailer section.
+    const Trailer: int = 4;
+    /// @brief Decoder state: the body is complete.
+    const Done: int = 5;
+
+    /// @brief The value of a hex digit byte, or -1.
+    let hex_value = func(b: uint8) -> int {
+        if (b >= 48 && b <= 57) {
+            return (b - 48) as int;
+        }
+        if (b >= 97 && b <= 102) {
+            return (b - 87) as int;
+        }
+        return if (b >= 65 && b <= 70) -> (b - 55) as int
+            else -> -1;
+    };
+
+    /// @brief `n` (positive) in lowercase hexadecimal.
+    let hex = func(n: int64) -> string {
+        last digits = "0123456789abcdef";
+        let text = "";
+        let value = n;
+        while (value > 0) {
+            last d = (value % 16) as int;
+            text = digits.slice(d, d + 1) .. text;
+            value = value / 16;
+        }
+        return text;
+    };
+
+    /// @brief Appends the UTF-8 bytes of `text`.
+    let append_text = func(out: uint8[list], text: string) {
+        for (let i = 0; i < text.byte_length; i++) {
+            out.append(text.byte_at(i));
+        }
+    };
+
+    /// @brief Whether line[from, end) is a chunk-ext (RFC 9112 section 7.1.1): *( BWS ";" BWS token
+    /// [ BWS "=" BWS ( token / quoted-string ) ] ). Whitespace not followed by ";" is invalid.
+    let extensions_valid = func(line: uint8[list], from: int) -> bool {
+        last length = line.length;
+        let k = from;
+        while (true) {
+            last before = k;
+            k = skip_space(line, k);
+            if (k == length) {
+                return k == before;
+            }
+            if (line[k] != 59) {
+                return false;
+            }
+            k = skip_space(line, k + 1);
+            last name_start = k;
+            while (k < length && http_headers.is_tchar(line[k])) {
+                k++;
+            }
+            if (k == name_start) {
+                return false;
+            }
+            last after_name = k;
+            k = skip_space(line, k);
+            if (k < length && line[k] == 61) {
+                k = skip_space(line, k + 1);
+                if (k < length && line[k] == 34) {
+                    k = quoted_end(line, k + 1);
+                    if (k < 0) {
+                        return false;
+                    }
+                } else {
+                    last value_start = k;
+                    while (k < length && http_headers.is_tchar(line[k])) {
+                        k++;
+                    }
+                    if (k == value_start) {
+                        return false;
+                    }
+                }
+            } else {
+                k = after_name;
+            }
+        }
+        return false;
+    };
+
+    /// @brief The offset after the closing quote of a quoted-string whose content starts at `from`, or -1
+    /// (RFC 9110 section 5.6.4: qdtext is HTAB, SP, %x21, %x23-5B, %x5D-7E and obs-text; a quoted-pair is "\"
+    /// and HTAB, SP, VCHAR or obs-text).
+    let quoted_end = func(line: uint8[list], from: int) -> int {
+        let k = from;
+        while (k < line.length) {
+            last c = line[k];
+            if (c == 34) {
+                return k + 1;
+            }
+            if (c == 92) {
+                if (k + 1 >= line.length || not is_quoted_text(line[k + 1]) && line[k + 1] != 34 && line[k + 1] != 92) {
+                    return -1;
+                }
+                k += 2;
+                continue;
+            }
+            return -1 unless is_quoted_text(c);
+            k++;
+        }
+        return -1;
+    };
+
+    /// @brief Whether `c` is qdtext.
+    let is_quoted_text = func(c: uint8) -> bool => c == 9 || c == 32 || c == 33 || (c >= 35 && c <= 91)
+        || (c >= 93 && c <= 126) || c >= 128;
+
+    /// @brief The offset of the first byte at or after `k` that is not SP or HTAB.
+    let skip_space = func(line: uint8[list], k: int) -> int {
+        let j = k;
+        while (j < line.length && (line[j] == 32 || line[j] == 9)) {
+            j++;
+        }
+        return j;
+    };
+);

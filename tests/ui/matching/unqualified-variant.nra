@@ -1,0 +1,10 @@
+// Edge case 40: an unqualified name as a whole pattern, as in 0.2.
+let.promote _ = import:Std.Core.Optional;
+let Shape = enum (Dot, Line(int), Box { size: [int, int], label: Optional<string> });
+let Tree = enum (Leaf(int), Node(Tree, Tree));
+let Light = enum (Red, Yellow, Green);
+let length = func(shape: Shape) -> int => match (shape) {
+    Dot => 0,
+    Shape.Line(n) if n > 0 => n,
+    _ => 1,
+};

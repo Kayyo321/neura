@@ -1,0 +1,3 @@
+// Edge case 47 of docs/design/Expressions030.md: `!==` is one token, and
+// `!= =` written with a space is a parse error, as it was.
+let differ = func(a: int, b: int) -> bool => a != = b;

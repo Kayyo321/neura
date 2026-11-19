@@ -1,0 +1,255 @@
+let errors = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Random.Random;
+
+/// @brief The W3C Trace Context `traceparent` header: version, 16-byte trace id, 8-byte parent id and trace flags.
+///
+/// Follows the Trace Context HTTP request header format (w3c/trace-context, `spec/20-http_request_header_format.md`
+/// on the main branch, fetched 2026-11-17), which also defines the random-trace-id flag. Version 00 is exactly 55
+/// characters of lowercase hex and dashes: `00-<32 hex trace id>-<16 hex parent id>-<2 hex flags>`. An all-zero
+/// trace id or parent id, uppercase hex, and version `ff` are invalid. A higher version is parsed by the spec's
+/// forward-compatibility rules: at least 55 characters, the three known fields at their version-00 positions, and
+/// either the end of the text or a dash after the flags; anything after that dash is ignored. A `TraceParent` is
+/// always emitted as version 00, which is the downgrade the spec requires. A parse failure is an `Error.Parse`;
+/// the spec then has the receiver restart the trace and ignore `tracestate`.
+/// @see [Std.Net.Mesh.TraceParent](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Mesh-TraceParent)
+#Since("0.3.0")
+export let TraceParent = module (
+    /// @brief The sampled flag (bit 0): the caller may have recorded trace data.
+    export const SampledFlag: int = 1;
+    /// @brief The random-trace-id flag (bit 1): at least the right-most 7 bytes of the trace id are random.
+    export const RandomTraceIdFlag: int = 2;
+    /// @brief The flags this version defines; a component sets every other flag to zero when it writes a header.
+    export const KnownFlags: int = 3;
+    /// @brief The length of a version-00 header value.
+    export const Length: int = 55;
+    /// @brief The trace id length in bytes.
+    export const TraceIdBytes: int = 16;
+    /// @brief The parent id length in bytes.
+    export const ParentIdBytes: int = 8;
+
+    /// @brief One parsed or generated `traceparent` value.
+    #Final
+    export let TraceParent = class (
+        /// @brief The version the value was parsed from (0 for a value this library made). Emission always
+        /// writes version 00.
+        export last version: int;
+        /// @brief The 16-byte trace id; never all zero.
+        export last trace_id: uint8[list];
+        /// @brief The 8-byte id of the caller's span; never all zero.
+        export last parent_id: uint8[list];
+        /// @brief The 8-bit trace flags as received or set.
+        export last flags: int;
+
+        /// @brief A value with every field given. Wrong lengths, all-zero ids, flags outside 0 to 255 or a version
+        /// outside 0 to 254 trap with "invalid argument: <name>"; use `parse` for untrusted text.
+        export let init = func(parsed_version: int, trace: uint8[list], parent: uint8[list], trace_flags: int) {
+            if (parsed_version < 0 || parsed_version > 254) {
+                trap_with_message("invalid argument: version");
+            }
+            if (trace.length != TraceIdBytes || all_zero(trace)) {
+                trap_with_message("invalid argument: trace_id");
+            }
+            if (parent.length != ParentIdBytes || all_zero(parent)) {
+                trap_with_message("invalid argument: parent_id");
+            }
+            if (trace_flags < 0 || trace_flags > 255) {
+                trap_with_message("invalid argument: flags");
+            }
+            version = parsed_version;
+            trace_id = copy(trace);
+            parent_id = copy(parent);
+            flags = trace_flags;
+        };
+
+        /// @brief Whether the sampled flag is set.
+        #NoDiscard
+        export let sampled = func -> bool => (flags & SampledFlag) != 0;
+
+        /// @brief Whether the random-trace-id flag is set.
+        #NoDiscard
+        export let random_trace_id = func -> bool => (flags & RandomTraceIdFlag) != 0;
+
+        /// @brief The trace id as 32 lowercase hex digits.
+        #NoDiscard
+        export let trace_id_hex = func -> string => hex(trace_id);
+
+        /// @brief The parent id as 16 lowercase hex digits.
+        #NoDiscard
+        export let parent_id_hex = func -> string => hex(parent_id);
+
+        /// @brief The version-00 header value, with the flags this version does not define cleared.
+        #NoDiscard
+        export let to_header = func -> string =>
+            "00-" .. hex(trace_id) .. "-" .. hex(parent_id) .. "-" .. hex_byte(flags & KnownFlags);
+
+        /// @brief The same trace continued by a new span: the same trace id, `span_id` as the parent id, the
+        /// known flags kept (the random-trace-id flag must not change while the trace id is kept). Traps like
+        /// `init` on a bad `span_id`.
+        #NoDiscard
+        export let child = func(span_id: uint8[list]) -> TraceParent =>
+            new TraceParent(0, trace_id, span_id, flags & KnownFlags);
+
+        /// @brief As `child` with the sampled flag set to `sample`; the spec allows changing it only together
+        /// with the parent id.
+        #NoDiscard
+        export let child_sampled = func(span_id: uint8[list], sample: bool) -> TraceParent =>
+            new TraceParent(0, trace_id, span_id, (flags & RandomTraceIdFlag) + (sample ? SampledFlag : 0));
+
+        /// @brief Equal when the version, both ids and the flags are.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: TraceParent) {
+                return false;
+            }
+            return version == that.version && flags == that.flags && same_bytes(trace_id, that.trace_id)
+                && same_bytes(parent_id, that.parent_id);
+        };
+
+        /// @brief Combines the version, flags and id bytes.
+        export let.override hash_code = func -> uint32 {
+            let hash = hashing.combine(17, (version * 256 + flags) as uint32);
+            for (let b in trace_id) {
+                hash = hashing.combine(hash, b as uint32);
+            }
+            for (let b in parent_id) {
+                hash = hashing.combine(hash, b as uint32);
+            }
+            return hash;
+        };
+
+        /// @brief The version-00 header value.
+        export let.override to_string = func -> string => to_header();
+    );
+
+    /// @brief Parses a `traceparent` value by the rules described for the module.
+    #NoDiscard
+    export let parse = func(text: string) -> Result<TraceParent> {
+        if (text.byte_length < 3 || not is_hex(text.byte_at(0)) || not is_hex(text.byte_at(1)) || text.byte_at(2) != 45) {
+            return fail(0, "the version is not two lowercase hex digits followed by a dash");
+        }
+        last version = hex_value(text.byte_at(0)) * 16 + hex_value(text.byte_at(1));
+        if (version == 255) {
+            return fail(0, "version ff is invalid");
+        }
+        if (version == 0 && text.byte_length != Length) {
+            return fail(0, "a version-00 value is exactly 55 characters");
+        }
+        if (text.byte_length < Length) {
+            return fail(text.byte_length, "a value is at least 55 characters");
+        }
+        last trace = read_hex(text, 3, TraceIdBytes);
+        if (trace.length != TraceIdBytes || text.byte_at(35) != 45) {
+            return fail(3, "the trace id is not 32 lowercase hex digits followed by a dash");
+        }
+        last parent = read_hex(text, 36, ParentIdBytes);
+        if (parent.length != ParentIdBytes || text.byte_at(52) != 45) {
+            return fail(36, "the parent id is not 16 lowercase hex digits followed by a dash");
+        }
+        if (not is_hex(text.byte_at(53)) || not is_hex(text.byte_at(54))) {
+            return fail(53, "the flags are not two lowercase hex digits");
+        }
+        if (text.byte_length > Length && text.byte_at(55) != 45) {
+            return fail(55, "the flags are not followed by the end of the value or a dash");
+        }
+        if (all_zero(trace)) {
+            return fail(3, "the trace id is all zero");
+        }
+        if (all_zero(parent)) {
+            return fail(36, "the parent id is all zero");
+        }
+        return Result<TraceParent>.Ok(new TraceParent(version, trace, parent,
+            hex_value(text.byte_at(53)) * 16 + hex_value(text.byte_at(54))));
+    };
+
+    /// @brief `count` random bytes from `random` that are not all zero (drawn again in the rare all-zero case).
+    #NoDiscard
+    export let random_id = func(random: Random, count: int) -> uint8[list] {
+        while (true) {
+            last bytes = random.fill_bytes(count);
+            return bytes unless all_zero(bytes);
+        }
+        return new;
+    };
+
+    /// @brief A new trace: a random trace id (with the random-trace-id flag set), a random parent id, and the
+    /// sampled flag set to `sample`.
+    #NoDiscard
+    export let start = func(random: Random, sample: bool) -> TraceParent {
+        last trace = random_id(random, TraceIdBytes);
+        last parent = random_id(random, ParentIdBytes);
+        return new TraceParent(0, trace, parent, RandomTraceIdFlag + (sample ? SampledFlag : 0));
+    };
+
+    /// @brief A parse error at `offset`.
+    let fail = func(offset: int, text: string) -> Result<TraceParent> =>
+        Result<TraceParent>.Err(errors.Error.Parse { kind: errors.ParseErrorKind.Syntax, offset: offset,
+            message: "traceparent: " .. text });
+
+    /// @brief Whether `b` is a lowercase hex digit.
+    let is_hex = func(b: uint8) -> bool => (b >= 48 && b <= 57) || (b >= 97 && b <= 102);
+
+    /// @brief The value of a lowercase hex digit.
+    let hex_value = func(b: uint8) -> int => b <= 57 ? (b as int) - 48 : (b as int) - 87;
+
+    /// @brief `count` bytes from lowercase hex at `start`, or a shorter list when a digit is not lowercase hex.
+    let read_hex = func(text: string, start: int, count: int) -> uint8[list] {
+        last bytes: uint8[list] = new;
+        for (let i = 0; i < count; i++) {
+            last high = text.byte_at(start + 2 * i);
+            last low = text.byte_at(start + 2 * i + 1);
+            if (not is_hex(high) || not is_hex(low)) {
+                return bytes;
+            }
+            bytes.append((hex_value(high) * 16 + hex_value(low)) as uint8);
+        }
+        return bytes;
+    };
+
+    /// @brief The lowercase hex digit for 0 to 15.
+    let digit = func(value: int) -> string => "0123456789abcdef".slice(value, value + 1);
+
+    /// @brief Two lowercase hex digits for 0 to 255.
+    let hex_byte = func(value: int) -> string => digit(value / 16) + digit(value % 16);
+
+    /// @brief The bytes as lowercase hex.
+    let hex = func(bytes: uint8[list]) -> string {
+        let text = "";
+        for (let b in bytes) {
+            text ..= hex_byte(b as int);
+        }
+        return text;
+    };
+
+    /// @brief Whether every byte is zero.
+    let all_zero = func(bytes: uint8[list]) -> bool {
+        for (let b in bytes) {
+            if (b != 0) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    /// @brief Whether two byte lists are equal.
+    let same_bytes = func(a: uint8[list], b: uint8[list]) -> bool {
+        if (a.length != b.length) {
+            return false;
+        }
+        for (let i = 0; i < a.length; i++) {
+            if (a[i] != b[i]) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    /// @brief A copy of the bytes.
+    let copy = func(bytes: uint8[list]) -> uint8[list] {
+        last out: uint8[list] = new;
+        for (let b in bytes) {
+            out.append(b);
+        }
+        return out;
+    };
+);

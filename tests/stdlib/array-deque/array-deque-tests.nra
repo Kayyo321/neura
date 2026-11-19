@@ -27,7 +27,7 @@ let ArrayDequeTests = module (
 
     // Removing from an empty end moves half of the other end across.
     export let test_rebalancing = func() -> void {
-        let items = array_deque.of<int>([1, 2, 3, 4, 5, 6, 7]);
+        let items = array_deque.of<int>(new([1, 2, 3, 4, 5, 6, 7]));
         test.assert_equal_int32(1, items.remove_first());
         items.validate();
         test.assert_equal_string("[2, 3, 4, 5, 6, 7]", items.to_string());
@@ -68,7 +68,7 @@ let ArrayDequeTests = module (
     };
 
     export let test_indexing_and_search = func() -> void {
-        let items = array_deque.of<int>([3, 4]);
+        let items = array_deque.of<int>(new([3, 4]));
         items.add_first(2);
         items.add_first(1);
         let i = 0;
@@ -79,12 +79,12 @@ let ArrayDequeTests = module (
         test.assert(items.contains(1));
         test.assert(items.contains(4));
         test.assert(!items.contains(5));
-        test.assert(items.contains_all([1, 4]));
+        test.assert(items.contains_all(new([1, 4])));
         test.assert_equal_string("[1, 2, 3, 4]", items.to_list().to_string());
     };
 
     export let test_clear = func() -> void {
-        let items = array_deque.of<int>([1, 2]);
+        let items = array_deque.of<int>(new([1, 2]));
         items.add_first(0);
         items.clear();
         test.assert(items.is_empty());
@@ -95,7 +95,7 @@ let ArrayDequeTests = module (
     };
 
     export let test_iteration = func() -> void {
-        let items = array_deque.of<int>([2, 3]);
+        let items = array_deque.of<int>(new([2, 3]));
         items.add_first(1);
         let walk = items.iterator();
         test.assert(walk.has_next());
@@ -104,7 +104,7 @@ let ArrayDequeTests = module (
         test.assert_equal_int32(2, walk.next());
         test.assert_equal_int32(3, walk.next());
         test.assert(!walk.has_next());
-        let seen: int[list] = [];
+        let seen: int[list] = new;
         for (let value in items) {
             seen.append(value);
         }
@@ -122,8 +122,8 @@ let ArrayDequeTests = module (
 
     // Equality and hashing are by identity; the text lists the elements.
     export let test_identity_and_text = func {
-        let a = array_deque.of<int>([1, 2]);
-        let b = array_deque.of<int>([1, 2]);
+        let a = array_deque.of<int>(new([1, 2]));
+        let b = array_deque.of<int>(new([1, 2]));
         test.assert(a === a);
         test.assert(!(a === b));
         let as_class: class = a;

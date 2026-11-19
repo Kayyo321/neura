@@ -1,0 +1,79 @@
+let host_error = import:Std.Core.Internal.HostError;
+let messages = import:Std.Net.Dns.Message;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Net.Core.SocketAddr;
+let tcp_dns = import:Std.Net.Dns.TcpDnsTransport;
+let transports = import:Std.Net.Dns.DnsTransport;
+
+/// @brief DNS over QUIC (RFC 9250): one query per bidirectional QUIC stream, the message with DNS ID 0 behind a
+/// two-byte length (section 4.2), ALPN "doq", port 853.
+///
+/// The message preparation (`stream_payload`) is real. The exchange needs a QUIC connection with real packet
+/// protection, which this runtime does not have (`Std.Net.Quic` models the state machines but has no network or
+/// TLS 1.3 key schedule service), so the exchange is a stub.
+/// @see [Std.Net.Dns.DoqTransport](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-DoqTransport)
+#Since("0.3.0")
+export let DoqTransport = module (
+    /// @brief The DoQ port (RFC 9250 section 4.1.1, "Port Selection").
+    export const DoqPort: int = 853;
+    /// @brief The ALPN token (RFC 9250 section 4.1).
+    export const Alpn = "doq";
+
+    /// @brief Bytes received, or an unsigned host error code.
+    let BytesOutcome = enum (Ok(uint8[list]), Error(uint32));
+
+    /// @brief A DoQ transport.
+    #[Final, NotThreadSafe]
+    export let DoqTransport = class implements transports.DnsTransport (
+        /// @brief The server.
+        export last server: SocketAddr;
+        /// @brief The TLS server name.
+        export last server_name: string;
+
+        /// @brief A transport to `address`, verifying `name`.
+        export let init = func(address: SocketAddr, name: string) {
+            server = address;
+            server_name = name;
+        };
+
+        /// @brief A stream transport.
+        export let is_stream = func -> bool => true;
+
+        /// @brief One exchange on a new QUIC stream.
+        export let exchange = func(query: messages.Message) -> Result<messages.Message> {
+            last payload = stream_payload(query)?;
+            return match (quic_exchange(server.host_text(), server.port, server_name, payload)) {
+                BytesOutcome.Ok(reply) => restore_id(query, reply),
+                BytesOutcome.Error(code) => Result<messages.Message>.Err(host_error.io(code, "DoQ exchange failed",
+                    server.to_string())),
+            };
+        };
+
+        /// @brief Text such as "DoqTransport(192.0.2.53:853)".
+        export let.override to_string = func -> string => "DoqTransport(" .. server.to_string() .. ")";
+    );
+
+    /// @brief Decodes a reply and gives it the query's ID back (it travelled as 0).
+    let restore_id = func(query: messages.Message, reply: uint8[list]) -> Result<messages.Message> {
+        last response = messages.decode(reply)?;
+        response.header.id = query.header.id;
+        return Result<messages.Message>.Ok(response);
+    };
+
+    /// @brief What a DoQ client writes on its stream: the query with ID 0 (RFC 9250 section 4.2.1, "DNS Message
+    /// IDs") behind its two-byte length (section 4.2).
+    #NoDiscard
+    export let stream_payload = func(query: messages.Message) -> Result<uint8[list]> {
+        last bytes = messages.encode(query)?;
+        bytes[0] = 0;
+        bytes[1] = 0;
+        return Result<uint8[list]>.Ok(tcp_dns.frame(bytes));
+    };
+
+    /// @brief Opens a QUIC connection with ALPN "doq", writes `payload` on a new bidirectional stream, finishes it,
+    /// and returns the unframed response. Needed service: neura.net.quic.dns_exchange version 1.
+    /// @stub no QUIC transport in this runtime
+    let quic_exchange = func(host: string, port: int, server_name: string, payload: uint8[list]) -> BytesOutcome {
+        trap_with_message("unsupported: Std.Net.Dns.DoqTransport.quic_exchange is not implemented in Neura 0.3.0 (no QUIC transport in this runtime)");
+    };
+);

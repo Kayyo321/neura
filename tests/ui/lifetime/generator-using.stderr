@@ -1,0 +1,10 @@
+error[E0473]: 'using' needs a function that returns 'Result<T>'
+ --> $DIR/generator-using.nra:9:5
+  |
+9 |     using (source = new Resource()) {
+  |     ^^^^^ a generator returns its values through 'yield'
+  |
+  = note: a failed close returns its error from the function
+  = help: return a Result, or move the block into a function or lambda that returns one
+
+For more information about this error, try `neura explain E0473`.

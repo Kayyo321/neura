@@ -1,0 +1,14 @@
+error[E0504]: 'Small' must have an exported field 'size: int64' that can be read
+ --> $DIR/wrong-type.nra:6:1
+  |
+3 |     let size: int64;
+  |         ---- 'size' is required here
+...
+6 | let Small = class implements Sized (
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^... 'Small' does not satisfy the property 'size' of 'Sized'
+7 |     export let size: int = 0;
+  |                ---- 'size' is declared here
+  |
+  = note: 'size' has type int32, and a property is satisfied by exactly its type
+
+For more information about this error, try `neura explain E0504`.

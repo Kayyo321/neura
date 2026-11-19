@@ -1,0 +1,3 @@
+// A positional argument after a named one (edge case 2).
+let area = func(a: int, b: int) -> int => a * b;
+let size = area(a: 1, 2);

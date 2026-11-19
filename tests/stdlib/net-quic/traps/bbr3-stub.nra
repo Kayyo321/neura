@@ -1,0 +1,12 @@
+// status: 134
+// stderr: unsupported: Std\.Net\.Quic\.Bbr\.bbr3 is not implemented in Neura 0\.3\.0
+// BBRv3 has no stable published specification to implement against.
+let bbr = import:Std.Net.Quic.Bbr;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = bbr.bbr3(1200);
+        return program.ExitCode.Ok;
+    };
+);

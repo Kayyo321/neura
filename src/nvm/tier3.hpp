@@ -122,7 +122,8 @@ enum class Op : std::uint8_t {
     Call,          // function imm through exits[aux] on the extras; operands[0] = C (the call block's step in it),
                    // operands[1] = K
     Return,        // operands[0] = C before the return block's step, operands[1] = the value (none: void),
-                   // operands[2] = K
+                   // operands[2] = K; the extras are the words after the first of a function with several
+                   // result words (NVR 1.7), at most Context::max_result_words - 1
     // Terminators.
     Jump,
     Branch,        // operands[0] & 1: succs[0] when set, else succs[1]
@@ -181,6 +182,10 @@ enum class Op : std::uint8_t {
     // Canon of it). Both pure.
     Canon,
     Sqrt,
+    // Word `imm` (above 0) of the result of the Call operands[0], which follows it in its block: the callee's
+    // Return left it in Context::result_words, and nothing else runs between the two. The value of a call's
+    // first word is the Call itself.
+    ResultWord,
 };
 
 enum Flag : std::uint16_t {
@@ -359,6 +364,9 @@ struct Function {
     // The slot count of each function the program calls (not inlined): the
     // size of the frame a call pushes.
     std::map<std::uint32_t, std::uint32_t> call_frames;
+    // The result words (1 or more) of each function the program calls (not
+    // inlined): a Return writes that many slots of the caller's frame.
+    std::map<std::uint32_t, std::uint32_t> call_results;
     // The widths (lanes, at most 64) of the parameters of each function the
     // program calls (not inlined): the widths an argument must fit for the
     // callee's entry (a call's enter helper checks them, and so does native
@@ -372,6 +380,11 @@ struct Function {
     // frame state holds. Without them K is not an SSA value at all, and the
     // context's K stays what the activation chain has charged.
     bool inline_kernels = false;
+    // Whether the function has an EnterRegion exit (NVR 1.7; from the image,
+    // lifted or not, tier2::Region::enters_region): its frame may own storage
+    // regions, so its Return goes through the return helper, which releases
+    // them, and native code never pops its frame in place.
+    bool enters_region = false;
     // By SSA value, after place_canons (tier3_float.cpp): 32 or 64 for a
     // value whose bits a frame write canonicalizes in that format (a
     // Deferred result, or a value of only such results and canonical ones);
@@ -544,9 +557,10 @@ struct Helpers {
     const Program* (*callee_code)(Context*, std::uint32_t callee);
     // commit_exit's Return for the innermost frame, after the preconditions
     // (Fault: they do not hold, the run deoptimizes). On Ok the frame is
-    // popped, the caller's result slot written, `next_block` is the caller's
-    // return block.
-    Status (*ret)(Context*, std::uint64_t value, bool has_value, std::uint64_t blocks);
+    // popped, the caller's result slot written (and, for a function with
+    // several result words, the slots after it from the context's
+    // result_words), `next_block` is the caller's return block.
+    Status (*ret)(Context*, std::uint64_t value, bool has_value, std::uint64_t blocks, std::uint32_t words);
     // Heap::set_element on the live array or list with handle `handle`
     // (Widen); Exception when it throws.
     Status (*set_element)(Context*, std::uint64_t handle, std::uint64_t index, std::uint64_t bits);
@@ -576,12 +590,12 @@ struct Helpers {
 // FrameStack::push and pop_back do, and calls a helper otherwise.
 struct FrameRecord {
     void* headers = nullptr;
-    std::uint64_t size = 0;
-    std::uint64_t capacity = 0;
+    std::size_t size = 0;
+    std::size_t capacity = 0;
     std::uint64_t* slots = nullptr;
     std::uint8_t* initialized = nullptr;
-    std::uint64_t slot_size = 0;
-    std::uint64_t slot_capacity = 0;
+    std::size_t slot_size = 0;
+    std::size_t slot_capacity = 0;
 };
 
 // The offsets native code uses in a FrameRecord and in a frame header
@@ -605,6 +619,7 @@ inline constexpr std::int32_t called_from = 32;
 } // namespace frame_offsets
 
 static_assert(std::is_standard_layout_v<FrameRecord>);
+#ifndef NEURA_WASM_RUNTIME
 static_assert(offsetof(FrameRecord, headers) == frame_offsets::headers &&
               offsetof(FrameRecord, size) == frame_offsets::size &&
               offsetof(FrameRecord, capacity) == frame_offsets::capacity &&
@@ -612,6 +627,7 @@ static_assert(offsetof(FrameRecord, headers) == frame_offsets::headers &&
               offsetof(FrameRecord, initialized) == frame_offsets::initialized &&
               offsetof(FrameRecord, slot_size) == frame_offsets::slot_size &&
               offsetof(FrameRecord, slot_capacity) == frame_offsets::slot_capacity);
+#endif
 
 // How a helper of native code went (Context::status).
 enum class NativeStatus : std::uint32_t {
@@ -646,9 +662,10 @@ struct NativeHelpers {
     std::uint64_t (*call)(Context*, std::uint32_t exit, std::uint32_t callee, const std::uint64_t* arguments,
                           std::uint32_t count);
     // commit_exit's Return of `value` with C = `blocks` before the return
-    // block's step: Fault deoptimizes (Exits); on Ok the value comes back
-    // and C in the context counts the return block.
-    std::uint64_t (*ret)(Context*, std::uint64_t value, std::uint64_t blocks);
+    // block's step, and `words` more words in the context's result_words
+    // (NVR 1.7): Fault deoptimizes (Exits); on Ok the value comes back and C in
+    // the context counts the return block.
+    std::uint64_t (*ret)(Context*, std::uint64_t value, std::uint64_t blocks, std::uint32_t words);
     // Ends the activation at block `block` of the innermost frame, with C in
     // the context.
     std::uint64_t (*leave)(Context*, std::uint32_t block);
@@ -721,6 +738,12 @@ struct Context {
     CalleeCell* callee_cells = nullptr;
     // Calls native code entered from a callee's cell, for the statistics.
     std::uint64_t cell_entries = 0;
+    // The words after the first that the last Return of a function with several result words left
+    // (result_words[i] is word i + 1). A Return writes them before it pops the frame (the `ret`
+    // helpers take their count), and the Call that follows reads them (ResultWord) before anything
+    // else runs.
+    static constexpr std::uint32_t max_result_words = 64;
+    std::uint64_t result_words[max_result_words] = {};
 
     void* owner = nullptr;
     const Helpers* helpers = nullptr;
@@ -798,9 +821,11 @@ inline constexpr std::int32_t inline_calls = 176;
 inline constexpr std::int32_t inline_returns = 184;
 inline constexpr std::int32_t callee_cells = 192;
 inline constexpr std::int32_t cell_entries = 200;
+inline constexpr std::int32_t result_words = 208;
 } // namespace offsets
 
 static_assert(std::is_standard_layout_v<Context>);
+#ifndef NEURA_WASM_RUNTIME
 static_assert(offsetof(Context, C) == offsets::C && offsetof(Context, K) == offsets::K &&
               offsetof(Context, room) == offsets::room && offsetof(Context, slots) == offsets::slots &&
               offsetof(Context, flags) == offsets::flags && offsetof(Context, block) == offsets::block &&
@@ -819,10 +844,12 @@ static_assert(offsetof(Context, functions) + offsetof(NativeHelpers, state) == o
               offsetof(Context, functions) + offsetof(NativeHelpers, evaluate) == offsets::evaluate &&
               offsetof(Context, functions) + offsetof(NativeHelpers, enter) == offsets::enter);
 static_assert(offsetof(Context, callee_cells) == offsets::callee_cells &&
-              offsetof(Context, cell_entries) == offsets::cell_entries);
+              offsetof(Context, cell_entries) == offsets::cell_entries &&
+              offsetof(Context, result_words) == offsets::result_words);
 static_assert(offsetof(Context, frames) == offsets::frames && offsetof(Context, max_frames) == offsets::max_frames &&
               offsetof(Context, inline_calls) == offsets::inline_calls &&
               offsetof(Context, inline_returns) == offsets::inline_returns);
+#endif
 
 // The fields of a CalleeCell.
 namespace cell_offsets {

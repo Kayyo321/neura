@@ -1,0 +1,7 @@
+error[E0305]: unknown or inaccessible member 'missing' of T
+ --> $DIR/missing-name.nra:6:43
+  |
+6 | let make = func<T: Additive<T>>() -> T => T.missing();
+  |                                           ^^^^^^^^^ no bound of 'T' requires a static function 'missing'
+
+For more information about this error, try `neura explain E0305`.

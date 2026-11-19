@@ -26,6 +26,27 @@ nvr::Image logic_model();
 nvr::Image version_model();
 std::vector<std::uint8_t> version_bytes(std::uint16_t minor);
 std::vector<std::uint8_t> logic_bytes();
+// tests/backend/tier/multi-result.nvra, assembled: an NVR 1.7 image whose
+// functions return two and three words (the compiler does not emit them yet).
+nvr::Image multi_result_image(const Environment& environment);
+// tests/backend/tier/aggregates.nvra, assembled and given the lift hints of its
+// graphs: an NVR 1.7 image with arrays and lists of aggregate elements. The
+// entry's argument count selects a trap case (1 to 4).
+nvr::Image aggregate_image(const Environment& environment);
+// tests/backend/tier/region-storage.nvra, assembled and given the lift hints of its
+// graphs: an NVR 1.7 image with storage regions (the compiler does not emit them yet).
+// The entry's argument count selects a trap case (1 to 9).
+nvr::Image region_image(const Environment& environment);
+// tests/backend/tier/region-tiers.nvra, assembled and given the lift hints of its graphs:
+// storage regions in hot loops, recursion and calls that tiers 2 and 3 compile. The entry's
+// argument count selects a trap case (1 or 2).
+nvr::Image region_tiers_image(const Environment& environment);
+// tests/backend/tier/region-tasks.nvra and region-tasks-token.nvra, assembled: three tasks with
+// regions of their own, and the variant in which a child uses the root's token.
+nvr::Image region_tasks_image(const Environment& environment, bool token_variant = false);
+// tests/backend/tier/aggregate-cells.nvra, assembled: the cell accounting of
+// aggregate collections (peak 18 cells, 15 at the end).
+nvr::Image aggregate_cells_image(const Environment& environment);
 
 // One image of the corpus that the decompiler tests use.
 struct CorpusImage {

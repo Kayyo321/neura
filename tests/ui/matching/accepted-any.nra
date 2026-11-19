@@ -1,0 +1,46 @@
+// Edge cases 42, 43, 47, 50, 52 to 58, 63 and 64: any forms that are accepted. They are checked; executing them needs the converter step.
+let.promote _ = import:Std.Core.Optional;
+let Shape = class ( export let sides: int = 0; );
+let Wrapper = class ( export let items: int[list] = new int[list](); );
+let Holder = class ( export let value: any = nil; );
+let global: any = 1;
+let log_all = func(values: ...any) -> int {
+    let integers = 0;
+    for (let value: any in values) {
+        if (value is int64) {
+            integers += 1;
+        }
+    }
+    return integers;
+};
+let f = func(x: int32) -> int {
+    return 1;
+} or func(x: any) -> int {
+    return 2;
+};
+let identity = func<T>(value: T) -> T => value;
+let forms = func(ready: bool, shape: Shape, sequence: int[]) {
+    let v: any = 7;
+    let w: any = 7 as int64;
+    let u = 7 as any;
+    let x: any = u;
+    let r: any = shape;
+    let n: any = nil;
+    let c: class = shape;
+    let k: any = c;
+    let wrapped: any = new Wrapper();
+    let both = [v is int64, v is Shape];
+    let array: any[] = [v, w];
+    let list = new any[list]([1, "a", nil]);
+    let tuple: [any, int] = [1, 2];
+    let maybe = Optional<any>.Some(v);
+    let count = log_all(7 as int64, "seven", 7.0, nil);
+    let pick: any = ready ? 1 : "x";
+    let first = f(1 as int32);
+    let second = f("text");
+    let same = identity(7);
+    let explicit = identity<any>(7);
+    let sixteen: [any, any, any, any, any, any, any, any, any, any, any, any, any, any, any, any] =
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+    let any = 1;
+};

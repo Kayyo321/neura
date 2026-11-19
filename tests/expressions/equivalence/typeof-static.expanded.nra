@@ -1,0 +1,14 @@
+// typeof of a type (docs/design/Expressions030.md, typeof): the kind and the
+// names are constants of the program, so `typeof(int32)` builds the image of
+// the call of TypeInfo.from_parts with those constants.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let reflect = import:Std.Reflect.Core.TypeInfo;
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let info = reflect.from_parts([2, "int32", "int32"]);
+        console.print_line(info.name);
+        return program.ExitCode.Ok;
+    };
+);

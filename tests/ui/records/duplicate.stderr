@@ -1,0 +1,10 @@
+error[E0303]: duplicate component 'x'
+ --> $DIR/duplicate.nra:2:25
+  |
+2 | let P = record (x: int, x: int);
+  |                         ^ 'x' is declared again here
+  |                 - 'x' is first declared here
+  |
+  = help: rename one of them
+
+For more information about this error, try `neura explain E0303`.

@@ -1,0 +1,10 @@
+let console = import:Std.Io.Console;
+let cycle_a = import:CycleA;
+
+static scope {
+    console.print_line("cycle-b: block");
+}
+
+export let CycleB = module (
+    export let name: string = "b";
+);

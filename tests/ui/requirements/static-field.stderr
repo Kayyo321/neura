@@ -1,0 +1,7 @@
+error[E0404]: binding requires an initializer
+ --> $DIR/static-field.nra:3:5
+  |
+3 |     static let limit: int;
+  |     ^^^^^^^^^^^^^^^^^^^^^^
+
+For more information about this error, try `neura explain E0404`.

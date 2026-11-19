@@ -1,0 +1,9 @@
+error[E0214]: parameter 'x' has no type
+ --> $DIR/untyped-lambda-declaration.nra:2:14
+  |
+2 | let f = func(x) => x;
+  |              ^ a parameter takes the type that follows its group of names
+  |
+  = help: write ': <type>' after the last name of the group, as in 'func(a, b: int)'
+
+For more information about this error, try `neura explain E0214`.

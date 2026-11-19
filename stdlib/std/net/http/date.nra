@@ -1,0 +1,427 @@
+let.promote _ = import:Std.Core.Error;
+let instant = import:Std.Time.Instant;
+let int64s = import:Std.Core.Int64;
+let local_date = import:Std.Time.LocalDate;
+let.promote _ = import:Std.Core.Result;
+
+/// @brief HTTP-date timestamps (RFC 9110 section 5.6.7): parsing all three formats a recipient must accept and
+/// formatting the preferred IMF-fixdate.
+///
+/// `parse` accepts IMF-fixdate (`Sun, 06 Nov 1994 08:49:37 GMT`), the obsolete RFC 850 form (`Sunday,
+/// 06-Nov-94 08:49:37 GMT`) and the asctime form (`Sun Nov  6 08:49:37 1994`), all in UTC. Names are
+/// case-sensitive as RFC 9110 requires; `parse_ignoring_case` matches day names, month names and `GMT` without
+/// regard to ASCII case, as RFC 9111 section 4.2 asks of a cache. The day name must be the day of the week of
+/// the date (RFC 5322 section 3.3), or the text is invalid. A second of 60 (a leap second) is accepted and
+/// read as second 59, the nearest representable time not later than the value (as RFC 9111 section 4.2 asks
+/// for Expires). The two-digit year of the RFC 850 form is resolved against a reference instant: the year
+/// with those last two digits that is not more than 50 years after the reference (RFC 9110 section 5.6.7).
+/// Every malformed or impossible text is an `Err`, never a trap; a cache treats an invalid Expires value as a
+/// time in the past ("already expired", RFC 9111 section 5.3), see `Std.Net.Http.Cache`.
+/// @see [Std.Net.Http.Date](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-Date)
+#Since("0.3.0")
+export let Date = module (
+    /// @brief The first second that IMF-fixdate can write: 0000-01-01T00:00:00Z.
+    export const MinEpochSeconds: int64 = -62167219200;
+
+    /// @brief The last second that IMF-fixdate can write: 9999-12-31T23:59:59Z.
+    export const MaxEpochSeconds: int64 = 253402300799;
+
+    /// @brief `moment` as IMF-fixdate, for example `Sun, 06 Nov 1994 08:49:37 GMT`. A fraction of a second is
+    /// dropped (the time is rounded toward the past). Err (OutOfRange) outside years 0000 through 9999.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let format = func(moment: instant.Instant) -> Result<string> {
+        last seconds = moment.epoch_seconds;
+        if (seconds < MinEpochSeconds || seconds > MaxEpochSeconds) {
+            return Result<string>.Err(failure(ParseErrorKind.OutOfRange, 0, "year outside 0000 through 9999"));
+        }
+        last epoch_day = int64s.floor_div(seconds, 86400);
+        last second_of_day = (seconds - epoch_day * 86400) as int;
+        last date = local_date.of_epoch_day(epoch_day);
+        last weekday = weekday_of(epoch_day);
+        return Result<string>.Ok(
+            name_of(DayNames, weekday) .. ", " .. two_digits(date.day) .. " " .. name_of(MonthNames, date.month - 1)
+            .. " " .. four_digits(date.year) .. " " .. two_digits(second_of_day / 3600) .. ":"
+            .. two_digits(second_of_day / 60 % 60) .. ":" .. two_digits(second_of_day % 60) .. " GMT");
+    };
+
+    /// @brief Parses an HTTP-date in any of the three formats, matching names exactly. `reference` (normally
+    /// the time the message was received) resolves the two-digit year of the RFC 850 form.
+    ///
+    /// Errors are Parse errors at the offending byte: Empty for "", Syntax for text that fits no format,
+    /// InvalidCharacter for a bad name, digit or separator, OutOfRange for an impossible date or time or a day
+    /// name that is not the date's weekday, UnexpectedEnd for a cut text.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let parse = func(text: string, reference: instant.Instant) -> Result<instant.Instant> =>
+        parse_with(text, reference, false);
+
+    /// @brief `parse`, but day names, month names and `GMT` match without regard to ASCII case (RFC 9111
+    /// section 4.2).
+    #[NoDiscard, Pure, ThreadSafe]
+    export let parse_ignoring_case = func(text: string, reference: instant.Instant) -> Result<instant.Instant> =>
+        parse_with(text, reference, true);
+
+    /// @brief Parses only the preferred IMF-fixdate format, matching names exactly; no reference is needed.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let parse_imf_fixdate = func(text: string) -> Result<instant.Instant> {
+        if (text.byte_length == 0) {
+            return Result<instant.Instant>.Err(failure(ParseErrorKind.Empty, 0, "empty date"));
+        }
+        return Result<instant.Instant>.Err(failure(ParseErrorKind.Syntax, 0, "not an IMF-fixdate")) unless is_fixdate_shape(text);
+        return parse_fixdate(new Reader(text, false));
+    };
+
+    /// @brief Name table: the day names of IMF-fixdate and asctime, Monday first.
+    const DayNames: int = 0;
+
+    /// @brief Name table: the day names of the RFC 850 form, Monday first.
+    const LongDayNames: int = 1;
+
+    /// @brief Name table: the month names, January first.
+    const MonthNames: int = 2;
+
+    /// @brief The number of names in `table`.
+    #[Pure, ThreadSafe]
+    let table_size = func(table: int) -> int => table == MonthNames ? 12 : 7;
+
+    /// @brief Name `index` of `table`.
+    #[Pure, ThreadSafe]
+    let name_of = func(table: int, index: int) -> string {
+        if (table == MonthNames) {
+            return "JanFebMarAprMayJunJulAugSepOctNovDec".slice(index * 3, index * 3 + 3);
+        }
+        last short = "MonTueWedThuFriSatSun".slice(index * 3, index * 3 + 3);
+        if (table == DayNames) {
+            return short;
+        }
+        if (index == 1) {
+            return "Tuesday";
+        }
+        if (index == 2) {
+            return "Wednesday";
+        }
+        if (index == 3) {
+            return "Thursday";
+        }
+        return if (index == 5) -> "Saturday"
+            else -> short .. "day";
+    };
+
+    /// @brief A cursor over the bytes of a date text that records the first failure.
+    #[Final, NotThreadSafe]
+    let Reader = class (
+        /// @brief The text being read.
+        last text: string;
+        /// @brief Whether names match without regard to ASCII case.
+        last ignore_case: bool;
+        /// @brief The offset of the next byte.
+        let pos: int = 0;
+        /// @brief Whether a failure was recorded.
+        let failed: bool = false;
+        /// @brief The recorded failure.
+        let problem: Error = Error.Parse { kind: ParseErrorKind.Syntax, offset: 0, message: "" };
+
+        /// @brief Reads `source` from its start.
+        export let init = func(source: string, fold: bool) {
+            text = source;
+            ignore_case = fold;
+        };
+
+        /// @brief Whether no failure was recorded.
+        export let ok = func -> bool => not failed;
+
+        /// @brief The offset of the next byte.
+        export let position = func -> int => pos;
+
+        /// @brief The recorded failure.
+        export let error = func -> Error => problem;
+
+        /// @brief The byte at the cursor, or -1 at the end.
+        export let peek = func -> int => pos < text.byte_length ? text.byte_at(pos) as int : -1;
+
+        /// @brief Records a failure unless one is recorded already.
+        export let fail = func(kind: ParseErrorKind, offset: int, message: string) {
+            if (not failed) {
+                failed = true;
+                problem = failure(kind, offset, message);
+            }
+        };
+
+        /// @brief Consumes byte `b` or records a failure naming `what`.
+        export let expect = func(b: uint8, what: string) {
+            if (failed) {
+                return;
+            }
+            if (pos >= text.byte_length) {
+                fail(ParseErrorKind.UnexpectedEnd, pos, "expected " .. what);
+                return;
+            }
+            if (text.byte_at(pos) != b) {
+                fail(ParseErrorKind.InvalidCharacter, pos, "expected " .. what);
+                return;
+            }
+            pos++;
+        };
+
+        /// @brief Consumes `count` decimal digits and returns their value, or records a failure and returns -1.
+        export let digits = func(count: int) -> int {
+            if (failed) {
+                return -1;
+            }
+            let value = 0;
+            for (let i = 0; i < count; i++) {
+                if (pos >= text.byte_length) {
+                    fail(ParseErrorKind.UnexpectedEnd, pos, "expected a digit");
+                    return -1;
+                }
+                last b = text.byte_at(pos);
+                if (b < 48 || b > 57) {
+                    fail(ParseErrorKind.InvalidCharacter, pos, "expected a digit");
+                    return -1;
+                }
+                value = value * 10 + ((b - 48) as int);
+                pos++;
+            }
+            return value;
+        };
+
+        /// @brief Consumes the first name of `table` found at the cursor and returns its index, or records a failure
+        /// naming `what` and returns -1.
+        export let name = func(table: int, what: string) -> int {
+            if (failed) {
+                return -1;
+            }
+            for (let i = 0; i < table_size(table); i++) {
+                last candidate = name_of(table, i);
+                if (matches_at(candidate)) {
+                    pos += candidate.byte_length;
+                    return i;
+                }
+            }
+            fail(ParseErrorKind.InvalidCharacter, pos, "expected " .. what);
+            return -1;
+        };
+
+        /// @brief Consumes the literal `word` (case as configured) or records a failure.
+        export let word = func(literal: string) {
+            if (failed) {
+                return;
+            }
+            if (not matches_at(literal)) {
+                fail(ParseErrorKind.InvalidCharacter, pos, "expected " .. literal);
+                return;
+            }
+            pos += literal.byte_length;
+        };
+
+        /// @brief Records a failure unless the whole text was read.
+        export let finish = func {
+            if (not failed && pos != text.byte_length) {
+                fail(ParseErrorKind.InvalidCharacter, pos, "text after the date");
+            }
+        };
+
+        /// @brief Whether `literal` appears at the cursor.
+        let matches_at = func(literal: string) -> bool {
+            if (pos + literal.byte_length > text.byte_length) {
+                return false;
+            }
+            for (let i = 0; i < literal.byte_length; i++) {
+                let a = text.byte_at(pos + i);
+                let b = literal.byte_at(i);
+                if (ignore_case) {
+                    a = lower(a);
+                    b = lower(b);
+                }
+                if (a != b) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        /// @brief "Reader".
+        export let.override to_string = func -> string => "Reader";
+    );
+
+    /// @brief Dispatches on the shape of the text: a comma after three bytes is IMF-fixdate, a comma later is
+    /// the RFC 850 form, no comma is asctime.
+    let parse_with = func(text: string, reference: instant.Instant, ignore_case: bool) -> Result<instant.Instant> {
+        if (text.byte_length == 0) {
+            return Result<instant.Instant>.Err(failure(ParseErrorKind.Empty, 0, "empty date"));
+        }
+        last reader = new Reader(text, ignore_case);
+        last comma = comma_index(text);
+        if (comma == 3) {
+            return parse_fixdate(reader);
+        }
+        if (comma > 3) {
+            return parse_rfc850(reader, reference);
+        }
+        return if (comma < 0) -> parse_asctime(reader)
+            else -> Result<instant.Instant>.Err(failure(ParseErrorKind.Syntax, comma, "not an HTTP-date"));
+    };
+
+    /// @brief IMF-fixdate: day-name "," SP 2DIGIT SP month SP 4DIGIT SP time-of-day SP "GMT".
+    let parse_fixdate = func(reader: Reader) -> Result<instant.Instant> {
+        last weekday = reader.name(DayNames, "a day name");
+        reader.expect(44, "','");
+        reader.expect(32, "a space");
+        last day_at = reader.position();
+        last day = reader.digits(2);
+        reader.expect(32, "a space");
+        last month = reader.name(MonthNames, "a month name") + 1;
+        reader.expect(32, "a space");
+        last year = reader.digits(4);
+        reader.expect(32, "a space");
+        last time_at = reader.position();
+        last seconds = read_time(reader);
+        reader.expect(32, "a space");
+        reader.word("GMT");
+        reader.finish();
+        return assemble(reader, weekday, year, month, day, day_at, seconds, time_at);
+    };
+
+    /// @brief The RFC 850 form: day-name-l "," SP 2DIGIT "-" month "-" 2DIGIT SP time-of-day SP "GMT".
+    let parse_rfc850 = func(reader: Reader, reference: instant.Instant) -> Result<instant.Instant> {
+        last weekday = reader.name(LongDayNames, "a day name");
+        reader.expect(44, "','");
+        reader.expect(32, "a space");
+        last day_at = reader.position();
+        last day = reader.digits(2);
+        reader.expect(45, "'-'");
+        last month = reader.name(MonthNames, "a month name") + 1;
+        reader.expect(45, "'-'");
+        last short_year = reader.digits(2);
+        reader.expect(32, "a space");
+        last time_at = reader.position();
+        last seconds = read_time(reader);
+        reader.expect(32, "a space");
+        reader.word("GMT");
+        reader.finish();
+        return Result<instant.Instant>.Err(reader.error()) unless reader.ok();
+        last reference_seconds = reference.epoch_seconds;
+        // The reference must leave room for 50 years and stay in years 0000 through 9999.
+        if (reference_seconds < MinEpochSeconds || reference_seconds > MaxEpochSeconds - 1600000000) {
+            return Result<instant.Instant>.Err(failure(ParseErrorKind.OutOfRange, 0, "reference instant out of range"));
+        }
+        last year = resolve_year(short_year, month, day, seconds, reference_seconds);
+        return assemble(reader, weekday, year, month, day, day_at, seconds, time_at);
+    };
+
+    /// @brief asctime: day-name SP month SP ( 2DIGIT / SP 1DIGIT ) SP time-of-day SP 4DIGIT.
+    let parse_asctime = func(reader: Reader) -> Result<instant.Instant> {
+        last weekday = reader.name(DayNames, "a day name");
+        reader.expect(32, "a space");
+        last month = reader.name(MonthNames, "a month name") + 1;
+        reader.expect(32, "a space");
+        last day_at = reader.position();
+        let day = -1;
+        if (reader.ok() && reader.peek() == 32) {
+            reader.expect(32, "a space");
+            day = reader.digits(1);
+        } else {
+            day = reader.digits(2);
+        }
+        reader.expect(32, "a space");
+        last time_at = reader.position();
+        last seconds = read_time(reader);
+        reader.expect(32, "a space");
+        last year = reader.digits(4);
+        reader.finish();
+        return assemble(reader, weekday, year, month, day, day_at, seconds, time_at);
+    };
+
+    /// @brief hour ":" minute ":" second as a second of the day; second 60 reads as 59. Returns -1 after a
+    /// failure, which it records.
+    let read_time = func(reader: Reader) -> int {
+        last hour = reader.digits(2);
+        reader.expect(58, "':'");
+        last minute = reader.digits(2);
+        reader.expect(58, "':'");
+        let second = reader.digits(2);
+        return -1 unless reader.ok();
+        if (hour > 23 || minute > 59 || second > 60) {
+            reader.fail(ParseErrorKind.OutOfRange, reader.position() - 8, "time of day out of range");
+            return -1;
+        }
+        if (second == 60) {
+            second = 59;
+        }
+        return hour * 3600 + minute * 60 + second;
+    };
+
+    /// @brief Checks the date and the weekday and builds the instant, or returns the recorded failure.
+    let assemble = func(reader: Reader, weekday: int, year: int, month: int, day: int, day_at: int, seconds: int,
+        time_at: int) -> Result<instant.Instant> {
+        return Result<instant.Instant>.Err(reader.error()) unless reader.ok();
+        last date = local_date.try_of(year, month, day);
+        if (date == nil) {
+            return Result<instant.Instant>.Err(failure(ParseErrorKind.OutOfRange, day_at, "no such date"));
+        }
+        last epoch_day = date.to_epoch_day();
+        if (weekday_of(epoch_day) != weekday) {
+            return Result<instant.Instant>.Err(
+                failure(ParseErrorKind.OutOfRange, 0, "day name is not the date's weekday"));
+        }
+        return Result<instant.Instant>.Ok(instant.of_epoch_seconds(epoch_day * 86400 + (seconds as int64), 0));
+    };
+
+    /// @brief The four-digit year ending in `short_year` that is not more than 50 years after the reference
+    /// (RFC 9110 section 5.6.7): the latest such year at or before the reference year plus 50, one century
+    /// earlier when the timestamp would still fall after the reference plus 50 years.
+    let resolve_year = func(short_year: int, month: int, day: int, seconds: int, reference_seconds: int64) -> int {
+        last reference_day = int64s.floor_div(reference_seconds, 86400);
+        last reference_second = (reference_seconds - reference_day * 86400) as int;
+        last reference_date = local_date.of_epoch_day(reference_day);
+        last limit_year = reference_date.year + 50;
+        let year = limit_year - (((limit_year - short_year) % 100 + 100) % 100);
+        if (year == limit_year) {
+            // Compares month, day and time with the reference's, so an impossible day still compares.
+            last later = month > reference_date.month
+                || (month == reference_date.month && (day > reference_date.day
+                    || (day == reference_date.day && seconds > reference_second)));
+            if (later) {
+                year -= 100;
+            }
+        }
+        return year;
+    };
+
+    /// @brief The weekday of an epoch day: 0 for Monday through 6 for Sunday (1970-01-01 was a Thursday).
+    let weekday_of = func(epoch_day: int64) -> int => int64s.floor_mod(epoch_day + 3, 7) as int;
+
+    /// @brief The index of the first comma, or -1.
+    let comma_index = func(text: string) -> int {
+        for (let i = 0; i < text.byte_length; i++) {
+            if (text.byte_at(i) == 44) {
+                return i;
+            }
+        }
+        return -1;
+    };
+
+    /// @brief Whether the text has a comma at offset 3, the IMF-fixdate position.
+    let is_fixdate_shape = func(text: string) -> bool => comma_index(text) == 3;
+
+    /// @brief The ASCII lowercase of `b`.
+    let lower = func(b: uint8) -> uint8 {
+        return if (b >= 65 && b <= 90) -> b + 32
+            else -> b;
+    };
+
+    /// @brief `value` (0 through 99) as two digits.
+    let two_digits = func(value: int) -> string => value < 10 ? "0" .. value.to_string() : value.to_string();
+
+    /// @brief `value` (0 through 9999) as four digits.
+    let four_digits = func(value: int) -> string {
+        let text = value.to_string();
+        while (text.byte_length < 4) {
+            text = "0" .. text;
+        }
+        return text;
+    };
+
+    /// @brief A Parse error.
+    let failure = func(kind: ParseErrorKind, offset: int, message: string) -> Error =>
+        Error.Parse { kind: kind, offset: offset, message: message };
+);

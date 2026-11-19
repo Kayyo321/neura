@@ -51,15 +51,9 @@ export let Calendar = module (
     #Pure
     export let month_length = func(year: int64, month: int) -> int {
         if (month == 2) {
-            if (is_leap(year)) {
-                return 29;
-            }
-            return 28;
+            return if (is_leap(year)) -> 29 else -> 28;
         }
-        if (month == 4 || month == 6 || month == 9 || month == 11) {
-            return 30;
-        }
-        return 31;
+        return if (month == 4 || month == 6 || month == 9 || month == 11) -> 30 else -> 31;
     };
 
     /// @brief Days since 1970-01-01.
@@ -110,7 +104,7 @@ export let Calendar = module (
         let text = value.to_string();
         let count = text.byte_length;
         while (count < width) {
-            text = "0" + text;
+            text = "0" .. text;
             count++;
         }
         return text;
@@ -120,18 +114,15 @@ export let Calendar = module (
     #Pure
     export let year_text = func(year: int64) -> string {
         if (year < 0) {
-            return "-" + padded(-year, 4);
+            return "-" .. padded(-year, 4);
         }
-        if (year > 9999) {
-            return "+" + year.to_string();
-        }
-        return padded(year, 4);
+        return if (year > 9999) -> "+" .. year.to_string() else -> padded(year, 4);
     };
 
     /// @brief Formats a Gregorian date with a signed extended year when required.
     #Pure
     export let date_text = func(year: int64, month: int, day: int) -> string {
-        return year_text(year) + "-" + padded(month as int64, 2) + "-" + padded(day as int64, 2);
+        return year_text(year) .. "-" .. padded(month as int64, 2) .. "-" .. padded(day as int64, 2);
     };
 
     /// @brief Empty for zero; otherwise a point and the shortest of 3, 6, or 9 digits that is exact.
@@ -141,12 +132,12 @@ export let Calendar = module (
             return "";
         }
         if (nanos % 1000000 == 0) {
-            return "." + padded((nanos / 1000000) as int64, 3);
+            return "." .. padded((nanos / 1000000) as int64, 3);
         }
         if (nanos % 1000 == 0) {
-            return "." + padded((nanos / 1000) as int64, 6);
+            return "." .. padded((nanos / 1000) as int64, 6);
         }
-        return "." + padded(nanos as int64, 9);
+        return "." .. padded(nanos as int64, 9);
     };
 
     /// @brief HH:MM:SS and the fraction of fraction_text.
@@ -155,8 +146,8 @@ export let Calendar = module (
         last whole = floor_div(nano_of_day, NanosPerSecond);
         last nanos = (nano_of_day - whole * NanosPerSecond) as int;
         last seconds = whole as int;
-        return padded((seconds / 3600) as int64, 2) + ":" + padded((seconds / 60 % 60) as int64, 2) + ":" +
-            padded((seconds % 60) as int64, 2) + fraction_text(nanos);
+        return padded((seconds / 3600) as int64, 2) .. ":" .. padded((seconds / 60 % 60) as int64, 2) .. ":" ..
+            padded((seconds % 60) as int64, 2) .. fraction_text(nanos);
     };
 
     /// @brief Z for zero; otherwise a sign and HH:MM. Offsets are whole minutes.
@@ -171,7 +162,7 @@ export let Calendar = module (
             sign = "-";
             magnitude = -magnitude;
         }
-        return sign + padded(magnitude / 3600, 2) + ":" + padded(magnitude / 60 % 60, 2);
+        return sign .. padded(magnitude / 3600, 2) .. ":" .. padded(magnitude / 60 % 60, 2);
     };
 
     /// @brief A cursor over text for the ISO parsers.
@@ -202,7 +193,7 @@ export let Calendar = module (
 
         /// @brief Reports whether scanning has yet to record a failure.
         #Pure
-        export let ok = func -> bool => !failed;
+        export let ok = func -> bool => not failed;
 
         /// @brief Returns the scanner's next byte offset.
         #Pure
@@ -215,10 +206,7 @@ export let Calendar = module (
         /// @brief The byte at the cursor, or -1 at the end or after a failure.
         #Pure
         export let peek = func -> int {
-            if (failed || cursor >= source.byte_length) {
-                return -1;
-            }
-            return source.byte_at(cursor) as int;
+            return if (failed || cursor >= source.byte_length) -> -1 else -> source.byte_at(cursor) as int;
         };
 
         /// @brief Tests whether the next byte is an ASCII decimal digit.
@@ -230,7 +218,7 @@ export let Calendar = module (
 
         /// @brief Keeps the first failure only.
         export let fail = func(kind: error.ParseErrorKind, offset: int, message: string) {
-            if (!failed) {
+            if (not failed) {
                 failed = true;
                 failure_kind = kind;
                 failure_offset = offset;
@@ -242,9 +230,9 @@ export let Calendar = module (
         /// InvalidCharacter at the cursor.
         export let unexpected = func(expected: string) {
             if (cursor >= source.byte_length) {
-                fail(error.ParseErrorKind.UnexpectedEnd, source.byte_length, "unexpected end of input, expected " + expected);
+                fail(error.ParseErrorKind.UnexpectedEnd, source.byte_length, "unexpected end of input, expected " .. expected);
             } else {
-                fail(error.ParseErrorKind.InvalidCharacter, cursor, "expected " + expected);
+                fail(error.ParseErrorKind.InvalidCharacter, cursor, "expected " .. expected);
             }
         };
 
@@ -264,7 +252,7 @@ export let Calendar = module (
 
         /// @brief Consumes an expected byte or records the first mismatch.
         export let expect = func(b: int, expected: string) {
-            if (!accept(b)) {
+            if (not accept(b)) {
                 unexpected(expected);
             }
         };
@@ -272,8 +260,8 @@ export let Calendar = module (
         /// @brief Exactly `count` decimal digits.
         export let fixed_digits = func(count: int) -> int64 {
             let value: int64 = 0;
-            for (let i = 0; i < count; i = i + 1) {
-                if (!peek_digit()) {
+            for (let i in 0 .. count) {
+                if (not peek_digit()) {
                     unexpected("digit");
                     return 0;
                 }
@@ -323,7 +311,7 @@ export let Calendar = module (
 
         /// @brief Any byte left over is an InvalidCharacter.
         export let finish = func {
-            if (!failed && cursor < source.byte_length) {
+            if (not failed && cursor < source.byte_length) {
                 fail(error.ParseErrorKind.InvalidCharacter, cursor, "unexpected character");
             }
         };
@@ -333,6 +321,9 @@ export let Calendar = module (
         export let failure = func -> error.Error {
             return error.Error.Parse { kind: failure_kind, offset: failure_offset, message: failure_message };
         };
+
+        /// @brief Names the scanner and its cursor.
+        export let.override to_string = func -> string => "Scanner(at " .. cursor.to_string() .. ")";
     );
 
     /// @brief A year: exactly four digits, or a sign and at least four digits; -999999 through 999999.
@@ -346,13 +337,9 @@ export let Calendar = module (
             signed = true;
             negative = true;
         }
-        if (!signed) {
-            return scan.fixed_digits(4);
-        }
+        return scan.fixed_digits(4) unless signed;
         let [value, count] = scan.digits();
-        if (!scan.ok()) {
-            return 0;
-        }
+        return 0 unless scan.ok();
         if (count < 4) {
             scan.unexpected("digit");
             return 0;
@@ -361,10 +348,7 @@ export let Calendar = module (
             scan.out_of_range(start, "year out of range");
             return 0;
         }
-        if (negative) {
-            return -(value as int64);
-        }
-        return value as int64;
+        return if (negative) -> -(value as int64) else -> value as int64;
     };
 
     /// @brief Two digits from `low` through `high`; OutOfRange at the field.
@@ -372,7 +356,7 @@ export let Calendar = module (
         last start = scan.position();
         last value = scan.fixed_digits(2);
         if (scan.ok() && (value < low || value > high)) {
-            scan.out_of_range(start, name + " out of range");
+            scan.out_of_range(start, name .. " out of range");
         }
         return value as int;
     };
@@ -402,9 +386,7 @@ export let Calendar = module (
         if (scan.accept(46)) {
             nanos = scan.fraction();
         }
-        if (!scan.ok()) {
-            return 0;
-        }
+        return 0 unless scan.ok();
         return ((hour * 3600 + minute * 60 + second) as int64) * NanosPerSecond + (nanos as int64);
     };
 
@@ -417,24 +399,19 @@ export let Calendar = module (
         let negative = false;
         if (scan.accept(45)) {
             negative = true;
-        } else if (!scan.accept(43)) {
+        } else if (not scan.accept(43)) {
             scan.unexpected("'Z', '+', or '-'");
             return 0;
         }
         last hours = read_field(scan, 0, 18, "offset hour");
         scan.expect(58, "':'");
         last minutes = read_field(scan, 0, 59, "offset minute");
-        if (!scan.ok()) {
-            return 0;
-        }
+        return 0 unless scan.ok();
         last total = hours * 3600 + minutes * 60;
         if (total > MaxOffsetSeconds) {
             scan.out_of_range(start, "zone offset out of range");
             return 0;
         }
-        if (negative) {
-            return -total;
-        }
-        return total;
+        return if (negative) -> -total else -> total;
     };
 );

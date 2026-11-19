@@ -1,0 +1,324 @@
+let bytes = import:Std.Io.Internal.Bytes;
+let.promote _ = import:Std.Time.Clock;
+let.promote _ = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let host_error = import:Std.Core.Internal.HostError;
+let instants = import:Std.Time.Instant;
+let.promote _ = import:Std.Net.MultiplexedTransport;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Net.Quic.QuicConfig;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Net.Quic.SessionTicket;
+let socket = import:Std.Net.Internal.Socket;
+let tickets = import:Std.Net.Quic.SessionTicket;
+let.promote _ = import:Std.Net.Core.SocketAddr;
+let stream_ids = import:Std.Net.Quic.StreamId;
+let support = import:Std.Net.Socket.Internal.Support;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief A QUIC connection (RFC 9000) as a `Std.Net.MultiplexedTransport` of stream IDs (`int64`) and byte
+/// frames: independent bidirectional and unidirectional streams, unreliable RFC 9221 datagrams as the inherited
+/// `send` and `receive`, session tickets for resumption and 0-RTT, and connection migration.
+///
+/// The API and its local rules are real: a stream's direction and initiator decide whether this side may send or
+/// receive on it (RFC 9000 section 2.1), so writing to the peer's unidirectional stream or reading from one's
+/// own is a Custom error with the code `quic.stream_state` before any host call. The transport is not: the
+/// runtime has no QUIC stack, so every host call is a private wrapper
+/// that traps in Neura 0.3.0 (see the notes for the `neura.net.quic.*` service it needs). `connect` therefore
+/// traps, and no connection exists to call the other members on.
+/// @see [Std.Net.Quic.QuicConnection](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Quic-QuicConnection)
+#Since("0.3.0")
+export let QuicConnection = module (
+    /// @brief A connection ID, the selected ALPN and whether 0-RTT data was accepted, or a host error code.
+    let ConnectOutcome = enum (Ok([int64, string, bool]), Error(uint32));
+    /// @brief A stream ID, or a host error code.
+    let IdOutcome = enum (Ok(int64), Error(uint32));
+    /// @brief Bytes read (empty at the end of a stream), or a host error code.
+    let BytesOutcome = enum (Ok(uint8[list]), Error(uint32));
+    /// @brief A byte count, or a host error code.
+    let CountOutcome = enum (Ok(int), Error(uint32));
+    /// @brief Success, or a host error code.
+    let DoneOutcome = enum (Ok, Error(uint32));
+    /// @brief Whether a datagram arrived (false once the connection closed) and its bytes, or a host error code.
+    let DatagramOutcome = enum (Ok([bool, uint8[list]]), Error(uint32));
+    /// @brief Whether a ticket is held, its bytes, lifetime in seconds, ticket_age_add and max_early_data_size
+    /// (-1 when absent), or a host error code.
+    let TicketOutcome = enum (Ok([bool, uint8[list], int64, int64, int64]), Error(uint32));
+
+    /// @brief One QUIC connection.
+    #[Final, NoDiscard(reason: "a connection must be closed"), NotThreadSafe]
+    export let QuicConnection = class implements MultiplexedTransport<int64, uint8[list]> (
+        /// @brief The host's connection ID.
+        last id: int64;
+        /// @brief The address text used in error messages.
+        last label: string;
+        /// @brief The peer, when known.
+        last peer: Optional<SocketAddr>;
+        /// @brief True on the client side.
+        export last client: bool;
+        /// @brief The ALPN protocol the handshake selected.
+        export last alpn: string;
+        /// @brief True when the server accepted this client's 0-RTT data.
+        export last early_data_accepted: bool;
+        /// @brief The read timeout in nanoseconds; zero waits without limit.
+        let timeout_nanos: int64 = 0;
+        /// @brief Tracks whether the connection may still use the host ID.
+        let open_now: bool = true;
+
+        /// @brief Use `connect` or `QuicEndpoint.accept`; the handle comes from the library.
+        export let init = func(opened: socket.Handle, address: Optional<SocketAddr>, is_client: bool,
+            protocol: string, early_accepted: bool) {
+            id = opened.id;
+            label = opened.address;
+            peer = address;
+            client = is_client;
+            alpn = protocol;
+            early_data_accepted = early_accepted;
+        };
+
+        /// @brief The peer's address, or `None` when the host did not report it.
+        export let peer_address = func -> Optional<SocketAddr> => peer;
+
+        /// @brief Opens a stream of this side, bidirectional or send-only.
+        #NoDiscard
+        export let open_stream = func(bidirectional: bool) -> Result<int64> {
+            return Result<int64>.Err(bytes.closed("connection", label)) unless open_now;
+            return id_result(quic_open_stream(id, bidirectional));
+        };
+
+        /// @brief Waits for the next stream the peer opens.
+        #NoDiscard
+        export let accept_stream = func -> Result<int64> {
+            return Result<int64>.Err(bytes.closed("connection", label)) unless open_now;
+            return id_result(quic_accept_stream(id, timeout_nanos));
+        };
+
+        /// @brief Sends `frame` on `stream`. A stream this side cannot send on (the peer's unidirectional
+        /// stream) is a `quic.stream_state` error.
+        #NoDiscard
+        export let send_on = func(stream: int64, frame: uint8[list]) -> Result<Unit> {
+            check_open()?;
+            return Result<Unit>.Err(state_error(stream, "is receive-only for this side")) unless stream_ids.may_send(stream, client);
+            return written(quic_stream_write(id, stream, frame, false), frame.length);
+        };
+
+        /// @brief The next bytes of `stream`, or `None` once the peer finished it. A stream this side cannot
+        /// receive on (its own unidirectional stream) is a `quic.stream_state` error.
+        #NoDiscard
+        export let receive_on = func(stream: int64) -> Result<Optional<uint8[list]>> {
+            check_open()?;
+            return Result<Optional<uint8[list]>>.Err(state_error(stream, "is send-only for this side")) unless stream_ids.may_receive(stream, client);
+            return match (quic_stream_read(id, stream, 65536, timeout_nanos)) {
+                BytesOutcome.Ok(chunk) => Result<Optional<uint8[list]>>.Ok(chunk.length == 0
+                    ? Optional<uint8[list]>.None : Optional<uint8[list]>.Some(chunk)),
+                BytesOutcome.Error(code) => Result<Optional<uint8[list]>>.Err(
+                    host_error.io(code, "stream read failed", label)),
+            };
+        };
+
+        /// @brief Finishes this side of `stream` (a STREAM frame with FIN).
+        #NoDiscard
+        export let finish_stream = func(stream: int64) -> Result<Unit> {
+            check_open()?;
+            return Result<Unit>.Err(state_error(stream, "is receive-only for this side")) unless stream_ids.may_send(stream, client);
+            return written(quic_stream_write(id, stream, new, true), 0);
+        };
+
+        /// @brief Sends one unreliable datagram (an RFC 9221 DATAGRAM frame).
+        #NoDiscard
+        export let send = func(data: uint8[list]) -> Result<Unit> {
+            check_open()?;
+            return match (quic_datagram_send(id, data)) {
+                DoneOutcome.Ok => bytes.ok(),
+                DoneOutcome.Error(code) => Result<Unit>.Err(host_error.io(code, "datagram send failed", label)),
+            };
+        };
+
+        /// @brief The next datagram, or `None` once the connection is closed.
+        #NoDiscard
+        export let receive = func -> Result<Optional<uint8[list]>> {
+            check_open()?;
+            return match (quic_datagram_receive(id, 65535, timeout_nanos)) {
+                DatagramOutcome.Ok(arrived) => datagram_of(arrived),
+                DatagramOutcome.Error(code) => Result<Optional<uint8[list]>>.Err(
+                    host_error.io(code, "datagram receive failed", label)),
+            };
+        };
+
+        /// @brief Moves the connection to a new local address (client migration, RFC 9000 section 9), for example
+        /// from Wi-Fi to cellular; the peer validates the new path.
+        #NoDiscard
+        export let migrate = func(local: SocketAddr) -> Result<Unit> {
+            check_open()?;
+            return match (quic_migrate(id, local.host_text(), local.port)) {
+                DoneOutcome.Ok => bytes.ok(),
+                DoneOutcome.Error(code) => Result<Unit>.Err(host_error.io(code, "migration failed", local.to_string())),
+            };
+        };
+
+        /// @brief The newest session ticket the server sent, stamped with the clock's time, or `None`.
+        #NoDiscard
+        export let session_ticket = func(clock: Clock, server_name: string) -> Result<Optional<SessionTicket>> {
+            check_open()?;
+            last now = clock.now()?;
+            return match (quic_session_ticket(id)) {
+                TicketOutcome.Ok(held) => ticket_of(held, server_name, alpn, now),
+                TicketOutcome.Error(code) => Result<Optional<SessionTicket>>.Err(
+                    host_error.io(code, "session ticket failed", label)),
+            };
+        };
+
+        /// @brief The longest a read or accept waits; zero waits without limit.
+        export let read_timeout = func -> Duration => of_nanos(timeout_nanos);
+
+        /// @brief Sets the read timeout. A negative timeout traps with "invalid argument: negative timeout".
+        export let set_read_timeout = func(timeout: Duration) {
+            timeout_nanos = support.timeout_nanos(timeout);
+        };
+
+        /// @brief Closes the connection with application error 0 (CONNECTION_CLOSE). Closing again returns Ok.
+        export let close = func -> Result<Unit> {
+            return bytes.ok() unless open_now;
+            open_now = false;
+            return match (quic_close(id, 0, "")) {
+                DoneOutcome.Ok => bytes.ok(),
+                DoneOutcome.Error(code) => Result<Unit>.Err(host_error.io(code, "close failed", label)),
+            };
+        };
+
+        /// @brief Text such as "QuicConnection(client, h3, 192.0.2.1:443)".
+        export let.override to_string = func -> string =>
+            "QuicConnection(" .. (client ? "client" : "server") .. ", " .. alpn .. ", " .. label .. ")";
+
+        /// @brief Closed when the connection is.
+        let check_open = func -> Result<Unit> {
+            return Result<Unit>.Err(bytes.closed("connection", label)) unless open_now;
+            return bytes.ok();
+        };
+
+        /// @brief A host ID result.
+        let id_result = func(outcome: IdOutcome) -> Result<int64> => match (outcome) {
+            IdOutcome.Ok(stream) => Result<int64>.Ok(stream),
+            IdOutcome.Error(code) => Result<int64>.Err(host_error.io(code, "stream failed", label)),
+        };
+
+        /// @brief A write result: every byte or an error.
+        let written = func(outcome: CountOutcome, expected: int) -> Result<Unit> => match (outcome) {
+            CountOutcome.Ok(count) => count == expected ? bytes.ok()
+                : Result<Unit>.Err(bytes.no_progress("stream write was short", label)),
+            CountOutcome.Error(code) => Result<Unit>.Err(host_error.io(code, "stream write failed", label)),
+        };
+    );
+
+    /// @brief Opens a QUIC connection to `address` with a client configuration (its TLS settings give the
+    /// server name, CA file and ALPN). With a usable `ticket` and `early_data` enabled in the configuration, the
+    /// ticket resumes the session and `early_bytes` go as 0-RTT data. Traps in Neura 0.3.0 (no QUIC host
+    /// service).
+    #NoDiscard
+    export let connect = func(address: SocketAddr, config: QuicConfig, ticket: Optional<SessionTicket>,
+        early_bytes: uint8[list]) -> Result<QuicConnection> {
+        last text = address.to_string();
+        last tls_config = config.tls_config;
+        last ticket_bytes = match (ticket) {
+            Optional.Some(held) => held.ticket_bytes(),
+            Optional.None => new,
+        };
+        last early: uint8[list] = config.early_data ? early_bytes : new;
+        last nanos = support.timeout_nanos(tls_config.handshake_timeout);
+        return match (quic_connect(address.host_text(), address.port, nanos,
+            tls_config.server_name, tls_config.alpn(), tls_config.ca_file, ticket_bytes, early,
+            config.max_datagram_frame_size as int64, config.congestion as int)) {
+            ConnectOutcome.Ok(opened) => Result<QuicConnection>.Ok(connection_of(opened, address)),
+            ConnectOutcome.Error(code) => Result<QuicConnection>.Err(host_error.io(code, "QUIC connect failed", text)),
+        };
+    };
+
+    /// @brief A connection from the host's [ID, ALPN, early data accepted].
+    let connection_of = func(opened: [int64, string, bool], address: SocketAddr) -> QuicConnection {
+        let [id, protocol, accepted] = opened;
+        return new QuicConnection(new socket.Handle(id, address.to_string()), Optional<SocketAddr>.Some(address), true,
+            protocol, accepted);
+    };
+
+    /// @brief A datagram result from the host's [arrived, bytes].
+    let datagram_of = func(arrived: [bool, uint8[list]]) -> Result<Optional<uint8[list]>> {
+        let [present, data] = arrived;
+        return Result<Optional<uint8[list]>>.Ok(present ? Optional<uint8[list]>.Some(data)
+            : Optional<uint8[list]>.None);
+    };
+
+    /// @brief A ticket from the host's [held, bytes, lifetime, age_add, max_early_data].
+    let ticket_of = func(held: [bool, uint8[list], int64, int64, int64], server_name: string, alpn: string,
+        now: instants.Instant) -> Result<Optional<SessionTicket>> {
+        let [present, data, lifetime, age_add, max_early] = held;
+        return Result<Optional<SessionTicket>>.Ok(Optional<SessionTicket>.None) unless present;
+        last ticket = tickets.create(data, server_name, alpn, now, lifetime, age_add, max_early)?;
+        return Result<Optional<SessionTicket>>.Ok(Optional<SessionTicket>.Some(ticket));
+    };
+
+    /// @brief A `quic.stream_state` error.
+    let state_error = func(stream: int64, text: string) -> errors.Error =>
+        errors.custom("quic.stream_state", "stream " .. stream.to_string() .. " " .. text);
+
+    /// @brief Opens a client connection. Needed service: neura.net.quic.connect.
+    /// @stub no QUIC host service in any runtime
+    let quic_connect = func(host: string, port: int, timeout_nanos: int64, server_name: string, alpn: string[list],
+        ca_file: string, ticket: uint8[list], early: uint8[list], max_datagram_frame_size: int64, congestion: int)
+        -> ConnectOutcome {
+        trap_with_message("unsupported: Std.Net.Quic.QuicConnection.quic_connect is not implemented in Neura 0.3.0 (no QUIC host service in any runtime)");
+    };
+
+    /// @brief Opens a stream. Needed service: neura.net.quic.open_stream.
+    /// @stub no QUIC host service in any runtime
+    let quic_open_stream = func(connection: int64, bidirectional: bool) -> IdOutcome {
+        trap_with_message("unsupported: Std.Net.Quic.QuicConnection.quic_open_stream is not implemented in Neura 0.3.0 (no QUIC host service in any runtime)");
+    };
+
+    /// @brief Waits for a peer stream. Needed service: neura.net.quic.accept_stream.
+    /// @stub no QUIC host service in any runtime
+    let quic_accept_stream = func(connection: int64, timeout_nanos: int64) -> IdOutcome {
+        trap_with_message("unsupported: Std.Net.Quic.QuicConnection.quic_accept_stream is not implemented in Neura 0.3.0 (no QUIC host service in any runtime)");
+    };
+
+    /// @brief Reads stream bytes; empty at FIN. Needed service: neura.net.quic.stream_read.
+    /// @stub no QUIC host service in any runtime
+    let quic_stream_read = func(connection: int64, stream: int64, max: int, timeout_nanos: int64) -> BytesOutcome {
+        trap_with_message("unsupported: Std.Net.Quic.QuicConnection.quic_stream_read is not implemented in Neura 0.3.0 (no QUIC host service in any runtime)");
+    };
+
+    /// @brief Writes stream bytes, with FIN when `fin`. Needed service: neura.net.quic.stream_write.
+    /// @stub no QUIC host service in any runtime
+    let quic_stream_write = func(connection: int64, stream: int64, data: uint8[list], fin: bool) -> CountOutcome {
+        trap_with_message("unsupported: Std.Net.Quic.QuicConnection.quic_stream_write is not implemented in Neura 0.3.0 (no QUIC host service in any runtime)");
+    };
+
+    /// @brief Sends a DATAGRAM frame. Needed service: neura.net.quic.datagram_send.
+    /// @stub no QUIC host service in any runtime
+    let quic_datagram_send = func(connection: int64, data: uint8[list]) -> DoneOutcome {
+        trap_with_message("unsupported: Std.Net.Quic.QuicConnection.quic_datagram_send is not implemented in Neura 0.3.0 (no QUIC host service in any runtime)");
+    };
+
+    /// @brief Receives a DATAGRAM frame. Needed service: neura.net.quic.datagram_receive.
+    /// @stub no QUIC host service in any runtime
+    let quic_datagram_receive = func(connection: int64, max: int, timeout_nanos: int64) -> DatagramOutcome {
+        trap_with_message("unsupported: Std.Net.Quic.QuicConnection.quic_datagram_receive is not implemented in Neura 0.3.0 (no QUIC host service in any runtime)");
+    };
+
+    /// @brief Migrates to a new local address. Needed service: neura.net.quic.migrate.
+    /// @stub no QUIC host service in any runtime
+    let quic_migrate = func(connection: int64, host: string, port: int) -> DoneOutcome {
+        trap_with_message("unsupported: Std.Net.Quic.QuicConnection.quic_migrate is not implemented in Neura 0.3.0 (no QUIC host service in any runtime)");
+    };
+
+    /// @brief The newest session ticket. Needed service: neura.net.quic.session_ticket.
+    /// @stub no QUIC host service in any runtime
+    let quic_session_ticket = func(connection: int64) -> TicketOutcome {
+        trap_with_message("unsupported: Std.Net.Quic.QuicConnection.quic_session_ticket is not implemented in Neura 0.3.0 (no QUIC host service in any runtime)");
+    };
+
+    /// @brief Sends CONNECTION_CLOSE and releases the connection. Needed service: neura.net.quic.close.
+    /// @stub no QUIC host service in any runtime
+    let quic_close = func(connection: int64, code: int64, reason: string) -> DoneOutcome {
+        trap_with_message("unsupported: Std.Net.Quic.QuicConnection.quic_close is not implemented in Neura 0.3.0 (no QUIC host service in any runtime)");
+    };
+);

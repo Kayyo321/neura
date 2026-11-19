@@ -1,0 +1,125 @@
+let alpn = import:Std.Net.Http.Alpn;
+let alt = import:Std.Net.Http.AltSvc;
+let.promote _ = import:Std.Core.Optional;
+let test = import:Std.Test;
+
+// Std.Net.Http.AltSvc. Field values and the protocol-id escaping table are copied from RFC 7838 section 3
+// (h2=":8000"; h2="new.example.org:80"; w=x:y#z <-> w%3Dx%3Ay#z; x%y <-> x%25y; h2="alt.example.com:8000",
+// h2=":443") and section 3.1 (h2=":443"; ma=3600; h2=":8000"; ma=60; h2=":443"; ma=2592000; persist=1).
+let AltSvcTests = module (
+    let parsed = func(text: string) -> alt.AltSvc => test.assert_ok<alt.AltSvc>(alt.parse(text));
+
+    let text_of = func(bytes: uint8[list]) -> string => string.from_utf8(bytes)[1];
+
+    export let test_section_3_examples = func {
+        last same_host = parsed("h2=\":8000\"");
+        test.assert(!same_host.clear);
+        test.assert_equal<int>(1, same_host.size());
+        test.assert_equal_string("h2", text_of(same_host.at(0).protocol));
+        test.assert_equal_string("", same_host.at(0).host);
+        test.assert_equal<int>(8000, same_host.at(0).port);
+        test.assert_equal<int64>(86400, same_host.at(0).max_age);
+        test.assert(!same_host.at(0).persist);
+        last other_host = parsed("h2=\"new.example.org:80\"");
+        test.assert_equal_string("new.example.org", other_host.at(0).host);
+        test.assert_equal<int>(80, other_host.at(0).port);
+        last two = parsed("h2=\"alt.example.com:8000\", h2=\":443\"");
+        test.assert_equal<int>(2, two.size());
+        test.assert_equal_string("alt.example.com", two.at(0).host);
+        test.assert_equal<int>(443, two.at(1).port);
+    };
+
+    export let test_protocol_id_escaping_table = func {
+        test.assert_equal_string("h2", alt.encode_protocol_id(alpn.bytes_of("h2")));
+        test.assert_equal_string("w%3Dx%3Ay#z", alt.encode_protocol_id(alpn.bytes_of("w=x:y#z")));
+        test.assert_equal_string("x%25y", alt.encode_protocol_id(alpn.bytes_of("x%y")));
+        test.assert_equal_string("w=x:y#z",
+            text_of(test.assert_ok<uint8[list]>(alt.decode_protocol_id("w%3Dx%3Ay#z"))));
+        test.assert_equal_string("x%y", text_of(test.assert_ok<uint8[list]>(alt.decode_protocol_id("x%25y"))));
+        // Lowercase hex digits are accepted on input.
+        test.assert_equal_string("w=x", text_of(test.assert_ok<uint8[list]>(alt.decode_protocol_id("w%3dx"))));
+        test.assert_err<uint8[list]>(alt.decode_protocol_id("x%2"));
+        test.assert_err<uint8[list]>(alt.decode_protocol_id("x%zz"));
+        test.assert_err<uint8[list]>(alt.decode_protocol_id("a:b"));
+        test.assert_err<uint8[list]>(alt.decode_protocol_id(""));
+        // A non-UTF-8 byte round-trips as an escape.
+        last raw: uint8[list] = new;
+        raw.append(255);
+        test.assert_equal_string("%FF", alt.encode_protocol_id(raw));
+        test.assert_equal<uint8>(255, test.assert_ok<uint8[list]>(alt.decode_protocol_id("%FF"))[0]);
+        last escaped = parsed("w%3Dx%3Ay#z=\":443\"");
+        test.assert_equal_string("w%3Dx%3Ay#z", escaped.at(0).protocol_id);
+        test.assert_equal_string("w=x:y#z", text_of(escaped.at(0).protocol));
+    };
+
+    export let test_parameters = func {
+        test.assert_equal<int64>(3600, parsed("h2=\":443\"; ma=3600").at(0).max_age);
+        test.assert_equal<int64>(60, parsed("h2=\":8000\"; ma=60").at(0).max_age);
+        last persistent = parsed("h2=\":443\"; ma=2592000; persist=1");
+        test.assert_equal<int64>(2592000, persistent.at(0).max_age);
+        test.assert(persistent.at(0).persist);
+        // persist values other than 1 are ignored (RFC 7838 section 3.1).
+        test.assert(!parsed("h2=\":443\"; persist=2").at(0).persist);
+        test.assert_equal<int64>(2147483648, parsed("h2=\":443\"; ma=99999999999").at(0).max_age);
+        last unknown = parsed("h3=\":443\" ; foo=bar;BAZ=\"q;x\"; ma=10");
+        test.assert_equal<int>(2, unknown.at(0).parameter_names.length);
+        test.assert_equal_string("foo", unknown.at(0).parameter_names[0]);
+        test.assert_equal_string("baz", unknown.at(0).parameter_names[1]);
+        test.assert_equal_string("q;x", unknown.at(0).parameter_values[1]);
+        test.assert_equal<int64>(10, unknown.at(0).max_age);
+    };
+
+    export let test_clear = func {
+        test.assert(parsed("clear").clear);
+        test.assert_equal<int>(0, parsed("clear").size());
+        // clear among alternatives invalidates them too.
+        test.assert(parsed("h2=\":443\", clear").clear);
+        // clear is case-sensitive.
+        test.assert_err<alt.AltSvc>(alt.parse("CLEAR"));
+        test.assert_equal_string("clear", parsed("clear").to_string());
+    };
+
+    export let test_invalid_values = func {
+        test.assert_err<alt.AltSvc>(alt.parse(""));
+        test.assert_err<alt.AltSvc>(alt.parse("h2=:443"));
+        test.assert_err<alt.AltSvc>(alt.parse("h2=\"example.org\""));
+        test.assert_err<alt.AltSvc>(alt.parse("h2=\":0\""));
+        test.assert_err<alt.AltSvc>(alt.parse("h2=\":65536\""));
+        test.assert_err<alt.AltSvc>(alt.parse("h2=\":\""));
+        test.assert_err<alt.AltSvc>(alt.parse("h2=\":443\"; ma=soon"));
+        test.assert_err<alt.AltSvc>(alt.parse("h2=\":443\"; ma"));
+        test.assert_err<alt.AltSvc>(alt.parse("h2=\":443\"x"));
+        test.assert_err<alt.AltSvc>(alt.parse("=\":443\""));
+        test.assert_err<alt.AltSvc>(alt.parse("é=\":443\""));
+    };
+
+    export let test_preferred = func {
+        last value = parsed("h3=\"alt.example.com:443\", h2=\":443\", http%2F1.1=\":80\"");
+        last supported: uint8[list][list] = new;
+        supported.append(alpn.h2());
+        supported.append(alpn.http11());
+        last choice = test.assert_some<alt.Alternative>(alt.preferred(value, supported));
+        test.assert_equal_string("h2", choice.protocol_id);
+        supported.append(alpn.h3());
+        test.assert_equal_string("alt.example.com",
+            test.assert_some<alt.Alternative>(alt.preferred(value, supported)).host);
+        last only_old: uint8[list][list] = new;
+        only_old.append(alpn.http11());
+        test.assert_equal<int>(80, test.assert_some<alt.Alternative>(alt.preferred(value, only_old)).port);
+        last nothing: uint8[list][list] = new;
+        nothing.append(alpn.bytes_of("spdy/3"));
+        test.assert_none<alt.Alternative>(alt.preferred(value, nothing));
+        test.assert_none<alt.Alternative>(alt.preferred(parsed("clear"), supported));
+    };
+
+    export let test_to_string_round_trip = func {
+        last text = "h2=\"alt.example.com:8000\"; ma=60; persist=1, w%3Dx%3Ay#z=\":443\"; foo=\"a b\"";
+        last value = parsed(text);
+        test.assert_equal_string(text, value.to_string());
+        test.assert(value.equals(parsed(value.to_string())));
+        test.assert_equal<uint32>(value.hash_code(), parsed(text).hash_code());
+        test.assert_equal_string("h2=\":443\"", parsed("h2=\":443\"; ma=86400").to_string());
+        test.assert_equal_string("h2=\"[2001:db8::1]:443\"", parsed("h2=\"[2001:db8::1]:443\"").to_string());
+        test.assert_equal_string("[2001:db8::1]", parsed("h2=\"[2001:db8::1]:443\"").at(0).host);
+    };
+);

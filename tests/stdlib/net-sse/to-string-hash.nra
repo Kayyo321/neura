@@ -1,0 +1,40 @@
+let.promote _ = import:Std.Core.Optional;
+let sse_client = import:Std.Net.Realtime.Sse.Client;
+let sse_event = import:Std.Net.Realtime.Sse.SseEvent;
+let parser = import:Std.Net.Realtime.Sse.Parser;
+let test = import:Std.Test;
+
+// Part 4 of the 0.3.0 stdlib pass: to_string, equals and hash_code of the Std.Net.Realtime.Sse value classes
+// agree, and the parser text shows its limits but not its buffers.
+let ToStringHashTests = module (
+    let agree = func(a: class, b: class) {
+        test.assert(a.equals(b));
+        test.assert(b.equals(a));
+        test.assert_equal_int64(a.hash_code() as int64, b.hash_code() as int64);
+    };
+
+    let differ = func(a: class, b: class) {
+        test.assert(not a.equals(b));
+        test.assert(not b.equals(a));
+    };
+
+    export let test_sse_request = func {
+        last a = new sse_client.SseRequest("https://example.com/events", "7", 2);
+        agree(a, new sse_client.SseRequest("https://example.com/events", "7", 2));
+        differ(a, new sse_client.SseRequest("https://example.com/events", "8", 2));
+        test.assert_equal_string("SseRequest(https://example.com/events, Last-Event-ID \"7\", attempt 2)", a.to_string());
+    };
+
+    export let test_sse_event = func {
+        last a = new sse_event.SseEvent("message", "hello", "1", Optional<int64>.None);
+        agree(a, new sse_event.SseEvent("message", "hello", "1", Optional<int64>.None));
+        differ(a, new sse_event.SseEvent("message", "hello", "2", Optional<int64>.None));
+        differ(a, new sse_event.SseEvent("message", "hello", "1", Optional<int64>.Some(500)));
+        test.assert(a.to_string().byte_length > 0);
+    };
+
+    export let test_parser_text = func {
+        last p = new parser.EventStreamParser("", 100, 200);
+        test.assert_equal_string("EventStreamParser(max line 100 bytes, max event 200 bytes)", p.to_string());
+    };
+);

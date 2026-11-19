@@ -12,7 +12,9 @@ namespace neura::nvr {
 
 unsigned lane_count(const Type& type) {
     switch (type.kind) {
-    case TypeKind::Void: return 0;
+    case TypeKind::Void:
+    // An aggregate is never a value, so it has no lanes.
+    case TypeKind::Aggregate: return 0;
     case TypeKind::Bool: return 1;
     case TypeKind::Unsigned:
     case TypeKind::Signed:
@@ -97,7 +99,7 @@ void values(Output& out, const std::vector<Value>& items) {
     vector(out, items, value);
 }
 
-void exit(Output& out, const Exit& item, bool returns_value) {
+void exit(Output& out, const Exit& item, std::size_t result_words) {
     if (item.poll && item.kind != ExitKind::Continue && item.kind != ExitKind::Call) {
         throw std::invalid_argument("a poll is valid only on a continue or call exit");
     }
@@ -117,11 +119,11 @@ void exit(Output& out, const Exit& item, bool returns_value) {
         out.u32(item.resume);
         break;
     case ExitKind::Return:
-        if (returns_value != (item.arguments.size() == 1) || item.arguments.size() > 1) {
+        if (item.arguments.size() != result_words) {
             throw std::invalid_argument("return exit value does not match the function result");
         }
-        if (returns_value) {
-            value(out, item.arguments.front());
+        for (const auto& word : item.arguments) {
+            value(out, word);
         }
         break;
     case ExitKind::State:
@@ -181,15 +183,31 @@ std::vector<Section> sections(const Image& image, std::uint16_t minor) {
             if (function.result_type >= image.types.size()) {
                 throw std::invalid_argument("function result type is out of range");
             }
-            const bool returns_value = image.types[function.result_type].kind != TypeKind::Void;
+            const std::size_t result_words =
+                (image.types[function.result_type].kind != TypeKind::Void ? 1 : 0) + function.more_results.size();
+            if (!function.more_results.empty()) {
+                if (image.types[function.result_type].kind == TypeKind::Void) {
+                    throw std::invalid_argument("a multi-word function needs a nonvoid first result");
+                }
+                for (const auto word : function.more_results) {
+                    if (word >= image.types.size() || image.types[word].kind == TypeKind::Void) {
+                        throw std::invalid_argument("a result word is out of range or void");
+                    }
+                }
+            }
             o.u32(function.parameter_count);
             o.u32(function.result_type);
+            // Only a 1.7 record carries the list; an earlier image has none
+            // (required_minor_version declares 1.7 for any that does).
+            if (minor >= 7) {
+                indices(o, function.more_results);
+            }
             indices(o, function.frame_types);
             vector(o, function.blocks, [&](Output& b, const Block& block) {
                 b.u32(block.graph);
                 values(b, block.inputs);
                 b.u32(block.selector_start);
-                vector(b, block.exits, [&](Output& e, const Exit& item) { exit(e, item, returns_value); });
+                vector(b, block.exits, [&](Output& e, const Exit& item) { exit(e, item, result_words); });
             });
         });
     });
@@ -287,6 +305,7 @@ std::vector<Section> sections(const Image& image, std::uint16_t minor) {
             case TypeKind::Float:
             case TypeKind::BFloat: o.u8(type.width); break;
             case TypeKind::Object:
+            case TypeKind::Aggregate:
             case TypeKind::Array:
             case TypeKind::List: o.u32(type.reference); break;
             default: break;
@@ -306,6 +325,19 @@ std::vector<Section> sections(const Image& image, std::uint16_t minor) {
 
 } // namespace
 
+bool uses_regions(const Image& image) {
+    if (std::ranges::any_of(image.constants, [&](const Constant& value) {
+            return value.type < image.types.size() && is_static_object_constant(image.types[value.type], value);
+        })) return true;
+    return std::ranges::any_of(image.functions, [](const Function& function) {
+        return std::ranges::any_of(function.blocks, [](const Block& block) {
+            return std::ranges::any_of(block.exits, [](const Exit& exit) {
+                return exit.kind == ExitKind::State && is_region_operation(exit.operation);
+            });
+        });
+    });
+}
+
 bool concurrent_image(const Image& image) {
     if (image.transferable_layouts) return true;
     for (const auto& function : image.functions) {
@@ -319,6 +351,46 @@ bool concurrent_image(const Image& image) {
 }
 
 std::uint16_t required_minor_version(const Image& image) {
+    for (const auto& function : image.functions) {
+        for (const auto& block : function.blocks) {
+            for (const auto& exit : block.exits) {
+                if (exit.kind == ExitKind::State && exit.operation == StateOp::ConcatText) return concat_minor_version;
+            }
+        }
+    }
+    for (const auto& function : image.functions) {
+        for (const auto& block : function.blocks) {
+            for (const auto& exit : block.exits) {
+                if (exit.kind == ExitKind::State && (is_hook_operation(exit.operation) || extended_reference_state(exit)))
+                    return hooks_minor_version;
+            }
+        }
+    }
+    if (std::ranges::any_of(image.types, [](const Type& type) { return type.kind == TypeKind::Aggregate; })) return 7;
+    // Nil collection and static object constants (NVR 1.7).
+    if (std::ranges::any_of(image.constants, [&](const Constant& value) {
+            if (value.type >= image.types.size()) return false;
+            const auto& type = image.types[value.type];
+            return type.kind == TypeKind::Array || type.kind == TypeKind::List || is_static_object_constant(type, value);
+        })) {
+        return 7;
+    }
+    for (const auto& function : image.functions) {
+        for (const auto& block : function.blocks) {
+            for (const auto& exit : block.exits) {
+                if (exit.kind == ExitKind::Scheduler && exit.scheduler == SchedulerOp::ParallelFinish &&
+                    exit.arguments.size() == 2) {
+                    return 7;
+                }
+                if (exit.kind == ExitKind::State &&
+                    (exit.operation == StateOp::ReadComponent || exit.operation == StateOp::WriteComponent ||
+                     is_region_operation(exit.operation))) {
+                    return 7;
+                }
+            }
+        }
+    }
+    if (std::ranges::any_of(image.functions, [](const Function& f) { return !f.more_results.empty(); })) return 7;
     if (!image.kernels.empty()) return 6;
     for (const auto& function : image.functions) {
         for (const auto& block : function.blocks) {

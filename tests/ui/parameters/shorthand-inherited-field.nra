@@ -1,0 +1,8 @@
+let Base = class (
+    export let label: string = "";
+);
+let Child = class : Base (
+    export let size: int = 0;
+
+    export let init = func(size: int, label: string) => set;
+);

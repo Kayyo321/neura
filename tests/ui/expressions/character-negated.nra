@@ -1,0 +1,4 @@
+// A minus applied to a character literal with no expected type is the range
+// error of an unsigned literal: its type is `byte` (docs/design/Expressions030.md,
+// Decisions taken in the implementation, step 4).
+let negated = -'A';

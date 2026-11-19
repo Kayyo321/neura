@@ -1,0 +1,8 @@
+// A method does not satisfy a property (edge case 68).
+let Named = interface (
+    let name: string;
+        | get;
+);
+let Method = class implements Named (
+    export let name = func() -> string => "m";
+);

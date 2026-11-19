@@ -31,15 +31,15 @@ The following public declarations are taken from the module source; each links t
   The instant at which UTC reads this date and time minus the offset. Tagged `#Pure`.
 - **LocalDateTime.LocalDateTime** · [`export let compare_to = func(other: LocalDateTime) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L55)
   Orders by local date first and time of day second. Tagged `#Pure`.
-- **LocalDateTime.LocalDateTime** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L65)
-  Tests whether both date and time components are equal. Tagged `#Pure`.
-- **LocalDateTime.LocalDateTime** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L75)
+- **LocalDateTime.LocalDateTime** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L62)
+  Tests whether both date and time components are equal. Reading the argument can run its class hook.
+- **LocalDateTime.LocalDateTime** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L71)
   Combines the hashes of the date and time components. Tagged `#Pure`.
-- **LocalDateTime.LocalDateTime** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L81)
+- **LocalDateTime.LocalDateTime** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L77)
   The date, T, and the time. Tagged `#Pure`.
-- **LocalDateTime** · [`export let of = func(on: local_date.LocalDate, at: local_time.LocalTime) -> LocalDateTime`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L86)
+- **LocalDateTime** · [`export let of = func(on: local_date.LocalDate, at: local_time.LocalTime) -> LocalDateTime`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L82)
   Combines a date and time of day without applying an offset. Tagged `#Pure`, `#ThreadSafe`.
-- **LocalDateTime** · [`export let parse = func(text: string) -> result.Result<LocalDateTime>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L92)
+- **LocalDateTime** · [`export let parse = func(text: string) -> result.Result<LocalDateTime>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L88)
   The LocalDate form, T, and the LocalTime form, with their errors. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 

@@ -1,0 +1,9 @@
+error[E0231]: a range pattern is not supported
+ --> $DIR/range-pattern.nra:7:16
+  |
+7 |     Shape.Line(0 .. 9) => 1,
+  |                ^^^^^^ range patterns are not part of 0.3.0
+  |
+  = help: bind the value and test it in a guard
+
+For more information about this error, try `neura explain E0231`.

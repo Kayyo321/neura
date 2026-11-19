@@ -1,0 +1,43 @@
+// String chains (docs/design/Expressions030.md, String chains, edge cases 35,
+// 38, 39 and 42): the text of each chain, empty and multibyte operands,
+// literal folding, parenthesized inner chains, the order of effects, and
+// chains as arguments, conditional arms and range-like contexts.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let note = func(text: string) -> string {
+    console.print_line("eval " + text);
+    return text;
+};
+
+let shout = func(text: string) -> string => text .. "!";
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let name = "Ada";
+        let empty = "";
+        console.print_line("hi " .. "there" .. "!");
+        console.print_line("[" .. "x" .. name .. "]");
+        console.print_line(empty .. name .. empty .. empty);
+        console.print_line(("" .. "").byte_length.to_string());
+        let accents = "é" .. "€" .. "😀";
+        console.print_line(accents .. " " .. accents.byte_length.to_string());
+        console.print_line((name .. "/" .. name) .. "/" .. name);
+        console.print_line(name .. ("-" .. "-") .. name);
+        console.print_line(shout(name .. " " .. name));
+        let ready = false;
+        console.print_line(ready ? name .. "!" : "busy");
+        console.print_line(name .. (ready ? " ok" : " busy"));
+        console.print_line(((name .. "a") == "Adaa").to_string() + " " + ("x" + "y" .. "z"));
+        let text: string = name .. 3.to_string() .. $" {name}";
+        console.print_line(text);
+
+        console.print_line(note("a") .. note("b") .. note("c"));
+        console.print_line((note("d") .. note("e")) .. note("f"));
+        console.print_line(note("g") .. (note("h") .. note("i")));
+        let items = ["x", "y"];
+        let index = 5;
+        console.print_line(note("j") .. items[index] .. note("k"));
+        return program.ExitCode.Ok;
+    };
+);

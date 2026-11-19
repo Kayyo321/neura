@@ -1,0 +1,332 @@
+let filesystem = import:Std.Fs.Fs;
+let hashing = import:Std.Core.Hash;
+let ips = import:Std.Net.Core.IpAddr;
+let paths = import:Std.Fs.Path;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Net.Core.SocketAddr;
+let strings = import:Std.Text.Strings;
+let v4 = import:Std.Net.Core.Ipv4Addr;
+
+/// @brief The stub-resolver configuration file `resolv.conf`: name servers, the search list and options.
+///
+/// Source: resolv.conf(5) as installed on the development machine (`man 5 resolv.conf`, read 2026-11-17).
+/// The rules taken from it:
+/// - A line whose first column is `;` or `#` is a comment; a keyword starts the line and its value follows
+///   after white space. A line that starts with white space is skipped and reported. Blank lines and unknown
+///   keywords (such as `sortlist`) are ignored.
+/// - `nameserver` gives one IPv4 or IPv6 address; up to MAXNS (3) are used, in the order listed. Further
+///   ones are ignored and reported, and an invalid address is skipped and reported. With no `nameserver`
+///   line "the default is to use the name server on the local machine": `effective_nameservers` answers
+///   127.0.0.1 then. (The page names no IPv6 default; ::1 is not added.)
+/// - `search` lists domains separated by spaces or tabs; `domain` is "an obsolete name for the search
+///   directive that handles one search list entry only". Both set the search list, and the last `search` or
+///   `domain` line wins. Since glibc 2.26 the list is unlimited, so no entries are dropped. Without either,
+///   the page derives the list from the local host name; this parser cannot read it and leaves the list empty.
+/// - `options` takes `ndots:n` (default 1, capped to 15), `timeout:n` (seconds, default 5, capped to 30),
+///   `attempts:n` (default 2, capped to 5), `rotate` and `edns0`. Values above a cap are "silently capped";
+///   a value that is not a nonnegative decimal number is reported and ignored. Other options are kept in
+///   `unknown_options` without failing.
+/// Parsing never fails. The `LOCALDOMAIN` and `RES_OPTIONS` environment variables are not read.
+/// @see [Std.Net.Dns.ResolvConf](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-ResolvConf)
+#Since("0.3.0")
+export let ResolvConf = module (
+    /// @brief The usual location of the file.
+    export const DefaultPath = "/etc/resolv.conf";
+    /// @brief MAXNS: the most name servers used.
+    export const MaxNameservers: int = 3;
+    /// @brief The default `ndots`.
+    export const DefaultNdots: int = 1;
+    /// @brief The default `timeout`, in seconds (RES_TIMEOUT).
+    export const DefaultTimeoutSeconds: int = 5;
+    /// @brief The default `attempts` (RES_DFLRETRY).
+    export const DefaultAttempts: int = 2;
+    /// @brief The cap of `ndots`.
+    export const MaxNdots: int = 15;
+    /// @brief The cap of `timeout`.
+    export const MaxTimeoutSeconds: int = 30;
+    /// @brief The cap of `attempts`.
+    export const MaxAttempts: int = 5;
+    /// @brief The DNS port used by `nameserver_addresses` by default.
+    export const DnsPort: int = 53;
+
+    /// @brief A parsed configuration. Fields are public for reading; build one with `parse`, `defaults`, or
+    /// the constructor.
+    #Final
+    export let ResolvConf = class (
+        /// @brief The configured name servers (at most 3), in file order.
+        last servers: ips.IpAddr[list];
+        /// @brief The search list.
+        last search_list: string[list];
+        /// @brief The `ndots` threshold.
+        export last ndots: int;
+        /// @brief The per-try timeout in seconds.
+        export last timeout_seconds: int;
+        /// @brief How many times each server is tried.
+        export last attempts: int;
+        /// @brief Whether queries rotate among the servers.
+        export last rotate: bool;
+        /// @brief Whether EDNS(0) is used.
+        export last edns0: bool;
+        /// @brief Options the parser did not know.
+        last unknown: string[list];
+        /// @brief Lines or values the parser skipped, each "line N: reason".
+        last skipped: string[list];
+
+        /// @brief A configuration with every value given. Values above the caps are capped and negative values
+        /// trap with "invalid argument: resolver option".
+        export let init = func(nameservers: ips.IpAddr[list], search: string[list], dots: int, timeout: int,
+            tries: int, round_robin: bool, use_edns0: bool, unknown_options: string[list], problems: string[list]) {
+            if (dots < 0 || timeout < 0 || tries < 0) {
+                trap_with_message("invalid argument: resolver option");
+            }
+            servers = nameservers;
+            search_list = search;
+            ndots = dots > MaxNdots ? MaxNdots : dots;
+            timeout_seconds = timeout > MaxTimeoutSeconds ? MaxTimeoutSeconds : timeout;
+            attempts = tries > MaxAttempts ? MaxAttempts : tries;
+            rotate = round_robin;
+            edns0 = use_edns0;
+            unknown = unknown_options;
+            skipped = problems;
+        };
+
+        /// @brief The configured name servers, in file order; empty when the file names none.
+        #NoDiscard
+        export let nameservers = func -> ips.IpAddr[list] => servers;
+
+        /// @brief The servers to query: the configured ones, or 127.0.0.1 when there are none.
+        #NoDiscard
+        export let effective_nameservers = func -> ips.IpAddr[list] {
+            if (servers.length > 0) {
+                return servers;
+            }
+            last local: ips.IpAddr[list] = new;
+            local.append(ips.IpAddr.V4(v4.localhost()));
+            return local;
+        };
+
+        /// @brief The effective name servers as socket addresses on `port` (usually `DnsPort`).
+        #NoDiscard
+        export let nameserver_addresses = func(port: int) -> SocketAddr[list] {
+            last out: SocketAddr[list] = new;
+            for (let ip in effective_nameservers()) {
+                out.append(new SocketAddr(ip, port));
+            }
+            return out;
+        };
+
+        /// @brief The search list (a `domain` line gives a one-entry list).
+        #NoDiscard
+        export let search = func -> string[list] => search_list;
+
+        /// @brief The first search domain, or "" when the list is empty.
+        #NoDiscard
+        export let domain = func -> string => search_list.length > 0 ? search_list[0] : "";
+
+        /// @brief Options the parser did not know, as written.
+        #NoDiscard
+        export let unknown_options = func -> string[list] => unknown;
+
+        /// @brief The skipped lines and values, each "line N: reason".
+        #NoDiscard
+        export let problems = func -> string[list] => skipped;
+
+        /// @brief Equal when the servers, search list and options are equal (unknown options and problems are
+        /// not compared).
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: ResolvConf) {
+                return false;
+            }
+            if (ndots != that.ndots || timeout_seconds != that.timeout_seconds || attempts != that.attempts
+                || rotate != that.rotate || edns0 != that.edns0 || servers.length != that.servers.length
+                || search_list.length != that.search_list.length) {
+                return false;
+            }
+            for (let i = 0; i < servers.length; i++) {
+                return false unless ips.equals(servers[i], that.servers[i]);
+            }
+            for (let i = 0; i < search_list.length; i++) {
+                if (search_list[i] != that.search_list[i]) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        /// @brief Combines the compared fields.
+        export let.override hash_code = func -> uint32 {
+            let hash = hashing.combine(17, (ndots * 10000 + timeout_seconds * 100 + attempts) as uint32);
+            hash = hashing.combine(hash, hashing.of_bool(rotate));
+            hash = hashing.combine(hash, hashing.of_bool(edns0));
+            for (let ip in servers) {
+                hash = hashing.combine(hash, ips.hash(ip));
+            }
+            for (let s in search_list) {
+                hash = hashing.combine(hash, strings.hash(s));
+            }
+            return hash;
+        };
+
+        /// @brief Text such as "ResolvConf(nameservers [10.0.0.1], search [corp.example], ndots 1, timeout 5,
+        /// attempts 2)", with " rotate" and " edns0" when set.
+        export let.override to_string = func -> string {
+            last names: string[list] = new;
+            for (let ip in servers) {
+                names.append(ips.to_string(ip));
+            }
+            let text = "ResolvConf(nameservers [" .. strings.join(names, ", ") .. "], search ["
+                .. strings.join(search_list, ", ") .. "], ndots " .. ndots.to_string() .. ", timeout "
+                .. timeout_seconds.to_string() .. ", attempts " .. attempts.to_string();
+            if (rotate) {
+                text ..= ", rotate";
+            }
+            if (edns0) {
+                text ..= ", edns0";
+            }
+            return text .. ")";
+        };
+    );
+
+    /// @brief The configuration of an empty file: no servers, empty search list, default options.
+    #NoDiscard
+    export let defaults = func -> ResolvConf =>
+        new ResolvConf(new, new, DefaultNdots, DefaultTimeoutSeconds, DefaultAttempts, false, false, new, new);
+
+    /// @brief Parses resolv.conf text; never fails. Skipped lines and values are listed in `problems`.
+    #NoDiscard
+    export let parse = func(text: string) -> ResolvConf {
+        last servers: ips.IpAddr[list] = new;
+        let search: string[list] = new;
+        let ndots = DefaultNdots;
+        let timeout = DefaultTimeoutSeconds;
+        let attempts = DefaultAttempts;
+        let rotate = false;
+        let edns0 = false;
+        last unknown: string[list] = new;
+        last problems: string[list] = new;
+        last lines = strings.lines(text);
+        for (let i = 0; i < lines.length; i++) {
+            last line = lines[i];
+            last where = "line " .. (i + 1).to_string() .. ": ";
+            if (line.byte_length > 0 && (line.byte_at(0) == 59 || line.byte_at(0) == 35)) {
+                continue;
+            }
+            last fields = fields_of(line);
+            if (fields.length == 0) {
+                continue;
+            }
+            if (line.byte_at(0) == 32 || line.byte_at(0) == 9) {
+                problems.append(where .. "the keyword must start the line");
+                continue;
+            }
+            last keyword = fields[0];
+            if (keyword == "nameserver") {
+                if (fields.length < 2) {
+                    problems.append(where .. "nameserver without an address");
+                } else {
+                    match (ips.parse(fields[1])) {
+                        Result.Err(_) => {
+                            problems.append(where .. "invalid nameserver address " .. fields[1]);
+                        },
+                        Result.Ok(ip) => {
+                            if (servers.length >= MaxNameservers) {
+                                problems.append(where .. "more than 3 nameservers; " .. fields[1] .. " ignored");
+                            } else {
+                                servers.append(ip);
+                            }
+                        },
+                    }
+                }
+            } else if (keyword == "search" || keyword == "domain") {
+                last list: string[list] = new;
+                last count = keyword == "domain" && fields.length > 2 ? 2 : fields.length;
+                for (let k = 1; k < count; k++) {
+                    list.append(fields[k]);
+                }
+                if (list.length == 0) {
+                    problems.append(where .. keyword .. " without a domain");
+                } else {
+                    search = list;
+                }
+            } else if (keyword == "options") {
+                for (let k = 1; k < fields.length; k++) {
+                    last option = fields[k];
+                    if (option == "rotate") {
+                        rotate = true;
+                    } else if (option == "edns0") {
+                        edns0 = true;
+                    } else if (strings.starts_with(option, "ndots:")) {
+                        last value = number_of(option.slice(6, option.byte_length), MaxNdots);
+                        if (value < 0) {
+                            problems.append(where .. "invalid option " .. option);
+                        } else {
+                            ndots = value;
+                        }
+                    } else if (strings.starts_with(option, "timeout:")) {
+                        last value = number_of(option.slice(8, option.byte_length), MaxTimeoutSeconds);
+                        if (value < 0) {
+                            problems.append(where .. "invalid option " .. option);
+                        } else {
+                            timeout = value;
+                        }
+                    } else if (strings.starts_with(option, "attempts:")) {
+                        last value = number_of(option.slice(9, option.byte_length), MaxAttempts);
+                        if (value < 0) {
+                            problems.append(where .. "invalid option " .. option);
+                        } else {
+                            attempts = value;
+                        }
+                    } else {
+                        unknown.append(option);
+                    }
+                }
+            }
+        }
+        return new ResolvConf(servers, search, ndots, timeout, attempts, rotate, edns0, unknown, problems);
+    };
+
+    /// @brief Reads and parses the file at `path` (usually `DefaultPath`). Fails only when the file cannot be
+    /// read as UTF-8 text.
+    #NoDiscard
+    export let read = func(path: string) -> Result<ResolvConf> {
+        last text = filesystem.read_text(new paths.Path(path))?;
+        return Result<ResolvConf>.Ok(parse(text));
+    };
+
+    /// @brief A nonempty run of decimal digits as a number capped to `cap`, or -1 when the text is not one.
+    let number_of = func(text: string, cap: int) -> int {
+        if (text.byte_length == 0) {
+            return -1;
+        }
+        let value = 0;
+        for (let i = 0; i < text.byte_length; i++) {
+            last b = text.byte_at(i);
+            if (b < 48 || b > 57) {
+                return -1;
+            }
+            if (value <= cap) {
+                value = value * 10 + ((b - 48) as int);
+            }
+        }
+        return value > cap ? cap : value;
+    };
+
+    /// @brief The fields of a line separated by spaces, tabs and carriage returns.
+    let fields_of = func(line: string) -> string[list] {
+        last fields: string[list] = new;
+        let start = -1;
+        for (let i = 0; i <= line.byte_length; i++) {
+            last blank = i == line.byte_length || line.byte_at(i) == 32 || line.byte_at(i) == 9
+                || line.byte_at(i) == 13;
+            if (blank) {
+                if (start >= 0) {
+                    fields.append(line.slice(start, i));
+                    start = -1;
+                }
+            } else if (start < 0) {
+                start = i;
+            }
+        }
+        return fields;
+    };
+);

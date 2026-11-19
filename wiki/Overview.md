@@ -3,7 +3,7 @@
 
 [Wiki home](https://github.com/Kayyo321/neura/wiki) · [Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · [Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)
 
-This documentation describes Neura 0.2.0. `neura --version` prints the installed version ([Install](Install), [Tooling](Tooling#version-install-and-update)); a build from a checkout reports the version in the repository's `VERSION` file with `-dev` added. The [changelog](https://github.com/Kayyo321/neura/blob/main/CHANGELOG.md) lists what changed in each version.
+This documentation describes Neura 0.3.0. `neura --version` prints the installed version ([Install](Install), [Tooling](Tooling#version-install-and-update)); a build from a checkout reports the version in the repository's `VERSION` file with `-dev` added. The [changelog](https://github.com/Kayyo321/neura/blob/main/CHANGELOG.md) lists what changed in each version.
 
 Neura is a statically typed language organized around modules, classes, and explicit interfaces. The [toolchain](Tooling) compiles Neura programs to standalone `.nvr` images and runs them in the Neura Virtual Machine. It can also package the image and its runtime in a native executable. [Status](Status) lists what this release supports and the language decisions that remain open.
 

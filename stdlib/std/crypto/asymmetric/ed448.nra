@@ -1,0 +1,322 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.Core.SecretBytes;
+let.promote _ = import:Std.Crypto.PrivateKey;
+let.promote _ = import:Std.Crypto.Signer;
+let.promote _ = import:Std.Crypto.Verifier;
+let constant_time = import:Std.Crypto.Core.ConstantTime;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let edwards = import:Std.Crypto.Internal.Edwards448;
+let entropy = import:Std.Crypto.Random.Entropy;
+let error = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let mp = import:Std.Crypto.Internal.Mp;
+let sha3 = import:Std.Crypto.Hash.Sha3;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief Ed448 and Ed448ph signatures of RFC 8032, section 5.2 (Stdlib.md section 21.8).
+///
+/// Signing is deterministic, as RFC 8032 defines it, and every signature carries a context of 0 to 255 bytes
+/// (empty by default). Verification is strict: it rejects a signature whose S is not below L, a public key or
+/// R that is not the canonical encoding of a curve point, and a public key or R of small order (4 P = 0). It
+/// then checks the cofactorless equation [S]B = R + [k]A by computing [S]B - [k]A and comparing its encoding
+/// with R's bytes. The scalar multiplications are branch-free in source; the runtime does not guarantee
+/// constant time.
+/// @see [Std.Crypto.Asymmetric.Ed448](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-Ed448)
+#Since("0.3.0")
+export let Ed448 = module (
+    /// @brief An Ed448 public key: the 57-byte encoding of A. Equal keys have equal bytes. The point is
+    /// checked when a signature is verified.
+    #[Final, Since("0.3.0")]
+    export let Ed448PublicKey = class (
+        last encoded: uint8[list];
+
+        /// @brief Copies the 57 bytes; another length traps (use `parse_public_key` for outside input).
+        export let init = func(bytes: uint8[list]) {
+            crypto_policy.require(Algorithm.Ed448);
+            if (bytes.length != 57) {
+                trap_with_message("invalid argument: Ed448 public key must be 57 bytes");
+            }
+            encoded = words.copy(bytes);
+        };
+
+        /// @brief A copy of the 57 bytes.
+        #NoDiscard
+        export let to_bytes = func -> uint8[list] => words.copy(encoded);
+
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: Ed448PublicKey) {
+                return false;
+            }
+            return constant_time.ct_eq(encoded, that.to_bytes());
+        };
+
+        export let.override hash_code = func -> uint32 {
+            let h: uint32 = 448;
+            for (let b in encoded) {
+                h = hashing.combine(h, b as uint32);
+            }
+            return h;
+        };
+
+        export let.override to_string = func -> string => "Ed448PublicKey(57 bytes)";
+    );
+
+    /// @brief An Ed448 private key: the 57-byte seed of RFC 8032 in secret memory, with its public key.
+    /// `to_string` never prints it.
+    #[Final, Since("0.3.0")]
+    export let Ed448PrivateKey = class implements PrivateKey<Ed448Signer> (
+        last material: SecretBytes;
+        last public_encoded: uint8[list];
+
+        /// @brief Copies the 57-byte seed and computes the public key; another length traps.
+        export let init = func(seed: uint8[list]) {
+            crypto_policy.require(Algorithm.Ed448);
+            if (seed.length != 57) {
+                trap_with_message("invalid argument: Ed448 private key must be 57 bytes");
+            }
+            material = new(seed);
+            last group = new edwards.Group();
+            let expanded = sha3.shake256(seed, 114);
+            public_encoded = group.encode(group.multiply_base(clamp(expanded)));
+            words.wipe(expanded);
+        };
+
+        export let expose = func -> uint8[list] => material.expose();
+        export let wipe = func => material.wipe();
+        export let is_wiped = func -> bool => material.is_wiped();
+        export let lock = func => material.lock();
+        export let public_key_bytes = func -> uint8[list] => words.copy(public_encoded);
+
+        /// @brief The matching public key.
+        #NoDiscard
+        export let public_key = func -> Ed448PublicKey => new(public_encoded);
+
+        /// @brief A fixed placeholder, never the key.
+        export let.override to_string = func -> string => "Ed448PrivateKey(<redacted>)";
+    );
+
+    /// @brief Signs with an Ed448 private key; it also verifies against the matching public key.
+    #[Final, Since("0.3.0")]
+    export let Ed448Signer = class implements Signer<Ed448PrivateKey, uint8[list]>,
+        Verifier<Ed448PublicKey, uint8[list]> (
+        last key: Ed448PrivateKey;
+
+        /// @brief A signer over the key.
+        export let init = func(private_key: Ed448PrivateKey) {
+            crypto_policy.require(Algorithm.Ed448);
+            key = private_key;
+        };
+
+        /// @brief `Algorithm.Ed448`.
+        export let algorithm = func -> Algorithm => Algorithm.Ed448;
+
+        /// @brief The public key.
+        export let public_key = func -> Ed448PublicKey => key.public_key();
+
+        /// @brief The 114-byte Ed448 signature R || S of the message with an empty context (RFC 8032, section
+        /// 5.2.6).
+        export let sign = func(message: uint8[list]) -> uint8[list] => sign_core(key, dom4(0, new), message);
+
+        /// @brief The Ed448 signature under a context of at most 255 bytes; a longer one traps.
+        #NoDiscard
+        export let sign_with_context = func(message: uint8[list], context: uint8[list]) -> uint8[list] {
+            check_context(context);
+            return sign_core(key, dom4(0, context), message);
+        };
+
+        /// @brief The Ed448ph signature: the message is hashed with SHAKE256 to 64 bytes first. The context has
+        /// at most 255 bytes.
+        #NoDiscard
+        export let sign_prehashed = func(message: uint8[list], context: uint8[list]) -> uint8[list] {
+            check_context(context);
+            return sign_core(key, dom4(1, context), sha3.shake256(message, 64));
+        };
+
+        /// @brief Strict Ed448 verification against the matching public key (see the module).
+        export let verify = func(message: uint8[list], signature: uint8[list]) -> bool =>
+            verify_core(public_key_bytes(), dom4(0, new), message, signature);
+
+        let public_key_bytes = func -> uint8[list] => key.public_key_bytes();
+
+        export let.override to_string = func -> string => "Ed448Signer(<redacted>)";
+    );
+
+    /// @brief Verifies Ed448 and Ed448ph signatures under a public key, strictly (see the
+    /// module).
+    #[Final, Since("0.3.0")]
+    export let Ed448Verifier = class implements Verifier<Ed448PublicKey, uint8[list]> (
+        last key: Ed448PublicKey;
+
+        /// @brief A verifier for the key.
+        export let init = func(public_key: Ed448PublicKey) {
+            crypto_policy.require(Algorithm.Ed448);
+            key = public_key;
+        };
+
+        /// @brief `Algorithm.Ed448`.
+        export let algorithm = func -> Algorithm => Algorithm.Ed448;
+
+        /// @brief The public key.
+        export let public_key = func -> Ed448PublicKey => key;
+
+        /// @brief Whether the 114-byte signature is a valid Ed448 signature of the message with an empty context.
+        /// Any other length is false.
+        export let verify = func(message: uint8[list], signature: uint8[list]) -> bool =>
+            verify_core(key.to_bytes(), dom4(0, new), message, signature);
+
+        /// @brief Whether the signature is a valid Ed448 signature under the context (at most 255 bytes).
+        #NoDiscard
+        export let verify_with_context = func(message: uint8[list], signature: uint8[list], context: uint8[list])
+            -> bool {
+            check_context(context);
+            return verify_core(key.to_bytes(), dom4(0, context), message, signature);
+        };
+
+        /// @brief Whether the signature is a valid Ed448ph signature under the context.
+        #NoDiscard
+        export let verify_prehashed = func(message: uint8[list], signature: uint8[list], context: uint8[list])
+            -> bool {
+            check_context(context);
+            return verify_core(key.to_bytes(), dom4(1, context), sha3.shake256(message, 64), signature);
+        };
+
+        export let.override to_string = func -> string => "Ed448Verifier";
+    );
+
+    /// @brief Traps unless the context has at most 255 bytes.
+    let check_context = func(context: uint8[list]) {
+        if (context.length > 255) {
+            trap_with_message("invalid argument: Ed448 context must be 0 to 255 bytes");
+        }
+    };
+
+    /// @brief dom4(phflag, context) of RFC 8032, section 5.2.
+    let dom4 = func(phflag: uint8, context: uint8[list]) -> uint8[list] {
+        let out = words.utf8("SigEd448");
+        out.append(phflag);
+        out.append(context.length as uint8);
+        words.append_all(out, context);
+        return out;
+    };
+
+    /// @brief The clamped secret scalar s of the first 57 bytes of SHAKE256(seed, 114), as 15 limbs.
+    let clamp = func(expanded: uint8[list]) -> uint32[list] {
+        let half = words.slice(expanded, 0, 57);
+        half[0] = half[0] & 252;
+        half[56] = 0;
+        half[55] = half[55] | 128;
+        last s = mp.from_bytes_le(half, 15);
+        words.wipe(half);
+        return s;
+    };
+
+    /// @brief SHAKE256 of the concatenated parts, 114 bytes.
+    let hash = func(parts: uint8[list][list]) -> uint8[list] {
+        let xof = new sha3.Shake256();
+        for (let part in parts) {
+            xof.update(part);
+        }
+        return xof.squeeze(114);
+    };
+
+    /// @brief RFC 8032, section 5.2.6 with the given dom4 prefix.
+    let sign_core = func(key: Ed448PrivateKey, dom: uint8[list], message: uint8[list]) -> uint8[list] {
+        last group = new edwards.Group();
+        let expanded = sha3.shake256(key.expose(), 114);
+        let s = clamp(expanded);
+        let prefix = words.slice(expanded, 57, 114);
+        last public_bytes = key.public_key_bytes();
+        let r = group.scalar_reduce(hash(new([dom, prefix, message])));
+        last r_bytes = group.encode(group.multiply_base(r));
+        last k = group.scalar_reduce(hash(new([dom, r_bytes, public_bytes, message])));
+        let signature = words.copy(r_bytes);
+        words.append_all(signature, group.scalar_bytes(group.scalar_mul_add(s, k, r)));
+        words.wipe(expanded);
+        words.wipe(prefix);
+        for (let i = 0; i < s.length; i++) {
+            s[i] = 0;
+        }
+        for (let i = 0; i < r.length; i++) {
+            r[i] = 0;
+        }
+        return signature;
+    };
+
+    /// @brief Strict verification (see the module) with the given dom4 prefix.
+    let verify_core = func(public_bytes: uint8[list], dom: uint8[list], message: uint8[list], signature: uint8[list])
+        -> bool {
+        if (signature.length != 114) {
+            return false;
+        }
+        last group = new edwards.Group();
+        last r_bytes = words.slice(signature, 0, 57);
+        last a = group.decode(public_bytes);
+        last r = group.decode(r_bytes);
+        last s = group.scalar_canonical(words.slice(signature, 57, 114));
+        match (a) {
+            Optional.None => {
+                return false;
+            },
+            Optional.Some(point_a) => {
+                match (r) {
+                    Optional.None => {
+                        return false;
+                    },
+                    Optional.Some(point_r) => {
+                        match (s) {
+                            Optional.None => {
+                                return false;
+                            },
+                            Optional.Some(scalar_s) => {
+                                if (group.is_small_order(point_a) || group.is_small_order(point_r)) {
+                                    return false;
+                                }
+                                last k = group.scalar_reduce(hash(new([dom, r_bytes, public_bytes, message])));
+                                last check = group.multiply_two(scalar_s, group.base(), k, group.negate(point_a));
+                                return constant_time.ct_eq(group.encode(check), r_bytes);
+                            },
+                        }
+                    },
+                }
+            },
+        }
+    };
+
+    /// @brief A new private key from a 57-byte seed of `Entropy.os_bytes`, or from the given generator. Fails
+    /// when the entropy source fails.
+    #[NoDiscard, Since("0.3.0")]
+    export let generate_key_pair = func -> Result<Ed448PrivateKey> {
+        match (entropy.os_bytes(57)) {
+            Result.Ok(seed) => {
+                last key = new Ed448PrivateKey(seed);
+                words.wipe(seed);
+                return Result<Ed448PrivateKey>.Ok(key);
+            },
+            Result.Err(e) => {
+                return Result<Ed448PrivateKey>.Err(e);
+            },
+        }
+    } or func(random: drbg.ChaCha20Drbg) -> Result<Ed448PrivateKey> {
+        let seed = random.fill(57);
+        last key = new Ed448PrivateKey(seed);
+        words.wipe(seed);
+        return Result<Ed448PrivateKey>.Ok(key);
+    };
+
+    /// @brief A public key from outside the program. A wrong length, or bytes that are not the canonical
+    /// encoding of a point, is `Custom` code `crypto.invalid_key`.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_public_key = func(bytes: uint8[list]) -> Result<Ed448PublicKey> {
+        if (bytes.length != 57) {
+            return Result<Ed448PublicKey>.Err(error.custom("crypto.invalid_key", "Ed448 public key must be 57 bytes"));
+        }
+        return match (new edwards.Group().decode(bytes)) {
+            Optional.None => Result<Ed448PublicKey>.Err(error.custom("crypto.invalid_key", "Ed448 public key is not a curve point")),
+            Optional.Some(_) => Result<Ed448PublicKey>.Ok(new Ed448PublicKey(bytes)),
+        };
+    };
+);

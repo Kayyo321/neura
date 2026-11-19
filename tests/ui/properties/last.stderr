@@ -1,0 +1,9 @@
+error[E0573]: invalid interface property
+ --> $DIR/last.nra:3:10
+  |
+3 |     last name: string;
+  |          ^^^^ an interface property is declared with 'let', not 'last'
+  |
+  = help: declare it as 'let name: T;' followed by '| get;'
+
+For more information about this error, try `neura explain E0573`.

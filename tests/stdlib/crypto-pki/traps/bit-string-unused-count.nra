@@ -1,0 +1,11 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: BIT STRING unused bit count
+let bits = import:Std.Crypto.Pki.BitString;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = new bits.BitString(new([1]), 8);
+        return program.ExitCode.Ok;
+    };
+);

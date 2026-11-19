@@ -1,0 +1,9 @@
+error[E0472]: 'defer' needs a block of a function to leave
+ --> $DIR/defer-file-level.nra:3:1
+  |
+3 | defer cleanup();
+  | ^^^^^ this is outside every function
+  |
+  = help: move the statements into a function
+
+For more information about this error, try `neura explain E0472`.

@@ -1,0 +1,3 @@
+// Edge case 36 of docs/design/Expressions030.md: an operand that is a name
+// gets the suggestion to call to_string on it.
+let label = func(count: int) -> string => "count: " .. count .. "!";

@@ -1,0 +1,96 @@
+let alpn = import:Std.Net.Http.Alpn;
+let test = import:Std.Test;
+
+// Std.Net.Http.Alpn. Identifier bytes: "http/1.1" is RFC 7301 section 6 (0x68 0x74 0x74 0x70 0x2f 0x31 0x2e
+// 0x31), "h2" is RFC 9113 section 3 (0x68 0x32), "h3" is RFC 9114 section 11.1 (0x68 0x33). Wire vectors from:
+// python3 -I -c 'import struct
+// for names in ([b"h2", b"http/1.1"], [b"h3"]):
+//     body = b"".join(struct.pack("B", len(n)) + n for n in names); print(list(struct.pack(">H", len(body)) + body))'
+// -> [0, 12, 2, 104, 50, 8, 104, 116, 116, 112, 47, 49, 46, 49] and [0, 3, 2, 104, 51].
+let AlpnTests = module (
+    let bytes = func(values: int[]) -> uint8[list] {
+        last list: uint8[list] = new;
+        for (let v in values) {
+            list.append(v as uint8);
+        }
+        return list;
+    };
+
+    let assert_bytes = func(expected: uint8[list], actual: uint8[list]) {
+        test.assert_equal<int>(expected.length, actual.length);
+        for (let i = 0; i < expected.length; i++) {
+            test.assert_equal<uint8>(expected[i], actual[i]);
+        }
+    };
+
+    let names = func(first: uint8[list], second: uint8[list]) -> uint8[list][list] {
+        last list: uint8[list][list] = new;
+        list.append(first);
+        list.append(second);
+        return list;
+    };
+
+    let one = func(first: uint8[list]) -> uint8[list][list] {
+        last list: uint8[list][list] = new;
+        list.append(first);
+        return list;
+    };
+
+    export let test_identifiers = func {
+        assert_bytes(bytes([104, 116, 116, 112, 47, 49, 46, 49]), alpn.http11());
+        assert_bytes(bytes([104, 50]), alpn.h2());
+        assert_bytes(bytes([104, 51]), alpn.h3());
+        test.assert_equal<int>(16, alpn.ExtensionType);
+        test.assert_equal<int>(120, alpn.NoApplicationProtocolAlert);
+    };
+
+    export let test_encode = func {
+        last wire = test.assert_ok<uint8[list]>(alpn.encode(names(alpn.h2(), alpn.http11())));
+        assert_bytes(bytes([0, 12, 2, 104, 50, 8, 104, 116, 116, 112, 47, 49, 46, 49]), wire);
+        assert_bytes(bytes([0, 3, 2, 104, 51]), test.assert_ok<uint8[list]>(alpn.encode(one(alpn.h3()))));
+        test.assert_err<uint8[list]>(alpn.encode(new uint8[list][list]()));
+        test.assert_err<uint8[list]>(alpn.encode(one(new uint8[list]())));
+        last long: uint8[list] = new;
+        for (let i = 0; i < 256; i++) {
+            long.append(97);
+        }
+        test.assert_err<uint8[list]>(alpn.encode(one(long)));
+        long.remove_at(0);
+        test.assert_equal<int>(258, test.assert_ok<uint8[list]>(alpn.encode(one(long))).length);
+    };
+
+    export let test_decode = func {
+        last pair = bytes([0, 12, 2, 104, 50, 8, 104, 116, 116, 112, 47, 49, 46, 49]);
+        last decoded = test.assert_ok<uint8[list][list]>(alpn.decode(pair));
+        test.assert_equal<int>(2, decoded.length);
+        assert_bytes(alpn.h2(), decoded[0]);
+        assert_bytes(alpn.http11(), decoded[1]);
+        test.assert_err<uint8[list][list]>(alpn.decode(bytes([0])));
+        test.assert_err<uint8[list][list]>(alpn.decode(bytes([0, 0])));
+        test.assert_err<uint8[list][list]>(alpn.decode(bytes([0, 4, 2, 104, 50])));
+        test.assert_err<uint8[list][list]>(alpn.decode(bytes([0, 2, 2, 104, 50])));
+        test.assert_err<uint8[list][list]>(alpn.decode(bytes([0, 3, 0, 104, 50])));
+        test.assert_err<uint8[list][list]>(alpn.decode(bytes([0, 3, 3, 104, 50])));
+    };
+
+    export let test_server_selection_message = func {
+        assert_bytes(alpn.h3(), test.assert_ok<uint8[list]>(alpn.decode_server_selection(bytes([0, 3, 2, 104, 51]))));
+        last pair = bytes([0, 12, 2, 104, 50, 8, 104, 116, 116, 112, 47, 49, 46, 49]);
+        test.assert_err<uint8[list]>(alpn.decode_server_selection(pair));
+        test.assert_err<uint8[list]>(alpn.decode_server_selection(bytes([0, 9])));
+    };
+
+    let selected = func(choice: alpn.Selection) -> string => match (choice) {
+        alpn.Selection.Selected(name) => string.from_utf8(name)[1],
+        alpn.Selection.NoApplicationProtocol => "none",
+    };
+
+    export let test_select_uses_server_preference = func {
+        // The client prefers http/1.1, the server prefers h2: the server's order wins (RFC 7301 section 3.2).
+        last client = names(alpn.http11(), alpn.h2());
+        test.assert_equal_string("h2", selected(alpn.select(names(alpn.h2(), alpn.http11()), client)));
+        test.assert_equal_string("http/1.1", selected(alpn.select(names(alpn.http11(), alpn.h2()), client)));
+        test.assert_equal_string("none", selected(alpn.select(one(alpn.h3()), client)));
+        test.assert_equal_string("none", selected(alpn.select(one(alpn.h3()), new uint8[list][list]())));
+    };
+);

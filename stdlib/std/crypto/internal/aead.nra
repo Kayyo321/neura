@@ -1,0 +1,36 @@
+let error = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief Checks and results shared by the AEADs of Std.Crypto.Symmetric. Internal.
+#Since("0.3.0")
+export let Aead = module (
+    /// @brief The error every failed `open` returns: no plaintext, no detail about what differed.
+    export let failure = func -> Result<uint8[list]> =>
+        Result<uint8[list]>.Err(error.custom("crypto.authentication", "authentication failed"));
+
+    /// @brief Traps with "invalid argument: <name> nonce must be <length> bytes" unless the nonce has the length.
+    export let check_nonce = func(nonce: uint8[list], length: int, name: string) {
+        if (nonce.length != length) {
+            trap_with_message("invalid argument: " .. name .. " nonce must be " .. length.to_string() .. " bytes");
+        }
+    };
+
+    /// @brief Traps with "invalid argument: <name> key must be <lengths> bytes" unless `ok`.
+    export let check_key = func(ok: bool, name: string, lengths: string) {
+        if (not ok) {
+            trap_with_message("invalid argument: " .. name .. " key must be " .. lengths .. " bytes");
+        }
+    };
+
+    /// @brief The 16-byte block with its last four bytes, a big-endian counter, increased by one modulo 2^32.
+    export let increment32_be = func(block: uint8[list]) -> uint8[list] {
+        let out = words.copy(block);
+        last value = ((words.load32_be(block, 12) as uint64) + 1) & 4294967295;
+        out[12] = ((value >> 24) & 255) as uint8;
+        out[13] = ((value >> 16) & 255) as uint8;
+        out[14] = ((value >> 8) & 255) as uint8;
+        out[15] = (value & 255) as uint8;
+        return out;
+    };
+);

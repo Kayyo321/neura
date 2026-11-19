@@ -1,0 +1,181 @@
+let errors = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let utf8 = import:Std.Encoding.Utf8;
+
+/// @brief WebSocket close status codes, close frame bodies, and protocol failures (RFC 6455 sections 5.5.1 and
+/// 7.4).
+///
+/// A close frame body is empty or a two-byte big-endian status code followed by a UTF-8 reason; a control frame
+/// carries at most 125 bytes, so the reason is at most 123 bytes. `is_valid_on_wire` accepts the codes RFC 6455
+/// section 7.4.1 defines for use in a frame (1000 to 1003 and 1007 to 1011) and the ranges 3000 to 4999 of
+/// section 7.4.2; 0 to 999, the reserved 1004, 1005, 1006 and 1015, and the other codes of 1000 to 2999 are
+/// rejected. A failure the connection reports carries the status it closes with, as a `ProtocolFailure` detail.
+/// @see [Std.Net.Realtime.Ws.CloseStatus](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-Ws-CloseStatus)
+#Since("0.3.0")
+export let CloseStatus = module (
+    /// @brief 1000: the purpose of the connection was fulfilled.
+    export const Normal: int = 1000;
+    /// @brief 1001: the endpoint is going away.
+    export const GoingAway: int = 1001;
+    /// @brief 1002: a protocol error.
+    export const ProtocolError: int = 1002;
+    /// @brief 1003: a type of data the endpoint cannot accept.
+    export const UnsupportedData: int = 1003;
+    /// @brief 1005: reserved, never sent; reported when a close frame had no status.
+    export const NoStatusReceived: int = 1005;
+    /// @brief 1006: reserved, never sent; reported when the connection ended without a close frame.
+    export const AbnormalClosure: int = 1006;
+    /// @brief 1007: message data inconsistent with its type, such as text that is not UTF-8.
+    export const InvalidPayload: int = 1007;
+    /// @brief 1008: a message that violates the endpoint's policy.
+    export const PolicyViolation: int = 1008;
+    /// @brief 1009: a message too big to process.
+    export const MessageTooBig: int = 1009;
+    /// @brief 1010: the client expected an extension the server did not negotiate.
+    export const MandatoryExtension: int = 1010;
+    /// @brief 1011: the server met an unexpected condition.
+    export const InternalError: int = 1011;
+    /// @brief 1015: reserved, never sent; reported when the TLS handshake failed.
+    export const TlsHandshake: int = 1015;
+
+    /// @brief The error code of every `ProtocolFailure`.
+    export const ErrorCode: string = "ws.protocol";
+
+    /// @brief The longest close reason in bytes: 125 minus the two status bytes.
+    export const MaxReasonBytes: int = 123;
+
+    /// @brief Whether an endpoint may put the code in a close frame, and accept it from one (RFC 6455 section
+    /// 7.4).
+    #[NoDiscard, Pure]
+    export let is_valid_on_wire = func(code: int) -> bool {
+        if (code >= 1000 && code <= 1003) {
+            return true;
+        }
+        return if (code >= 1007 && code <= 1011) -> true
+            else -> code >= 3000 && code <= 4999;
+    };
+
+    /// @brief The status and reason of a close frame. Status 1005 stands for a frame without a body.
+    #[Final, Immutable]
+    export let CloseReason = class (
+        /// @brief The status code, or 1005 when the frame had no body.
+        export last code: int;
+        /// @brief The reason text, possibly empty.
+        export last reason: string;
+
+        /// @brief Stores the code and reason.
+        export let init = func(status: int, text: string) {
+            code = status;
+            reason = text;
+        };
+
+        /// @brief Equal when the code and reason are.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: CloseReason) {
+                return false;
+            }
+            return code == that.code && reason == that.reason;
+        };
+
+        /// @brief Combines the code and the reason.
+        export let.override hash_code = func -> uint32 =>
+            hashing.combine(hashing.combine(17, hashing.of_int64(code as int64)), strings.hash(reason));
+
+        /// @brief `code reason`, or the code alone.
+        export let.override to_string = func -> string =>
+            reason.byte_length == 0 ? code.to_string() : code.to_string() .. " " .. reason;
+    );
+
+    /// @brief The error detail of a WebSocket failure: the status the connection closes with and a message.
+    #Final
+    export let ProtocolFailure = class:errors.ErrorDetail (
+        /// @brief The close status this failure maps to, such as 1002 or 1009.
+        export last status: int;
+        /// @brief What went wrong.
+        last text: string;
+
+        /// @brief Stores the status and message.
+        export let init = func(code_value: int, message_value: string) {
+            super.init();
+            status = code_value;
+            text = message_value;
+        };
+
+        /// @brief Always `ws.protocol`.
+        export let.override code = func -> string => ErrorCode;
+
+        /// @brief The message.
+        export let.override message = func -> string => text;
+
+        /// @brief Equal when the status and message are.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: ProtocolFailure) {
+                return false;
+            }
+            return status == that.status && text == that.message();
+        };
+
+        /// @brief Combines the status and message.
+        export let.override hash_code = func -> uint32 =>
+            hashing.combine(hashing.combine(17, hashing.of_int64(status as int64)), strings.hash(text));
+
+        /// @brief `ws.protocol status: message`.
+        export let.override to_string = func -> string => ErrorCode .. " " .. status.to_string() .. ": " .. text;
+    );
+
+    /// @brief A Custom error holding a `ProtocolFailure`.
+    #NoDiscard
+    export let failure = func(status: int, message: string) -> errors.Error =>
+        errors.Error.Custom(new ProtocolFailure(status, message));
+
+    /// @brief The close status a failure maps to: its `ProtocolFailure` status, otherwise 1011 for any other
+    /// error.
+    #NoDiscard
+    export let status_of = func(problem: errors.Error) -> int => match (problem) {
+        errors.Error.Custom(detail) => detail is ProtocolFailure ? (detail as ProtocolFailure).status : InternalError,
+        _ => InternalError,
+    };
+
+    /// @brief The body of a close frame with the status and reason. Fails when the code is not valid on the wire
+    /// or the reason is longer than 123 bytes.
+    #NoDiscard
+    export let encode_body = func(code: int, reason: string) -> Result<uint8[list]> {
+        if (not is_valid_on_wire(code)) {
+            return Result<uint8[list]>.Err(failure(ProtocolError, "close status " .. code.to_string()
+                .. " may not be sent"));
+        }
+        if (reason.byte_length > MaxReasonBytes) {
+            return Result<uint8[list]>.Err(failure(ProtocolError, "close reason longer than 123 bytes"));
+        }
+        last body: uint8[list] = new;
+        body.append((code / 256) as uint8);
+        body.append((code % 256) as uint8);
+        for (let b in strings.to_bytes(reason)) {
+            body.append(b);
+        }
+        return Result<uint8[list]>.Ok(body);
+    };
+
+    /// @brief Reads a received close frame body (RFC 6455 section 5.5.1). An empty body gives status 1005; a
+    /// one-byte body, a status not valid on the wire, or a reason that is not UTF-8 fails with status 1002
+    /// (1007 for the reason).
+    #NoDiscard
+    export let decode_body = func(body: uint8[list]) -> Result<CloseReason> {
+        if (body.length == 0) {
+            return Result<CloseReason>.Ok(new CloseReason(NoStatusReceived, ""));
+        }
+        if (body.length == 1) {
+            return Result<CloseReason>.Err(failure(ProtocolError, "close body of one byte"));
+        }
+        last code = (body[0] as int) * 256 + (body[1] as int);
+        return Result<CloseReason>.Err(failure(ProtocolError, "invalid close status " .. code.to_string())) unless is_valid_on_wire(code);
+        last reason_bytes: uint8[list] = new;
+        for (let i = 2; i < body.length; i++) {
+            reason_bytes.append(body[i]);
+        }
+        return if (utf8.validate(reason_bytes) >= 0) -> Result<CloseReason>.Err(failure(InvalidPayload, "close reason is not UTF-8"))
+            else -> Result<CloseReason>.Ok(new CloseReason(code, strings.from_bytes_lossy(reason_bytes)));
+    };
+);

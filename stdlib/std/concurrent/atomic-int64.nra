@@ -37,6 +37,9 @@ export let AtomicInt64 = module (
             }
             return false;
         };
+
+        /// @brief Shows the current value.
+        export let.override to_string = func -> string => "AtomicInt64(" .. load().to_string() .. ")";
     );
 
     /// @brief An atomic holding the initial value.

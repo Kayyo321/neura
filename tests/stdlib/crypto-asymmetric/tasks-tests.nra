@@ -1,0 +1,39 @@
+// test-options: --gpu=off --max-steps 2000000000
+let ecdsa = import:Std.Crypto.Asymmetric.Ecdsa;
+let ed25519 = import:Std.Crypto.Asymmetric.Ed25519;
+let test = import:Std.Test;
+let x25519 = import:Std.Crypto.Asymmetric.X25519;
+
+// The public-key primitives work inside spawned tasks: every constant table, Montgomery context and group is
+// built per call (the compiler checks every spawned call). A file of its own, because a program with tasks
+// runs without the fast tiers.
+let TasksTests = module (
+    let seed = func(first: int) -> uint8[list] {
+        let out: uint8[list] = new;
+        for (let i = 0; i < 32; i++) {
+            out.append(((first + 3 * i) % 256) as uint8);
+        }
+        return out;
+    };
+
+    let task_work = func(n: int) -> int {
+        last a = new x25519.X25519PrivateKey(seed(n));
+        last b = new x25519.X25519PrivateKey(seed(n + 1));
+        last shared = test.assert_ok(a.diffie_hellman(b.public_key()));
+        last signer = new ed25519.Ed25519Signer(new ed25519.Ed25519PrivateKey(shared.expose()));
+        last signature = signer.sign(new([n as uint8]));
+        last ec = new ecdsa.EcdsaSigner(new ecdsa.EcPrivateKey(ecdsa.Curve.P256, seed(n)));
+        last der = ec.sign(signature);
+        return (signer.verify(new([n as uint8]), signature) && ec.verify(signature, der)) ? 1 : 0;
+    };
+
+    export let test_primitives_in_tasks = func {
+        let total = 0;
+        scope (s) {
+            let first = spawn task_work(1);
+            let second = spawn task_work(2);
+            total = first.join() + second.join();
+        }
+        test.assert_equal_int32(2, total);
+    };
+);

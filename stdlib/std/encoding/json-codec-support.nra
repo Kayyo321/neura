@@ -1,0 +1,199 @@
+let int8s = import:Std.Core.Int8;
+let int16s = import:Std.Core.Int16;
+let int32s = import:Std.Core.Int32;
+let int64s = import:Std.Core.Int64;
+let uint8s = import:Std.Core.UInt8;
+let uint16s = import:Std.Core.UInt16;
+let uint32s = import:Std.Core.UInt32;
+let uint64s = import:Std.Core.UInt64;
+let float16s = import:Std.Core.Float16;
+let bfloat16s = import:Std.Core.BFloat16;
+let float32s = import:Std.Core.Float32;
+let float64s = import:Std.Core.Float64;
+let error = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+let json = import:Std.Encoding.Json;
+
+/// @brief Primitive conversions and input parsing for compiler-derived JSON codecs.
+#Since("0.3.0")
+export let JsonCodecSupport = module (
+    const MaxInputBytes: int = 16777216;
+
+    /// @brief Parses codec input with a 16 MiB bound and retains repeated member names in order.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let parse = func(text: string) -> Result<json.JsonValue> {
+        if (text.byte_length > MaxInputBytes) {
+            return Result<json.JsonValue>.Err(error.custom("json.codec.too_large", "$: JSON text exceeds 16777216 bytes"));
+        }
+        return json.parse_ordered_members(text);
+    };
+
+    let wrong_kind = func<T>(path: string, expected: string) -> Result<T> => Result<T>.Err(error.custom("json.codec.type", path .. ": expected " .. expected));
+
+    let outside_range = func<T>(path: string, type_name: string) -> Result<T> => Result<T>.Err(error.custom("json.codec.range", path .. ": expected a number representable as " .. type_name));
+
+    let not_finite = func<T>(path: string) -> Result<T> => Result<T>.Err(error.custom("json.codec.not_finite", path .. ": expected a finite number"));
+
+    let number_text = func(value: json.JsonValue, path: string) -> Result<string> {
+        match (value) {
+            json.JsonValue.Number(text) => {
+                return Result<string>.Err(error.custom("json.codec.range", path .. ": invalid JSON number text")) unless json.is_number_text(text);
+                return Result<string>.Ok(text);
+            },
+            _ => {
+                return wrong_kind<string>(path, "a number");
+            },
+        }
+    };
+
+    let number_result = func<T>(parsed: Result<T>, path: string, type_name: string) -> Result<T> => match (parsed) {
+        Result.Ok(_) => parsed,
+        Result.Err(_) => outside_range<T>(path, type_name),
+    };
+
+    #[NoDiscard, Pure, ThreadSafe]
+    export let encode_bool = func(value: bool, path: string) -> Result<json.JsonValue> => Result<json.JsonValue>.Ok(json.JsonValue.Boolean(value));
+
+    #[NoDiscard, Pure, ThreadSafe]
+    export let decode_bool = func(value: json.JsonValue, path: string) -> Result<bool> => match (value) {
+        json.JsonValue.Boolean(decoded) => Result<bool>.Ok(decoded),
+        _ => wrong_kind<bool>(path, "a boolean"),
+    };
+
+    #[NoDiscard, Pure, ThreadSafe]
+    export let encode_string = func(value: string, path: string) -> Result<json.JsonValue> => Result<json.JsonValue>.Ok(json.JsonValue.Text(value));
+
+    #[NoDiscard, Pure, ThreadSafe]
+    export let decode_string = func(value: json.JsonValue, path: string) -> Result<string> => match (value) {
+        json.JsonValue.Text(decoded) => Result<string>.Ok(decoded),
+        _ => wrong_kind<string>(path, "a string"),
+    };
+
+    #[NoDiscard, Pure, ThreadSafe]
+    export let encode_int8 = func(value: int8, path: string) -> Result<json.JsonValue> => Result<json.JsonValue>.Ok(json.JsonValue.Number(value.to_string()));
+
+    #[NoDiscard, Pure, ThreadSafe]
+    export let decode_int8 = func(value: json.JsonValue, path: string) -> Result<int8> {
+        last text = number_text(value, path)?;
+        return number_result<int8>(int8s.parse(text), path, "int8");
+    };
+
+    #[NoDiscard, Pure, ThreadSafe]
+    export let encode_int16 = func(value: int16, path: string) -> Result<json.JsonValue> => Result<json.JsonValue>.Ok(json.JsonValue.Number(value.to_string()));
+
+    #[NoDiscard, Pure, ThreadSafe]
+    export let decode_int16 = func(value: json.JsonValue, path: string) -> Result<int16> {
+        last text = number_text(value, path)?;
+        return number_result<int16>(int16s.parse(text), path, "int16");
+    };
+
+    #[NoDiscard, Pure, ThreadSafe]
+    export let encode_int32 = func(value: int32, path: string) -> Result<json.JsonValue> => Result<json.JsonValue>.Ok(json.JsonValue.Number(value.to_string()));
+
+    #[NoDiscard, Pure, ThreadSafe]
+    export let decode_int32 = func(value: json.JsonValue, path: string) -> Result<int32> {
+        last text = number_text(value, path)?;
+        return number_result<int32>(int32s.parse(text), path, "int32");
+    };
+
+    #[NoDiscard, Pure, ThreadSafe]
+    export let encode_int64 = func(value: int64, path: string) -> Result<json.JsonValue> => Result<json.JsonValue>.Ok(json.JsonValue.Number(value.to_string()));
+
+    #[NoDiscard, Pure, ThreadSafe]
+    export let decode_int64 = func(value: json.JsonValue, path: string) -> Result<int64> {
+        last text = number_text(value, path)?;
+        return number_result<int64>(int64s.parse(text), path, "int64");
+    };
+
+    #[NoDiscard, Pure, ThreadSafe]
+    export let encode_uint8 = func(value: uint8, path: string) -> Result<json.JsonValue> => Result<json.JsonValue>.Ok(json.JsonValue.Number(value.to_string()));
+
+    #[NoDiscard, Pure, ThreadSafe]
+    export let decode_uint8 = func(value: json.JsonValue, path: string) -> Result<uint8> {
+        last text = number_text(value, path)?;
+        return number_result<uint8>(uint8s.parse(text), path, "uint8");
+    };
+
+    #[NoDiscard, Pure, ThreadSafe]
+    export let encode_uint16 = func(value: uint16, path: string) -> Result<json.JsonValue> => Result<json.JsonValue>.Ok(json.JsonValue.Number(value.to_string()));
+
+    #[NoDiscard, Pure, ThreadSafe]
+    export let decode_uint16 = func(value: json.JsonValue, path: string) -> Result<uint16> {
+        last text = number_text(value, path)?;
+        return number_result<uint16>(uint16s.parse(text), path, "uint16");
+    };
+
+    #[NoDiscard, Pure, ThreadSafe]
+    export let encode_uint32 = func(value: uint32, path: string) -> Result<json.JsonValue> => Result<json.JsonValue>.Ok(json.JsonValue.Number(value.to_string()));
+
+    #[NoDiscard, Pure, ThreadSafe]
+    export let decode_uint32 = func(value: json.JsonValue, path: string) -> Result<uint32> {
+        last text = number_text(value, path)?;
+        return number_result<uint32>(uint32s.parse(text), path, "uint32");
+    };
+
+    #[NoDiscard, Pure, ThreadSafe]
+    export let encode_uint64 = func(value: uint64, path: string) -> Result<json.JsonValue> => Result<json.JsonValue>.Ok(json.JsonValue.Number(value.to_string()));
+
+    #[NoDiscard, Pure, ThreadSafe]
+    export let decode_uint64 = func(value: json.JsonValue, path: string) -> Result<uint64> {
+        last text = number_text(value, path)?;
+        return number_result<uint64>(uint64s.parse(text), path, "uint64");
+    };
+
+    #[NoDiscard, Pure, ThreadSafe]
+    export let encode_float16 = func(value: float16, path: string) -> Result<json.JsonValue> {
+        return not_finite<json.JsonValue>(path) unless float16s.is_finite(value);
+        return Result<json.JsonValue>.Ok(json.JsonValue.Number(value.to_string()));
+    };
+
+    #[NoDiscard, Pure, ThreadSafe]
+    export let decode_float16 = func(value: json.JsonValue, path: string) -> Result<float16> {
+        last text = number_text(value, path)?;
+        last decoded = number_result<float16>(float16s.parse(text), path, "float16")?;
+        return not_finite<float16>(path) unless float16s.is_finite(decoded);
+        return Result<float16>.Ok(decoded);
+    };
+
+    #[NoDiscard, Pure, ThreadSafe]
+    export let encode_bfloat16 = func(value: bfloat16, path: string) -> Result<json.JsonValue> {
+        return not_finite<json.JsonValue>(path) unless bfloat16s.is_finite(value);
+        return Result<json.JsonValue>.Ok(json.JsonValue.Number(value.to_string()));
+    };
+
+    #[NoDiscard, Pure, ThreadSafe]
+    export let decode_bfloat16 = func(value: json.JsonValue, path: string) -> Result<bfloat16> {
+        last text = number_text(value, path)?;
+        last decoded = number_result<bfloat16>(bfloat16s.parse(text), path, "bfloat16")?;
+        return not_finite<bfloat16>(path) unless bfloat16s.is_finite(decoded);
+        return Result<bfloat16>.Ok(decoded);
+    };
+
+    #[NoDiscard, Pure, ThreadSafe]
+    export let encode_float32 = func(value: float32, path: string) -> Result<json.JsonValue> {
+        return not_finite<json.JsonValue>(path) unless float32s.is_finite(value);
+        return Result<json.JsonValue>.Ok(json.JsonValue.Number(value.to_string()));
+    };
+
+    #[NoDiscard, Pure, ThreadSafe]
+    export let decode_float32 = func(value: json.JsonValue, path: string) -> Result<float32> {
+        last text = number_text(value, path)?;
+        last decoded = number_result<float32>(float32s.parse(text), path, "float32")?;
+        return not_finite<float32>(path) unless float32s.is_finite(decoded);
+        return Result<float32>.Ok(decoded);
+    };
+
+    #[NoDiscard, Pure, ThreadSafe]
+    export let encode_float64 = func(value: float64, path: string) -> Result<json.JsonValue> {
+        return not_finite<json.JsonValue>(path) unless float64s.is_finite(value);
+        return Result<json.JsonValue>.Ok(json.JsonValue.Number(value.to_string()));
+    };
+
+    #[NoDiscard, Pure, ThreadSafe]
+    export let decode_float64 = func(value: json.JsonValue, path: string) -> Result<float64> {
+        last text = number_text(value, path)?;
+        last decoded = number_result<float64>(float64s.parse(text), path, "float64")?;
+        return not_finite<float64>(path) unless float64s.is_finite(decoded);
+        return Result<float64>.Ok(decoded);
+    };
+);

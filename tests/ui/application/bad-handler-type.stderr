@@ -1,0 +1,7 @@
+error[E1006]: handler does not match the event
+ --> $DIR/bad-handler-type.nra:2:72
+  |
+2 | ...view = html(receive: func(ui.KeyEvent) -> void) { <button on:click={receive}>Save</button> };
+  |                                                                       ^^^^^^^^^ expected func<ClickEvent, void>, got func<KeyEvent, void>
+
+For more information about this error, try `neura explain E1006`.

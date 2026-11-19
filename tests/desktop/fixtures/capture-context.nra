@@ -1,0 +1,20 @@
+let desktop = import:Std.Desktop;
+let program = import:Std.Program;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+// Rejected: a bridge operation runs as its own task, so its implementation cannot capture the Context, which
+// belongs to the task that runs `start`. `neura check` reports E0602 at this program's call of `run`.
+let CaptureContext = module:program.Entry (
+    let start = func(context: desktop.Context) -> Result<Unit> {
+        last dispatcher = new desktop.Dispatcher(new desktop.Registry(new(["fixture.title"])));
+        dispatcher.add("fixture.title", new func(call: desktop.Call) -> Result<uint8[list]> {
+            context.quit(0);
+            return Result<uint8[list]>.Ok(call.request());
+        });
+        return context.run(dispatcher);
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode =>
+        desktop.run_application(new desktop.Registry(new(["fixture.title"])), start);
+);

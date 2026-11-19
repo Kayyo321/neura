@@ -1,0 +1,65 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.AeadCipher;
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.SymmetricKey;
+let aead = import:Std.Crypto.Internal.Aead;
+let chacha = import:Std.Crypto.Internal.ChaCha20;
+let chacha20 = import:Std.Crypto.Symmetric.ChaCha20;
+let chacha20_poly1305 = import:Std.Crypto.Symmetric.ChaCha20Poly1305;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief XChaCha20-Poly1305 of draft-irtf-cfrg-xchacha-03: ChaCha20-Poly1305 with 192-bit nonces (Stdlib.md
+/// section 21.7).
+///
+/// The first 16 bytes of the nonce derive a subkey with HChaCha20; the last 8 form the ChaCha20 nonce. A nonce
+/// of 24 random bytes does not repeat in practice, so random nonces are safe.
+/// @see [Std.Crypto.Symmetric.XChaCha20Poly1305](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Symmetric-XChaCha20Poly1305)
+#Since("0.3.0")
+export let XChaCha20Poly1305 = module (
+    /// @brief The AEAD under a 32-byte key.
+    #[Final, Since("0.3.0")]
+    export let XChaCha20Poly1305 = class implements AeadCipher<SymmetricKey<XChaCha20Poly1305>, uint8[list], uint8[list]> (
+        let key_bytes: uint8[list] = new;
+
+        /// @brief Keys the cipher with a 32-byte key (typed, or raw bytes); another length traps.
+        export let init = func(key: SymmetricKey<XChaCha20Poly1305>) {
+            setup(key.expose());
+        } or func(key: uint8[list]) {
+            setup(key);
+        };
+
+        let setup = func(key: uint8[list]) {
+            aead.check_key(key.length == 32, "XChaCha20-Poly1305", "32");
+            crypto_policy.require(Algorithm.XChaCha20Poly1305);
+            key_bytes = words.copy(key);
+        };
+
+        /// @brief `XChaCha20Poly1305`.
+        export let algorithm = func -> Algorithm => Algorithm.XChaCha20Poly1305;
+        /// @brief 24.
+        export let nonce_length = func -> int => 24;
+        /// @brief 16.
+        export let tag_length = func -> int => 16;
+
+        export let seal = func(nonce: uint8[list], plaintext: uint8[list], associated_data: uint8[list]) -> uint8[list] {
+            aead.check_nonce(nonce, 24, "XChaCha20-Poly1305");
+            let subkey = chacha.hchacha20(key_bytes, words.slice(nonce, 0, 16));
+            last out = chacha20_poly1305.seal_with(subkey, chacha20.short_nonce(nonce), plaintext, associated_data);
+            words.wipe(subkey);
+            return out;
+        };
+
+        export let open = func(nonce: uint8[list], sealed: uint8[list], associated_data: uint8[list])
+            -> Result<uint8[list]> {
+            aead.check_nonce(nonce, 24, "XChaCha20-Poly1305");
+            let subkey = chacha.hchacha20(key_bytes, words.slice(nonce, 0, 16));
+            last out = chacha20_poly1305.open_with(subkey, chacha20.short_nonce(nonce), sealed, associated_data);
+            words.wipe(subkey);
+            return out;
+        };
+
+        export let.override to_string = func -> string => "XChaCha20Poly1305(<redacted>)";
+    );
+);

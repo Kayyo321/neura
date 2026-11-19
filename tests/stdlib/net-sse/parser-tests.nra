@@ -1,0 +1,259 @@
+let errors = import:Std.Core.Error;
+let optional = import:Std.Core.Optional;
+let parser = import:Std.Net.Realtime.Sse.Parser;
+let sse_event = import:Std.Net.Realtime.Sse.SseEvent;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+
+// The event-stream parser. The example streams marked "WHATWG" are copied from WHATWG HTML, section 9.2
+// ("Server-sent events"; sections 9.2.1 and 9.2.6), Living Standard fetched 2026-11-17.
+let ParserTests = module (
+    let parse_bytes = func(bytes: uint8[list]) -> sse_event.SseEvent[list] {
+        last p = parser.create();
+        last events = test.assert_ok<sse_event.SseEvent[list]>(p.feed(bytes));
+        p.finish();
+        return events;
+    };
+
+    // The UTF-8 byte order mark 0xEF 0xBB 0xBF followed by the text.
+    let with_bom = func(text: string) -> uint8[list] {
+        last bytes: uint8[list] = new([239, 187, 191]);
+        for (let b in strings.to_bytes(text)) {
+            bytes.append(b);
+        }
+        return bytes;
+    };
+
+    let parse = func(text: string) -> sse_event.SseEvent[list] => parse_bytes(strings.to_bytes(text));
+
+    let expect = func(event: sse_event.SseEvent, kind: string, data: string, id: string) {
+        test.assert_equal_string(kind, event.event_type);
+        test.assert_equal_string(data, event.data);
+        test.assert_equal_string(id, event.id);
+    };
+
+    // WHATWG 9.2.6: the stock ticker example, once followed by a blank line.
+    export let test_whatwg_multi_line_data = func {
+        last events = parse("data: YHOO\ndata: +2\ndata: 10\n\n");
+        test.assert_equal<int>(1, events.length);
+        expect(events[0], "message", "YHOO\n+2\n10", "");
+    };
+
+    // WHATWG 9.2.6: four blocks; the last is followed by the blank line the specification says it still needs.
+    export let test_whatwg_four_blocks = func {
+        last events = parse(": test stream\n\ndata: first event\nid: 1\n\ndata:second event\nid\n\ndata:  third event\n\n");
+        test.assert_equal<int>(3, events.length);
+        expect(events[0], "message", "first event", "1");
+        expect(events[1], "message", "second event", "");
+        expect(events[2], "message", " third event", "");
+    };
+
+    // WHATWG 9.2.6: the first block fires empty data, the middle one a single newline, the last is discarded.
+    export let test_whatwg_empty_data_blocks = func {
+        last events = parse("data\n\ndata\ndata\n\ndata:");
+        test.assert_equal<int>(2, events.length);
+        expect(events[0], "message", "", "");
+        expect(events[1], "message", "\n", "");
+    };
+
+    // WHATWG 9.2.6: the space after the colon is ignored if present (followed here by the blank line).
+    export let test_whatwg_space_after_colon = func {
+        last events = parse("data:test\n\ndata: test\n\n");
+        test.assert_equal<int>(2, events.length);
+        test.assert(events[0].equals(events[1]));
+        test.assert_equal_string("test", events[0].data);
+    };
+
+    // WHATWG 9.2.1: named event types; the last block has no blank line and is not dispatched.
+    export let test_whatwg_event_types = func {
+        last events = parse("event: add\ndata: 73857293\n\nevent: remove\ndata: 2153\n\nevent: add\ndata: 113411");
+        test.assert_equal<int>(2, events.length);
+        expect(events[0], "add", "73857293", "");
+        expect(events[1], "remove", "2153", "");
+    };
+
+    // WHATWG 9.2.1: three messages, the last without its blank line.
+    export let test_whatwg_three_messages = func {
+        last events = parse("data: This is the first message.\n\ndata: This is the second message, it\n"
+            + "data: has two lines.\n\ndata: This is the third message.");
+        test.assert_equal<int>(2, events.length);
+        test.assert_equal_string("This is the second message, it\nhas two lines.", events[1].data);
+    };
+
+    export let test_line_endings = func {
+        last lf = parse("event: a\ndata: x\ndata: y\n\n");
+        last crlf = parse("event: a\r\ndata: x\r\ndata: y\r\n\r\n");
+        last cr = parse("event: a\rdata: x\rdata: y\r\r");
+        test.assert_equal<int>(1, cr.length);
+        test.assert(lf[0].equals(crlf[0]));
+        test.assert(lf[0].equals(cr[0]));
+        expect(cr[0], "a", "x\ny", "");
+        // CR LF CR is one CRLF and one CR: a line end and a blank line.
+        test.assert_equal<int>(1, parse("data: z\r\n\r").length);
+    };
+
+    export let test_every_chunk_split_gives_the_same_events = func {
+        last text = ": c\r\nevent: tick\r\ndata: one\rdata: two\r\nid: 7\r\nretry: 1500\r\n\r\ndata: été\n\n";
+        last bytes = with_bom(text);
+        last whole = parse_bytes(bytes);
+        test.assert_equal<int>(2, whole.length);
+        expect(whole[0], "tick", "one\ntwo", "7");
+        test.assert_equal<int64>(1500, test.assert_some<int64>(whole[0].retry));
+        expect(whole[1], "message", "été", "7");
+        test.assert_none<int64>(whole[1].retry);
+        for (let cut = 0; cut <= bytes.length; cut++) {
+            last first: uint8[list] = new;
+            last second: uint8[list] = new;
+            for (let i = 0; i < bytes.length; i++) {
+                if (i < cut) {
+                    first.append(bytes[i]);
+                } else {
+                    second.append(bytes[i]);
+                }
+            }
+            last p = parser.create();
+            last events = test.assert_ok<sse_event.SseEvent[list]>(p.feed(first));
+            for (let e in test.assert_ok<sse_event.SseEvent[list]>(p.feed(second))) {
+                events.append(e);
+            }
+            test.assert_equal<int>(2, events.length);
+            test.assert(events[0].equals(whole[0]));
+            test.assert(events[1].equals(whole[1]));
+        }
+    };
+
+    export let test_byte_at_a_time = func {
+        last bytes = with_bom("data: a\r\n\r\ndata: b\r\r");
+        last p = parser.create();
+        last events: sse_event.SseEvent[list] = new;
+        for (let b in bytes) {
+            last single: uint8[list] = new;
+            single.append(b);
+            for (let e in test.assert_ok<sse_event.SseEvent[list]>(p.feed(single))) {
+                events.append(e);
+            }
+        }
+        test.assert_equal<int>(2, events.length);
+        test.assert_equal_string("a", events[0].data);
+        test.assert_equal_string("b", events[1].data);
+    };
+
+    export let test_byte_order_mark = func {
+        // Only one leading BOM is stripped; a second one is part of the first field name, which is then unknown.
+        test.assert_equal<int>(1, parse_bytes(with_bom("data: x\n\n")).length);
+        last twice = with_bom("");
+        for (let b in with_bom("data: x\n\n")) {
+            twice.append(b);
+        }
+        test.assert_equal<int>(0, parse_bytes(twice).length);
+        // A BOM later in the stream is ordinary text.
+        last later = strings.to_bytes("data: ");
+        for (let b in with_bom("y\n\n")) {
+            later.append(b);
+        }
+        test.assert_equal_string(strings.from_bytes_lossy(with_bom("y")), parse_bytes(later)[0].data);
+        // A partial BOM is not stripped.
+        last partial: uint8[list] = new([239, 187]);
+        for (let b in strings.to_bytes("data: x\n\n")) {
+            partial.append(b);
+        }
+        test.assert_equal<int>(0, parse_bytes(partial).length);
+    };
+
+    export let test_invalid_utf8_is_replaced = func {
+        last bytes = strings.to_bytes("data: a");
+        bytes.append(255);
+        bytes.append(98);
+        bytes.append(10);
+        bytes.append(10);
+        test.assert_equal_string("a�b", parse_bytes(bytes)[0].data);
+    };
+
+    export let test_id_rules = func {
+        // The ID carries over to later events until changed; an id with U+0000 is ignored.
+        last bytes = strings.to_bytes("id: 1\ndata: a\n\ndata: b\n\nid: x");
+        bytes.append(0);
+        for (let b in strings.to_bytes("y\ndata: c\n\nid\ndata: d\n\n")) {
+            bytes.append(b);
+        }
+        last events = parse_bytes(bytes);
+        test.assert_equal<int>(4, events.length);
+        test.assert_equal_string("1", events[0].id);
+        test.assert_equal_string("1", events[1].id);
+        test.assert_equal_string("1", events[2].id);
+        test.assert_equal_string("", events[3].id);
+        // A block with an id but no data dispatches nothing yet sets the last event ID.
+        last p = parser.create();
+        test.assert_equal<int>(0, test.assert_ok<sse_event.SseEvent[list]>(p.feed(strings.to_bytes("id: 42\n\n"))).length);
+        test.assert_equal_string("42", p.last_event_id);
+        // An id in an undispatched block does not move the cursor.
+        test.assert_ok<sse_event.SseEvent[list]>(p.feed(strings.to_bytes("id: 43\ndata: q\n")));
+        test.assert_equal_string("42", p.last_event_id);
+        p.finish();
+        test.assert_equal_string("42", parse_resumed("42", "data: r\n\n").id);
+    };
+
+    let parse_resumed = func(id: string, text: string) -> sse_event.SseEvent {
+        last p = parser.resuming(id);
+        return test.assert_ok<sse_event.SseEvent[list]>(p.feed(strings.to_bytes(text)))[0];
+    };
+
+    export let test_retry_rules = func {
+        test.assert_equal<int64>(3000, test.assert_some<int64>(parser.parse_retry("3000")));
+        test.assert_equal<int64>(0, test.assert_some<int64>(parser.parse_retry("0")));
+        test.assert_none<int64>(parser.parse_retry(""));
+        test.assert_none<int64>(parser.parse_retry(" 10"));
+        test.assert_none<int64>(parser.parse_retry("10ms"));
+        test.assert_none<int64>(parser.parse_retry("-5"));
+        test.assert_none<int64>(parser.parse_retry("1.5"));
+        // A digit string far beyond int64 saturates instead of trapping.
+        test.assert_equal<int64>(parser.MaxRetryMillis,
+            test.assert_some<int64>(parser.parse_retry("99999999999999999999999999999999999999")));
+        test.assert_equal<int64>(parser.MaxRetryMillis, test.assert_some<int64>(parser.parse_retry("1000000000001")));
+        last p = parser.create();
+        test.assert_ok<sse_event.SseEvent[list]>(p.feed(strings.to_bytes("retry: 250\n\nretry: soon\n\n")));
+        test.assert_equal<int64>(250, test.assert_some<int64>(p.reconnection_time));
+    };
+
+    export let test_comments_and_unknown_fields = func {
+        last events = parse(":comment\n: another\nfoo: bar\nData: no\ndata\n\n");
+        test.assert_equal<int>(1, events.length);
+        expect(events[0], "message", "", "");
+        // Field names compare exactly; a name with a trailing space is unknown.
+        test.assert_equal<int>(0, parse("data : x\n\n").length);
+        // Only the first colon splits; the value keeps later colons and only one leading space is dropped.
+        test.assert_equal_string("a: b", parse("data: a: b\n\n")[0].data);
+        // An empty event field leaves the default type.
+        expect(parse("event:\ndata: x\n\n")[0], "message", "x", "");
+    };
+
+    export let test_incomplete_event_is_discarded = func {
+        last p = parser.create();
+        test.assert_equal<int>(0, test.assert_ok<sse_event.SseEvent[list]>(p.feed(strings.to_bytes("data: half\n"))).length);
+        p.finish();
+        last events = test.assert_ok<sse_event.SseEvent[list]>(p.feed(strings.to_bytes("data: next\n\n")));
+        test.assert_equal<int>(1, events.length);
+        test.assert_equal_string("next", events[0].data);
+    };
+
+    export let test_limits = func {
+        last p = new parser.EventStreamParser("", 8, 10);
+        test.assert_ok<sse_event.SseEvent[list]>(p.feed(strings.to_bytes("data: 12\n")));
+        last long_line = test.assert_err<sse_event.SseEvent[list]>(p.feed(strings.to_bytes("data: 123\n")));
+        test.assert(strings.contains(errors.message(long_line), "line longer than 8 bytes"));
+        last q = new parser.EventStreamParser("", 100, 10);
+        last big = test.assert_err<sse_event.SseEvent[list]>(q.feed(strings.to_bytes("data: 12345\ndata: 12345\n\n")));
+        test.assert(strings.contains(errors.message(big), "event data longer than 10 bytes"));
+    };
+
+    export let test_event_value_semantics = func {
+        last a = new sse_event.SseEvent("x", "d", "1", optional.Optional<int64>.Some(5));
+        last b = new sse_event.SseEvent("x", "d", "1", optional.Optional<int64>.Some(5));
+        last c = sse_event.of("x", "d", "1");
+        test.assert(a.equals(b));
+        test.assert_equal<uint32>(a.hash_code(), b.hash_code());
+        test.assert(!a.equals(c));
+        test.assert_equal_string("SseEvent(x, id \"1\", data \"d\", retry 5)", a.to_string());
+        test.assert_equal_string("SseEvent(message, id \"\", data \"hi\")", sse_event.message("hi").to_string());
+    };
+);

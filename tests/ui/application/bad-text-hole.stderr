@@ -1,0 +1,7 @@
+error[E1004]: value cannot be rendered
+ --> $DIR/bad-text-hole.nra:1:35
+  |
+1 | let view = html(ready: bool) { <p>{ready}</p> };
+  |                                   ^^^^^^^ got bool; write text, a number or a ui.View
+
+For more information about this error, try `neura explain E1004`.

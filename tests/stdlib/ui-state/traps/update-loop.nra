@@ -1,0 +1,18 @@
+// status: 134
+// stderr: state update loop
+// Components030 case 44: a subscriber that keeps setting its state traps after 100 rounds.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let ui = import:Std.Ui;
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let state = new ui.State<int32>(0);
+        state.subscribe(new func(value: int32) {
+            console.print_line(value.to_string());
+            state.set(value + 1);
+        });
+        state.set(1);
+        return program.ExitCode.Ok;
+    };
+);

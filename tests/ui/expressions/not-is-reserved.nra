@@ -1,0 +1,2 @@
+// Edge case 5 of docs/design/Expressions030.md: `not` is a reserved word.
+let not = true;

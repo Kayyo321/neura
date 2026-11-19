@@ -38,6 +38,7 @@ inline constexpr std::uint32_t on_local = symbol_kind_bit(SymbolKind::Local);
 inline constexpr std::uint32_t on_field = symbol_kind_bit(SymbolKind::Field);
 inline constexpr std::uint32_t on_function = symbol_kind_bit(SymbolKind::Function);
 inline constexpr std::uint32_t on_class = symbol_kind_bit(SymbolKind::Class);
+inline constexpr std::uint32_t on_parameter = symbol_kind_bit(SymbolKind::Parameter);
 // Every kind that a source declaration introduces: all but File.
 inline constexpr std::uint32_t on_declarations =
     symbol_kind_bit(SymbolKind::Module) | symbol_kind_bit(SymbolKind::Class) | symbol_kind_bit(SymbolKind::Alias) |
@@ -126,6 +127,18 @@ IrAttributeValue anonymous_class_payload(bool structural, std::string signature,
 
 // kernel.binding: the kernel's name and ABI version.
 IrAttributeValue kernel_binding_payload(std::string kernel, std::uint32_t abi_version);
+
+// host.effects: what a call of a host binding may do. A host call is always a
+// host request, so the record has no field for it.
+struct HostEffects {
+    bool allocates = true;
+    bool traps = true;
+    bool scheduler = true;
+    bool retains = true;
+};
+IrAttributeValue host_effects_payload(const HostEffects& effects);
+// The contract of a function, or nothing when it has none.
+std::optional<HostEffects> host_effects(const IrSymbol& symbol);
 
 enum class InlineDirective : std::uint8_t { Auto = 0, Always = 1, Never = 2 };
 

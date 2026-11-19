@@ -1,0 +1,21 @@
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Net.Transport;
+
+/// @brief The unified sequenced-packet contract (`SOCK_SEQPACKET`): a connected, reliable, ordered exchange of
+/// whole records with boundaries kept.
+///
+/// As a `Std.Net.Transport`, each `receive` yields exactly one record the peer sent and each `send` sends one.
+/// Neura 0.3.0 ships no implementation: no runtime offers a sequenced-packet host
+/// service.
+/// @see [Std.Net.Socket.SeqPacketSocket](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-SeqPacketSocket)
+#Since("0.3.0")
+export let SeqPacketSocket = module (
+    /// @brief A connected record-oriented socket between addresses of type `Addr`.
+    export let SeqPacketSocket = interface<Addr>:Transport<uint8[list], uint8[list]> (
+        /// @brief The local address.
+        let local_address = func -> Result<Addr>;
+        /// @brief The peer's address, or `None` when the host did not report it.
+        let peer_address = func -> Optional<Addr>;
+    );
+);

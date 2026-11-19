@@ -1,0 +1,9 @@
+error[E0240]: malformed html factory
+ --> $DIR/html-result-annotation.nra:1:12
+  |
+1 | let view = html(x: int) -> ui.View { <p></p> };
+  |            ^^^^^^^^^^^^^^^ an HTML factory has no result annotation
+  |
+  = help: write 'html(parameters) { ... }' or 'html(parameters) from "path.html"'
+
+For more information about this error, try `neura explain E0240`.

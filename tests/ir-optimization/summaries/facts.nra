@@ -1,0 +1,172 @@
+// Functions that each show one effect or retention fact of a summary
+// (docs/design/Representation030.md, "Effect and retention summaries"), and
+// the nearest function that does not have it.
+let sorting = import:Std.Collections.Sorting;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Shape = interface (
+    let area = func() -> int64;
+);
+
+// An interface that no class implements: a call of it has no known target.
+let Orphan = interface (
+    let identity = func() -> int64;
+);
+
+let Counter = class (
+    // A runtime static initializer: the first use of the class runs it.
+    export static let created: int64[list] = new;
+    export let items: int64[list] = new;
+);
+
+// An immutable class: its instances are values that a summary does not track.
+#Immutable
+let Frozen = class (
+    export last size: int64;
+
+    export let init = func(start: int64) {
+        size = start;
+    };
+
+    export let read = func() -> int64 => size;
+);
+
+let Square = class implements Shape (
+    export let side: int64 = 2;
+    export let area = func() -> int64 => side * side;
+);
+
+let Blob = class implements Shape (
+    export let area = func() -> int64 {
+        let cells: int64[list] = new([1, 2, 3]);
+        return cells[0];
+    };
+);
+
+let Facts = module (
+    export let registry: int64[list] = new;
+
+    // No fact at all: it reads two numbers and compares them.
+    export let quiet = func(a: int8, b: int8) -> bool => a < b;
+
+    // Traps: the sum may overflow.
+
+    export let adds = func(a: int64, b: int64) -> int64 => a + b;
+
+    // Allocates a list and hands it to the caller.
+
+    export let fresh_list = func(n: int64) -> int64[list] {
+        let items: int64[list] = new([n]);
+        return items;
+    };
+
+    // Reads its argument and keeps nothing.
+
+    export let reads_only = func(items: int64[list]) -> bool => items.length == 0;
+
+    // The result is the argument.
+
+    export let identity = func(items: int64[list]) -> int64[list] => items;
+
+    // The argument becomes the global list.
+
+    export let store_global = func(items: int64[list]) {
+        registry = items;
+    };
+
+    // The result is the global list.
+
+    export let static_list = func -> int64[list] => registry;
+
+    // The argument becomes a field of another argument.
+
+    export let store_field = func(target: Counter, items: int64[list]) {
+        target.items = items;
+    };
+
+    // The argument goes to a function value.
+
+    export let call_value = func(callback: func(int64[list]) -> int64, items: int64[list]) -> int64 => callback(items);
+
+    // The result is whatever a function value returns.
+
+    export let value_result = func(maker: func() -> int64[list]) -> int64[list] => maker();
+
+    // A kernel sorts the list it is given and keeps nothing.
+
+    export let sorts = func(items: int64[list]) {
+        sorting.sort_ascending(items);
+    };
+
+    // A host request.
+
+    export let prints = func(text: string) {
+        console.print_line(text);
+    };
+
+    // The scheduler: it starts a task.
+
+    export let spawns = func {
+        scope {
+            spawn quiet(1, 2);
+        }
+    };
+
+    // Reading a static field runs the class's static initializer.
+
+    export let touches_static = func -> int64[list] => Counter.created;
+
+    // Two functions that call each other and nothing else: both are free.
+
+    export let even_free = func(n: int8) -> bool {
+        if (n == 0) {
+            return true;
+        }
+        return odd_free(n - 1);
+    };
+
+    export let odd_free = func(n: int8) -> bool {
+        if (n == 0) {
+            return false;
+        }
+        return even_free(n - 1);
+    };
+
+    // The same pair, one of which allocates: both do.
+
+    export let ping = func(n: int8) -> int64 {
+        if (n == 0) {
+            return 0;
+        }
+        return pong(n - 1);
+    };
+
+    export let pong = func(n: int8) -> int64 {
+        let cells: int64[list] = new([n as int64]);
+        return cells[0] + ping(n);
+    };
+
+    // A call whose targets are all known.
+
+    export let area_of = func(shape: Shape) -> int64 => shape.area();
+
+    // A call that has no target.
+
+    export let identity_of = func(thing: Orphan) -> int64 => thing.identity();
+
+    export let freeze = func(size: int64) -> int64 {
+        let frozen = new Frozen(size);
+        return frozen.read();
+    };
+
+    export let Main = module:program.Entry (
+        export let.override main = func(args: string[]) -> program.ExitCode {
+            let box = new Square();
+            let blob = new Blob();
+            console.print_line(area_of(box).to_string());
+            console.print_line(area_of(blob).to_string());
+            return program.ExitCode.Ok;
+        };
+    );
+);

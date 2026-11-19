@@ -22,7 +22,7 @@ let SortingTests = module (
 
     // A comparator that counts its calls.
     let counting = func(calls: cell.Cell<int>) -> func(int, int) -> ordering.Ordering {
-        return func(a: int, b: int) -> ordering.Ordering {
+        return new func(a: int, b: int) -> ordering.Ordering {
             calls.value = calls.value + 1;
             return compare(a, b);
         };
@@ -30,7 +30,7 @@ let SortingTests = module (
 
     // Insertion sort by adjacent exchanges: the trivially correct reference.
     let reference = func(items: int[list]) -> int[list] {
-        let result: int[list] = [];
+        let result: int[list] = new;
         for (let value in items) {
             result.append(value);
         }
@@ -49,7 +49,7 @@ let SortingTests = module (
     };
 
     let random_list = func(random: model_random.Generator, count: int, limit: int) -> int[list] {
-        let result: int[list] = [];
+        let result: int[list] = new;
         let i = 0;
         while (i < count) {
             result.append(random.below(limit) - limit / 2);
@@ -71,7 +71,7 @@ let SortingTests = module (
 
     export let test_small_and_boundary_lengths = func() -> void {
         let random = model_random.seeded(7);
-        let lengths: int[list] = [0, 1, 2, 3, 15, 16, 17, 31, 32, 33, 47, 48, 49, 64, 65, 100, 257];
+        let lengths: int[list] = new([0, 1, 2, 3, 15, 16, 17, 31, 32, 33, 47, 48, 49, 64, 65, 100, 257]);
         for (let length in lengths) {
             let items = random_list(random, length, 50);
             let expected = reference(items);
@@ -96,7 +96,7 @@ let SortingTests = module (
 
     export let test_stability = func() -> void {
         let random = model_random.seeded(3);
-        let items: [int, int][list] = [];
+        let items: [int, int][list] = new;
         let i = 0;
         while (i < 1000) {
             items.append([random.below(10), i]);
@@ -118,7 +118,7 @@ let SortingTests = module (
     // Every comparator-call count stays within n * ceil(log2 n).
     export let test_comparator_call_bound = func() -> void {
         let random = model_random.seeded(11);
-        let lengths: int[list] = [2, 5, 16, 17, 100, 333, 512, 1000];
+        let lengths: int[list] = new([2, 5, 16, 17, 100, 333, 512, 1000]);
         for (let length in lengths) {
             let calls = cell.of<int>(0);
             let items = random_list(random, length, 1000000);
@@ -126,14 +126,14 @@ let SortingTests = module (
             test.assert(calls.value <= length * ceiling_log2(length));
         }
         let none = cell.of<int>(0);
-        let single: int[list] = [4];
+        let single: int[list] = new([4]);
         sorting.sort<int>(single, counting(none));
         test.assert_equal_int32(0, none.value);
     };
 
     // Presorted input copies merged pairs without comparing elements.
     export let test_presorted_input = func() -> void {
-        let items: int[list] = [];
+        let items: int[list] = new;
         let i = 0;
         while (i < 1000) {
             items.append(i);
@@ -149,7 +149,7 @@ let SortingTests = module (
         // 63 blocks of 15 insertions (at most 4 calls each) and one call per
         // merged pair.
         test.assert(calls.value <= 63 * 15 * 4 + 63);
-        let descending: int[list] = [];
+        let descending: int[list] = new;
         i = 1000;
         while (i > 0) {
             descending.append(i);
@@ -166,7 +166,7 @@ let SortingTests = module (
     export let test_sort_range = func() -> void {
         let random = model_random.seeded(5);
         let items = random_list(random, 100, 1000);
-        let original: int[list] = [];
+        let original: int[list] = new;
         for (let value in items) {
             original.append(value);
         }
@@ -181,7 +181,7 @@ let SortingTests = module (
             }
             i = i + 1;
         }
-        let part: int[list] = [];
+        let part: int[list] = new;
         i = 10;
         while (i < 90) {
             part.append(original[i]);
@@ -193,7 +193,7 @@ let SortingTests = module (
             test.assert_equal_int32(expected[i], items[10 + i]);
             i = i + 1;
         }
-        let small: int[list] = [3, 2, 1];
+        let small: int[list] = new([3, 2, 1]);
         sorting.sort_range<int>(small, 1, 1, compare);
         sorting.sort_range<int>(small, 3, 3, compare);
         test.assert_equal_string("[3, 2, 1]", small.to_string());
@@ -202,7 +202,7 @@ let SortingTests = module (
     };
 
     export let test_other_element_types = func() -> void {
-        let words: string[list] = ["pear", "apple", "fig", "apple", "banana"];
+        let words: string[list] = new(["pear", "apple", "fig", "apple", "banana"]);
         sorting.sort<string>(words, func(a: string, b: string) -> ordering.Ordering {
             if (a == b) {
                 return ordering.Ordering.Equal;
@@ -223,7 +223,7 @@ let SortingTests = module (
             return ordering.Ordering.Greater;
         });
         test.assert_equal_string("[apple, apple, banana, fig, pear]", words.to_string());
-        let reversed: int[list] = [1, 3, 2];
+        let reversed: int[list] = new([1, 3, 2]);
         sorting.sort<int>(reversed, func(a: int, b: int) -> ordering.Ordering {
             return ordering.reverse(compare(a, b));
         });
@@ -231,7 +231,7 @@ let SortingTests = module (
     };
 
     export let test_binary_search = func() -> void {
-        let items: int[list] = [1, 3, 3, 3, 5, 7];
+        let items: int[list] = new([1, 3, 3, 3, 5, 7]);
         test.assert_equal_int32(1, sorting.binary_search<int>(items, 3, compare));
         test.assert_equal_int32(0, sorting.binary_search<int>(items, 1, compare));
         test.assert_equal_int32(4, sorting.binary_search<int>(items, 5, compare));
@@ -240,9 +240,9 @@ let SortingTests = module (
         test.assert_equal_int32(-2, sorting.binary_search<int>(items, 2, compare));
         test.assert_equal_int32(-6, sorting.binary_search<int>(items, 6, compare));
         test.assert_equal_int32(-7, sorting.binary_search<int>(items, 9, compare));
-        let empty: int[list] = [];
+        let empty: int[list] = new;
         test.assert_equal_int32(-1, sorting.binary_search<int>(empty, 9, compare));
-        let same: int[list] = [4, 4, 4, 4, 4, 4, 4, 4, 4];
+        let same: int[list] = new([4, 4, 4, 4, 4, 4, 4, 4, 4]);
         test.assert_equal_int32(0, sorting.binary_search<int>(same, 4, compare));
         test.assert_equal_int32(-10, sorting.binary_search<int>(same, 5, compare));
     };

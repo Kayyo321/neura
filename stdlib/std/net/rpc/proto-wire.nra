@@ -1,0 +1,502 @@
+let errors = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief The protobuf wire format: base-128 varints, zigzag, fixed32/64, length-delimited fields and field tags,
+/// with a `ProtoWriter` and a `ProtoReader`.
+///
+/// This is the encoding of protobuf messages without a schema compiler: a program writes and reads the fields of
+/// its messages by number. A tag is `(field << 3) | wire_type`; wire types are 0 (varint), 1 (64-bit), 2
+/// (length-delimited), 3 and 4 (groups, deprecated and rejected here) and 5 (32-bit). Fixed-width values are
+/// little-endian. `int32` and `int64` negatives are sign-extended to 10-byte varints; `sint32` and `sint64` use
+/// zigzag. Decoding never traps on input: a truncated value, a varint longer than 10 bytes or above 64 bits, a
+/// field number 0 or above 536870911, a group or unknown wire type, and a length past the end are Parse errors.
+/// @see [Std.Net.Rpc.ProtoWire](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Rpc-ProtoWire)
+#Since("0.3.0")
+export let ProtoWire = module (
+    /// @brief Wire type 0: a base-128 varint.
+    export const Varint: int = 0;
+    /// @brief Wire type 1: 8 little-endian bytes.
+    export const Fixed64: int = 1;
+    /// @brief Wire type 2: a varint length and that many bytes.
+    export const LengthDelimited: int = 2;
+    /// @brief Wire type 3: start of a group (deprecated; rejected by the reader).
+    export const StartGroup: int = 3;
+    /// @brief Wire type 4: end of a group (deprecated; rejected by the reader).
+    export const EndGroup: int = 4;
+    /// @brief Wire type 5: 4 little-endian bytes.
+    export const Fixed32: int = 5;
+    /// @brief The largest field number (2^29 - 1).
+    export const MaxFieldNumber: int = 536870911;
+    /// @brief The longest varint in bytes.
+    export const MaxVarintBytes: int = 10;
+
+    /// @brief 2^64 - 1.
+    const AllOnes: uint64 = 18446744073709551615;
+    /// @brief 2^63.
+    const SignBit: uint64 = 9223372036854775808;
+    /// @brief 2^32 - 1.
+    const Low32: uint64 = 4294967295;
+
+    /// @brief Appends the varint encoding of `value` to `out`.
+    export let append_varint = func(out: uint8[list], value: uint64) {
+        let rest = value;
+        while (rest >= 128) {
+            out.append(((rest & 127) + 128) as uint8);
+            rest = rest >> 7;
+        }
+        out.append(rest as uint8);
+    };
+
+    /// @brief The varint encoding of `value`.
+    #NoDiscard
+    export let varint = func(value: uint64) -> uint8[list] {
+        last out: uint8[list] = new;
+        append_varint(out, value);
+        return out;
+    };
+
+    /// @brief The number of bytes the varint encoding of `value` takes.
+    #NoDiscard
+    export let varint_size = func(value: uint64) -> int {
+        let size = 1;
+        let rest = value;
+        while (rest >= 128) {
+            rest = rest >> 7;
+            size++;
+        }
+        return size;
+    };
+
+    /// @brief The two's-complement bit pattern of `value`.
+    #NoDiscard
+    export let int64_bits = func(value: int64) -> uint64 {
+        return if (value >= 0) -> value as uint64
+            else -> AllOnes - ((-(value + 1)) as uint64);
+    };
+
+    /// @brief The `int64` whose two's-complement bit pattern is `bits`.
+    #NoDiscard
+    export let bits_int64 = func(bits: uint64) -> int64 {
+        return if (bits < SignBit) -> bits as int64
+            else -> -((AllOnes - bits) as int64) - 1;
+    };
+
+    /// @brief The `int32` held in the low 32 bits of `bits`, as protobuf reads an `int32` field.
+    #NoDiscard
+    export let low_int32 = func(bits: uint64) -> int32 {
+        last low = bits & Low32;
+        return if (low < 2147483648) -> low as int32
+            else -> ((low as int64) - 4294967296) as int32;
+    };
+
+    /// @brief The zigzag encoding of a 64-bit signed value: 0, -1, 1, -2 become 0, 1, 2, 3.
+    #NoDiscard
+    export let zigzag64 = func(value: int64) -> uint64 {
+        return if (value >= 0) -> (value as uint64) * 2
+            else -> ((-(value + 1)) as uint64) * 2 + 1;
+    };
+
+    /// @brief The 64-bit signed value of a zigzag encoding.
+    #NoDiscard
+    export let unzigzag64 = func(encoded: uint64) -> int64 {
+        last half = (encoded / 2) as int64;
+        return encoded % 2 == 0 ? half : -half - 1;
+    };
+
+    /// @brief The zigzag encoding of a 32-bit signed value.
+    #NoDiscard
+    export let zigzag32 = func(value: int32) -> uint32 => zigzag64(value as int64) as uint32;
+
+    /// @brief The 32-bit signed value of a zigzag encoding.
+    #NoDiscard
+    export let unzigzag32 = func(encoded: uint32) -> int32 => unzigzag64(encoded as uint64) as int32;
+
+    /// @brief The tag of field `field` with wire type `wire_type`. A field outside 1 to 536870911 traps with
+    /// "invalid argument: field number"; a wire type outside 0 to 5 traps with "invalid argument: wire type".
+    #NoDiscard
+    export let tag = func(field: int, wire_type: int) -> uint64 {
+        if (field < 1 || field > MaxFieldNumber) {
+            trap_with_message("invalid argument: field number");
+        }
+        if (wire_type < 0 || wire_type > 5) {
+            trap_with_message("invalid argument: wire type");
+        }
+        return ((field as uint64) << 3) | (wire_type as uint64);
+    };
+
+    /// @brief Builds one protobuf message by appending fields.
+    #[Final, NotThreadSafe]
+    export let ProtoWriter = class (
+        /// @brief The bytes written so far.
+        last out: uint8[list] = new;
+
+        /// @brief An empty writer.
+        export let init = func {
+        };
+
+        /// @brief The bytes written so far (the writer's own list).
+        #NoDiscard
+        export let to_bytes = func -> uint8[list] => out;
+
+        /// @brief The number of bytes written.
+        #NoDiscard
+        export let size = func -> int => out.length;
+
+        /// @brief Writes a tag.
+        export let write_tag = func(field: int, wire_type: int) {
+            append_varint(out, tag(field, wire_type));
+        };
+
+        /// @brief Writes a varint field holding `value` (`uint64`, or `uint32` widened).
+        export let write_uint64 = func(field: int, value: uint64) {
+            write_tag(field, Varint);
+            append_varint(out, value);
+        };
+
+        /// @brief Writes a `uint32` field.
+        export let write_uint32 = func(field: int, value: uint32) => write_uint64(field, value as uint64);
+
+        /// @brief Writes an `int64` field; a negative value takes 10 bytes.
+        export let write_int64 = func(field: int, value: int64) => write_uint64(field, int64_bits(value));
+
+        /// @brief Writes an `int32` field; a negative value is sign-extended to 10 bytes.
+        export let write_int32 = func(field: int, value: int32) => write_uint64(field, int64_bits(value as int64));
+
+        /// @brief Writes a `sint64` field (zigzag).
+        export let write_sint64 = func(field: int, value: int64) => write_uint64(field, zigzag64(value));
+
+        /// @brief Writes a `sint32` field (zigzag).
+        export let write_sint32 = func(field: int, value: int32) => write_uint64(field, zigzag32(value) as uint64);
+
+        /// @brief Writes a `bool` field as 0 or 1.
+        export let write_bool = func(field: int, value: bool) => write_uint64(field, value ? 1 : 0);
+
+        /// @brief Writes an enum field by its number.
+        export let write_enum = func(field: int, value: int32) => write_int32(field, value);
+
+        /// @brief Writes a `fixed32` field.
+        export let write_fixed32 = func(field: int, value: uint32) {
+            write_tag(field, Fixed32);
+            append_le(value as uint64, 4);
+        };
+
+        /// @brief Writes a `fixed64` field.
+        export let write_fixed64 = func(field: int, value: uint64) {
+            write_tag(field, Fixed64);
+            append_le(value, 8);
+        };
+
+        /// @brief Writes an `sfixed32` field.
+        export let write_sfixed32 = func(field: int, value: int32) =>
+            write_fixed32(field, (int64_bits(value as int64) & Low32) as uint32);
+
+        /// @brief Writes an `sfixed64` field.
+        export let write_sfixed64 = func(field: int, value: int64) => write_fixed64(field, int64_bits(value));
+
+        /// @brief Writes a `float` field (IEEE 754 binary32).
+        export let write_float = func(field: int, value: float32) => write_fixed32(field, value.to_bits());
+
+        /// @brief Writes a `double` field (IEEE 754 binary64).
+        export let write_double = func(field: int, value: float64) => write_fixed64(field, value.to_bits());
+
+        /// @brief Writes a length-delimited `bytes` field.
+        export let write_bytes = func(field: int, value: uint8[list]) {
+            write_tag(field, LengthDelimited);
+            append_varint(out, value.length as uint64);
+            for (let b in value) {
+                out.append(b);
+            }
+        };
+
+        /// @brief Writes a `string` field as its UTF-8 bytes.
+        export let write_string = func(field: int, value: string) {
+            write_tag(field, LengthDelimited);
+            append_varint(out, value.byte_length as uint64);
+            for (let i = 0; i < value.byte_length; i++) {
+                out.append(value.byte_at(i));
+            }
+        };
+
+        /// @brief Writes an embedded message field from another writer's bytes.
+        export let write_message = func(field: int, message: ProtoWriter) => write_bytes(field, message.to_bytes());
+
+        /// @brief Writes a packed repeated varint field (`repeated uint64 [packed = true]`).
+        export let write_packed_uint64 = func(field: int, values: uint64[list]) {
+            last body: uint8[list] = new;
+            for (let v in values) {
+                append_varint(body, v);
+            }
+            write_bytes(field, body);
+        };
+
+        /// @brief The number of bytes written.
+        export let.override to_string = func -> string => "ProtoWriter(" .. out.length.to_string() .. " bytes)";
+
+        /// @brief Appends the low `count` bytes of `value`, least significant first.
+        let append_le = func(value: uint64, count: int) {
+            for (let i = 0; i < count; i++) {
+                out.append(((value >> ((i * 8) as uint64)) & 255) as uint8);
+            }
+        };
+    );
+
+    /// @brief A field's number and wire type, as read from its tag.
+    #Final
+    export let FieldKey = class (
+        /// @brief The field number, 1 to 536870911.
+        export last field: int;
+        /// @brief The wire type, 0, 1, 2 or 5.
+        export last wire_type: int;
+
+        /// @brief A key with both parts.
+        export let init = func(number: int, kind: int) {
+            field = number;
+            wire_type = kind;
+        };
+
+        /// @brief Equal when the number and wire type are.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: FieldKey) {
+                return false;
+            }
+            return that.field == field && that.wire_type == wire_type;
+        };
+
+        /// @brief Combines the number and wire type.
+        export let.override hash_code = func -> uint32 =>
+            hashing.combine(hashing.combine(17, field as uint32), wire_type as uint32);
+
+        /// @brief `field N, wire type W`.
+        export let.override to_string = func -> string =>
+            "field " .. field.to_string() .. ", wire type " .. wire_type.to_string();
+    );
+
+    /// @brief Reads the fields of one protobuf message in order.
+    ///
+    /// Call `has_next`, then `read_key`, then the reader that fits the key's wire type, or `skip` for a field the
+    /// program does not know. Offsets in errors are relative to the start of the bytes given to `of`.
+    #[Final, NotThreadSafe]
+    export let ProtoReader = class (
+        /// @brief The message bytes.
+        last data: uint8[list];
+        /// @brief The end of this reader's range in `data`.
+        last end: int;
+        /// @brief The next unread byte.
+        let offset: int;
+
+        /// @brief A reader over `data[start, stop)`; a range outside the list traps with "invalid argument: range".
+        export let init = func(bytes: uint8[list], start: int, stop: int) {
+            if (start < 0 || stop < start || stop > bytes.length) {
+                trap_with_message("invalid argument: range");
+            }
+            data = bytes;
+            offset = start;
+            end = stop;
+        };
+
+        /// @brief Whether bytes remain.
+        #NoDiscard
+        export let has_next = func -> bool => offset < end;
+
+        /// @brief The offset of the next unread byte.
+        #NoDiscard
+        export let position = func -> int => offset;
+
+        /// @brief Reads a tag and checks its field number and wire type.
+        #NoDiscard
+        export let read_key = func -> Result<FieldKey> {
+            last at = offset;
+            last raw = read_varint()?;
+            last kind = (raw & 7) as int;
+            last number = raw >> 3;
+            if (number == 0 || number > (MaxFieldNumber as uint64)) {
+                return Result<FieldKey>.Err(parse_error(at, "invalid field number"));
+            }
+            if (kind == StartGroup || kind == EndGroup) {
+                return Result<FieldKey>.Err(parse_error(at, "groups are not supported"));
+            }
+            return if (kind > 5) -> Result<FieldKey>.Err(parse_error(at, "invalid wire type " .. kind.to_string()))
+                else -> Result<FieldKey>.Ok(new FieldKey(number as int, kind));
+        };
+
+        /// @brief Reads a varint of at most 10 bytes whose value fits 64 bits.
+        #NoDiscard
+        export let read_varint = func -> Result<uint64> {
+            last at = offset;
+            let value: uint64 = 0;
+            for (let i = 0; i < MaxVarintBytes; i++) {
+                if (offset >= end) {
+                    return Result<uint64>.Err(errors.Error.Parse { kind: errors.ParseErrorKind.UnexpectedEnd,
+                        offset: offset, message: "truncated varint" });
+                }
+                last b = data[offset] as uint64;
+                offset++;
+                if (i == 9 && b > 1) {
+                    return Result<uint64>.Err(parse_error(at, "varint exceeds 64 bits"));
+                }
+                value = value | ((b & 127) << ((i * 7) as uint64));
+                if (b < 128) {
+                    return Result<uint64>.Ok(value);
+                }
+            }
+            return Result<uint64>.Err(parse_error(at, "varint longer than 10 bytes"));
+        };
+
+        /// @brief Reads a `uint64` varint.
+        #NoDiscard
+        export let read_uint64 = func -> Result<uint64> => read_varint();
+
+        /// @brief Reads a `uint32` varint (the low 32 bits, as protobuf parsers do).
+        #NoDiscard
+        export let read_uint32 = func -> Result<uint32> => Result<uint32>.Ok((read_varint()? & Low32) as uint32);
+
+        /// @brief Reads an `int64` varint.
+        #NoDiscard
+        export let read_int64 = func -> Result<int64> => Result<int64>.Ok(bits_int64(read_varint()?));
+
+        /// @brief Reads an `int32` varint (the low 32 bits as a signed value).
+        #NoDiscard
+        export let read_int32 = func -> Result<int32> => Result<int32>.Ok(low_int32(read_varint()?));
+
+        /// @brief Reads a `sint64` (zigzag) varint.
+        #NoDiscard
+        export let read_sint64 = func -> Result<int64> => Result<int64>.Ok(unzigzag64(read_varint()?));
+
+        /// @brief Reads a `sint32` (zigzag) varint.
+        #NoDiscard
+        export let read_sint32 = func -> Result<int32> =>
+            Result<int32>.Ok(unzigzag32((read_varint()? & Low32) as uint32));
+
+        /// @brief Reads a `bool`: any nonzero varint is true.
+        #NoDiscard
+        export let read_bool = func -> Result<bool> => Result<bool>.Ok(read_varint()? != 0);
+
+        /// @brief Reads a `fixed32`.
+        #NoDiscard
+        export let read_fixed32 = func -> Result<uint32> => Result<uint32>.Ok(read_le(4)? as uint32);
+
+        /// @brief Reads a `fixed64`.
+        #NoDiscard
+        export let read_fixed64 = func -> Result<uint64> => read_le(8);
+
+        /// @brief Reads an `sfixed32`.
+        #NoDiscard
+        export let read_sfixed32 = func -> Result<int32> => Result<int32>.Ok(low_int32(read_le(4)?));
+
+        /// @brief Reads an `sfixed64`.
+        #NoDiscard
+        export let read_sfixed64 = func -> Result<int64> => Result<int64>.Ok(bits_int64(read_le(8)?));
+
+        /// @brief Reads a `float`.
+        #NoDiscard
+        export let read_float = func -> Result<float32> => Result<float32>.Ok(float32.from_bits(read_le(4)? as uint32));
+
+        /// @brief Reads a `double`.
+        #NoDiscard
+        export let read_double = func -> Result<float64> => Result<float64>.Ok(float64.from_bits(read_le(8)?));
+
+        /// @brief Reads a length-delimited field's bytes.
+        #NoDiscard
+        export let read_bytes = func -> Result<uint8[list]> {
+            last start = read_length()?;
+            last out: uint8[list] = new;
+            for (let i = start; i < offset; i++) {
+                out.append(data[i]);
+            }
+            return Result<uint8[list]>.Ok(out);
+        };
+
+        /// @brief Reads a length-delimited field as UTF-8 text; invalid UTF-8 is an Encoding error.
+        #NoDiscard
+        export let read_string = func -> Result<string> {
+            last bytes = read_bytes()?;
+            last decoded = string.from_utf8(bytes);
+            if (not decoded[0]) {
+                return Result<string>.Err(errors.Error.Encoding { offset: offset - bytes.length,
+                    message: "string field is not UTF-8" });
+            }
+            return Result<string>.Ok(decoded[1]);
+        };
+
+        /// @brief A reader over an embedded message field, without copying its bytes.
+        #NoDiscard
+        export let read_message = func -> Result<ProtoReader> {
+            last start = read_length()?;
+            return Result<ProtoReader>.Ok(new ProtoReader(data, start, offset));
+        };
+
+        /// @brief Reads a packed repeated varint field.
+        #NoDiscard
+        export let read_packed_uint64 = func -> Result<uint64[list]> {
+            last inner = read_message()?;
+            last values: uint64[list] = new;
+            while (inner.has_next()) {
+                values.append(inner.read_varint()?);
+            }
+            return Result<uint64[list]>.Ok(values);
+        };
+
+        /// @brief Skips the value of a field with wire type `wire_type`.
+        #NoDiscard
+        export let skip = func(wire_type: int) -> Result<Unit> {
+            if (wire_type == Varint) {
+                last ignored = read_varint()?;
+            } else if (wire_type == Fixed64) {
+                last ignored = read_le(8)?;
+            } else if (wire_type == Fixed32) {
+                last ignored = read_le(4)?;
+            } else if (wire_type == LengthDelimited) {
+                last ignored = read_length()?;
+            } else {
+                return Result<Unit>.Err(parse_error(offset, "cannot skip wire type " .. wire_type.to_string()));
+            }
+            return Result<Unit>.Ok(Unit.Value);
+        };
+
+        /// @brief The position and the end.
+        export let.override to_string = func -> string =>
+            "ProtoReader(at " .. offset.to_string() .. " of " .. end.to_string() .. ")";
+
+        /// @brief Reads `count` little-endian bytes.
+        let read_le = func(count: int) -> Result<uint64> {
+            if (end - offset < count) {
+                return Result<uint64>.Err(errors.Error.Parse { kind: errors.ParseErrorKind.UnexpectedEnd,
+                    offset: offset, message: "truncated fixed-width value" });
+            }
+            let value: uint64 = 0;
+            for (let i = count - 1; i >= 0; i--) {
+                value = (value << 8) | (data[offset + i] as uint64);
+            }
+            offset += count;
+            return Result<uint64>.Ok(value);
+        };
+
+        /// @brief Reads a length prefix, checks it against the bytes left, moves past the value and returns its
+        /// start.
+        let read_length = func -> Result<int> {
+            last at = offset;
+            last length = read_varint()?;
+            if (length > ((end - offset) as uint64)) {
+                return Result<int>.Err(errors.Error.Parse { kind: errors.ParseErrorKind.UnexpectedEnd, offset: at,
+                    message: "length-delimited field runs past the end" });
+            }
+            last start = offset;
+            offset += length as int;
+            return Result<int>.Ok(start);
+        };
+    );
+
+    /// @brief A reader over all of `bytes`.
+    #NoDiscard
+    export let reader = func(bytes: uint8[list]) -> ProtoReader => new ProtoReader(bytes, 0, bytes.length);
+
+    /// @brief A new empty writer.
+    #NoDiscard
+    export let writer = func -> ProtoWriter => new;
+
+    /// @brief A Syntax parse error at `at`.
+    let parse_error = func(at: int, message: string) -> errors.Error =>
+        errors.Error.Parse { kind: errors.ParseErrorKind.Syntax, offset: at, message: message };
+);

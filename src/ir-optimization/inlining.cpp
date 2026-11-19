@@ -1,8 +1,10 @@
 // Inlining of direct calls (docs/IrOptimization.md, inline-calls).
 #include "passes.hpp"
 
+#include "analysis_cache.hpp"
 #include "effects.hpp"
 #include "locals.hpp"
+#include "neura-ir/lifetime.hpp"
 
 #include "neura-ir/attributes.hpp"
 #include "neura-ir/control_flow.hpp"
@@ -71,14 +73,15 @@ bool return_in_loop(const std::vector<IrNode>& nodes, bool in_loop) {
 
 class Inliner {
 public:
-    explicit Inliner(IrProgram& program) : program_(program), analysis_(program) {}
+    explicit Inliner(IrProgram& program) : program_(program), analyses_(program), analysis_(analyses_.effects()) {}
 
     std::size_t run();
     std::vector<InlineRefusal> refusals() const;
 
 private:
     IrProgram& program_;
-    EffectAnalysis analysis_;
+    Analyses analyses_;
+    const EffectAnalysis& analysis_;
     std::map<SymbolId, Callee> callees_;
     SymbolId caller_ = no_symbol;
     std::size_t count_ = 0;
@@ -161,6 +164,8 @@ std::optional<Shape> Inliner::inlinable(const IrBody& body, std::string* why) co
                                         IrOp::SchedulerCall, IrOp::MakeClosure})) {
         return refuse("it starts tasks, makes closures, or initializes a base object");
     }
+    if (has_attribute(function, AttributeId::HookOf) || contains_op(body.instructions, {IrOp::HookRead, IrOp::HookAdmit}))
+        return refuse("it is a class hook or contains a class hook event");
     // A module's receiver can be replaced by a reference to the module the
     // call runs on; an object's receiver cannot.
     bool object_receiver = false;
@@ -497,6 +502,14 @@ std::vector<InlineRefusal> Inliner::refusals() const {
         if (function_body(program_, body)) ++bodies[body.owner];
     }
     for (const auto& body : program_.bodies) {
+        // A body with a cleanup or a suspension is left as written
+        // (docs/design/Lifetime030.md), which function_body reports.
+        if (body.owner < program_.symbols.size() && program_.symbols[body.owner].kind == SymbolKind::Function &&
+            uses_lifetime_operations(body.instructions) &&
+            inline_directive(program_.symbols[body.owner]) == InlineDirective::Always) {
+            result.push_back({body.owner, "it contains a deferred call, a 'using' block or a 'yield'"});
+            continue;
+        }
         if (!function_body(program_, body) ||
             inline_directive(program_.symbols[body.owner]) != InlineDirective::Always)
             continue;

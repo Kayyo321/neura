@@ -47,11 +47,11 @@ let BigIntegerTests = module (
         check("0", big.of_int64(0));
         check("18446744073709551615", big.of_uint64(18446744073709551615));
         check("4294967296", big.of_uint64(4294967296));
-        let limbs: uint32[list] = [1, 2, 0, 0];
+        let limbs: uint32[list] = new([1, 2, 0, 0]);
         let built = new big.BigInteger(-7, limbs);
         check("-8589934593", built);
         test.assert_equal_int32(-1, built.sign());
-        let empty: uint32[list] = [0, 0];
+        let empty: uint32[list] = new([0, 0]);
         test.assert(new big.BigInteger(1, empty).is_zero());
     };
 

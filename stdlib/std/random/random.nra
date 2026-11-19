@@ -98,7 +98,7 @@ export let Random = module (
                 u = next_float64() * 2.0 - 1.0;
                 v = next_float64() * 2.0 - 1.0;
                 s = u * u + v * v;
-            } while (!(s < 1.0 && s != 0.0));
+            } while (not (s < 1.0 && s != 0.0));
             last factor = maths.sqrt(-2.0 * maths.log(s) / s);
             spare = v * factor;
             has_spare = true;
@@ -113,7 +113,7 @@ export let Random = module (
             if (count < 0) {
                 trap_with_message("invalid argument: negative count");
             }
-            last bytes: uint8[list] = [];
+            last bytes: uint8[list] = new;
             while (bytes.length < count) {
                 let word = next_uint64();
                 let k = 0;
@@ -161,6 +161,9 @@ export let Random = module (
                 }
             }
         };
+
+        /// @brief Names the generator; the state is never shown.
+        export let.override to_string = func -> string => "Random";
     );
 
     /// @brief The four words are successive outputs of SplitMix64 started at the seed.
@@ -195,7 +198,7 @@ export let Random = module (
     let seeded_from = func(bytes: uint8[list]) -> Result<Random> {
         if (bytes.length != 8) {
             last wrong = Error.Io {
-                kind: IoErrorKind.InvalidData, message: "entropy source returned " + bytes.length.to_string() + " bytes",
+                kind: IoErrorKind.InvalidData, message: "entropy source returned " .. bytes.length.to_string() .. " bytes",
                 path: ""
             };
             return Result<Random>.Err(wrong);

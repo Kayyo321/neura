@@ -57,59 +57,59 @@ let Utf8Tests = module (
     };
 
     export let test_encode = func() -> void {
-        test.assert_equal<uint8[list]>([], utf8.encode(""));
-        test.assert_equal<uint8[list]>([65, 195, 169, 240, 159, 153, 130], utf8.encode("Aé🙂"));
-        test.assert_equal<uint8[list]>([226, 130, 172, 0], utf8.encode("€" + strings.from_scalars([0])));
-        test.assert_equal_string("Aé🙂", test.assert_ok<string>(utf8.decode([65, 195, 169, 240, 159, 153, 130])));
-        test.assert_equal_string("", test.assert_ok<string>(utf8.decode([])));
+        test.assert_equal<uint8[list]>(new, utf8.encode(""));
+        test.assert_equal<uint8[list]>(new([65, 195, 169, 240, 159, 153, 130]), utf8.encode("Aé🙂"));
+        test.assert_equal<uint8[list]>(new([226, 130, 172, 0]), utf8.encode("€" + strings.from_scalars(new([0]))));
+        test.assert_equal_string("Aé🙂", test.assert_ok<string>(utf8.decode(new([65, 195, 169, 240, 159, 153, 130]))));
+        test.assert_equal_string("", test.assert_ok<string>(utf8.decode(new)));
         test.assert_equal_string("plain", utf8.decode_lossy(utf8.encode("plain")));
     };
 
     export let test_python_vectors = func() -> void {
-        check([], -1, "", []);
-        check([65], -1, "", [65]);
-        check([0], -1, "", [0]);
-        check([127], -1, "", [127]);
-        check([128], 0, "invalid start byte", [65533]);
-        check([191], 0, "invalid start byte", [65533]);
-        check([192, 128], 0, "invalid start byte", [65533, 65533]);
-        check([193, 191], 0, "invalid start byte", [65533, 65533]);
-        check([194], 0, "unexpected end of data", [65533]);
-        check([194, 128], -1, "", [128]);
-        check([194, 127], 0, "invalid continuation byte", [65533, 127]);
-        check([223, 191], -1, "", [2047]);
-        check([224, 159, 191], 0, "invalid continuation byte", [65533, 65533, 65533]);
-        check([224, 160, 128], -1, "", [2048]);
-        check([225, 128], 0, "unexpected end of data", [65533]);
-        check([237, 159, 191], -1, "", [55295]);
-        check([237, 160, 128], 0, "invalid continuation byte", [65533, 65533, 65533]);
-        check([237, 191, 191], 0, "invalid continuation byte", [65533, 65533, 65533]);
-        check([238, 128, 128], -1, "", [57344]);
-        check([239, 191, 191], -1, "", [65535]);
-        check([240, 143, 191, 191], 0, "invalid continuation byte", [65533, 65533, 65533, 65533]);
-        check([240, 144, 128, 128], -1, "", [65536]);
-        check([243, 191, 191, 191], -1, "", [1048575]);
-        check([244, 143, 191, 191], -1, "", [1114111]);
-        check([244, 144, 128, 128], 0, "invalid continuation byte", [65533, 65533, 65533, 65533]);
-        check([245, 128, 128, 128], 0, "invalid start byte", [65533, 65533, 65533, 65533]);
-        check([255], 0, "invalid start byte", [65533]);
-        check([254, 255], 0, "invalid start byte", [65533, 65533]);
-        check([65, 226, 130], 1, "unexpected end of data", [65, 65533]);
-        check([65, 226, 130, 172, 66], -1, "", [65, 8364, 66]);
-        check([65, 226, 130, 65], 1, "invalid continuation byte", [65, 65533, 65]);
-        check([240, 159, 153], 0, "unexpected end of data", [65533]);
-        check([240, 159, 153, 130, 240, 159], 4, "unexpected end of data", [128578, 65533]);
-        check([97, 98, 99, 237, 160, 189, 237, 178, 169, 100], 3, "invalid continuation byte", [97, 98, 99, 65533, 65533, 65533, 65533, 65533, 65533, 100]);
-        check([226, 130, 172, 128, 226, 130], 3, "invalid start byte", [8364, 65533, 65533]);
-        check([192, 175, 224, 128, 175, 240, 128, 128, 175], 0, "invalid start byte", [65533, 65533, 65533, 65533, 65533, 65533, 65533, 65533, 65533]);
-        check([97, 241, 128, 128, 225, 128, 194, 98, 128, 99, 128, 191, 100], 1, "invalid continuation byte", [97, 65533, 65533, 65533, 98, 65533, 99, 65533, 65533, 100]);
+        check(new, -1, "", new);
+        check(new([65]), -1, "", new([65]));
+        check(new([0]), -1, "", new([0]));
+        check(new([127]), -1, "", new([127]));
+        check(new([128]), 0, "invalid start byte", new([65533]));
+        check(new([191]), 0, "invalid start byte", new([65533]));
+        check(new([192, 128]), 0, "invalid start byte", new([65533, 65533]));
+        check(new([193, 191]), 0, "invalid start byte", new([65533, 65533]));
+        check(new([194]), 0, "unexpected end of data", new([65533]));
+        check(new([194, 128]), -1, "", new([128]));
+        check(new([194, 127]), 0, "invalid continuation byte", new([65533, 127]));
+        check(new([223, 191]), -1, "", new([2047]));
+        check(new([224, 159, 191]), 0, "invalid continuation byte", new([65533, 65533, 65533]));
+        check(new([224, 160, 128]), -1, "", new([2048]));
+        check(new([225, 128]), 0, "unexpected end of data", new([65533]));
+        check(new([237, 159, 191]), -1, "", new([55295]));
+        check(new([237, 160, 128]), 0, "invalid continuation byte", new([65533, 65533, 65533]));
+        check(new([237, 191, 191]), 0, "invalid continuation byte", new([65533, 65533, 65533]));
+        check(new([238, 128, 128]), -1, "", new([57344]));
+        check(new([239, 191, 191]), -1, "", new([65535]));
+        check(new([240, 143, 191, 191]), 0, "invalid continuation byte", new([65533, 65533, 65533, 65533]));
+        check(new([240, 144, 128, 128]), -1, "", new([65536]));
+        check(new([243, 191, 191, 191]), -1, "", new([1048575]));
+        check(new([244, 143, 191, 191]), -1, "", new([1114111]));
+        check(new([244, 144, 128, 128]), 0, "invalid continuation byte", new([65533, 65533, 65533, 65533]));
+        check(new([245, 128, 128, 128]), 0, "invalid start byte", new([65533, 65533, 65533, 65533]));
+        check(new([255]), 0, "invalid start byte", new([65533]));
+        check(new([254, 255]), 0, "invalid start byte", new([65533, 65533]));
+        check(new([65, 226, 130]), 1, "unexpected end of data", new([65, 65533]));
+        check(new([65, 226, 130, 172, 66]), -1, "", new([65, 8364, 66]));
+        check(new([65, 226, 130, 65]), 1, "invalid continuation byte", new([65, 65533, 65]));
+        check(new([240, 159, 153]), 0, "unexpected end of data", new([65533]));
+        check(new([240, 159, 153, 130, 240, 159]), 4, "unexpected end of data", new([128578, 65533]));
+        check(new([97, 98, 99, 237, 160, 189, 237, 178, 169, 100]), 3, "invalid continuation byte", new([97, 98, 99, 65533, 65533, 65533, 65533, 65533, 65533, 100]));
+        check(new([226, 130, 172, 128, 226, 130]), 3, "invalid start byte", new([8364, 65533, 65533]));
+        check(new([192, 175, 224, 128, 175, 240, 128, 128, 175]), 0, "invalid start byte", new([65533, 65533, 65533, 65533, 65533, 65533, 65533, 65533, 65533]));
+        check(new([97, 241, 128, 128, 225, 128, 194, 98, 128, 99, 128, 191, 100]), 1, "invalid continuation byte", new([97, 65533, 65533, 65533, 98, 65533, 99, 65533, 65533, 100]));
     };
 
     export let test_one_and_two_bytes_exhaustive = func() -> void {
         for (let first = 0; first < 256; first = first + 1) {
-            agree([first as uint8]);
+            agree(new([first as uint8]));
             for (let second = 0; second < 256; second = second + 1) {
-                let pair: uint8[list] = [first as uint8, second as uint8];
+                let pair: uint8[list] = new([first as uint8, second as uint8]);
                 let [valid, _] = string.from_utf8(pair);
                 test.assert_equal_bool(valid, utf8.validate(pair) == -1);
             }
@@ -119,15 +119,15 @@ let Utf8Tests = module (
     // Lead bytes and continuation candidates at every range boundary, alone
     // and between ASCII bytes.
     export let test_three_and_four_byte_grid = func() -> void {
-        let leads: uint8[list] = [192, 193, 194, 223, 224, 225, 236, 237, 238, 239, 240, 241, 243, 244, 245, 247, 248, 255];
-        let others: uint8[list] = [0, 127, 128, 143, 144, 159, 160, 191, 192, 255];
+        let leads: uint8[list] = new([192, 193, 194, 223, 224, 225, 236, 237, 238, 239, 240, 241, 243, 244, 245, 247, 248, 255]);
+        let others: uint8[list] = new([0, 127, 128, 143, 144, 159, 160, 191, 192, 255]);
         for (let lead in leads) {
             for (let second in others) {
                 for (let third in others) {
-                    agree([lead, second, third]);
-                    agree([65, lead, second, third, 66]);
+                    agree(new([lead, second, third]));
+                    agree(new([65, lead, second, third, 66]));
                     for (let fourth in others) {
-                        agree([lead, second, third, fourth]);
+                        agree(new([lead, second, third, fourth]));
                     }
                 }
             }

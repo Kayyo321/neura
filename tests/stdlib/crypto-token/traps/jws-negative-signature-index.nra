@@ -1,0 +1,19 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: negative JWS signature index
+// run-options: --gpu=off
+let hex = import:Std.Encoding.Hex;
+let jwk = import:Std.Crypto.Token.Jwk;
+let jws = import:Std.Crypto.Token.Jws;
+let program = import:Std.Program;
+let test = import:Std.Test;
+let utf8 = import:Std.Encoding.Utf8;
+let vectors = import:JwsFormatVectors;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last jwk_text = test.assert_ok(utf8.decode(test.assert_ok(hex.decode(vectors.rfc7797[0]))));
+        last key = test.assert_ok(jwk.parse_hmac(jwk_text, jwk.HmacAlgorithm.Hs256));
+        let _ = jws.verify_json<jwk.HmacKey>("", key, -1);
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,3 @@
+// Precision is not allowed for an integer.
+let a = 1;
+let text = $"{a:.2}";

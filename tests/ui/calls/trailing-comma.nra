@@ -1,0 +1,3 @@
+// A trailing comma after a named argument stays an error (edge case 7).
+let one = func(a: int) -> int => a;
+let size = one(a: 1,);

@@ -1,0 +1,159 @@
+let bytes = import:Std.Io.Internal.Bytes;
+let.promote _ = import:Std.Time.Duration;
+let host = import:Std.Net.Socket.Internal.HostCalls;
+let host_error = import:Std.Core.Internal.HostError;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let socket = import:Std.Net.Internal.Socket;
+let.promote _ = import:Std.Net.Core.SocketAddr;
+let.promote _ = import:Std.Net.Socket.StreamSocket;
+let support = import:Std.Net.Socket.Internal.Support;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief A TLS 1.2 or 1.3 stream over TCP: a `Std.Net.Socket.StreamSocket` of `Std.Net.Core.SocketAddr` whose
+/// bytes are encrypted by the host's TLS provider. Needs the net capability.
+///
+/// `TlsConnector` and `TlsAcceptor` open streams. The record layer runs in the host's TLS library (OpenSSL 3.5 in
+/// builds configured with `NEURA_ENABLE_SERVER_TLS`): Neura 0.3.0 has no pure-Neura TLS (see
+/// `Std.Net.Tls.Handshake`). Reading, writing and close call the host's `neura.net.tls.*` services. `close` sends `close_notify`.
+/// `shutdown`, `local_address` and kernel TLS offload need host services that no runtime offers yet and trap.
+/// After close every operation except close fails with Closed.
+/// @see [Std.Net.Tls.TlsStream](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Tls-TlsStream)
+#Since("0.3.0")
+export let TlsStream = module (
+    /// @brief One TLS stream.
+    #[Final, NoDiscard(reason: "a stream must be closed"), NotThreadSafe]
+    export let TlsStream = class implements StreamSocket<SocketAddr> (
+        /// @brief The host's TLS stream ID.
+        last id: int64;
+        /// @brief The address text used in error messages.
+        last label: string;
+        /// @brief The dialed peer, when known.
+        last peer: Optional<SocketAddr>;
+        /// @brief The ALPN protocol the handshake selected; empty when none.
+        export last alpn: string;
+        /// @brief The read timeout in nanoseconds; zero waits without limit.
+        let timeout_nanos: int64 = 0;
+        /// @brief Tracks whether the stream may still use the host ID.
+        let open_now: bool = true;
+
+        /// @brief Use `TlsConnector` or `TlsAcceptor`; the handle comes from the library.
+        export let init = func(opened: socket.Handle, dialed: Optional<SocketAddr>, selected: string) {
+            id = opened.id;
+            label = opened.address;
+            peer = dialed;
+            alpn = selected;
+        };
+
+        /// @brief Up to `max` decrypted bytes; an empty list once the peer has closed the stream. A maximum
+        /// below 1 traps.
+        #NoDiscard
+        export let read = func(max: int) -> Result<uint8[list]> {
+            bytes.check_maximum(max);
+            return Result<uint8[list]>.Err(bytes.closed("stream", label)) unless open_now;
+            return match (host.tls_read(id, max, timeout_nanos)) {
+                host.BytesOutcome.Ok(chunk) => Result<uint8[list]>.Ok(chunk),
+                host.BytesOutcome.Error(code) => Result<uint8[list]>.Err(host_error.io(code, "TLS read failed", label)),
+            };
+        };
+
+        /// @brief Encrypts and writes every byte, repeating partial host writes.
+        #NoDiscard
+        export let write = func(data: uint8[list]) -> Result<Unit> {
+            return Result<Unit>.Err(bytes.closed("stream", label)) unless open_now;
+            let remaining = data;
+            while (remaining.length > 0) {
+                match (host.tls_write(id, remaining)) {
+                    host.CountOutcome.Ok(count) => {
+                        if (count <= 0) {
+                            return Result<Unit>.Err(bytes.no_progress("TLS write failed", label));
+                        }
+                        remaining = bytes.copy_range(remaining, count < remaining.length ? count : remaining.length,
+                            remaining.length);
+                    },
+                    host.CountOutcome.Error(code) => {
+                        return Result<Unit>.Err(host_error.io(code, "TLS write failed", label));
+                    },
+                }
+            }
+            return bytes.ok();
+        };
+
+        /// @brief The next decrypted bytes (at most `ReceiveChunk`), or `None` at the end of the peer's data.
+        #NoDiscard
+        export let receive = func -> Result<Optional<uint8[list]>> {
+            last chunk = read(ReceiveChunk)?;
+            return if (chunk.length == 0) -> Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.None)
+                else -> Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.Some(chunk));
+        };
+
+        /// @brief Sends every byte; the `Std.Net.Transport` form of `write`.
+        #NoDiscard
+        export let send = func(data: uint8[list]) -> Result<Unit> => write(data);
+
+        /// @brief The longest a read waits; zero waits without limit.
+        export let read_timeout = func -> Duration => of_nanos(timeout_nanos);
+
+        /// @brief Sets the read timeout. A negative timeout traps with "invalid argument: negative timeout".
+        export let set_read_timeout = func(timeout: Duration) {
+            timeout_nanos = support.timeout_nanos(timeout);
+        };
+
+        /// @brief The dialed peer, or `None` for an accepted stream (not reported by the host).
+        export let peer_address = func -> Optional<SocketAddr> => peer;
+
+        /// @brief The local address, from the host; traps in Neura 0.3.0 (no local-address service).
+        #NoDiscard
+        export let local_address = func -> Result<SocketAddr> {
+            return Result<SocketAddr>.Err(bytes.closed("stream", label)) unless open_now;
+            return match (host.local_address(id)) {
+                host.AddressOutcome.Ok(reported) => support.reported_address(reported),
+                host.AddressOutcome.Error(code) => Result<SocketAddr>.Err(
+                    host_error.io(code, "local address failed", label)),
+            };
+        };
+
+        /// @brief Ends reading, writing or both of the underlying TCP connection. Traps in Neura 0.3.0: the
+        /// runtime has no shutdown service. `close` sends `close_notify`.
+        #NoDiscard
+        export let shutdown = func(how: Shutdown) -> Result<Unit> {
+            return Result<Unit>.Err(bytes.closed("stream", label)) unless open_now;
+            last code = how == Shutdown.Read ? 0 : how == Shutdown.Write ? 1 : 2;
+            return match (host.shutdown(id, code)) {
+                host.DoneOutcome.Ok => bytes.ok(),
+                host.DoneOutcome.Error(failure) => Result<Unit>.Err(host_error.io(failure, "shutdown failed", label)),
+            };
+        };
+
+        /// @brief Moves symmetric record encryption into the kernel (kTLS, and the NIC where it supports it).
+        /// Traps in Neura 0.3.0: no runtime offers kTLS.
+        #NoDiscard
+        export let enable_kernel_offload = func -> Result<Unit> {
+            return Result<Unit>.Err(bytes.closed("stream", label)) unless open_now;
+            return match (host.tls_enable_kernel_offload(id)) {
+                host.DoneOutcome.Ok => bytes.ok(),
+                host.DoneOutcome.Error(code) => Result<Unit>.Err(host_error.io(code, "kernel TLS failed", label)),
+            };
+        };
+
+        /// @brief Sends `close_notify` and releases the stream. Closing again returns Ok; the stream is closed
+        /// even when the host reports an error.
+        export let close = func -> Result<Unit> {
+            return bytes.ok() unless open_now;
+            open_now = false;
+            return match (host.tls_close(id)) {
+                host.DoneOutcome.Ok => bytes.ok(),
+                host.DoneOutcome.Error(code) => Result<Unit>.Err(host_error.io(code, "TLS close failed", label)),
+            };
+        };
+
+        /// @brief Text such as "TlsStream(to 192.0.2.1:443, alpn h2)".
+        export let.override to_string = func -> string {
+            last side = match (peer) {
+                Optional.Some(address) => "to " .. address.to_string(),
+                Optional.None => "accepted on " .. label,
+            };
+            return "TlsStream(" .. side .. (alpn.byte_length > 0 ? ", alpn " .. alpn : "") .. ")";
+        };
+    );
+);

@@ -1,0 +1,8 @@
+// Edge case 7: `spawn` after `defer` makes it the keyword, and starting a
+// task is not a deferred call.
+let task = func() -> void {};
+let work = func() -> void {
+    scope {
+        defer spawn task();
+    }
+};

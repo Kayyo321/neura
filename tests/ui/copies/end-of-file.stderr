@@ -1,0 +1,9 @@
+error[E0203]: expected '}'
+ --> $DIR/end-of-file.nra:4:28
+  |
+4 | let copy = new with(user) {
+  |                            ^ expected '}' here
+  |                           - unclosed '{' opened here
+  |                            - found the end of the file
+
+For more information about this error, try `neura explain E0203`.

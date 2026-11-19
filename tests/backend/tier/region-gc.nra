@@ -14,7 +14,7 @@ let result = import:Std.Core.Result;
 let RegionGc = module:program.Entry (
     let Cell = class (
         export let value: int64 = 0;
-        export let payload: int64[list] = [];
+        export let payload: int64[list] = new;
     );
 
     let fill = func(cell: Cell, count: int32) -> void {
@@ -28,7 +28,7 @@ let RegionGc = module:program.Entry (
         if (args.length > 0) {
             rounds = result.value_or<int32>(int32s.parse(args[0]), 40);
         }
-        let cells: Cell[list] = [];
+        let cells: Cell[list] = new;
         for (let i = 0; i < 8; i = i + 1) {
             let cell = new Cell();
             cell.value = i as int64;

@@ -1,0 +1,7 @@
+error[E0418]: type argument float64 does not satisfy the bound Ordered<float64> of type parameter 'T'
+ --> $DIR/primitive-float-ordered.nra:5:15
+  |
+5 | let x = first(1.5, 2.5);
+  |               ^^^ 'T' is inferred as float64 from this argument
+
+For more information about this error, try `neura explain E0418`.

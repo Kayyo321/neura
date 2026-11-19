@@ -1,0 +1,3 @@
+// A later required parameter is reached by name (edge case 28).
+let f = func(a: int = 1, b: int) -> int => a + b;
+let two = f(2);

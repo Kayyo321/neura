@@ -1,0 +1,119 @@
+let error = import:Std.Core.Error;
+let immutable = import:Std.Collections.ImmutableList;
+let sql = import:Std.Data.Sql;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+// Std.Data.Sql against PostgreSQL 16, 17 and 18: tests/server/sql_host_test.py runs this file with
+// `neura test --sql-pool main=postgresql://...` once per server version.
+let SqlPostgresTests = module (
+    /// @brief The pool of the test run.
+    let main = func -> sql.Pool => test.assert_ok<sql.Pool>(sql.pool("main"));
+
+    /// @brief The kind of an SQL error.
+    let kind = func(problem: error.Error) -> sql.ErrorKind => test.assert_some<sql.ErrorKind>(sql.kind_of(problem));
+
+    /// @brief The detail of an SQL error.
+    let detail = func(problem: error.Error) -> string => match (problem) {
+        error.Error.Custom(item) => (item as sql.SqlError).detail,
+        _ => "",
+    };
+
+    /// @brief The one row of a query that must succeed.
+    let one = func(text: string) -> sql.Row => test.assert_ok<sql.Row>(main().query_one(text));
+
+    export let test_type_conversions = func() -> void {
+        last row = one("SELECT true AS b, 7::int2 AS small, 2147483647::int4 AS mid, "
+            + "(-9223372036854775808)::int8 AS low, 1.5::float4 AS f4, 0.1::float8 AS f8, 'héllo'::text AS t, "
+            + "'v'::varchar(4) AS vc, '\\x00ff10'::bytea AS raw, '6f1e0e9c-8e5b-4b8a-9d0c-3a4b5c6d7e8f'::uuid AS id, "
+            + "'2026-11-17 12:00:00+00'::timestamptz AS at, 12345.678900::numeric AS amount, NULL::int4 AS nothing");
+        test.assert(test.assert_ok<bool>(row.bool("b")));
+        test.assert_equal<int32>(7, test.assert_ok<int32>(row.int32("small")));
+        test.assert_equal<int32>(2147483647, test.assert_ok<int32>(row.int32("mid")));
+        test.assert_equal<int64>(-9223372036854775808, test.assert_ok<int64>(row.int64("low")));
+        test.assert_float_near(1.5, test.assert_ok<float64>(row.float64("f4")), 0.0);
+        test.assert(test.assert_ok<float64>(row.float64("f8")) == 0.1);
+        test.assert_equal_string("héllo", test.assert_ok<string>(row.text("t")));
+        test.assert_equal_string("v", test.assert_ok<string>(row.text("vc")));
+        last raw = test.assert_ok<uint8[list]>(row.bytes("raw"));
+        test.assert_equal<int>(3, raw.length);
+        test.assert_equal<uint8>(255, raw[1]);
+        test.assert_equal_string("6f1e0e9c-8e5b-4b8a-9d0c-3a4b5c6d7e8f", test.assert_ok<string>(row.text("id")));
+        test.assert(strings.starts_with(test.assert_ok<string>(row.text("at")), "2026-11-17"));
+        test.assert_equal_string("12345.678900", test.assert_ok<string>(row.text("amount")));
+        test.assert_none<int64>(test.assert_ok<Optional<int64>>(row.optional_int64("nothing")));
+        test.assert(kind(test.assert_err<int64>(row.int64("nothing"))) == sql.ErrorKind.InvalidInput);
+    };
+
+    export let test_unsupported_type_is_named = func() -> void {
+        last problem = test.assert_err<sql.Row>(main().query_one("SELECT '{\"a\":1}'::jsonb AS document"));
+        test.assert(kind(problem) == sql.ErrorKind.Unsupported);
+        test.assert(strings.contains(detail(problem), "jsonb"));
+        test.assert(strings.contains(detail(problem), "document"));
+    };
+
+    export let test_parameters_round_trip = func() -> void {
+        last lowest: int64 = -9223372036854775808;
+        last data: uint8[list] = new([0, 1, 0, 255]);
+        last row = test.assert_ok<sql.Row>(main().query_one(
+            "SELECT $2::text AS b, $1::text AS a, $1::text AS again, '$1' AS literal, $3::int8 AS low, "
+            + "$4::bytea AS raw, $5::float8 AS f, $6::bool AS flag, $7::int4 AS absent",
+            "first", "second", lowest, sql.bytes_value(data), 2.5, true, sql.null_value()));
+        test.assert_equal_string("second", test.assert_ok<string>(row.text("b")));
+        test.assert_equal_string("first", test.assert_ok<string>(row.text("again")));
+        test.assert_equal_string("$1", test.assert_ok<string>(row.text("literal")));
+        test.assert_equal<int64>(lowest, test.assert_ok<int64>(row.int64("low")));
+        test.assert_equal<int>(4, test.assert_ok<uint8[list]>(row.bytes("raw")).length);
+        test.assert_float_near(2.5, test.assert_ok<float64>(row.float64("f")), 0.0);
+        test.assert(test.assert_ok<bool>(row.bool("flag")));
+        test.assert_none<int32>(test.assert_ok<Optional<int32>>(row.optional_int32("absent")));
+        last narrowed = test.assert_err<int32>(one("SELECT 3000000000::int8 AS big").int32("big"));
+        test.assert(kind(narrowed) == sql.ErrorKind.InvalidInput);
+    };
+
+    export let test_constraints_and_failed_transactions = func() -> void {
+        last pool = main();
+        test.assert_ok<int64>(pool.execute("DROP TABLE IF EXISTS pg_probe"));
+        test.assert_ok<int64>(pool.execute("CREATE TABLE pg_probe (v TEXT NOT NULL CONSTRAINT pg_probe_v_key UNIQUE)"));
+        test.assert_equal<int64>(1, test.assert_ok<int64>(pool.execute("INSERT INTO pg_probe VALUES ($1)", "x")));
+        last duplicate = test.assert_err<int64>(pool.execute("INSERT INTO pg_probe VALUES ($1)", "x"));
+        test.assert(kind(duplicate) == sql.ErrorKind.ConstraintViolation);
+        test.assert_equal_string("pg_probe_v_key", detail(duplicate));
+        last transaction = test.assert_ok<sql.Transaction>(pool.begin());
+        test.assert_ok<int64>(transaction.execute("INSERT INTO pg_probe VALUES ($1)", "y"));
+        test.assert_err<int64>(transaction.execute("INSERT INTO pg_probe VALUES ($1)", "x"));
+        last after = test.assert_err<int64>(transaction.execute("INSERT INTO pg_probe VALUES ($1)", "z"));
+        test.assert(kind(after) == sql.ErrorKind.InvalidInput);
+        last commit = test.assert_err<Unit>(transaction.commit());
+        test.assert(kind(commit) == sql.ErrorKind.InvalidInput);
+        test.assert_ok<Unit>(transaction.close());
+        last count = test.assert_ok<sql.Row>(pool.query_one("SELECT count(*) AS n FROM pg_probe"));
+        test.assert_equal<int64>(1, test.assert_ok<int64>(count.int64("n")));
+        test.assert_ok<int64>(pool.execute("DROP TABLE pg_probe"));
+    };
+
+    export let test_cursor_and_pages = func() -> void {
+        last pool = main();
+        last connection = test.assert_ok<sql.Connection>(pool.acquire());
+        last cursor = test.assert_ok<sql.Cursor>(connection.open_cursor("SELECT n FROM generate_series(1, 2500) AS n"));
+        last first = test.assert_ok<immutable.ImmutableList<sql.Row>>(cursor.fetch(1000));
+        test.assert_equal<int>(1000, first.size());
+        test.assert(kind(test.assert_err<int64>(connection.execute("SELECT 1"))) == sql.ErrorKind.InvalidInput);
+        last second = test.assert_ok<immutable.ImmutableList<sql.Row>>(cursor.fetch(1000));
+        test.assert_equal<int64>(2000, test.assert_ok<int64>(second.get(999).int64("n")));
+        test.assert_ok<Unit>(cursor.close());
+        last page = test.assert_ok<immutable.ImmutableList<sql.Row>>(
+            connection.query_page("SELECT n FROM generate_series(1, 5) AS n", 3));
+        test.assert_equal<int>(3, page.size());
+        test.assert_ok<Unit>(connection.close());
+    };
+
+    export let test_syntax_error_is_invalid_input = func() -> void {
+        last problem = test.assert_err<int64>(main().execute("SELEC 1"));
+        test.assert(kind(problem) == sql.ErrorKind.InvalidInput);
+        test.assert(strings.contains(detail(problem), "syntax error"));
+    };
+);

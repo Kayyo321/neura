@@ -1,0 +1,2 @@
+// nameof is a reserved declaration name (edge case 91).
+let nameof = 1;

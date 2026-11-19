@@ -1,0 +1,4 @@
+// A character literal takes the expected integer type, and a value it cannot
+// hold is the literal range error E0424 (docs/design/Expressions030.md, edge
+// case 28).
+let small: int8 = '\xFF';

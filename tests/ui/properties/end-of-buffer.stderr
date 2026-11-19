@@ -1,0 +1,9 @@
+error[E0202]: expected 'get' or 'set' after '|'
+ --> $DIR/end-of-buffer.nra:4:10
+  |
+4 |         |
+  |          ^ expected 'get' or 'set' before the end of the file
+  |
+  = help: an accessor clause is '| get: <expression>;' or '| set: <statement>;'
+
+For more information about this error, try `neura explain E0202`.

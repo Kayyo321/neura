@@ -96,7 +96,7 @@ let IntRangeTests = module (
         check_values(negative_huge, "[2147483647, -1]");
     };
     let collect = func(r: ranges.IntRange) -> string {
-        let values: int[list] = [];
+        let values: int[list] = new;
         for (let value in r) {
             values.append(value);
         }

@@ -1,0 +1,10 @@
+error[E0576]: invalid static requirement
+ --> $DIR/variadic.nra:3:28
+  |
+3 |     static let join = func(parts: ...string) -> string;
+  |                            ^^^^^ a static requirement is not variadic
+  |
+  = note: a static requirement is a plain signature that each implementing class declares
+  = help: write it as 'static let join = func(parameters) -> T;'
+
+For more information about this error, try `neura explain E0576`.

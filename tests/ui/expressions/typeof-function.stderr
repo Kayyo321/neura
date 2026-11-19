@@ -1,0 +1,9 @@
+error[E0267]: typeof needs a value or a type
+ --> $DIR/typeof-function.nra:5:43
+  |
+5 | let function_name = func { let t = typeof(work); };
+  |                                           ^^^^ a function name is not a value here; call it, or bind it to a variable
+  |
+  = help: pass a value, such as 'typeof(shape)', or a type, such as 'typeof(int32)'
+
+For more information about this error, try `neura explain E0267`.

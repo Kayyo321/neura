@@ -1,0 +1,64 @@
+let durations = import:Std.Time.Duration;
+let hashing = import:Std.Core.Hash;
+let.promote _ = import:Std.Core.Result;
+
+/// @brief The contract of a keyed rate limiter and the decision it returns.
+///
+/// A limiter answers whether `permits` units of work for a key (a client IP, a tenant, an API key) may proceed now.
+/// `TokenBucketLimiter` and `GcraLimiter` implement it; `RateLimitFilter` applies one to requests.
+/// @see [Std.Net.Resilience.RateLimiter](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-RateLimiter)
+#Since("0.3.0")
+export let RateLimiter = module (
+    /// @brief Decides whether work for a key may proceed now.
+    export let RateLimiter = interface (
+        /// @brief Takes `permits` units for `key` when they are available and reports the decision. Err when the
+        /// limiter's clock or store fails.
+        #NoDiscard
+        let try_acquire = func(key: string, permits: int) -> Result<RateDecision>;
+    );
+
+    /// @brief The answer of a limiter: whether the work may proceed, how many more single permits would be granted
+    /// at once, how long to wait before the same request could succeed, and how long until the limiter is back to
+    /// its full allowance.
+    #[Final, Immutable, NoDiscard]
+    export let RateDecision = class (
+        /// @brief Whether the permits were granted.
+        export last allowed: bool;
+        /// @brief The single permits still available at once after this decision.
+        export last remaining: int;
+        /// @brief Zero when allowed; otherwise the wait before the same request would be granted.
+        export last retry_after: durations.Duration;
+        /// @brief The wait until the full allowance is available again.
+        export last reset_after: durations.Duration;
+
+        /// @brief A decision with each part.
+        export let init = func(granted: bool, left: int, retry: durations.Duration, reset: durations.Duration) {
+            allowed = granted;
+            remaining = left;
+            retry_after = retry;
+            reset_after = reset;
+        };
+
+        /// @brief Equal when every part is equal.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not decision: RateDecision) {
+                return false;
+            }
+            return allowed == decision.allowed && remaining == decision.remaining
+                && retry_after.equals(decision.retry_after) && reset_after.equals(decision.reset_after);
+        };
+
+        /// @brief Combines the hashes of the parts in order.
+        export let.override hash_code = func -> uint32 {
+            let h = hashing.combine(17, hashing.of_bool(allowed));
+            h = hashing.combine(h, hashing.of_int64(remaining as int64));
+            h = hashing.combine(h, retry_after.hash_code());
+            return hashing.combine(h, reset_after.hash_code());
+        };
+
+        /// @brief Text such as "RateDecision(allowed, remaining 2, retry after PT0S, reset after PT0.1S)".
+        export let.override to_string = func -> string =>
+            "RateDecision(" .. (allowed ? "allowed" : "denied") .. ", remaining " .. remaining.to_string()
+            .. ", retry after " .. retry_after.to_string() .. ", reset after " .. reset_after.to_string() .. ")";
+    );
+);

@@ -1,0 +1,50 @@
+// Case 47: a real class getter redirects body reads, not the saved close token.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let closeable = import:Std.Io.Closeable;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+let redirect = false;
+let replacement: Resource = nil;
+
+let Resource = class implements closeable.Closeable (
+    | get: {
+        if (redirect && instance != nil && instance.name == "first") {
+            return replacement;
+        }
+        return instance;
+    };
+
+    export let name: string;
+    export let init = func(label: string) {
+        name = label;
+    };
+
+    export let close = func -> Result<Unit> {
+        console.print_line("close " + name);
+        return Result<Unit>.Ok(Unit.Value);
+    };
+);
+
+let work = func() -> Result<Unit> {
+    using (source = new Resource("first")) {
+        redirect = true;
+        console.print_line("body " + source.name);
+    }
+    return Result<Unit>.Ok(Unit.Value);
+};
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        replacement = new Resource("second");
+        match (work()) {
+            Result.Ok(_) => {
+                console.print_line("ok");
+            },
+            Result.Err(_) => {
+                return program.ExitCode.Failure;
+            },
+        }
+        return program.ExitCode.Ok;
+    };
+);

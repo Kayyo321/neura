@@ -1,0 +1,10 @@
+// Case 22: an instance field, through an inherited 'set' hook.
+let Session = class (
+    | set: value;
+);
+
+let Guest = class:Session ();
+
+let Holder = class (
+    export let guest: Guest;
+);

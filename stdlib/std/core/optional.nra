@@ -33,7 +33,7 @@ export let Optional = module (
     export let expect = func<T>(o: Optional<T>, detail: string) -> T {
         match (o) {
             Optional.None => {
-                trap_with_message("no such element: " + detail);
+                trap_with_message("no such element: " .. detail);
             },
             Optional.Some(value) => {
                 return value;
@@ -70,10 +70,7 @@ export let Optional = module (
                 return o;
             },
             Optional.Some(value) => {
-                if (keep(value)) {
-                    return o;
-                }
-                return Optional<T>.None;
+                return if (keep(value)) -> o else -> Optional<T>.None;
             },
         }
     };
@@ -115,6 +112,6 @@ export let Optional = module (
     /// @brief Formats None or the text of a present payload wrapped in Some.
     export let to_string = func<T>(o: Optional<T>) -> string => match (o) {
         Optional.None => "None",
-        Optional.Some(value) => "Some(" + value.to_string() + ")",
+        Optional.Some(value) => "Some(" .. value.to_string() .. ")",
     };
 );

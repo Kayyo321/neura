@@ -1,0 +1,8 @@
+// Case 32: a hook body cannot use the scheduler (E0544, on the linked program).
+let Session = class (
+    | set: {
+        scope {
+        }
+        return value;
+    };
+);

@@ -1,0 +1,563 @@
+let caches = import:Std.Net.Dns.DnsCache;
+let errors = import:Std.Core.Error;
+let hosts_files = import:Std.Net.Dns.HostsFile;
+let ips = import:Std.Net.Core.IpAddr;
+let messages = import:Std.Net.Dns.Message;
+let names = import:Std.Net.Dns.Name;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Random.Random;
+let resolv_confs = import:Std.Net.Dns.ResolvConf;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let durations = import:Std.Time.Duration;
+let tcp_dns = import:Std.Net.Dns.TcpDnsTransport;
+let transports = import:Std.Net.Dns.DnsTransport;
+let udp_dns = import:Std.Net.Dns.UdpDnsTransport;
+
+/// @brief A stub resolver in Neura: `/etc/hosts`, then the cache, then the network, with search-list expansion,
+/// CNAME chasing, response matching, truncation fallback, retries, rotation and split-horizon routing.
+///
+/// - **Order.** For A and AAAA questions the hosts table answers first (as glibc's default `hosts: files dns`).
+///   Then the `DnsCache`, then the upstream servers.
+/// - **Search list** (resolv.conf(5), `man 5 resolv.conf`). A name ending in a dot is tried as is and only so.
+///   A name with at least `ndots` dots is tried as is first, then with each search domain appended; a name with
+///   fewer dots is tried with each search domain first, then as is. The next candidate is tried after a name
+///   error or a no-data answer; the first answer with records wins; otherwise the first no-data answer, else the
+///   last name error, is returned.
+/// - **Network.** Each query gets a fresh random 16-bit ID (from the injected `Random`) and, with `edns0`, an OPT
+///   record offering 1232 bytes. A response must have QR set, the query's ID and exactly the query's question;
+///   anything else counts as a failed try. SERVFAIL, REFUSED, NOTIMP and FORMERR move on to the next server. A
+///   truncated (TC) datagram response is retried over the server's stream transport (RFC 1035 section
+///   4.2.2); without one the exchange fails with `dns.truncated`. The servers are tried in order, `attempts`
+///   rounds; with `rotate` each query starts one server further on.
+/// - **CNAME chasing.** An answer holding a CNAME for the name asked is followed, first inside the same response
+///   and then with a new query, at most `MaxCnameChain` links; a loop or a longer chain fails with
+///   `dns.cname_chain`.
+/// - **Split horizon.** `add_route` sends names within a suffix (on label boundaries, ignoring case) to their own
+///   servers; the longest matching suffix wins, and other names use the default servers.
+/// - **Caching.** Positive answers are cached under the question asked (aliases included); NXDOMAIN and NODATA
+///   per RFC 2308 when the response carries an SOA.
+/// - **Waiting.** Every call waits for its result. Exchanges over `TcpDnsTransport` overlap with other tasks
+///   (the TCP services are overlapping); the datagram and system services, once merged, block every task while
+///   they wait (Std.Net.Internal.Sockets says none of its calls overlaps).
+/// @see [Std.Net.Dns.StubResolver](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-StubResolver)
+#Since("0.3.0")
+export let StubResolver = module (
+    /// @brief The most CNAME links followed for one question.
+    export const MaxCnameChain: int = 8;
+    /// @brief The EDNS UDP payload size offered (the DNS flag day 2020 value).
+    export const EdnsPayloadSize: int = 1232;
+
+    /// @brief One upstream server: a datagram (or stream) transport and an optional stream transport for
+    /// truncated answers.
+    #Final
+    export let Upstream = class (
+        /// @brief The first transport tried.
+        export last primary: transports.DnsTransport;
+        /// @brief The stream transport for truncated answers.
+        export last fallback: Optional<transports.DnsTransport>;
+
+        /// @brief A server reached through `first` only; or with a stream fallback.
+        export let init = func(first: transports.DnsTransport) {
+            primary = first;
+            fallback = Optional<transports.DnsTransport>.None;
+        } or func(first: transports.DnsTransport, stream: transports.DnsTransport) {
+            primary = first;
+            fallback = Optional<transports.DnsTransport>.Some(stream);
+        };
+
+        /// @brief Text such as "Upstream(MemoryTransport(a, 2 records))".
+        export let.override to_string = func -> string => "Upstream(" .. primary.to_string() .. ")";
+    );
+
+    /// @brief Where an answer came from.
+    export let Source = enum (Hosts, Cache, Network);
+
+    /// @brief The outcome of a lookup.
+    #Final
+    export let Answer = class (
+        /// @brief The question finally answered (the last search candidate tried).
+        export last question: messages.Question;
+        /// @brief The name the records belong to after following CNAMEs.
+        export last canonical_name: names.DnsName;
+        /// @brief The aliases followed, in order.
+        export last aliases: names.DnsName[list];
+        /// @brief The records of the type asked (empty for NXDOMAIN or NODATA).
+        export last records: messages.ResourceRecord[list];
+        /// @brief NOERROR or NXDOMAIN.
+        export last rcode: int;
+        /// @brief Where it came from.
+        export last source: Source;
+
+        /// @brief An answer.
+        export let init = func(asked: messages.Question, canonical: names.DnsName, alias_list: names.DnsName[list],
+            found: messages.ResourceRecord[list], code: int, origin: Source) {
+            question = asked;
+            canonical_name = canonical;
+            aliases = alias_list;
+            records = found;
+            rcode = code;
+            source = origin;
+        };
+
+        /// @brief Whether the name does not exist.
+        #NoDiscard
+        export let is_name_error = func -> bool => rcode == messages.RcodeNameError;
+
+        /// @brief Whether the name exists without records of the type.
+        #NoDiscard
+        export let is_no_data = func -> bool => rcode == messages.RcodeNoError && records.length == 0;
+
+        /// @brief The addresses among the records (A and AAAA).
+        #NoDiscard
+        export let addresses = func -> ips.IpAddr[list] {
+            last out: ips.IpAddr[list] = new;
+            for (let record in records) {
+                match (record.data) {
+                    messages.RecordData.A(v4) => {
+                        out.append(ips.IpAddr.V4(v4));
+                    },
+                    messages.RecordData.Aaaa(v6) => {
+                        out.append(ips.IpAddr.V6(v6));
+                    },
+                    _ => {
+                    },
+                }
+            }
+            return out;
+        };
+
+        /// @brief Text such as "Answer(www.example.com. IN A, 2 records, Network)".
+        export let.override to_string = func -> string => "Answer(" .. question.to_string() .. ", "
+            .. records.length.to_string() .. " records, rcode " .. rcode.to_string() .. ", " .. source.to_string() .. ")";
+    );
+
+    /// @brief A split-horizon route: a suffix and its servers.
+    #Final
+    let Route = class (
+        /// @brief The suffix.
+        export last suffix: names.DnsName;
+        /// @brief Its servers.
+        export last servers: Upstream[list];
+
+        /// @brief A route.
+        export let init = func(zone: names.DnsName, upstreams: Upstream[list]) {
+            suffix = zone;
+            servers = upstreams;
+        };
+
+        /// @brief Text such as "Route(corp.example.)".
+        export let.override to_string = func -> string => "Route(" .. suffix.to_string() .. ")";
+    );
+
+    /// @brief The resolver.
+    #[Final, NotThreadSafe]
+    export let StubResolver = class (
+        /// @brief Search list, ndots, attempts, rotate and edns0.
+        export last config: resolv_confs.ResolvConf;
+        /// @brief The hosts table.
+        export last hosts: hosts_files.HostsFile;
+        /// @brief The answer cache.
+        export last cache: caches.DnsCache;
+        /// @brief The default servers.
+        last servers: Upstream[list];
+        /// @brief The split-horizon routes.
+        last routes: Route[list] = new;
+        /// @brief The source of query IDs.
+        last ids: Random;
+        /// @brief The rotation counter.
+        let rotation: int = 0;
+
+        /// @brief A resolver. With no servers every network lookup fails with `dns.no_servers`.
+        export let init = func(settings: resolv_confs.ResolvConf, table: hosts_files.HostsFile, store: caches.DnsCache,
+            upstreams: Upstream[list], random: Random) {
+            config = settings;
+            hosts = table;
+            cache = store;
+            servers = upstreams;
+            ids = random;
+        };
+
+        /// @brief Sends names within `suffix` to `upstreams` (split horizon). Err when the suffix does not parse.
+        export let add_route = func(suffix: string, upstreams: Upstream[list]) -> Result<int> {
+            last zone = names.parse(suffix)?;
+            routes.append(new Route(zone, upstreams));
+            return Result<int>.Ok(routes.length);
+        };
+
+        /// @brief The servers for a name: the longest matching route, else the defaults.
+        #NoDiscard
+        export let servers_for = func(name: names.DnsName) -> Upstream[list] {
+            let best = -1;
+            let best_length = -1;
+            for (let i = 0; i < routes.length; i++) {
+                last route = routes[i];
+                if (name.is_within(route.suffix) && route.suffix.label_count() > best_length) {
+                    best = i;
+                    best_length = route.suffix.label_count();
+                }
+            }
+            return best >= 0 ? routes[best].servers : servers;
+        };
+
+        /// @brief The candidate names for `name` after search-list expansion.
+        #NoDiscard
+        export let candidates = func(name: string) -> Result<names.DnsName[list]> {
+            last out: names.DnsName[list] = new;
+            last absolute = names.parse(name)?;
+            if (strings.ends_with(name, ".")) {
+                out.append(absolute);
+                return Result<names.DnsName[list]>.Ok(out);
+            }
+            let dots = 0;
+            for (let i = 0; i < name.byte_length; i++) {
+                if (name.byte_at(i) == 46) {
+                    dots++;
+                }
+            }
+            last as_is_first = dots >= config.ndots;
+            if (as_is_first) {
+                out.append(absolute);
+            }
+            for (let domain in config.search()) {
+                match (names.parse(domain)) {
+                    Result.Ok(origin) => {
+                        match (absolute.concat(origin)) {
+                            Result.Ok(joined) => {
+                                out.append(joined);
+                            },
+                            Result.Err(_) => {
+                            },
+                        }
+                    },
+                    Result.Err(_) => {
+                    },
+                }
+            }
+            if (not as_is_first) {
+                out.append(absolute);
+            }
+            return Result<names.DnsName[list]>.Ok(out);
+        };
+
+        /// @brief Looks up records of `qtype` for `name`: the hosts table for the name as given (A and AAAA), then each
+        /// search-list candidate.
+        #NoDiscard
+        export let lookup = func(name: string, qtype: int) -> Result<Answer> {
+            // The hosts table sees the name as given, before any search domain is appended.
+            match (from_hosts(new messages.Question(names.parse(name)?, qtype, messages.ClassIn))) {
+                Optional.Some(answer) => {
+                    return Result<Answer>.Ok(answer);
+                },
+                Optional.None => {
+                },
+            }
+            last tries = candidates(name)?;
+            let no_data: Optional<Answer> = Optional<Answer>.None;
+            let last_answer: Optional<Answer> = Optional<Answer>.None;
+            for (let candidate in tries) {
+                last answer = lookup_name(candidate, qtype)?;
+                if (answer.records.length > 0) {
+                    return Result<Answer>.Ok(answer);
+                }
+                if (answer.is_no_data() && not is_some<Answer>(no_data)) {
+                    no_data = Optional<Answer>.Some(answer);
+                }
+                last_answer = Optional<Answer>.Some(answer);
+            }
+            match (no_data) {
+                Optional.Some(answer) => {
+                    return Result<Answer>.Ok(answer);
+                },
+                Optional.None => {
+                },
+            }
+            return match (last_answer) {
+                Optional.Some(answer) => Result<Answer>.Ok(answer),
+                Optional.None => Result<Answer>.Err(errors.custom("dns.no_candidates", "no name to look up")),
+            };
+        };
+
+        /// @brief The addresses of `host`: an address literal as itself; else the hosts table; else A and AAAA
+        /// lookups (A first). Err (Io NotFound) when there are none.
+        #NoDiscard
+        export let resolve = func(host: string) -> Result<ips.IpAddr[list]> {
+            match (ips.parse(host)) {
+                Result.Ok(ip) => {
+                    last literal: ips.IpAddr[list] = new;
+                    literal.append(ip);
+                    return Result<ips.IpAddr[list]>.Ok(literal);
+                },
+                Result.Err(_) => {
+                },
+            }
+            last from_hosts = hosts.lookup(host);
+            if (from_hosts.length > 0) {
+                return Result<ips.IpAddr[list]>.Ok(from_hosts);
+            }
+            last out: ips.IpAddr[list] = new;
+            for (let ip in (lookup(host, messages.TypeA)?).addresses()) {
+                out.append(ip);
+            }
+            for (let ip in (lookup(host, messages.TypeAaaa)?).addresses()) {
+                out.append(ip);
+            }
+            if (out.length == 0) {
+                return Result<ips.IpAddr[list]>.Err(errors.Error.Io { kind: errors.IoErrorKind.NotFound,
+                    message: "dns: no address for the name", path: host });
+            }
+            return Result<ips.IpAddr[list]>.Ok(out);
+        };
+
+        /// @brief Looks up one absolute name (no search list): hosts, cache, then the network with CNAME chasing.
+        #NoDiscard
+        export let lookup_name = func(name: names.DnsName, qtype: int) -> Result<Answer> {
+            last question = new messages.Question(name, qtype, messages.ClassIn);
+            match (from_hosts(question)) {
+                Optional.Some(answer) => {
+                    return Result<Answer>.Ok(answer);
+                },
+                Optional.None => {
+                },
+            }
+            match (cache.get(question)) {
+                caches.CacheResult.Answer(records) => {
+                    return Result<Answer>.Ok(assemble(question, records, messages.RcodeNoError, Source.Cache)?);
+                },
+                caches.CacheResult.NameError => {
+                    return Result<Answer>.Ok(new Answer(question, name, new, new, messages.RcodeNameError, Source.Cache));
+                },
+                caches.CacheResult.NoData => {
+                    return Result<Answer>.Ok(new Answer(question, name, new, new, messages.RcodeNoError, Source.Cache));
+                },
+                caches.CacheResult.Miss => {
+                },
+            }
+            return chase(question);
+        };
+
+        /// @brief Text such as "StubResolver(2 servers, 1 routes)".
+        export let.override to_string = func -> string => "StubResolver(" .. servers.length.to_string() .. " servers, "
+            .. routes.length.to_string() .. " routes)";
+
+        /// @brief The hosts-table answer to an A or AAAA question.
+        let from_hosts = func(question: messages.Question) -> Optional<Answer> {
+            if (question.qtype != messages.TypeA && question.qtype != messages.TypeAaaa) {
+                return Optional<Answer>.None;
+            }
+            last text = question.name.to_string();
+            last found = question.qtype == messages.TypeA ? hosts.lookup_v4(text) : hosts.lookup_v6(text);
+            if (found.length == 0) {
+                return Optional<Answer>.None;
+            }
+            last records: messages.ResourceRecord[list] = new;
+            for (let ip in found) {
+                last data = match (ip) {
+                    ips.IpAddr.V4(v4) => messages.RecordData.A(v4),
+                    ips.IpAddr.V6(v6) => messages.RecordData.Aaaa(v6),
+                };
+                records.append(new messages.ResourceRecord(question.name, question.qtype, messages.ClassIn, 0, data));
+            }
+            return Optional<Answer>.Some(new Answer(question, question.name, new, records, messages.RcodeNoError,
+                Source.Hosts));
+        };
+
+        /// @brief Queries the network for `question`, following CNAMEs, and caches the result.
+        let chase = func(question: messages.Question) -> Result<Answer> {
+            last collected: messages.ResourceRecord[list] = new;
+            let current = question.name;
+            last seen: names.DnsName[list] = new;
+            seen.append(current);
+            let links = 0;
+            while (true) {
+                last response = query_servers(current, question.qtype)?;
+                last code = response.rcode();
+                // Walk the chain as far as this response goes.
+                let moved = false;
+                let done = false;
+                let stepping = true;
+                while (stepping) {
+                    stepping = false;
+                    for (let record in response.answers) {
+                        if (record.name.equals(current) && (record.rtype == question.qtype || question.qtype == messages.TypeAny)) {
+                            collected.append(record);
+                            done = true;
+                        }
+                    }
+                    if (done) {
+                        break;
+                    }
+                    for (let record in response.answers) {
+                        if (record.name.equals(current) && record.rtype == messages.TypeCname) {
+                            match (record.data) {
+                                messages.RecordData.Cname(target) => {
+                                    links++;
+                                    if (links > MaxCnameChain || contains_name(seen, target)) {
+                                        return Result<Answer>.Err(errors.custom("dns.cname_chain",
+                                            "CNAME loop or chain longer than " .. MaxCnameChain.to_string()));
+                                    }
+                                    collected.append(record);
+                                    seen.append(target);
+                                    current = target;
+                                    moved = true;
+                                    stepping = true;
+                                },
+                                _ => {
+                                },
+                            }
+                            break;
+                        }
+                    }
+                }
+                if (done) {
+                    cache.put_answer(question, collected);
+                    return assemble(question, collected, messages.RcodeNoError, Source.Network);
+                }
+                if (moved && code == messages.RcodeNoError) {
+                    // The chain continues beyond this response: ask about the new name.
+                    continue;
+                }
+                // A negative answer for `current`.
+                last negative_question = new messages.Question(current, question.qtype, question.qclass);
+                last name_error = code == messages.RcodeNameError;
+                cache.put_negative(negative_question, name_error, response.authorities);
+                if (collected.length > 0) {
+                    // Remember the aliases too, under the original question, as a negative of the same kind.
+                    cache.put_negative(question, false, response.authorities);
+                }
+                return Result<Answer>.Ok(new Answer(question, current, alias_targets(collected), new, code,
+                    Source.Network));
+            }
+            return Result<Answer>.Err(errors.custom("dns.unreachable", "lookup loop ended"));
+        };
+
+        /// @brief Sends a query for `name` and `qtype` to the right servers.
+        let query_servers = func(name: names.DnsName, qtype: int) -> Result<messages.Message> {
+            last upstreams = servers_for(name);
+            if (upstreams.length == 0) {
+                return Result<messages.Message>.Err(errors.custom("dns.no_servers", "no name servers configured"));
+            }
+            last start = config.rotate ? rotation % upstreams.length : 0;
+            rotation++;
+            let last_error = errors.custom("dns.no_response", "no server answered");
+            last rounds = config.attempts < 1 ? 1 : config.attempts;
+            for (let round = 0; round < rounds; round++) {
+                for (let k = 0; k < upstreams.length; k++) {
+                    last upstream = upstreams[(start + k) % upstreams.length];
+                    match (ask(upstream, name, qtype)) {
+                        Result.Ok(response) => {
+                            last code = response.rcode();
+                            if (code == messages.RcodeNoError || code == messages.RcodeNameError) {
+                                return Result<messages.Message>.Ok(response);
+                            }
+                            last_error = errors.custom("dns.server_failure", "server answered RCODE "
+                                .. code.to_string());
+                        },
+                        Result.Err(problem) => {
+                            last_error = problem;
+                        },
+                    }
+                }
+            }
+            return Result<messages.Message>.Err(last_error);
+        };
+
+        /// @brief One exchange with one server, with TC fallback and response matching.
+        let ask = func(upstream: Upstream, name: names.DnsName, qtype: int) -> Result<messages.Message> {
+            last query = messages.query(ids.next_int_below(65536), name, qtype);
+            if (config.edns0) {
+                query.edns = Optional<messages.Edns>.Some(messages.edns_of(EdnsPayloadSize));
+            }
+            last first = upstream.primary.exchange(query)?;
+            check_match(query, first)?;
+            if (not first.header.truncated || upstream.primary.is_stream()) {
+                return Result<messages.Message>.Ok(first);
+            }
+            match (upstream.fallback) {
+                Optional.Some(stream) => {
+                    last second = stream.exchange(query)?;
+                    check_match(query, second)?;
+                    return Result<messages.Message>.Ok(second);
+                },
+                Optional.None => {
+                },
+            }
+            return Result<messages.Message>.Err(errors.custom("dns.truncated", "truncated response and no stream transport"));
+        };
+
+        /// @brief The answer for `question` from cached or collected records.
+        let assemble = func(question: messages.Question, records: messages.ResourceRecord[list], code: int,
+            origin: Source) -> Result<Answer> {
+            let current = question.name;
+            last finals: messages.ResourceRecord[list] = new;
+            for (let record in records) {
+                if (record.rtype == messages.TypeCname) {
+                    match (record.data) {
+                        messages.RecordData.Cname(target) => {
+                            current = target;
+                        },
+                        _ => {
+                        },
+                    }
+                } else {
+                    finals.append(record);
+                }
+            }
+            return Result<Answer>.Ok(new Answer(question, current, alias_targets(records), finals, code, origin));
+        };
+    );
+
+    /// @brief One `Upstream` per name server of `settings` (`effective_nameservers`, port 53): UDP first, TCP for
+    /// truncated answers, each waiting `timeout_seconds`. The UDP half needs the `neura.net.udp.*` services.
+    #NoDiscard
+    export let upstreams_for = func(settings: resolv_confs.ResolvConf) -> Upstream[list] {
+        last out: Upstream[list] = new;
+        last limit = durations.of_seconds(settings.timeout_seconds as int64);
+        for (let address in settings.nameserver_addresses(resolv_confs.DnsPort)) {
+            out.append(new Upstream(new udp_dns.UdpDnsTransport(address, limit),
+                new tcp_dns.TcpDnsTransport(address, limit)));
+        }
+        return out;
+    };
+
+    /// @brief A resolver whose servers come from `settings` through `upstreams_for`.
+    #NoDiscard
+    export let from_config = func(settings: resolv_confs.ResolvConf, table: hosts_files.HostsFile, store: caches.DnsCache,
+        random: Random) -> StubResolver => new StubResolver(settings, table, store, upstreams_for(settings), random);
+
+    /// @brief Checks that a response answers a query: QR set, the same ID and the same single question. Err
+    /// (Custom `dns.mismatch`) otherwise.
+    #NoDiscard
+    export let check_match = func(query: messages.Message, response: messages.Message) -> Result<int> {
+        if (not response.header.is_response || response.header.id != query.header.id) {
+            return Result<int>.Err(errors.custom("dns.mismatch", "response ID or QR does not match the query"));
+        }
+        return if (response.questions.length != 1 || not response.questions[0].equals(query.question())) -> Result<int>.Err(errors.custom("dns.mismatch", "response question does not match the query"))
+            else -> Result<int>.Ok(0);
+    };
+
+    /// @brief The CNAME targets among records.
+    let alias_targets = func(records: messages.ResourceRecord[list]) -> names.DnsName[list] {
+        last out: names.DnsName[list] = new;
+        for (let record in records) {
+            match (record.data) {
+                messages.RecordData.Cname(target) => {
+                    out.append(target);
+                },
+                _ => {
+                },
+            }
+        }
+        return out;
+    };
+
+    /// @brief Whether `list` holds `name`.
+    let contains_name = func(list: names.DnsName[list], name: names.DnsName) -> bool {
+        for (let item in list) {
+            if (item.equals(name)) {
+                return true;
+            }
+        }
+        return false;
+    };
+);

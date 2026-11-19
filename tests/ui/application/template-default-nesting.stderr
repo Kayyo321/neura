@@ -1,0 +1,7 @@
+error[E1015]: template or stylesheet exceeds a limit
+ --> $DIR/template-default-nesting.nra:1:20
+  |
+1 | let view = html() {
+  |                    ^... U-2 nesting depth: 65 exceeds 64
+
+For more information about this error, try `neura explain E1015`.

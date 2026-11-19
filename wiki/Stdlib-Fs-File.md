@@ -27,17 +27,19 @@ The following public declarations are taken from the module source; each links t
   Use File.open; the handle comes from the library.
 - **File.File** · [`export let read = func(max: int) -> result.Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L57)
   Up to `max` bytes from the current position; an empty list at the end of the file. A maximum below 1 traps. Tagged `#NoDiscard`.
-- **File.File** · [`export let write = func(data: uint8[list]) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L70)
+- **File.File** · [`export let write = func(data: uint8[list]) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L68)
   Writes every byte, repeating partial host writes. Tagged `#NoDiscard`.
-- **File.File** · [`export let seek = func(offset: int64, origin: SeekOrigin) -> result.Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L96)
+- **File.File** · [`export let seek = func(offset: int64, origin: SeekOrigin) -> result.Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L92)
   Moves the position and returns it, counted from the start. Tagged `#NoDiscard`.
-- **File.File** · [`export let size = func -> result.Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L108)
+- **File.File** · [`export let size = func -> result.Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L102)
   The file's size in bytes. The position is unchanged. Tagged `#NoDiscard`.
-- **File.File** · [`export let close = func -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L135)
+- **File.File** · [`export let close = func -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L129)
   Releases the file. Closing again does nothing and returns Ok; the file is closed even when the host reports an error.
-- **File** · [`export let open = func(path: Path, mode: OpenMode) -> result.Result<File>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L149)
+- **File.File** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L139)
+  Names the file with its path and whether it is open.
+- **File** · [`export let open = func(path: Path, mode: OpenMode) -> result.Result<File>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L144)
   Opens the normalized path using the selected mode and returns an owned file. Tagged `#NoDiscard`.
-- **File** · [`export let with_open = func<T>(path: Path, mode: OpenMode, body: func(File) -> result.Result<T>) -> result.Result<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L165)
+- **File** · [`export let with_open = func<T>(path: Path, mode: OpenMode, body: func(File) -> result.Result<T>) -> result.Result<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L160)
   Opens the file, runs `body` with it in a scope this helper owns, and closes it exactly once on every ordinary completion (Concurrency.md section 7, "Resources"). If the open fails, returns that error and does not call the body. Otherwise returns the body's result, with two exceptions for a failed close: a body Err becomes a Context error whose cause is the body's error and whose message carries the close error's message, and a body Ok becomes the close error (Std.Io.Closeable.release does the combining). The file is closed even if the body closed it already, which reports no error. A trap in the body ends the run without cleanup, and the runner then closes the files the run left open. Needs the fs capability. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

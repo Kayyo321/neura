@@ -1,0 +1,103 @@
+/// @brief SHA-1 (FIPS 180-4 section 6.1) for the WebSocket opening handshake (RFC 6455 section 4.2.2).
+///
+/// SHA-1 is broken for collision resistance; RFC 6455 uses it only to prove that the server read the client's
+/// key, and this module exists for that. It is not a general digest and is not exported outside the package:
+/// `Std.Net.Realtime.Ws.Handshake.sha1` is its public face. Words are uint32 values; a sum modulo 2^32 widens
+/// each term to uint64, adds, masks with 4294967295 and converts back (Stdlib.md section 7.2).
+/// @see [Std.Net.Realtime.Ws.Handshake](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-Ws-Handshake)
+#Since("0.3.0")
+export let Sha1 = module (
+    /// @brief The 20-byte SHA-1 hash of the bytes.
+    #[NoDiscard, Pure]
+    export let of = func(bytes: uint8[list]) -> uint8[list] {
+        // Initial hash value H(0), FIPS 180-4 section 5.3.1:
+        // 0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0.
+        last state: uint32[list] = new([1732584193, 4023233417, 2562383102, 271733878, 3285377520]);
+        last schedule: uint32[list] = new;
+        for (let t = 0; t < 80; t++) {
+            schedule.append(0);
+        }
+        last count = bytes.length;
+        let offset = 0;
+        while (offset + 64 <= count) {
+            compress(state, schedule, bytes, offset);
+            offset += 64;
+        }
+        last tail: uint8[list] = new;
+        for (let i = offset; i < count; i++) {
+            tail.append(bytes[i]);
+        }
+        tail.append(128);
+        while (tail.length % 64 != 56) {
+            tail.append(0);
+        }
+        last bits = (count as uint64) * 8;
+        for (let shift = 56; shift >= 0; shift = shift - 8) {
+            tail.append(((bits >> shift) & 255) as uint8);
+        }
+        for (let start = 0; start < tail.length; start = start + 64) {
+            compress(state, schedule, tail, start);
+        }
+        last digest: uint8[list] = new;
+        for (let word in state) {
+            digest.append((word >> 24) as uint8);
+            digest.append(((word >> 16) & 255) as uint8);
+            digest.append(((word >> 8) & 255) as uint8);
+            digest.append((word & 255) as uint8);
+        }
+        return digest;
+    };
+
+    /// @brief Processes the 64-byte block at the offset (FIPS 180-4 section 6.1.2).
+    let compress = func(state: uint32[list], w: uint32[list], block: uint8[list], offset: int) {
+        let p = offset;
+        for (let t = 0; t < 16; t++) {
+            w[t] = ((block[p] as uint32) << 24) | ((block[p + 1] as uint32) << 16)
+                | ((block[p + 2] as uint32) << 8) | (block[p + 3] as uint32);
+            p += 4;
+        }
+        for (let t = 16; t < 80; t++) {
+            last x = w[t - 3] ^ w[t - 8] ^ w[t - 14] ^ w[t - 16];
+            w[t] = (x << 1) | (x >> 31);
+        }
+        let a = state[0];
+        let b = state[1];
+        let c = state[2];
+        let d = state[3];
+        let e = state[4];
+        for (let t = 0; t < 80; t++) {
+            let f: uint32 = 0;
+            let k: uint32 = 0;
+            if (t < 20) {
+                f = (b & c) | ((~b) & d);
+                // 0x5a827999
+                k = 1518500249;
+            } else if (t < 40) {
+                f = b ^ c ^ d;
+                // 0x6ed9eba1
+                k = 1859775393;
+            } else if (t < 60) {
+                f = (b & c) | (b & d) | (c & d);
+                // 0x8f1bbcdc
+                k = 2400959708;
+            } else {
+                f = b ^ c ^ d;
+                // 0xca62c1d6
+                k = 3395469782;
+            }
+            last rotated = (a << 5) | (a >> 27);
+            last temp = (((rotated as uint64) + (f as uint64) + (e as uint64) + (k as uint64) + (w[t] as uint64))
+                & 4294967295) as uint32;
+            e = d;
+            d = c;
+            c = (b << 30) | (b >> 2);
+            b = a;
+            a = temp;
+        }
+        state[0] = (((state[0] as uint64) + (a as uint64)) & 4294967295) as uint32;
+        state[1] = (((state[1] as uint64) + (b as uint64)) & 4294967295) as uint32;
+        state[2] = (((state[2] as uint64) + (c as uint64)) & 4294967295) as uint32;
+        state[3] = (((state[3] as uint64) + (d as uint64)) & 4294967295) as uint32;
+        state[4] = (((state[4] as uint64) + (e as uint64)) & 4294967295) as uint32;
+    };
+);

@@ -1,0 +1,221 @@
+let.promote _ = import:Std.Time.Clock;
+let.promote _ = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief Zero-downtime certificate rotation: a `CertificateBundle` (leaf chain, private key and CA trust bundle
+/// as PEM text) that `DynamicCertResolver` swaps atomically when a change check reports new material.
+///
+/// The resolver is driven by injected functions: a loader that reads the bundle (from files, a KMS or a test),
+/// a change detector (for example a comparison of file modification times or a KMS version), and a clock. `poll`
+/// asks the detector at most once per check interval on the clock's monotonic reading and reloads on a change;
+/// `reload` reloads now. A reload that fails, or yields an invalid bundle, keeps the current bundle and returns
+/// the error, so a bad rotation never removes a working certificate. A successful reload replaces the bundle in
+/// one assignment and increments `generation`; a reader gets the old or the new bundle, never a mixture.
+/// Connections already established keep the certificate they were opened with; new `TlsAcceptor`s and
+/// `TlsConnector`s take `current()`. Watching files or KMS streams for changes is a host need: `watch_paths`
+/// traps in Neura 0.3.0, and the injected detector replaces it.
+///
+/// The private key is held as an ordinary string: this runtime cannot lock it in memory or guarantee that it is
+/// erased. `to_string` never shows it.
+/// @see [Std.Net.Tls.DynamicCertResolver](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Tls-DynamicCertResolver)
+#Since("0.3.0")
+export let DynamicCertResolver = module (
+    /// @brief The PEM boundary of a certificate.
+    const BeginCertificate: string = "-----BEGIN CERTIFICATE-----";
+    /// @brief The PEM end boundary of a certificate.
+    const EndCertificate: string = "-----END CERTIFICATE-----";
+
+    /// @brief A certificate chain, its private key and a CA trust bundle, as PEM text.
+    #[Final, Immutable]
+    export let CertificateBundle = class (
+        /// @brief The leaf certificate first, then intermediates (PEM).
+        export last chain_pem: string;
+        /// @brief The private key of the leaf (PEM). Never shown by `to_string`.
+        export last private_key_pem: string;
+        /// @brief The CA certificates trusted for peers (PEM); empty when none.
+        export last trust_pem: string;
+
+        /// @brief Use `bundle`, which checks the PEM structure.
+        export let init = func(chain: string, key: string, trust: string) {
+            chain_pem = chain;
+            private_key_pem = key;
+            trust_pem = trust;
+        };
+
+        /// @brief The number of certificates in the chain.
+        #Pure
+        export let chain_length = func -> int => count_certificates(chain_pem);
+
+        /// @brief The number of trusted CA certificates.
+        #Pure
+        export let trust_anchor_count = func -> int => count_certificates(trust_pem);
+
+        /// @brief Equal when the chain, key and trust bundle are.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: CertificateBundle) {
+                return false;
+            }
+            return chain_pem == that.chain_pem && private_key_pem == that.private_key_pem
+                && trust_pem == that.trust_pem;
+        };
+
+        /// @brief A hash of the chain and trust bundle (not the key), consistent with equals.
+        export let.override hash_code = func -> uint32 => hashing.combine(chain_pem.hash_code(), trust_pem.hash_code());
+
+        /// @brief Text such as "CertificateBundle(2 certificates, key redacted, 1 trust anchors)".
+        export let.override to_string = func -> string => "CertificateBundle(" .. chain_length().to_string()
+            .. " certificates, key redacted, " .. trust_anchor_count().to_string() .. " trust anchors)";
+    );
+
+    /// @brief Rotates a `CertificateBundle` when the injected change detector reports new material.
+    #[Final, NotThreadSafe]
+    export let DynamicCertResolver = class (
+        /// @brief Reads a new bundle.
+        last loader: func() -> Result<CertificateBundle>;
+        /// @brief Reports whether the material changed since the last call.
+        last changed: func() -> Result<bool>;
+        /// @brief The monotonic time source.
+        last clock: Clock;
+        /// @brief The least time between change checks, in nanoseconds.
+        last interval_nanos: int64;
+        /// @brief The bundle in use.
+        let active: CertificateBundle;
+        /// @brief How many times the bundle was replaced.
+        let swaps: int64 = 0;
+        /// @brief The monotonic reading of the last check.
+        let checked_at: int64;
+
+        /// @brief Use `create`, which loads the first bundle.
+        export let init = func(first: CertificateBundle, load: func() -> Result<CertificateBundle>,
+            detect: func() -> Result<bool>, source: Clock, check_interval: Duration, now: int64) {
+            active = first;
+            loader = load;
+            changed = detect;
+            clock = source;
+            interval_nanos = check_interval.to_nanos();
+            checked_at = now;
+        };
+
+        /// @brief The bundle in use now.
+        #NoDiscard
+        export let current = func -> CertificateBundle => active;
+
+        /// @brief How many times the bundle was replaced since creation.
+        #Pure
+        export let generation = func -> int64 => swaps;
+
+        /// @brief When the check interval has passed since the last check, asks the detector and reloads on a
+        /// change. Ok(true) when the bundle was replaced; Err when the clock, the detector or the reload failed
+        /// (the current bundle stays).
+        #NoDiscard
+        export let poll = func -> Result<bool> {
+            last now = (clock.monotonic()?).to_nanos();
+            if (now - checked_at < interval_nanos) {
+                return Result<bool>.Ok(false);
+            }
+            checked_at = now;
+            return if (not changed()?) -> Result<bool>.Ok(false)
+                else -> reload();
+        };
+
+        /// @brief Loads and checks a bundle now and swaps it in. Ok(false) when it equals the current one.
+        #NoDiscard
+        export let reload = func -> Result<bool> {
+            last loaded = loader();
+            last fresh = match (loaded) {
+                Result.Ok(candidate) => validate(candidate),
+                Result.Err(problem) => Result<CertificateBundle>.Err(problem),
+            };
+            return match (fresh) {
+                Result.Ok(candidate) => swap(candidate),
+                Result.Err(problem) => Result<bool>.Err(errors.context(problem,
+                    "certificate reload failed; generation " .. swaps.to_string() .. " stays in use")),
+            };
+        };
+
+        /// @brief Text such as "DynamicCertResolver(generation 2, CertificateBundle(...))".
+        export let.override to_string = func -> string =>
+            "DynamicCertResolver(generation " .. swaps.to_string() .. ", " .. active.to_string() .. ")";
+
+        /// @brief Replaces the bundle unless it is unchanged.
+        let swap = func(candidate: CertificateBundle) -> Result<bool> {
+            if (candidate.equals(active)) {
+                return Result<bool>.Ok(false);
+            }
+            active = candidate;
+            swaps++;
+            return Result<bool>.Ok(true);
+        };
+    );
+
+    /// @brief A bundle from PEM text: the chain must hold at least one complete certificate block, the key a
+    /// `PRIVATE KEY` block, and a non-empty trust bundle at least one certificate block. Else a Custom error
+    /// with the code `tls.certificate`.
+    #NoDiscard
+    export let bundle = func(chain: string, key: string, trust: string) -> Result<CertificateBundle> =>
+        validate(new CertificateBundle(chain, key, trust));
+
+    /// @brief A resolver whose first bundle comes from `loader` now. A negative interval traps with "invalid
+    /// argument: interval". Err when the clock, the loader or the first bundle fails.
+    #NoDiscard
+    export let create = func(loader: func() -> Result<CertificateBundle>, changed: func() -> Result<bool>,
+        clock: Clock, check_interval: Duration) -> Result<DynamicCertResolver> {
+        if (check_interval.to_nanos() < 0) {
+            trap_with_message("invalid argument: interval");
+        }
+        last now = (clock.monotonic()?).to_nanos();
+        last first = validate(loader()?)?;
+        return Result<DynamicCertResolver>.Ok(new DynamicCertResolver(first, loader, changed, clock, check_interval,
+            now));
+    };
+
+    /// @brief Watches files for changes and reloads the resolver when they change.
+    /// @stub file watching needs a host service (inotify or kqueue) that no runtime offers
+    #NoDiscard
+    export let watch_paths = func(resolver: DynamicCertResolver, paths: string[list]) -> Result<Unit> {
+        trap_with_message("unsupported: Std.Net.Tls.DynamicCertResolver.watch_paths is not implemented in Neura 0.3.0 (file watching needs a host service (inotify or kqueue) that no runtime offers)");
+    };
+
+    /// @brief Checks the PEM structure of a bundle.
+    let validate = func(candidate: CertificateBundle) -> Result<CertificateBundle> {
+        if (count_certificates(candidate.chain_pem) < 1) {
+            return invalid("the chain holds no complete PEM certificate");
+        }
+        last key = candidate.private_key_pem;
+        last begin = strings.index_of(key, "-----BEGIN ");
+        if (begin < 0 || strings.index_of_from(key, "PRIVATE KEY-----", begin) < 0
+            || strings.index_of_from(key, "-----END ", begin) < 0) {
+            return invalid("the key is not a PEM private key");
+        }
+        return if (candidate.trust_pem.byte_length > 0 && count_certificates(candidate.trust_pem) < 1) -> invalid("the trust bundle holds no complete PEM certificate")
+            else -> Result<CertificateBundle>.Ok(candidate);
+    };
+
+    /// @brief The number of complete BEGIN/END CERTIFICATE blocks.
+    #Pure
+    let count_certificates = func(pem: string) -> int {
+        let count = 0;
+        let from = 0;
+        while (true) {
+            last begin = strings.index_of_from(pem, BeginCertificate, from);
+            if (begin < 0) {
+                return count;
+            }
+            last end = strings.index_of_from(pem, EndCertificate, begin);
+            if (end < 0) {
+                return count;
+            }
+            count++;
+            from = end + EndCertificate.byte_length;
+        }
+        return count;
+    };
+
+    /// @brief A `tls.certificate` failure.
+    let invalid = func(text: string) -> Result<CertificateBundle> =>
+        Result<CertificateBundle>.Err(errors.custom("tls.certificate", text));
+);

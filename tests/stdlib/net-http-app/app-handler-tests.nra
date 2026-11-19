@@ -1,0 +1,128 @@
+let adapters = import:Std.Net.Http.AppHandler;
+let app = import:Std.App;
+let errors = import:Std.Core.Error;
+let http = import:Std.Net.Http;
+let optional = import:Std.Core.Optional;
+let result = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let unit = import:Std.Core.Unit;
+
+// Std.Net.Http.AppHandler: a Router as a Std.App.Handler.
+let AppHandlerTests = module (
+    let show = func(request: http.Request, params: http.Params) -> result.Result<http.Response> {
+        last response = http.text(200, "part " + (params.value("id")?) + " q=" + request.query + " c=" + request.client
+            + " s=" + request.scheme + " id=" + request.request_id);
+        response.headers.set("Connection", "close");
+        response.headers.set("X-Kept", "1");
+        return result.Result<http.Response>.Ok(response);
+    };
+
+    let echo = func(request: http.Request, params: http.Params) -> result.Result<http.Response> {
+        last body = request.body()?;
+        return result.Result<http.Response>.Ok(http.binary(201, "application/octet-stream", body));
+    };
+
+    let failing = func(request: http.Request, params: http.Params) -> result.Result<http.Response> =>
+        result.Result<http.Response>.Err(errors.custom("x", "hidden"));
+
+    let router = func -> http.Router {
+        last r = new http.Router();
+        r.on_error(new func(line: string) {});
+        r.get("/parts/{id}", show);
+        r.post("/parts", echo);
+        r.get("/fail", failing);
+        return r;
+    };
+
+    let host_request = func(method: string, target: string, body: string) -> app.Request {
+        last fields: [string, string][list] = new;
+        fields.append(["host", "shop.example"]);
+        fields.append(["x-user", "alice"]);
+        return new app.Request(method, target, fields, strings.to_bytes(body), "192.0.2.7", "https", "r-9");
+    };
+
+    let field = func(response: app.Response, name: string) -> optional.Optional<string> {
+        for (let f in response.headers) {
+            if (strings.equals_ignore_ascii_case(f[0], name)) {
+                return optional.Optional<string>.Some(f[1]);
+            }
+        }
+        return optional.Optional<string>.None;
+    };
+
+    export let test_get_converts_both_ways = func {
+        last handler = adapters.handler(router());
+        last answer = test.assert_ok<app.Response>(handler.handle(host_request("GET", "/parts/7?full=1", "")));
+        test.assert_equal<int>(200, answer.status);
+        test.assert_equal_string("part 7 q=full=1 c=192.0.2.7 s=https id=r-9", strings.from_bytes_lossy(answer.body));
+        test.assert_equal_string("1", test.assert_some<string>(field(answer, "X-Kept")));
+        test.assert_none<string>(field(answer, "Connection"));
+        test.assert_equal_string("text/plain; charset=utf-8", test.assert_some<string>(field(answer, "Content-Type")));
+    };
+
+    export let test_body_and_status = func {
+        last answer = test.assert_ok<app.Response>(adapters.handler(router()).handle(host_request("POST", "/parts", "abc")));
+        test.assert_equal<int>(201, answer.status);
+        test.assert_equal_string("abc", strings.from_bytes_lossy(answer.body));
+    };
+
+    export let test_head_keeps_the_body_for_the_host = func {
+        last answer = test.assert_ok<app.Response>(adapters.handler(router()).handle(host_request("HEAD", "/parts/3", "")));
+        test.assert_equal<int>(200, answer.status);
+        test.assert(answer.body.length > 0);
+        test.assert_none<string>(field(answer, "Content-Length"));
+    };
+
+    export let test_misses_and_errors = func {
+        last handler = adapters.handler(router());
+        test.assert_equal<int>(404, test.assert_ok<app.Response>(handler.handle(host_request("GET", "/none", ""))).status);
+        last wrong = test.assert_ok<app.Response>(handler.handle(host_request("DELETE", "/parts", "")));
+        test.assert_equal<int>(405, wrong.status);
+        test.assert_equal_string("POST", test.assert_some<string>(field(wrong, "Allow")));
+        last failed = test.assert_ok<app.Response>(handler.handle(host_request("GET", "/fail", "")));
+        test.assert_equal<int>(500, failed.status);
+        test.assert(strings.contains(strings.from_bytes_lossy(failed.body), "\"request_id\":\"r-9\""));
+        test.assert(!strings.contains(strings.from_bytes_lossy(failed.body), "hidden"));
+    };
+
+    export let test_streamed_response_is_buffered = func {
+        last r = new http.Router();
+        r.get("/s", new func(request: http.Request, params: http.Params) -> result.Result<http.Response> =>
+            result.Result<http.Response>.Ok(http.stream(200, new http.Headers(),
+                new func(sink: http.BodySink) -> result.Result<unit.Unit> => sink.write(strings.to_bytes("xyz")))));
+        last answer = test.assert_ok<app.Response>(adapters.handler(r).handle(host_request("GET", "/s", "")));
+        test.assert_equal_string("xyz", strings.from_bytes_lossy(answer.body));
+    };
+
+    export let test_failed_stream_gets_the_router_envelope = func {
+        last r = new http.Router();
+        let reported: string[list] = new;
+        r.on_error(new func(line: string) {
+            reported.append(line);
+        });
+        r.get("/broken", new func(request: http.Request, params: http.Params) -> result.Result<http.Response> =>
+            result.Result<http.Response>.Ok(http.stream(200, new http.Headers(),
+                new func(sink: http.BodySink) -> result.Result<unit.Unit> =>
+                    result.Result<unit.Unit>.Err(errors.custom("x", "stream broke")))));
+        last answer = test.assert_ok<app.Response>(adapters.handler(r).handle(host_request("GET", "/broken", "")));
+        test.assert_equal<int>(500, answer.status);
+        last body = strings.from_bytes_lossy(answer.body);
+        test.assert(strings.contains(body, "\"internal_error\""));
+        test.assert(strings.contains(body, "\"request_id\":\"r-9\""));
+        test.assert(!strings.contains(body, "stream broke"));
+        test.assert_equal<int>(1, reported.length);
+        test.assert(strings.contains(reported[0], "stream broke"));
+    };
+
+    export let test_request_conversion = func {
+        last converted = adapters.to_http_request(host_request("PUT", "/a/b?x=1", "body"));
+        test.assert_equal_string("PUT", converted.method);
+        test.assert_equal_string("/a/b", converted.path);
+        test.assert_equal_string("x=1", converted.query);
+        test.assert_equal_string("alice", test.assert_some<string>(converted.header("X-User")));
+        test.assert_equal_string("shop.example", converted.host());
+        test.assert_equal_string("body", test.assert_ok<string>(converted.body_text()));
+        test.assert_equal<int64>(4, converted.body_limit);
+    };
+);

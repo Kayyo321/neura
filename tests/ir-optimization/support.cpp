@@ -73,6 +73,18 @@ std::string_view op_name(IrOp op) {
     case IrOp::TaskScope: return "task_scope";
     case IrOp::Spawn: return "spawn";
     case IrOp::SchedulerCall: return "scheduler_call";
+    case IrOp::HookRead: return "hook_read";
+    case IrOp::AnyPack: return "any_pack";
+    case IrOp::AnyTag: return "any_tag";
+    case IrOp::AnyUnpack: return "any_unpack";
+    case IrOp::HookAdmit: return "hook_admit";
+    case IrOp::ConformanceCall: return "conformance_call";
+    case IrOp::Cleanup: return "cleanup";
+    case IrOp::Pending: return "pending";
+    case IrOp::Yield: return "yield";
+    case IrOp::ConcatText: return "concat_text";
+    case IrOp::TypeOf: return "type_of";
+    case IrOp::Reflect: return "reflect";
     }
     return "<invalid>";
 }
@@ -163,14 +175,33 @@ std::vector<fs::path> fixture_files(const Environment& environment) {
     // The concurrent fixtures are entry programs for the scheduler and have
     // their own suites (concurrency_support.hpp); the per-function sampling
     // of the other suites does not apply to them.
+    // The verifier's fixtures hold generic bodies, which the sampling
+    // cannot call, for the verifier suite alone.
     auto files = nra_files(environment.fixtures());
     const auto concurrent = fs::canonical(environment.fixtures() / "concurrency");
-    std::erase_if(files, [&](const fs::path& file) { return file.parent_path() == concurrent; });
+    const auto verifier = fs::canonical(environment.fixtures() / "verifier");
+    std::erase_if(files, [&](const fs::path& file) {
+        return file.parent_path() == concurrent || file.parent_path() == verifier;
+    });
     return files;
 }
 
+bool in_example_project(const Environment& environment, const fs::path& file) {
+    const auto root = fs::canonical(environment.examples());
+    for (auto directory = fs::canonical(file).parent_path(); directory != root && directory.has_relative_path();
+         directory = directory.parent_path()) {
+        if (fs::exists(directory / "neura.toml")) return true;
+    }
+    return false;
+}
+
 std::vector<fs::path> example_files(const Environment& environment) {
-    return nra_files(environment.examples());
+    // The sources of an example project (a directory with neura.toml, such
+    // as examples/apps/stock) import each other by the project's module
+    // roots and are built with `neura build --project`, so they are left out.
+    auto files = nra_files(environment.examples());
+    std::erase_if(files, [&](const fs::path& file) { return in_example_project(environment, file); });
+    return files;
 }
 
 std::string qualified_name(const IrProgram& program, SymbolId id) {

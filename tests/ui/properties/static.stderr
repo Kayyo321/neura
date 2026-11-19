@@ -1,0 +1,9 @@
+error[E0573]: invalid interface property
+ --> $DIR/static.nra:3:16
+  |
+3 |     static let name: string;
+  |                ^^^^ an interface property is declared with 'let', not 'static'
+  |
+  = help: declare it as 'let name: T;' followed by '| get;'
+
+For more information about this error, try `neura explain E0573`.

@@ -1,0 +1,9 @@
+error[E0202]: expected ',' or ')' after a record component
+ --> $DIR/member.nra:2:23
+  |
+2 | let P = record (x: int; export let f = func() -> int => x;);
+  |                       ^ a record's components are separated by ','
+  |
+  = help: a record holds components only: declare a class to give it methods or other members
+
+For more information about this error, try `neura explain E0202`.

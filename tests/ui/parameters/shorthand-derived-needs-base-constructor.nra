@@ -1,0 +1,11 @@
+let Base = class (
+    export let id: int;
+    export let init = func(id: int) {
+        instance.id = id;
+    };
+);
+let Child = class : Base (
+    export let size: int = 0;
+
+    export let init = func(size: int) => set;
+);

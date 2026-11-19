@@ -745,17 +745,46 @@ private:
         return target;
     }
 
+    // A Cleanup (docs/design/Lifetime030.md) is registered where it stands;
+    // however the region is left, the registered lists run last first: a
+    // return runs the return list when there is one, reading and assigning
+    // the returned value as Pending. A list that returns makes the rest of
+    // the exit a return.
     Flow run_region(const std::vector<IrNode>& region, Frame& frame) {
+        std::vector<const IrNode*> cleanups;
+        auto flow = Flow::Next;
         for (const auto& statement : region) {
-            const auto flow = run_statement(statement, frame);
-            if (flow != Flow::Next) {
-                return flow;
+            if (statement.op == IrOp::Cleanup) {
+                cleanups.push_back(&statement);
+                continue;
             }
+            flow = run_statement(statement, frame);
+            if (flow != Flow::Next) break;
         }
-        return Flow::Next;
+        for (auto cleanup = cleanups.rbegin(); cleanup != cleanups.rend(); ++cleanup) {
+            const auto& node = **cleanup;
+            const auto& list = flow == Flow::Return && !node.alternative.empty() ? node.alternative : node.body;
+            if (run_region(list, frame) == Flow::Return) flow = Flow::Return;
+        }
+        return flow;
     }
 
+    // A `return`, `break` or `continue` inside a scoped value, as the
+    // lowering of `?` writes one, leaves the statement that evaluates the
+    // value: the scoped value throws it and that statement returns it.
+    struct ScopedExit {
+        Flow flow;
+    };
+
     Flow run_statement(const IrNode& node, Frame& frame) {
+        try {
+            return run_statement_once(node, frame);
+        } catch (const ScopedExit& exit) {
+            return exit.flow;
+        }
+    }
+
+    Flow run_statement_once(const IrNode& node, Frame& frame) {
         switch (node.op) {
         case IrOp::Initialize: {
             // NeuraIR 1.10: a deferred `last` local has no value until its
@@ -787,6 +816,10 @@ private:
                 auto value = evaluate(node.operands.at(1), frame);
                 auto& entry = collection_entry(collection, node);
                 entry.elements[element_index(entry, index, destination)] = std::move(value);
+                return Flow::Next;
+            }
+            if (destination.op == IrOp::Pending) {
+                frame.result = evaluate(node.operands.at(1), frame);
                 return Flow::Next;
             }
             if (destination.op != IrOp::Load) {
@@ -915,6 +948,9 @@ private:
 
     Value evaluate(const IrNode& node, Frame& frame) {
         switch (node.op) {
+        case IrOp::Pending:
+            if (!frame.result) unsupported(node, "pending outside a return");
+            return *frame.result;
         case IrOp::Boolean:
             return bool_value(node.text == "true");
         case IrOp::Integer:
@@ -1164,7 +1200,7 @@ private:
         }
         case IrOp::ScopedValue: {
             for (std::size_t i = 0; i + 1 < node.body.size(); ++i) {
-                run_statement(node.body[i], frame);
+                if (const auto flow = run_statement(node.body[i], frame); flow != Flow::Next) throw ScopedExit{flow};
             }
             return evaluate(node.body.back(), frame);
         }
@@ -1223,6 +1259,19 @@ private:
             }
             Value result = text;
             result.text = bytes.substr(start.magnitude, end.magnitude - start.magnitude);
+            return result;
+        }
+        case IrOp::ConcatText: {
+            // Operands left to right, then the text of all of them.
+            std::string bytes;
+            Value result;
+            for (std::size_t i = 0; i < node.operands.size(); ++i) {
+                auto part = evaluate(node.operands[i], frame);
+                if (i == 0) result = part;
+                bytes += part.text;
+            }
+            if (bytes.size() > 0x7fffffffU) fault(node, "text exceeds the int32 byte length limit");
+            result.text = std::move(bytes);
             return result;
         }
         case IrOp::TextEqual: {

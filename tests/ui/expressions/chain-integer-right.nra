@@ -1,0 +1,3 @@
+// Edge case 36 of docs/design/Expressions030.md: `..` converts nothing,
+// so an integer after a string is E1100 at the integer.
+let turn = func() -> string => "turn " .. 3;

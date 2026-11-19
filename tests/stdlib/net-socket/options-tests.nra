@@ -1,0 +1,198 @@
+let duration = import:Std.Time.Duration;
+let error = import:Std.Core.Error;
+let options = import:Std.Net.Socket.SocketOptions;
+let result = import:Std.Core.Result;
+let test = import:Std.Test;
+
+// Std.Net.Socket.SocketOptions: building and validating option sets. Applying them needs the host's option
+// service and is not exercised here.
+let OptionsTests = module (
+    let built = func(builder: options.SocketOptionsBuilder, kind: options.SocketKind) -> options.SocketOptions =>
+        test.assert_ok<options.SocketOptions>(builder.build(kind));
+
+    let expect_problem = func(builder: options.SocketOptionsBuilder, kind: options.SocketKind, text: string) {
+        last failure = test.assert_err<options.SocketOptions>(builder.build(kind));
+        test.assert_equal_string(text, error.message(failure));
+        last code = match (failure) {
+            error.Error.Custom(detail) => detail.code(),
+            _ => "",
+        };
+        test.assert_equal_string("socket.options", code);
+    };
+
+    export let test_empty_set_needs_no_host_call = func {
+        last set = built(options.builder(), options.SocketKind.TcpStream);
+        test.assert(set.is_empty());
+        test.assert_equal<int>(0, set.settings().length);
+        test.assert(options.none(options.SocketKind.Udp).is_empty());
+        test.assert_equal_string("SocketOptions(TcpStream:)", set.to_string());
+    };
+
+    export let test_tcp_stream_options_in_number_order = func {
+        last builder = options.builder();
+        builder.set_send_buffer(65536);
+        builder.set_keep_alive_count(5);
+        builder.set_keep_alive_interval(duration.of_seconds(10));
+        builder.set_keep_alive_idle(duration.of_seconds(60));
+        builder.set_keep_alive(true);
+        builder.set_user_timeout(duration.of_millis(30000));
+        builder.set_no_delay(true);
+        builder.set_receive_buffer(131072);
+        last set = built(builder, options.SocketKind.TcpStream);
+        test.assert(!set.is_empty());
+        last pairs = set.settings();
+        last expected_numbers: int[list] = new([3, 5, 6, 7, 8, 9, 10, 11]);
+        last expected_values: int64[list] = new([1, 30000, 1, 60, 10, 5, 131072, 65536]);
+        test.assert_equal<int>(8, pairs.length);
+        let i = 0;
+        while (i < pairs.length) {
+            let [number, value] = pairs[i];
+            test.assert_equal<int>(expected_numbers[i], number);
+            test.assert_equal_int64(expected_values[i], value);
+            i++;
+        }
+        test.assert_equal_int64(30000, set.value_of(5));
+        test.assert_equal_int64(-1, set.value_of(12));
+        test.assert_equal_string("SocketOptions(TcpStream: no_delay=1, user_timeout=30000, keep_alive=1, "
+            + "keep_alive_idle=60, keep_alive_interval=10, keep_alive_count=5, receive_buffer=131072, "
+            + "send_buffer=65536)", set.to_string());
+    };
+
+    export let test_listener_reuse_port_and_fast_open = func {
+        last builder = options.builder();
+        builder.set_reuse_port(true);
+        builder.set_reuse_address(true);
+        builder.set_fast_open(16);
+        builder.set_multipath(true);
+        last set = built(builder, options.SocketKind.TcpListener);
+        test.assert(set.multipath);
+        test.assert_equal_int64(1, set.value_of(1));
+        test.assert_equal_int64(1, set.value_of(2));
+        test.assert_equal_int64(16, set.value_of(4));
+        test.assert_equal_string("SocketOptions(TcpListener: reuse_address=1, reuse_port=1, fast_open=16, multipath)",
+            set.to_string());
+    };
+
+    export let test_udp_broadcast_and_reuse_port = func {
+        last builder = options.builder();
+        builder.set_broadcast(true);
+        builder.set_reuse_port(false);
+        last set = built(builder, options.SocketKind.Udp);
+        test.assert_equal_int64(0, set.value_of(2));
+        test.assert_equal_int64(1, set.value_of(12));
+    };
+
+    export let test_options_that_do_not_apply = func {
+        last broadcast = options.builder();
+        broadcast.set_broadcast(true);
+        expect_problem(broadcast, options.SocketKind.TcpStream, "broadcast does not apply to a TcpStream socket");
+        last no_delay = options.builder();
+        no_delay.set_no_delay(true);
+        expect_problem(no_delay, options.SocketKind.Udp, "no_delay does not apply to a Udp socket");
+        last fast_open = options.builder();
+        fast_open.set_fast_open(8);
+        expect_problem(fast_open, options.SocketKind.TcpStream, "fast_open does not apply to a TcpStream socket");
+        last reuse = options.builder();
+        reuse.set_reuse_address(true);
+        expect_problem(reuse, options.SocketKind.UnixStream, "reuse_address does not apply to a UnixStream socket");
+        last reuse_port = options.builder();
+        reuse_port.set_reuse_port(true);
+        expect_problem(reuse_port, options.SocketKind.TcpStream, "reuse_port does not apply to a TcpStream socket");
+        last multipath = options.builder();
+        multipath.set_multipath(true);
+        expect_problem(multipath, options.SocketKind.Udp, "multipath does not apply to a Udp socket");
+        // Buffers apply everywhere.
+        last buffer = options.builder();
+        buffer.set_receive_buffer(4096);
+        built(buffer, options.SocketKind.UnixDatagram);
+        test.assert(options.applies(10, options.SocketKind.UnixStream));
+        test.assert(!options.applies(3, options.SocketKind.UnixDatagram));
+    };
+
+    export let test_user_timeout_bounds = func {
+        last negative = options.builder();
+        negative.set_user_timeout(duration.of_nanos(-1));
+        expect_problem(negative, options.SocketKind.TcpStream,
+            "user_timeout must be whole milliseconds from 0 through 2147483647");
+        last fractional = options.builder();
+        fractional.set_user_timeout(duration.of_micros(1500));
+        expect_problem(fractional, options.SocketKind.TcpStream,
+            "user_timeout must be whole milliseconds from 0 through 2147483647");
+        last too_long = options.builder();
+        too_long.set_user_timeout(duration.of_millis(2147483648));
+        expect_problem(too_long, options.SocketKind.TcpStream,
+            "user_timeout must be whole milliseconds from 0 through 2147483647");
+        last largest = options.builder();
+        largest.set_user_timeout(duration.of_millis(2147483647));
+        test.assert_equal_int64(2147483647, built(largest, options.SocketKind.TcpStream).value_of(5));
+        last zero = options.builder();
+        zero.set_user_timeout(duration.of_nanos(0));
+        test.assert_equal_int64(0, built(zero, options.SocketKind.TcpListener).value_of(5));
+    };
+
+    export let test_keepalive_timers_need_keepalive = func {
+        last idle = options.builder();
+        idle.set_keep_alive_idle(duration.of_seconds(30));
+        expect_problem(idle, options.SocketKind.TcpStream, "keep_alive_idle needs keep_alive enabled");
+        last disabled = options.builder();
+        disabled.set_keep_alive(false);
+        disabled.set_keep_alive_count(3);
+        expect_problem(disabled, options.SocketKind.TcpStream, "keep_alive_count needs keep_alive enabled");
+        last interval = options.builder();
+        interval.set_keep_alive(true);
+        interval.set_keep_alive_interval(duration.of_millis(1500));
+        expect_problem(interval, options.SocketKind.TcpStream,
+            "keep_alive_interval must be whole seconds from 1 through 32767");
+    };
+
+    export let test_keepalive_limits = func {
+        last check = func(seconds: int64, count: int, valid: bool) {
+            last builder = options.builder();
+            builder.set_keep_alive(true);
+            builder.set_keep_alive_idle(duration.of_seconds(seconds));
+            builder.set_keep_alive_count(count);
+            last outcome = builder.build(options.SocketKind.TcpStream);
+            last accepted = match (outcome) {
+                result.Result.Ok(_) => true,
+                result.Result.Err(_) => false,
+            };
+            test.assert_equal_bool(valid, accepted);
+        };
+        check(1, 1, true);
+        check(32767, 127, true);
+        check(0, 1, false);
+        check(32768, 1, false);
+        check(10, 0, false);
+        check(10, 128, false);
+    };
+
+    export let test_sizes_must_be_positive = func {
+        last queue = options.builder();
+        queue.set_fast_open(0);
+        expect_problem(queue, options.SocketKind.TcpListener, "fast_open needs a queue length of at least 1");
+        last buffer = options.builder();
+        buffer.set_send_buffer(-4);
+        expect_problem(buffer, options.SocketKind.Udp, "send_buffer must be at least 1 byte");
+    };
+
+    export let test_later_setting_replaces_earlier = func {
+        last builder = options.builder();
+        builder.set_no_delay(true);
+        builder.set_no_delay(false);
+        test.assert_equal_int64(0, built(builder, options.SocketKind.TcpStream).value_of(3));
+    };
+
+    export let test_equality = func {
+        last a = options.builder();
+        a.set_no_delay(true);
+        last b = options.builder();
+        b.set_no_delay(true);
+        last first = built(a, options.SocketKind.TcpStream);
+        last second = built(b, options.SocketKind.TcpStream);
+        test.assert(first.equals(second));
+        test.assert_equal<uint32>(first.hash_code(), second.hash_code());
+        test.assert(!first.equals(built(b, options.SocketKind.TcpListener)));
+        b.set_no_delay(false);
+        test.assert(!first.equals(built(b, options.SocketKind.TcpStream)));
+    };
+);

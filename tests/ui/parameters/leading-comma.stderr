@@ -1,0 +1,7 @@
+error[E0202]: expected an identifier
+ --> $DIR/leading-comma.nra:1:16
+  |
+1 | let add = func(, a, b: int) -> int {
+  |                ^ expected an identifier, found ','
+
+For more information about this error, try `neura explain E0202`.

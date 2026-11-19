@@ -24,7 +24,7 @@ let ProgramHelpers = module:program.Entry (
     let Node = class (
         export let value: int64 = 0;
         export let next: Node = nil;
-        export let payload: int64[list] = [];
+        export let payload: int64[list] = new;
     );
 
     let report = func(label: string, value: int64) {
@@ -61,7 +61,7 @@ let ProgramHelpers = module:program.Entry (
             let node = new Node();
             node.value = i as int64;
             node.payload.append(i as int64);
-            let repeated = {0 .. (i % 4 + 1)};
+            let repeated: int[list] = new(0 .. (i % 4 + 1));
             let pair: int64[] = [i as int64, (i + 1) as int64];
             let label = "n" + i.to_string();
             total = (total + node.value + (node.payload.length as int64) + (repeated.length as int64) + pair[1] +
@@ -75,7 +75,7 @@ let ProgramHelpers = module:program.Entry (
         let check: int64 = 0;
         for (let i = 0; i < size; i = i + 1) {
             total = total + math.sqrt((i + 1) as float64);
-            let bytes: uint8[list] = [(i % 256) as uint8, ((i * 3) % 256) as uint8];
+            let bytes: uint8[list] = new([(i % 256) as uint8, ((i * 3) % 256) as uint8]);
             check = (check + (crc.of(bytes) as int64)) & Mask;
         }
         return (total as int64) + check;
@@ -97,7 +97,7 @@ let ProgramHelpers = module:program.Entry (
     let decode = func(size: int32) -> int64 {
         let total: int64 = 0;
         for (let i = 0; i < size; i = i + 1) {
-            let bytes: uint8[list] = [104, 105];
+            let bytes: uint8[list] = new([104, 105]);
             if (i % 2 == 1) {
                 bytes.append(255);
             }
@@ -126,7 +126,7 @@ let ProgramHelpers = module:program.Entry (
     };
 
     let remove_out_of_bounds = func(size: int32) -> int64 {
-        let values: int64[list] = [];
+        let values: int64[list] = new;
         for (let i = 0; i < size; i = i + 1) {
             values.append(i as int64);
         }

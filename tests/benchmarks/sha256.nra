@@ -10,7 +10,7 @@ let sha256 = import:Std.Digest.Sha256;
 export let Sha256Benchmark = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         let n = result.value_or<int32>(int32s.parse(args[0]), 0);
-        let bytes: uint8[list] = [];
+        let bytes: uint8[list] = new;
         for (let i = 0; i < n; i = i + 1) {
             bytes.append((i % 251) as uint8);
         }

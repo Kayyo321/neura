@@ -1,0 +1,13 @@
+error[E0602]: a value of type Event<int32> is not transferable, so it cannot be given to a spawned task
+  --> $DIR/event-task.nra:10:22
+   |
+10 |         spawn listen(event);
+   |                      ^^^^^ not transferable
+  ::: $ROOT/stdlib/std/events/event.nra:59:14
+   |
+59 |     #[Final, NotThreadSafe]
+   |              ------------- 'Event<int32>' is marked #NotThreadSafe here
+   |
+   = note: the instances of a #NotThreadSafe class, and of a class that extends one, stay in the task that holds them
+
+For more information about this error, try `neura explain E0602`.

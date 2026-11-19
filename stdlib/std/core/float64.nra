@@ -8,7 +8,7 @@ let.promote _ = import:Std.Core.Result;
 /// encoding (N1); text conversion follows section 7.5.
 /// @see [Std.Core.Float64](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-Float64)
 #Since("0.1.0")
-export let Float64 = module (
+export let Float64 = module implements Additive<float64>, Multiplicative<float64>, Parseable<float64> (
     /// @brief The largest finite value.
     export const Max: float64 = float64.from_bits(9218868437227405311);
     /// @brief The smallest positive (subnormal) value.
@@ -67,10 +67,7 @@ export let Float64 = module (
         if (b < a) {
             return b;
         }
-        if (is_negative(a)) {
-            return a;
-        }
-        return b;
+        return if (is_negative(a)) -> a else -> b;
     };
 
     /// @brief Returns the greater value, propagating NaN and preferring positive zero over negative zero.
@@ -85,10 +82,7 @@ export let Float64 = module (
         if (b > a) {
             return b;
         }
-        if (is_negative(a)) {
-            return b;
-        }
-        return a;
+        return if (is_negative(a)) -> b else -> a;
     };
 
     /// @brief max(v, low), then min with high, so a NaN `v` gives NaN. Traps when either bound is NaN or `low`
@@ -143,10 +137,7 @@ export let Float64 = module (
             if (a_nan && b_nan) {
                 return Ordering.Equal;
             }
-            if (a_nan) {
-                return Ordering.Greater;
-            }
-            return Ordering.Less;
+            return if (a_nan) -> Ordering.Greater else -> Ordering.Less;
         }
         if (a < b) {
             return Ordering.Less;
@@ -158,10 +149,7 @@ export let Float64 = module (
         if (a_negative == is_negative(b)) {
             return Ordering.Equal;
         }
-        if (a_negative) {
-            return Ordering.Less;
-        }
-        return Ordering.Greater;
+        return if (a_negative) -> Ordering.Less else -> Ordering.Greater;
     };
 
     /// @brief Same bit pattern, except that every NaN equals every NaN; 0.0 and -0.0 differ (section 5.2).
@@ -200,4 +188,20 @@ export let Float64 = module (
     /// @brief Applies the requested rounding mode to the format's raw bit pattern.
     let round_with = func(v: float64, mode: int) -> float64 =>
         float64.from_bits(float_text.round_bits(v.to_bits() as uint64, 52, 11, mode) as uint64);
+
+    /// @brief The additive identity, 0.0 (Std.Core.Arithmetic.Additive).
+    #[Pure, ThreadSafe, Since("0.3.0")]
+    export let zero = func() -> float64 => 0.0;
+
+    /// @brief The sum `left + right`, rounded as the type's arithmetic specifies.
+    #[Pure, ThreadSafe, Since("0.3.0")]
+    export let add = func(left: float64, right: float64) -> float64 => left + right;
+
+    /// @brief The multiplicative identity, 1.0 (Std.Core.Arithmetic.Multiplicative).
+    #[Pure, ThreadSafe, Since("0.3.0")]
+    export let one = func() -> float64 => 1.0;
+
+    /// @brief The product `left * right`, rounded as the type's arithmetic specifies.
+    #[Pure, ThreadSafe, Since("0.3.0")]
+    export let multiply = func(left: float64, right: float64) -> float64 => left * right;
 );

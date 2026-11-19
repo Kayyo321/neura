@@ -1,0 +1,15 @@
+// Edge case 74: a module receiver.
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Error;
+let Owner = class (
+    export let name: string = "";
+);
+let Pet = class (
+    export let owner: Owner = nil;
+    export let age: int = 0;
+);
+let Tools = module (
+    export let answer = 42;
+);
+let read = func() => Tools?.answer;

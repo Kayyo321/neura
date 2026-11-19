@@ -1,0 +1,401 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Ordering;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+let.promote _ = import:Std.Crypto.Pki.AlgorithmIdentifier;
+let.promote _ = import:Std.Crypto.Pki.BitString;
+let.promote _ = import:Std.Crypto.Pki.Extensions;
+let.promote _ = import:Std.Crypto.Pki.GeneralName;
+let.promote _ = import:Std.Crypto.Pki.Name;
+let.promote _ = import:Std.Crypto.Pki.PublicKeyInfo;
+let der = import:Std.Crypto.Pki.Der;
+let extensions = import:Std.Crypto.Pki.Extensions;
+let hex = import:Std.Encoding.Hex;
+let identifiers = import:Std.Crypto.Pki.AlgorithmIdentifier;
+let instant = import:Std.Time.Instant;
+let names = import:Std.Crypto.Pki.Name;
+let oids = import:Std.Crypto.Pki.Oids;
+let pem = import:Std.Crypto.Pki.Pem;
+let public_keys = import:Std.Crypto.Pki.PublicKeyInfo;
+let sha2 = import:Std.Crypto.Hash.Sha2;
+
+/// @brief X.509 v1, v2 and v3 certificates (RFC 5280, section 4) as typed values (Stdlib.md section 21.10).
+///
+/// `parse` reads the whole certificate strictly: DER throughout, a version of v1 to v3 encoded only when not
+/// v1, unique identifiers only from v2 and extensions only in v3, the inner and outer signature algorithms equal
+/// (section 4.1.1.2), each extension at most once (section 4.2), and every extension this module knows parsed
+/// into its typed field. Unknown extensions stay in `extensions` with their criticality; path validation refuses
+/// an unknown critical one. Profile rules about criticality and names are checked by path validation, not here.
+/// @see [Std.Crypto.Pki.Certificate](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Certificate)
+#Since("0.3.0")
+export let Certificate = module (
+    /// @brief The parts of a certificate while it is read. Internal to the parser.
+    #[Internal, Since("0.3.0")]
+    export let CertificateParts = class (
+        export let der_bytes: uint8[list] = new;
+        export let tbs_bytes: uint8[list] = new;
+        export let version: int = 1;
+        export let serial: uint8[list] = new;
+        export let tbs_signature_algorithm: Optional<AlgorithmIdentifier> = Optional<AlgorithmIdentifier>.None;
+        export let issuer: Optional<Name> = Optional<Name>.None;
+        export let not_before: instant.Instant = instant.Epoch;
+        export let not_after: instant.Instant = instant.Epoch;
+        export let subject: Optional<Name> = Optional<Name>.None;
+        export let public_key: Optional<SubjectPublicKeyInfo> = Optional<SubjectPublicKeyInfo>.None;
+        export let issuer_unique_id: Optional<BitString> = Optional<BitString>.None;
+        export let subject_unique_id: Optional<BitString> = Optional<BitString>.None;
+        export let extensions: Extension[list] = new;
+        export let signature_algorithm: Optional<AlgorithmIdentifier> = Optional<AlgorithmIdentifier>.None;
+        export let signature: uint8[list] = new;
+        export let basic_constraints: Optional<BasicConstraints> = Optional<BasicConstraints>.None;
+        export let key_usage: Optional<KeyUsage> = Optional<KeyUsage>.None;
+        export let extended_key_usage: Optional<ExtendedKeyUsage> = Optional<ExtendedKeyUsage>.None;
+        export let subject_alt_names: Optional<GeneralName[list]> = Optional<GeneralName[list]>.None;
+        export let issuer_alt_names: Optional<GeneralName[list]> = Optional<GeneralName[list]>.None;
+        export let name_constraints: Optional<NameConstraints> = Optional<NameConstraints>.None;
+        export let authority_key_identifier: Optional<AuthorityKeyIdentifier> = Optional<AuthorityKeyIdentifier>.None;
+        export let subject_key_identifier: Optional<uint8[list]> = Optional<uint8[list]>.None;
+        export let policies: Optional<PolicyInformation[list]> = Optional<PolicyInformation[list]>.None;
+        export let policy_mappings: Optional<PolicyMapping[list]> = Optional<PolicyMapping[list]>.None;
+        export let policy_constraints: Optional<PolicyConstraints> = Optional<PolicyConstraints>.None;
+        export let inhibit_any_policy: Optional<int> = Optional<int>.None;
+        export let crl_distribution_points: Optional<DistributionPoint[list]> = Optional<DistributionPoint[list]>.None;
+        export let authority_info_access: Optional<AccessDescription[list]> = Optional<AccessDescription[list]>.None;
+        export let sct_list: Optional<uint8[list]> = Optional<uint8[list]>.None;
+
+        export let.override to_string = func -> string => "CertificateParts";
+    );
+
+    /// @brief A parsed certificate. Equal certificates have equal DER.
+    #[Final, Since("0.3.0")]
+    export let Certificate = class (
+        /// @brief The DER of the whole certificate.
+        export last der_bytes: uint8[list];
+        /// @brief The DER of the TBSCertificate, which the signature covers.
+        export last tbs_bytes: uint8[list];
+        /// @brief 1, 2 or 3.
+        export last version: int;
+        /// @brief The serial number as two's-complement content bytes.
+        export last serial: uint8[list];
+        export last issuer: Name;
+        export last not_before: instant.Instant;
+        export last not_after: instant.Instant;
+        export last subject: Name;
+        export last public_key: SubjectPublicKeyInfo;
+        export last issuer_unique_id: Optional<BitString>;
+        export last subject_unique_id: Optional<BitString>;
+        /// @brief Every extension in order, known and unknown.
+        export last extensions: Extension[list];
+        /// @brief The signature algorithm (equal to the one inside the TBSCertificate).
+        export last signature_algorithm: AlgorithmIdentifier;
+        /// @brief The signature bytes.
+        export last signature: uint8[list];
+        export last basic_constraints: Optional<BasicConstraints>;
+        export last key_usage: Optional<KeyUsage>;
+        export last extended_key_usage: Optional<ExtendedKeyUsage>;
+        export last subject_alt_names: Optional<GeneralName[list]>;
+        export last issuer_alt_names: Optional<GeneralName[list]>;
+        export last name_constraints: Optional<NameConstraints>;
+        export last authority_key_identifier: Optional<AuthorityKeyIdentifier>;
+        export last subject_key_identifier: Optional<uint8[list]>;
+        export last policies: Optional<PolicyInformation[list]>;
+        export last policy_mappings: Optional<PolicyMapping[list]>;
+        export last policy_constraints: Optional<PolicyConstraints>;
+        export last inhibit_any_policy: Optional<int>;
+        export last crl_distribution_points: Optional<DistributionPoint[list]>;
+        export last authority_info_access: Optional<AccessDescription[list]>;
+        /// @brief The TLS-encoded SignedCertificateTimestampList of RFC 6962 (read it with
+        /// Std.Crypto.Pki.Transparency).
+        export last sct_list: Optional<uint8[list]>;
+
+        /// @brief Takes the parts a successful `parse` collected.
+        export let init = func(p: CertificateParts) {
+            der_bytes = p.der_bytes;
+            tbs_bytes = p.tbs_bytes;
+            version = p.version;
+            serial = p.serial;
+            issuer = must(p.issuer);
+            not_before = p.not_before;
+            not_after = p.not_after;
+            subject = must(p.subject);
+            public_key = must(p.public_key);
+            issuer_unique_id = p.issuer_unique_id;
+            subject_unique_id = p.subject_unique_id;
+            extensions = p.extensions;
+            signature_algorithm = must(p.signature_algorithm);
+            signature = p.signature;
+            basic_constraints = p.basic_constraints;
+            key_usage = p.key_usage;
+            extended_key_usage = p.extended_key_usage;
+            subject_alt_names = p.subject_alt_names;
+            issuer_alt_names = p.issuer_alt_names;
+            name_constraints = p.name_constraints;
+            authority_key_identifier = p.authority_key_identifier;
+            subject_key_identifier = p.subject_key_identifier;
+            policies = p.policies;
+            policy_mappings = p.policy_mappings;
+            policy_constraints = p.policy_constraints;
+            inhibit_any_policy = p.inhibit_any_policy;
+            crl_distribution_points = p.crl_distribution_points;
+            authority_info_access = p.authority_info_access;
+            sct_list = p.sct_list;
+        };
+
+        /// @brief The extension with the dotted OID.
+        export let extension = func(dotted: string) -> Optional<Extension> {
+            for (let e in extensions) {
+                if (e.oid.dotted == dotted) {
+                    return Optional<Extension>.Some(e);
+                }
+            }
+            return Optional<Extension>.None;
+        };
+
+        /// @brief Whether issuer and subject are the same name (RFC 5280's self-issued).
+        export let is_self_issued = func -> bool => issuer.equals(subject);
+
+        /// @brief Whether basicConstraints says cA.
+        export let is_ca = func -> bool {
+            match (basic_constraints) {
+                Optional.Some(b) => {
+                    return b.ca;
+                },
+                Optional.None => {
+                    return false;
+                },
+            }
+            return false;
+        };
+
+        /// @brief Whether the instant lies in [notBefore, notAfter], both inclusive (RFC 5280, 4.1.2.5).
+        export let is_valid_at = func(at: instant.Instant) -> bool =>
+            at.compare_to(not_before) != Ordering.Less && at.compare_to(not_after) != Ordering.Greater;
+
+        /// @brief The SHA-256 of the DER.
+        export let fingerprint_sha256 = func -> uint8[list] => sha2.sha256(der_bytes);
+
+        /// @brief The serial number as lowercase hexadecimal of its content bytes.
+        export let serial_hex = func -> string => hex.encode(serial);
+
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: Certificate) {
+                return false;
+            }
+            if (that.der_bytes.length != der_bytes.length) {
+                return false;
+            }
+            for (let i = 0; i < der_bytes.length; i++) {
+                if (der_bytes[i] != that.der_bytes[i]) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        export let.override hash_code = func -> uint32 => der.hash_range(der_bytes, 0, der_bytes.length);
+
+        /// @brief "Certificate(<subject>, serial <hex>)".
+        export let.override to_string = func -> string => "Certificate(" .. subject.to_string() .. ", serial " .. serial_hex() .. ")";
+    );
+
+    let must = func<T>(value: Optional<T>) -> T {
+        match (value) {
+            Optional.Some(v) => {
+                return v;
+            },
+            Optional.None => {
+                trap_with_message("invalid state: certificate part missing");
+            },
+        }
+        trap_with_message("invalid state: certificate part missing");
+    };
+
+    let fail = func<T>(offset: int, message: string) -> Result<T> =>
+        Result<T>.Err(Error.Parse { kind: ParseErrorKind.Syntax, offset: offset, message: message });
+
+    /// @brief Parses a DER certificate.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse = func(bytes: uint8[list]) -> Result<Certificate> => parse_certificate(bytes, false);
+
+    /// @brief Parses a historical AMD Milan CA certificate using its original signed bytes.
+    #[Hidden, NoDiscard, Since("0.3.0")]
+    export let parse_amd_milan_ca = func(bytes: uint8[list]) -> Result<Certificate> {
+        last cert = parse_certificate(bytes, true)?;
+        last names = cert.subject.common_names();
+        if (not cert.is_ca() || names.length != 1 || (names[0] != "SEV-Milan" && names[0] != "ARK-Milan")) {
+            return fail<Certificate>(0, "expected an AMD Milan ASK or ARK certificate");
+        }
+        return Result<Certificate>.Ok(cert);
+    };
+
+    let parse_certificate = func(bytes: uint8[list], amd_milan: bool) -> Result<Certificate> {
+        last top = der.parse(bytes)?;
+        if (not top.is_universal(der.TagSequence)) {
+            return fail<Certificate>(0, "Certificate must be a SEQUENCE");
+        }
+        let p: CertificateParts = new;
+        p.der_bytes = top.encoded();
+        let r = top.reader();
+        last tbs = r.next_universal(der.TagSequence, "tbsCertificate")?;
+        last outer_algorithm = identifiers.parse(r.next_universal(der.TagSequence, "signatureAlgorithm")?)?;
+        last signature = (r.next_universal(der.TagBitString, "signatureValue")?).bit_string()?;
+        r.finish()?;
+        if (signature.unused_bits != 0) {
+            return fail<Certificate>(top.offset, "signature must be whole bytes");
+        }
+        p.signature = signature.bytes;
+        p.signature_algorithm = Optional<AlgorithmIdentifier>.Some(outer_algorithm);
+        p.tbs_bytes = tbs.encoded();
+        read_tbs(tbs, p, amd_milan)?;
+        match (p.tbs_signature_algorithm) {
+            Optional.Some(inner) => {
+                if (not inner.equals(outer_algorithm)) {
+                    return fail<Certificate>(tbs.offset, "signature algorithms inside and outside the TBSCertificate differ");
+                }
+            },
+            Optional.None => {},
+        }
+        return Result<Certificate>.Ok(new Certificate(p));
+    };
+
+    /// @brief Every CERTIFICATE block of PEM text, parsed.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_pem = func(text: string) -> Result<Certificate[list]> {
+        let out: Certificate[list] = new;
+        for (let block in pem.decode_all(text)?) {
+            if (block.label == "CERTIFICATE") {
+                out.append(parse(block.der)?);
+            }
+        }
+        return Result<Certificate[list]>.Ok(out);
+    };
+
+    let read_tbs = func(tbs: der.Element, p: CertificateParts, amd_milan: bool) -> Result<Unit> {
+        let r = tbs.reader();
+        match (r.optional_context(0)?) {
+            Optional.Some(v) => {
+                last n = (v.explicit_inner()?).small_integer(2)?;
+                if (n == 0) {
+                    return fail<Unit>(v.offset, "version v1 must be omitted in DER");
+                }
+                p.version = (n as int) + 1;
+            },
+            Optional.None => {},
+        }
+        last serial = r.next_universal(der.TagInteger, "serialNumber")?;
+        p.serial = serial.integer()?;
+        p.tbs_signature_algorithm = Optional<AlgorithmIdentifier>.Some(identifiers.parse(r.next_universal(der.TagSequence,
+            "signature")?)?);
+        p.issuer = Optional<Name>.Some(names.parse(r.next_universal(der.TagSequence, "issuer")?)?);
+        last validity = r.next_universal(der.TagSequence, "validity")?;
+        let vr = validity.reader();
+        p.not_before = (vr.next()?).time()?;
+        p.not_after = (vr.next()?).time()?;
+        vr.finish()?;
+        p.subject = Optional<Name>.Some(names.parse(r.next_universal(der.TagSequence, "subject")?)?);
+        p.public_key = Optional<SubjectPublicKeyInfo>.Some(public_keys.parse(r.next_universal(der.TagSequence,
+            "subjectPublicKeyInfo")?)?);
+        match (r.optional_context(1)?) {
+            Optional.Some(u) => {
+                if (p.version < 2) {
+                    return fail<Unit>(u.offset, "issuerUniqueID needs v2 or v3");
+                }
+                p.issuer_unique_id = Optional<BitString>.Some(u.bit_string_content()?);
+            },
+            Optional.None => {},
+        }
+        match (r.optional_context(2)?) {
+            Optional.Some(u) => {
+                if (p.version < 2) {
+                    return fail<Unit>(u.offset, "subjectUniqueID needs v2 or v3");
+                }
+                p.subject_unique_id = Optional<BitString>.Some(u.bit_string_content()?);
+            },
+            Optional.None => {},
+        }
+        match (r.optional_context(3)?) {
+            Optional.Some(x) => {
+                if (p.version != 3) {
+                    return fail<Unit>(x.offset, "extensions need v3");
+                }
+                last list = x.explicit_inner()?;
+                if (not list.is_universal(der.TagSequence)) {
+                    return fail<Unit>(list.offset, "Extensions must be a SEQUENCE");
+                }
+                for (let item in list.children()?) {
+                    last ext = extensions.parse_extension(item)?;
+                    for (let seen in p.extensions) {
+                        if (seen.oid.equals(ext.oid)) {
+                            return fail<Unit>(item.offset, "extension " .. ext.oid.dotted .. " appears twice");
+                        }
+                    }
+                    p.extensions.append(ext);
+                    read_extension(ext, p, item.offset, amd_milan)?;
+                }
+                if (p.extensions.length == 0) {
+                    return fail<Unit>(list.offset, "Extensions must not be empty");
+                }
+            },
+            Optional.None => {},
+        }
+        r.finish()?;
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    /// @brief Parses a known extension into its field; the error offset is the extension's.
+    let read_extension = func(ext: Extension, p: CertificateParts, at: int, amd_milan: bool) -> Result<Unit> {
+        match (typed(ext, p, amd_milan)) {
+            Result.Ok(u) => {
+                return Result<Unit>.Ok(u);
+            },
+            Result.Err(e) => {
+                return fail<Unit>(at, "malformed " .. oids.name_of(ext.oid.dotted) .. " extension");
+            },
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    let typed = func(ext: Extension, p: CertificateParts, amd_milan: bool) -> Result<Unit> {
+        last id = ext.oid.dotted;
+        last v = ext.value;
+        if (id == oids.BasicConstraints) {
+            p.basic_constraints = Optional<BasicConstraints>.Some(extensions.parse_basic_constraints(v)?);
+        } else if (id == oids.KeyUsage) {
+            // The historical Milan ASK encodes keyCertSign with one extra trailing zero bit.
+            if (amd_milan && ext.critical && v.length == 4 && v[0] == 3 && v[1] == 2 && v[2] == 1 && v[3] == 4) {
+                last bits = (der.parse(v)?).bit_string()?;
+                p.key_usage = Optional<KeyUsage>.Some(new KeyUsage(bits, v));
+            } else {
+                p.key_usage = Optional<KeyUsage>.Some(extensions.parse_key_usage(v)?);
+            }
+        } else if (id == oids.ExtKeyUsage) {
+            p.extended_key_usage = Optional<ExtendedKeyUsage>.Some(extensions.parse_extended_key_usage(v)?);
+        } else if (id == oids.SubjectAltName) {
+            p.subject_alt_names = Optional<GeneralName[list]>.Some(extensions.parse_general_names(v)?);
+        } else if (id == oids.IssuerAltName) {
+            p.issuer_alt_names = Optional<GeneralName[list]>.Some(extensions.parse_general_names(v)?);
+        } else if (id == oids.NameConstraints) {
+            p.name_constraints = Optional<NameConstraints>.Some(extensions.parse_name_constraints(v)?);
+        } else if (id == oids.AuthorityKeyIdentifier) {
+            p.authority_key_identifier = Optional<AuthorityKeyIdentifier>.Some(extensions.parse_authority_key_identifier(v)?);
+        } else if (id == oids.SubjectKeyIdentifier) {
+            p.subject_key_identifier = Optional<uint8[list]>.Some(extensions.parse_subject_key_identifier(v)?);
+        } else if (id == oids.CertificatePolicies) {
+            p.policies = Optional<PolicyInformation[list]>.Some(extensions.parse_certificate_policies(v)?);
+        } else if (id == oids.PolicyMappings) {
+            p.policy_mappings = Optional<PolicyMapping[list]>.Some(extensions.parse_policy_mappings(v)?);
+        } else if (id == oids.PolicyConstraints) {
+            p.policy_constraints = Optional<PolicyConstraints>.Some(extensions.parse_policy_constraints(v)?);
+        } else if (id == oids.InhibitAnyPolicy) {
+            p.inhibit_any_policy = Optional<int>.Some(extensions.parse_inhibit_any_policy(v)?);
+        } else if (id == oids.CrlDistributionPoints) {
+            p.crl_distribution_points = Optional<DistributionPoint[list]>.Some(extensions.parse_crl_distribution_points(v)?);
+        } else if (id == oids.AuthorityInfoAccess) {
+            p.authority_info_access = Optional<AccessDescription[list]>.Some(extensions.parse_info_access(v)?);
+        } else if (id == oids.SctList) {
+            p.sct_list = Optional<uint8[list]>.Some(extensions.parse_sct_list(v)?);
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+);

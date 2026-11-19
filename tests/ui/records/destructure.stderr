@@ -1,0 +1,7 @@
+error[E0426]: destructuring requires a tuple with one element per binding
+ --> $DIR/destructure.nra:4:5
+  |
+4 |     let [a, b] = p;
+  |     ^^^^^^^^^^^^^^^
+
+For more information about this error, try `neura explain E0426`.

@@ -1,0 +1,1352 @@
+let ui = import:Std.Ui;
+let storage = import:Std.Ui.Internal.Storage;
+let build = import:Std.Ui.Internal.Build;
+let json = import:Std.Encoding.Json;
+let.promote optional = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote string_maps = import:Std.Collections.StringMap;
+
+/// @brief Validation, reconciliation and the commit encoding of a root (Html030.md, Commit).
+///
+/// A `Reconciler` holds the tree a root has mounted. `prepare` validates a new view, touching nothing, and
+/// computes the operations that turn the mounted tree into the new one; `accept` makes the new tree the mounted
+/// one once the host has applied them. Operations are the decoded operations of `hosts/web/README.md`, in the
+/// order a commit applies them: removals in the old document order; creations and moves in the new document
+/// order; text, attribute and custom-property changes in document order; handler changes; property writes.
+#Internal
+#Since("0.3.0")
+export let Reconcile = module (
+    /// @brief The kinds of a decoded operation; their codes in the commit encoding are 1 to 9 in this order.
+    export let OpKind = enum (Remove, Element, Text, Move, SetText, Attribute, Variable, Handler, Property);
+
+    /// @brief One decoded operation. Fields an operation does not use hold their defaults.
+    #[Final, NotThreadSafe]
+    export let Operation = class (
+        export last kind: OpKind;
+        export last id: uint32;
+        export let parent: uint32 = 0;
+        /// The sibling to insert before, or 0 to append.
+        export let before: uint32 = 0;
+        export let svg: bool = false;
+        export let name: string = "";
+        export let value: string = "";
+        /// False when an attribute, custom property or handler is removed.
+        export let present: bool = true;
+        export let number: float64 = 0.0;
+        export let unit: string = "";
+        export let handler: uint64 = 0;
+        export let prevent_default: bool = false;
+        export let stop_propagation: bool = false;
+        export let flag: bool = false;
+        export let boolean: bool = false;
+
+        export let init = func(kind: OpKind, id: uint32) => set;
+
+        /// @brief The operation as the JSON object of the operation corpus (tests/apps/ui-ops/batches.json).
+        export let.override to_string = func -> string {
+            last fields: [string, json.JsonValue][list] = new();
+            last integer = func(v: uint64) -> json.JsonValue => json.JsonValue.Number(v.to_string());
+            last anchor = func(v: uint32) -> json.JsonValue =>
+                (v == 0) ? json.JsonValue.Null : integer(v as uint64);
+            last op_name = match (kind) {
+                OpKind.Remove => "remove",
+                OpKind.Element => "element",
+                OpKind.Text => "text",
+                OpKind.Move => "move",
+                OpKind.SetText => "setText",
+                OpKind.Attribute => "attribute",
+                OpKind.Variable => "variable",
+                OpKind.Handler => "handler",
+                OpKind.Property => "property",
+            };
+            fields.append(["op", json.JsonValue.Text(op_name)]);
+            fields.append(["id", integer(id as uint64)]);
+            match (kind) {
+                OpKind.Element => {
+                    fields.append(["parent", integer(parent as uint64)]);
+                    fields.append(["before", anchor(before)]);
+                    fields.append(["name", json.JsonValue.Text(name)]);
+                    fields.append(["svg", json.JsonValue.Boolean(svg)]);
+                },
+                OpKind.Text => {
+                    fields.append(["parent", integer(parent as uint64)]);
+                    fields.append(["before", anchor(before)]);
+                    fields.append(["value", json.JsonValue.Text(value)]);
+                },
+                OpKind.Move => {
+                    fields.append(["parent", integer(parent as uint64)]);
+                    fields.append(["before", anchor(before)]);
+                },
+                OpKind.SetText => {
+                    fields.append(["value", json.JsonValue.Text(value)]);
+                },
+                OpKind.Attribute => {
+                    fields.append(["name", json.JsonValue.Text(name)]);
+                    fields.append(["value", present ? json.JsonValue.Text(value) : json.JsonValue.Null]);
+                },
+                OpKind.Variable => {
+                    fields.append(["name", json.JsonValue.Text(name)]);
+                    if (present) {
+                        last parts: [string, json.JsonValue][list] = new();
+                        parts.append(["number", json.number_of_float64(number)]);
+                        parts.append(["unit", json.JsonValue.Text(unit)]);
+                        fields.append(["value", json.JsonValue.Object(parts)]);
+                    } else {
+                        fields.append(["value", json.JsonValue.Null]);
+                    }
+                },
+                OpKind.Handler => {
+                    fields.append(["event", json.JsonValue.Text(name)]);
+                    fields.append(["handler", present ? integer(handler) : json.JsonValue.Null]);
+                    fields.append(["preventDefault", json.JsonValue.Boolean(prevent_default)]);
+                    fields.append(["stopPropagation", json.JsonValue.Boolean(stop_propagation)]);
+                },
+                OpKind.Property => {
+                    fields.append(["name", json.JsonValue.Text(name)]);
+                    fields.append(["value", boolean ? json.JsonValue.Boolean(flag) : json.JsonValue.Text(value)]);
+                },
+                OpKind.Remove => {},
+            }
+            return json.write(json.JsonValue.Object(fields));
+        };
+    );
+
+    // A template descriptor, parsed once per root.
+    #NotThreadSafe
+    let TNode = class (
+        // 0 text, 1 element, 2 slot
+        export let kind: int = 0;
+        export let value: string = "";
+        export let name: string = "";
+        export let svg: bool = false;
+        export let slot: uint32 = 0;
+        // Static attributes have slot -1; dynamic ones name their slot.
+        export let attributes: [string, string, int64][list] = new();
+        export let children: TNode[list] = new();
+
+        /// @brief Names the template node.
+        export let.override to_string = func -> string => "TNode(" .. name .. ")";
+    );
+
+    #NotThreadSafe
+    let TSlot = class (
+        export let kind: string = "";
+        export let name: string = "";
+        export let prevent_default: bool = false;
+        export let stop_propagation: bool = false;
+        export let list: bool = false;
+
+        /// @brief Names the template slot.
+        export let.override to_string = func -> string => "TSlot(" .. kind .. " " .. name .. ")";
+    );
+
+    #NotThreadSafe
+    let TFragment = class (
+        export let nodes: TNode[list] = new();
+        export let slots: TSlot[list] = new();
+
+        /// @brief Names the fragment and its node count.
+        export let.override to_string = func -> string => "TFragment(" .. nodes.length.to_string() .. " nodes)";
+    );
+
+    #NotThreadSafe
+    let Template = class (
+        export last id: int;
+        export let fragments: TFragment[list] = new();
+
+        export let init = func(id: int) => set;
+
+        /// @brief Names the template and its identifier.
+        export let.override to_string = func -> string => "Template(" .. id.to_string() .. ")";
+    );
+
+    let malformed = func(what: string) {
+        trap_with_message("invalid UI descriptor: expected " .. what);
+    };
+
+    let text_of = func(value: json.JsonValue) -> string {
+        match (value) {
+            json.JsonValue.Text(t) => {
+                return t;
+            },
+            _ => {},
+        }
+        malformed("text");
+        return "";
+    };
+
+    let number_of = func(value: json.JsonValue) -> int64 {
+        match (value) {
+            json.JsonValue.Number(t) => {
+                return optional.expect<int64>(json.number_to_int64(t), "invalid UI descriptor number");
+            },
+            _ => {},
+        }
+        malformed("a number");
+        return 0;
+    };
+
+    let flag_of = func(value: json.JsonValue) -> bool {
+        match (value) {
+            json.JsonValue.Boolean(b) => {
+                return b;
+            },
+            _ => {},
+        }
+        malformed("a Boolean");
+        return false;
+    };
+
+    let items_of = func(value: json.JsonValue) -> json.JsonValue[list] {
+        match (value) {
+            json.JsonValue.Array(items) => {
+                return items;
+            },
+            _ => {},
+        }
+        malformed("an array");
+        return new();
+    };
+
+    let members_of = func(value: json.JsonValue) -> [string, json.JsonValue][list] {
+        match (value) {
+            json.JsonValue.Object(members) => {
+                return members;
+            },
+            _ => {},
+        }
+        malformed("an object");
+        return new();
+    };
+
+    let member = func(members: [string, json.JsonValue][list], name: string) -> Optional<json.JsonValue> =>
+        json.member(members, name);
+
+    let required = func(members: [string, json.JsonValue][list], name: string) -> json.JsonValue =>
+        optional.expect<json.JsonValue>(json.member(members, name), "invalid UI descriptor: missing " .. name);
+
+    let parse_node = func(value: json.JsonValue) -> TNode {
+        last members = members_of(value);
+        last result = new TNode();
+        last kind = text_of(required(members, "kind"));
+        if (kind == "text") {
+            result.kind = 0;
+            result.value = text_of(required(members, "value"));
+        } else if (kind == "slot") {
+            result.kind = 2;
+            result.slot = number_of(required(members, "slot")) as uint32;
+        } else {
+            result.kind = 1;
+            result.name = text_of(required(members, "name"));
+            result.svg = flag_of(required(members, "svg"));
+            for (let attribute in items_of(required(members, "attributes"))) {
+                last fields = members_of(attribute);
+                last slot = member(fields, "slot");
+                if (optional.is_some<json.JsonValue>(slot)) {
+                    result.attributes.append(["", "", number_of(optional.expect<json.JsonValue>(slot, "slot"))]);
+                } else {
+                    result.attributes.append([text_of(required(fields, "name")), text_of(required(fields, "value")),
+                        -1]);
+                }
+            }
+            for (let child in items_of(required(members, "children"))) {
+                result.children.append(parse_node(child));
+            }
+        }
+        return result;
+    };
+
+    let parse_template = func(text: string, id: int) -> Template {
+        let root = json.JsonValue.Null;
+        match (json.parse(text)) {
+            Result.Ok(value) => {
+                root = value;
+            },
+            Result.Err(_) => {
+                malformed("JSON");
+            },
+        }
+        last members = members_of(root);
+        if (number_of(required(members, "encoding")) != 1) {
+            trap_with_message("unknown UI descriptor encoding");
+        }
+        last result = new Template(id);
+        for (let entry in items_of(required(members, "fragments"))) {
+            last fields = members_of(entry);
+            last fragment = new TFragment();
+            for (let node in items_of(required(fields, "nodes"))) {
+                fragment.nodes.append(parse_node(node));
+            }
+            for (let slot in items_of(required(fields, "slots"))) {
+                last slot_fields = members_of(slot);
+                last parsed = new TSlot();
+                last kind = member(slot_fields, "kind");
+                if (optional.is_some<json.JsonValue>(kind)) {
+                    parsed.kind = text_of(optional.expect<json.JsonValue>(kind, "kind"));
+                }
+                last name = member(slot_fields, "name");
+                if (optional.is_some<json.JsonValue>(name)) {
+                    parsed.name = text_of(optional.expect<json.JsonValue>(name, "name"));
+                }
+                last list = member(slot_fields, "list");
+                if (optional.is_some<json.JsonValue>(list)) {
+                    parsed.list = flag_of(optional.expect<json.JsonValue>(list, "list"));
+                }
+                last modifiers = member(slot_fields, "modifiers");
+                if (optional.is_some<json.JsonValue>(modifiers)) {
+                    for (let modifier in items_of(optional.expect<json.JsonValue>(modifiers, "modifiers"))) {
+                        last word = text_of(modifier);
+                        if (word == "prevent_default") {
+                            parsed.prevent_default = true;
+                        } else if (word == "stop_propagation") {
+                            parsed.stop_propagation = true;
+                        }
+                    }
+                }
+                fragment.slots.append(parsed);
+            }
+            result.fragments.append(fragment);
+        }
+        return result;
+    };
+
+    #NotThreadSafe
+    let Listener = class (
+        export last event: string;
+        export last prevent_default: bool;
+        export last stop_propagation: bool;
+        export last callable: storage.Slot;
+        export let id: uint64 = 0;
+        // The component whose view holds the listener, or nil outside a component.
+        export let component: ui.Component = nil;
+
+        export let init = func(event: string, prevent_default: bool, stop_propagation: bool, callable: storage.Slot)
+            => set;
+
+        /// @brief Names the listener and its event.
+        export let.override to_string = func -> string => "Listener(" .. event .. ")";
+    );
+
+    #NotThreadSafe
+    let Property = class (
+        export last name: string;
+        export last boolean: bool;
+        export last flag: bool;
+        export last text: string;
+
+        export let init = func(name: string, boolean: bool, flag: bool, text: string) => set;
+
+        /// @brief Names the property.
+        export let.override to_string = func -> string => "Property(" .. name .. ")";
+    );
+
+    // One host node of an expanded view.
+    #NotThreadSafe
+    let VNode = class (
+        export last element: bool;
+        export last name: string;
+        export last svg: bool;
+        // Where the node comes from: template, fragment and node path.
+        export last origin: string;
+        // Unique among siblings: the template path, with branch and item keys.
+        export last key: string;
+        export let text: string = "";
+        export let attributes: [string, string][list] = new();
+        export let variables: [string, ui.CssValue][list] = new();
+        export let properties: Property[list] = new();
+        export let listeners: Listener[list] = new();
+        export let children: VNode[list] = new();
+        export let id: uint32 = 0;
+        // 0 created, 1 kept in place, 2 moved; the matched old node, if any.
+        export let state: int = 0;
+        export let old: VNode = nil;
+        export let removed: bool = false;
+        // False for a node of a component that was not rendered in this commit; its properties are not written.
+        export let fresh: bool = true;
+        // The pass that reused this mounted node, with its whole subtree, for a component that did not render.
+        export let reused: uint64 = 0;
+
+        export let init = func(element: bool, name: string, svg: bool, origin: string, key: string) => set;
+
+        /// @brief Names the node.
+        export let.override to_string = func -> string => "VNode(" .. name .. ")";
+    );
+
+    // A component's part of the mounted tree: its top-level nodes, under the key path they were expanded at, the
+    // views claimed and the nodes counted while expanding them, and the memos of the components inside it. It is
+    // valid while `pass` is the pass of the mounted tree.
+    #NotThreadSafe
+    let Memo = class (
+        export last owner: class;
+        export last key: string;
+        export last nodes: VNode[list];
+        export last views: ui.View[list];
+        export last count: int;
+        export last nested: Memo[list];
+        export let pass: uint64 = 0;
+        // The pass in which the component or a component below it rendered.
+        export let touched: uint64 = 0;
+
+        export let init = func(owner: class, key: string, nodes: VNode[list], views: ui.View[list], count: int,
+            nested: Memo[list], pass: uint64) {
+            instance.owner = owner;
+            instance.key = key;
+            instance.nodes = nodes;
+            instance.views = views;
+            instance.count = count;
+            instance.nested = nested;
+            instance.pass = pass;
+        };
+
+        /// @brief Names the memo and its key.
+        export let.override to_string = func -> string => "Memo(" .. key .. ")";
+    );
+
+    /// @brief The result of `prepare`: a refusal, or the operations of a valid commit.
+    #[Final, NotThreadSafe]
+    export let Plan = class (
+        /// @brief Why the view was refused, or nil.
+        export let diagnostic: ui.Diagnostic = nil;
+        export let operations: Operation[list] = new();
+        #Internal
+        export let tree: VNode[list] = new();
+        #Internal
+        export let pass: uint64 = 0;
+        // Set when a reused node could not keep its place, so the plan must be computed without reuse.
+        #Internal
+        export let reuse_failed: bool = false;
+
+        /// @brief The operations in the commit encoding, version 1 (docs/runtime/Providers.md).
+        export let encode = func -> uint8[list] => encode_commit(operations);
+
+        export let.override to_string = func -> string =>
+            (diagnostic == nil) ? "Plan(" .. operations.length.to_string() .. " operations)"
+            : "Plan(invalid: " .. diagnostic.message .. ")";
+    );
+
+    // Thrown out of an expansion when the view is refused.
+    #NotThreadSafe
+    let Refusal = class (
+        export last diagnostic: ui.Diagnostic;
+
+        export let init = func(diagnostic: ui.Diagnostic) => set;
+
+        /// @brief Names the refusal with its diagnostic message.
+        export let.override to_string = func -> string => "Refusal(" .. diagnostic.message .. ")";
+    );
+
+    let MaxItems: int = 10000;
+    let MaxNodes: int = 100000;
+    let MaxValueBytes: int = 1048576;
+
+    // Expansion state for one prepare.
+    #NotThreadSafe
+    let Expansion = class (
+        export let nodes: int = 0;
+        export let refusal: ui.Diagnostic = nil;
+        // The component being expanded, or nil for a view committed without components.
+        export let component: ui.Component = nil;
+        // Whether that component rendered for this commit. A component that did not keeps its mounted view, which
+        // may then be expanded again (a retained view).
+        export let fresh: bool = true;
+        // Whether every view is new (prepare of a whole view); otherwise only the components of `rendered` rendered.
+        export let whole: bool = true;
+        export let rendered: ui.Rendered[list] = new();
+        // Whether a component that did not render, and has no component below it that rendered, reuses its
+        // mounted nodes instead of expanding its views again.
+        export let reuse: bool = false;
+        // Every view claimed and every memo made or reused, in order; a memo keeps its slices.
+        export let claimed: ui.View[list] = new();
+        export let memos: Memo[list] = new();
+        export let reuse_failed: bool = false;
+        // The pass of this expansion, which marks the nodes it reused.
+        export let claimed_pass: uint64 = 0;
+
+        /// @brief Names the expansion and its node count.
+        export let.override to_string = func -> string => "Expansion(" .. nodes.to_string() .. " nodes)";
+    );
+
+    // The descriptor of the view that `ui.slot` makes: one payload, the embedded component.
+    let SlotDescriptor: string = "neura:slot";
+
+    let slice_nodes = func(items: VNode[list], from: int) -> VNode[list] {
+        last out: VNode[list] = new();
+        for (let i = from; i < items.length; i++) {
+            out.append(items[i]);
+        }
+        return out;
+    };
+
+    let slice_views = func(items: ui.View[list], from: int) -> ui.View[list] {
+        last out: ui.View[list] = new();
+        for (let i = from; i < items.length; i++) {
+            out.append(items[i]);
+        }
+        return out;
+    };
+
+    let slice_memos = func(items: Memo[list], from: int) -> Memo[list] {
+        last out: Memo[list] = new();
+        for (let i = from; i < items.length; i++) {
+            out.append(items[i]);
+        }
+        return out;
+    };
+
+    #[Final, NotThreadSafe]
+    export let Reconciler = class (
+        let templates: StringMap<Template> = string_maps.create<Template>();
+        let mounted: VNode[list] = new();
+        let handlers: StringMap<storage.Slot> = string_maps.create<storage.Slot>();
+        // The component of each listener of the mounted tree that belongs to one.
+        let targets: StringMap<ui.Component> = string_maps.create<ui.Component>();
+        // Every template descriptor parsed, in the order first seen; a host registers them in this order.
+        let descriptors: string[list] = new();
+        let next_id: uint32 = 1;
+        let next_handler: uint64 = 1;
+        let passes: uint64 = 1;
+        let mounted_pass: uint64 = 0;
+
+        export let.override to_string = func -> string =>
+            "Reconciler(" .. mounted.length.to_string() .. " top-level nodes)";
+
+        let template = func(descriptor: string) -> Template {
+            last found = templates.get(descriptor);
+            if (optional.is_some<Template>(found)) {
+                return optional.expect<Template>(found, "template");
+            }
+            last parsed = parse_template(descriptor, templates.size());
+            templates.set(descriptor, parsed);
+            descriptors.append(descriptor);
+            return parsed;
+        };
+
+        let refuse = func(state: Expansion, kind: ui.DiagnosticKind, message: string, slot: uint32, index: int64,
+            key: string) {
+            if (state.refusal == nil) {
+                state.refusal = new ui.Diagnostic(kind, message, slot, index, key);
+            }
+        };
+
+        let count = func(state: Expansion) {
+            state.nodes += 1;
+            if (state.nodes == MaxNodes + 1) {
+                refuse(state, ui.DiagnosticKind.LimitExceeded, "U-5: a root holds at most 100000 nodes", 0, -1, "");
+            }
+        };
+
+        let value_bytes = func(state: Expansion, text: string, slot: uint32) {
+            if (text.byte_length > MaxValueBytes) {
+                refuse(state, ui.DiagnosticKind.LimitExceeded, "U-6: a text or attribute value holds at most 1 MiB",
+                    slot, -1, "");
+            }
+        };
+
+        // A view is refused when it appears twice in this tree, when a component rendered for this commit returns a
+        // view that this root has mounted, or when it is part of the tree another root has mounted. A component that
+        // did not render keeps its mounted view, which is expanded again. A view that another root only prepared (a
+        // refused or unaccepted plan), or that it mounted before a reset or a later commit, is free.
+        let claim = func(view: ui.View, pass: uint64, state: Expansion) -> bool {
+            last here = view.owner != nil && view.owner === instance;
+            if (view.owner != nil &&
+                ((here && (view.pass == pass || (view.pass == mounted_pass && state.fresh))) ||
+                    (not here && view.owner is Reconciler && (view.owner as Reconciler).holds(view.pass)))) {
+                refuse(state, ui.DiagnosticKind.ViewReused, "a view appears once in one tree, in one root", 0, -1, "");
+                return false;
+            }
+            view.owner = instance;
+            view.pass = pass;
+            state.claimed.append(view);
+            return true;
+        };
+
+        // The components of `state.rendered` carry this reconciler and the pass, stamped by `plan_from`.
+        let was_rendered = func(state: Expansion, component: ui.Component) -> bool =>
+            state.whole || (component.rendered_by === instance && component.rendered_pass == state.claimed_pass);
+
+        // A component boundary: the embedded component's current view takes the slot's place, expanded as fresh
+        // when the component rendered for this commit and as retained otherwise. Its listeners belong to it.
+        let expand_component = func(view: ui.View, key: string, pass: uint64, state: Expansion, out: VNode[list]) {
+            if (not claim(view, pass, state)) {
+                return;
+            }
+            last child = (view.last_slot as storage.Payload<ui.Component>).value;
+            last current = child.current_view();
+            if (current == nil) {
+                trap_with_message("a component in a slot has not rendered");
+            }
+            if (state.reuse && child.reconciled is Memo) {
+                last memo = child.reconciled as Memo;
+                if (memo.owner === instance && memo.pass == mounted_pass && memo.touched != pass && memo.key == key) {
+                    reuse_memo(memo, pass, state, out);
+                    return;
+                }
+            }
+            last outer = state.component;
+            last outer_fresh = state.fresh;
+            last first_node = out.length;
+            last first_view = state.claimed.length;
+            last first_memo = state.memos.length;
+            last counted = state.nodes;
+            state.component = child;
+            state.fresh = was_rendered(state, child);
+            expand_view(current, key, pass, state, out);
+            state.component = outer;
+            state.fresh = outer_fresh;
+            if (state.reuse && state.refusal == nil) {
+                last memo = new Memo(instance, key, slice_nodes(out, first_node), slice_views(state.claimed, first_view),
+                    state.nodes - counted, slice_memos(state.memos, first_memo), pass);
+                child.reconciled = memo;
+                state.memos.append(memo);
+            }
+        };
+
+        // A component that did not render, and has no component below it that rendered, keeps the mounted nodes it
+        // last expanded to: they join the new tree as they are, with their views claimed for this pass.
+        let reuse_memo = func(memo: Memo, pass: uint64, state: Expansion, out: VNode[list]) {
+            for (let view in memo.views) {
+                view.pass = pass;
+                state.claimed.append(view);
+            }
+            for (let node in memo.nodes) {
+                node.reused = pass;
+                out.append(node);
+            }
+            last before = state.nodes;
+            state.nodes += memo.count;
+            if (before <= MaxNodes && state.nodes > MaxNodes) {
+                refuse(state, ui.DiagnosticKind.LimitExceeded, "U-5: a root holds at most 100000 nodes", 0, -1, "");
+            }
+            memo.pass = pass;
+            for (let inner in memo.nested) {
+                inner.pass = pass;
+            }
+            state.memos.append(memo);
+            for (let inner in memo.nested) {
+                state.memos.append(inner);
+            }
+        };
+
+        // Marks the memo of each component that rendered, or has a component below it that rendered, as touched in
+        // `pass`; returns whether `component` is touched.
+        let mark_touched = func(component: ui.Component, pass: uint64, state: Expansion) -> bool {
+            let touched = was_rendered(state, component);
+            for (let child in component.children) {
+                if (mark_touched(child, pass, state)) {
+                    touched = true;
+                }
+            }
+            if (touched && component.reconciled is Memo) {
+                (component.reconciled as Memo).touched = pass;
+            }
+            return touched;
+        };
+
+        let expand_view = func(view: ui.View, key: string, pass: uint64, state: Expansion, out: VNode[list]) {
+            if (view.descriptor == SlotDescriptor) {
+                expand_component(view, key, pass, state, out);
+                return;
+            }
+            if (not claim(view, pass, state)) {
+                return;
+            }
+            last t = template(view.descriptor);
+            last fragment = t.fragments[view.fragment as int];
+            let values: storage.Slot[list] = new();
+            let i = 0;
+            while (i < fragment.slots.length) {
+                values.append(nil);
+                i += 1;
+            }
+            let slot = view.last_slot;
+            while (slot != nil) {
+                values[slot.index as int] = slot;
+                slot = slot.next;
+            }
+            last origin = t.id.to_string() .. ":" .. view.fragment.to_string() .. ":";
+            expand_nodes(fragment, values, fragment.nodes, origin, key, pass, state, out);
+        };
+
+        let expand_nodes = func(fragment: TFragment, values: storage.Slot[list], nodes: TNode[list], origin: string,
+            key: string, pass: uint64, state: Expansion, out: VNode[list]) {
+            let i = 0;
+            while (i < nodes.length && state.refusal == nil) {
+                last node = nodes[i];
+                last path = key .. "." .. i.to_string();
+                last where = origin + i.to_string();
+                if (node.kind == 0) {
+                    last text = new VNode(false, "", false, where, path);
+                    text.text = node.value;
+                    text.fresh = state.fresh;
+                    count(state);
+                    out.append(text);
+                } else if (node.kind == 1) {
+                    last element = new VNode(true, node.name, node.svg, where, path);
+                    element.fresh = state.fresh;
+                    count(state);
+                    for (let attribute in node.attributes) {
+                        if (attribute[2] < 0) {
+                            element.attributes.append([attribute[0], attribute[1]]);
+                        } else {
+                            bind(fragment.slots[attribute[2] as int], attribute[2] as uint32,
+                                values[attribute[2] as int], element, state);
+                        }
+                    }
+                    expand_nodes(fragment, values, node.children, where .. ".", path, pass, state, element.children);
+                    out.append(element);
+                } else {
+                    expand_slot(fragment.slots[node.slot as int], node.slot, values[node.slot as int], where, path,
+                        pass, state, out);
+                }
+                i += 1;
+            }
+        };
+
+        let bind = func(slot: TSlot, index: uint32, value: storage.Slot, element: VNode, state: Expansion) {
+            if (value == nil) {
+                return;
+            }
+            if (slot.kind == "attribute") {
+                if (value is storage.Payload<string>) {
+                    last text = (value as storage.Payload<string>).value;
+                    value_bytes(state, text, index);
+                    element.attributes.append([slot.name, text]);
+                } else if (value is storage.Payload<Optional<string>>) {
+                    last chosen = (value as storage.Payload<Optional<string>>).value;
+                    if (optional.is_some<string>(chosen)) {
+                        last text = optional.expect<string>(chosen, "attribute");
+                        value_bytes(state, text, index);
+                        element.attributes.append([slot.name, text]);
+                    }
+                } else if (value is storage.Payload<ui.Url>) {
+                    last text = (value as storage.Payload<ui.Url>).value.text;
+                    value_bytes(state, text, index);
+                    element.attributes.append([slot.name, text]);
+                } else {
+                    trap_with_message("invalid UI attribute value");
+                }
+            } else if (slot.kind == "flag") {
+                if ((value as storage.Payload<bool>).value) {
+                    element.attributes.append([slot.name, ""]);
+                }
+            } else if (slot.kind == "property") {
+                if (value is storage.Payload<bool>) {
+                    element.properties.append(new Property(slot.name, true, (value as storage.Payload<bool>).value, ""));
+                } else {
+                    last text = (value as storage.Payload<string>).value;
+                    value_bytes(state, text, index);
+                    element.properties.append(new Property(slot.name, false, false, text));
+                }
+            } else if (slot.kind == "custom-property") {
+                element.variables.append([slot.name, (value as storage.Payload<ui.CssValue>).value]);
+            } else if (slot.kind == "handler") {
+                last listener = new Listener(slot.name, slot.prevent_default, slot.stop_propagation, value);
+                listener.component = state.component;
+                element.listeners.append(listener);
+            }
+        };
+
+        let expand_slot = func(slot: TSlot, index: uint32, value: storage.Slot, origin: string, key: string,
+            pass: uint64, state: Expansion, out: VNode[list]) {
+            if (value == nil) {
+                return;
+            }
+            if (slot.kind == "text") {
+                last text = new VNode(false, "", false, origin, key);
+                text.fresh = state.fresh;
+                text.text = (value as storage.Payload<string>).value;
+                value_bytes(state, text.text, index);
+                count(state);
+                out.append(text);
+            } else if (slot.kind == "child") {
+                expand_view((value as storage.Payload<ui.View>).value, key .. "v", pass, state, out);
+            } else if (not slot.list) {
+                last branch = (value as storage.Payload<ui.View>).value;
+                expand_view(branch, key .. "b" .. branch.fragment.to_string(), pass, state, out);
+            } else {
+                last items = (value as storage.Payload<build.Items>).value;
+                last seen = string_maps.create<bool>();
+                last ordered = build.items_in_order(items);
+                let position: int64 = 0;
+                while (position < ordered.length as int64 && state.refusal == nil) {
+                    last item = ordered[position as int];
+                    if (position == MaxItems as int64) {
+                        refuse(state, ui.DiagnosticKind.LimitExceeded, "U-4: an @for commits at most 10000 items",
+                            index, position, item.key);
+                        return;
+                    }
+                    if (seen.contains_key(item.key)) {
+                        refuse(state, ui.DiagnosticKind.DuplicateKey,
+                            "two items of one @for have the key '" .. item.key .. "'", index, position, item.key);
+                        return;
+                    }
+                    seen.set(item.key, true);
+                    expand_view(item.view, key .. "k" .. item.key.byte_length.to_string() .. ":" .. item.key, pass, state,
+                        out);
+                    position += 1;
+                }
+            }
+        };
+
+        /// @brief Validates `view` and computes the commit; changes nothing the root has mounted. Every view in it
+        /// is new: a view that is mounted is refused (`ViewReused`).
+        export let prepare = func(view: ui.View) -> Plan => plan_from(view, new Expansion());
+
+        /// @brief Validates the tree of `top` and computes the commit of one turn, in which the components of
+        /// `rendered` rendered. The tree is each component's current view, with every `ui.slot` replaced by its
+        /// component's tree. A component that did not render keeps its mounted view and writes no properties, so
+        /// a child that rendered alone changes only its own nodes. Changes nothing the root has mounted.
+        export let prepare_turn = func(top: ui.Component, rendered: ui.Rendered[list]) -> Plan {
+            last view = top.current_view();
+            if (view == nil) {
+                trap_with_message("the root component has not rendered");
+            }
+            // Reusing the nodes of components that did not render gives the operations of expanding them again,
+            // as long as each reused node keeps its place; otherwise the turn is planned again without reuse,
+            // from the same node identifiers.
+            last ids = next_id;
+            last plan = plan_from(view, turn_state(top, rendered, true));
+            return plan unless plan.reuse_failed;
+            next_id = ids;
+            return plan_from(view, turn_state(top, rendered, false));
+        };
+
+        let turn_state = func(top: ui.Component, rendered: ui.Rendered[list], reuse: bool) -> Expansion {
+            last state = new Expansion();
+            state.whole = false;
+            state.rendered = rendered;
+            state.component = top;
+            state.reuse = reuse;
+            return state;
+        };
+
+        let plan_from = func(view: ui.View, state: Expansion) -> Plan {
+            last plan = new Plan();
+            last pass = passes + 1;
+            passes = pass;
+            plan.pass = pass;
+            state.claimed_pass = pass;
+            if (not state.whole) {
+                for (let entry in state.rendered) {
+                    entry.component.rendered_by = instance;
+                    entry.component.rendered_pass = pass;
+                }
+                state.fresh = was_rendered(state, state.component);
+            }
+            if (state.reuse) {
+                mark_touched(state.component, pass, state);
+            }
+            expand_view(view, "", pass, state, plan.tree);
+            if (state.refusal != nil) {
+                plan.diagnostic = state.refusal;
+                plan.tree = new();
+                return plan;
+            }
+            last removals: Operation[list] = new();
+            last creations: Operation[list] = new();
+            last contents: Operation[list] = new();
+            last listeners: Operation[list] = new();
+            last properties: Operation[list] = new();
+            match_children(mounted, plan.tree, state);
+            if (state.reuse_failed) {
+                plan.reuse_failed = true;
+                return plan;
+            }
+            collect_removals(mounted, removals, pass);
+            place_children(0, plan.tree, creations, pass);
+            changes(plan.tree, contents, listeners, properties, pass);
+            for (let list in [removals, creations, contents, listeners, properties]) {
+                for (let operation in list) {
+                    plan.operations.append(operation);
+                }
+            }
+            return plan;
+        };
+
+        // Match each new child to the old child with its key and origin, recursively, and decide which matched
+        // children keep their place: the longest run of matched children whose old order is increasing.
+        let match_children = func(old: VNode[list], fresh: VNode[list], state: Expansion) {
+            // Siblings whose keys are those of the old siblings in the same order, the common case, are matched by
+            // position without a map.
+            let in_order = old.length == fresh.length;
+            let i = 0;
+            while (i < old.length) {
+                old[i].removed = true;
+                if (in_order && not (old[i].key == fresh[i].key)) {
+                    in_order = false;
+                }
+                i += 1;
+            }
+            last positions = string_maps.create<int>();
+            if (not in_order) {
+                i = 0;
+                while (i < old.length) {
+                    positions.set(old[i].key, i);
+                    i += 1;
+                }
+            }
+            last matched: int[list] = new();
+            let place = 0;
+            for (let node in fresh) {
+                let index = -1;
+                let at = place;
+                place += 1;
+                if (not in_order) {
+                    last position = positions.get(node.key);
+                    at = optional.is_some<int>(position) ? optional.expect<int>(position, "position") : -1;
+                }
+                if (at >= 0) {
+                    last candidate = old[at];
+                    if (candidate.origin == node.origin && candidate.element == node.element) {
+                        index = at;
+                    }
+                }
+                if (node.reused == state.claimed_pass && (index < 0 || not (old[index] === node))) {
+                    // A reused node matches only itself; anywhere else the turn is planned without reuse.
+                    state.reuse_failed = true;
+                    return;
+                }
+                matched.append(index);
+                if (index >= 0) {
+                    last previous = old[index];
+                    previous.removed = false;
+                    node.old = previous;
+                    node.id = previous.id;
+                    node.state = 2;
+                    if (node.reused != state.claimed_pass) {
+                        match_children(previous.children, node.children, state);
+                        if (state.reuse_failed) {
+                            return;
+                        }
+                    }
+                } else {
+                    node.id = next_id;
+                    next_id += 1;
+                    node.state = 0;
+                    allocate(node.children, state);
+                    if (state.reuse_failed) {
+                        return;
+                    }
+                }
+            }
+            // Longest increasing subsequence of the matched old positions.
+            last tails: int[list] = new();
+            last links: int[list] = new();
+            let j = 0;
+            while (j < matched.length) {
+                links.append(-1);
+                last at = matched[j];
+                if (at >= 0) {
+                    let low = 0;
+                    let high = tails.length;
+                    while (low < high) {
+                        last middle = (low + high) / 2;
+                        if (matched[tails[middle]] < at) {
+                            low = middle + 1;
+                        } else {
+                            high = middle;
+                        }
+                    }
+                    if (low > 0) {
+                        links[j] = tails[low - 1];
+                    }
+                    if (low == tails.length) {
+                        tails.append(j);
+                    } else {
+                        tails[low] = j;
+                    }
+                }
+                j += 1;
+            }
+            let k = (tails.length == 0) ? -1 : tails[tails.length - 1];
+            while (k >= 0) {
+                fresh[k].state = 1;
+                k = links[k];
+            }
+        };
+
+        let allocate = func(nodes: VNode[list], state: Expansion) {
+            for (let node in nodes) {
+                if (node.reused == state.claimed_pass) {
+                    state.reuse_failed = true;
+                    return;
+                }
+                node.id = next_id;
+                next_id += 1;
+                node.state = 0;
+                allocate(node.children, state);
+            }
+        };
+
+        // A node reused in `pass` keeps its whole subtree, so nothing below it is removed.
+        let collect_removals = func(old: VNode[list], out: Operation[list], pass: uint64) {
+            for (let node in old) {
+                if (node.removed) {
+                    out.append(new Operation(OpKind.Remove, node.id));
+                } else if (node.reused != pass) {
+                    collect_removals(node.children, out, pass);
+                }
+            }
+        };
+
+        let place_children = func(parent: uint32, nodes: VNode[list], out: Operation[list], pass: uint64) {
+            // The anchor of each child is the next sibling that stays in place, found in one pass from the end so
+            // that placing n children costs O(n).
+            last anchors: uint32[list] = new();
+            let k = 0;
+            while (k < nodes.length) {
+                anchors.append(0);
+                k += 1;
+            }
+            let following: uint32 = 0;
+            k = nodes.length - 1;
+            while (k >= 0) {
+                anchors[k] = following;
+                if (nodes[k].state == 1) {
+                    following = nodes[k].id;
+                }
+                k -= 1;
+            }
+            let i = 0;
+            while (i < nodes.length) {
+                last node = nodes[i];
+                if (node.state != 1) {
+                    last anchor = anchors[i];
+                    last operation = new Operation(
+                        (node.state == 2) ? OpKind.Move : (node.element ? OpKind.Element : OpKind.Text), node.id);
+                    operation.parent = parent;
+                    operation.before = anchor;
+                    if (node.state == 0) {
+                        operation.name = node.name;
+                        operation.svg = node.svg;
+                        operation.value = node.text;
+                    }
+                    out.append(operation);
+                }
+                if (node.reused != pass) {
+                    place_children(node.id, node.children, out, pass);
+                }
+                i += 1;
+            }
+        };
+
+        // A node reused in `pass` is its own old node, with its whole subtree: nothing in it changes.
+        let changes = func(nodes: VNode[list], contents: Operation[list], listeners: Operation[list],
+            properties: Operation[list], pass: uint64) {
+            for (let node in nodes) {
+                if (node.reused == pass) {
+                    continue;
+                }
+                last old = node.old;
+                if (not node.element) {
+                    if (old != nil && old.text != node.text) {
+                        last operation = new Operation(OpKind.SetText, node.id);
+                        operation.value = node.text;
+                        contents.append(operation);
+                    }
+                    continue;
+                }
+                for (let attribute in node.attributes) {
+                    let same = false;
+                    if (old != nil) {
+                        for (let previous in old.attributes) {
+                            if (previous[0] == attribute[0] && previous[1] == attribute[1]) {
+                                same = true;
+                            }
+                        }
+                    }
+                    if (not same) {
+                        last operation = new Operation(OpKind.Attribute, node.id);
+                        operation.name = attribute[0];
+                        operation.value = attribute[1];
+                        contents.append(operation);
+                    }
+                }
+                if (old != nil) {
+                    for (let previous in old.attributes) {
+                        let kept = false;
+                        for (let attribute in node.attributes) {
+                            if (attribute[0] == previous[0]) {
+                                kept = true;
+                            }
+                        }
+                        if (not kept) {
+                            last operation = new Operation(OpKind.Attribute, node.id);
+                            operation.name = previous[0];
+                            operation.present = false;
+                            contents.append(operation);
+                        }
+                    }
+                }
+                for (let variable in node.variables) {
+                    let same = false;
+                    if (old != nil) {
+                        for (let previous in old.variables) {
+                            if (previous[0] == variable[0] && previous[1].value == variable[1].value &&
+                                previous[1].unit == variable[1].unit) {
+                                same = true;
+                            }
+                        }
+                    }
+                    if (not same) {
+                        last operation = new Operation(OpKind.Variable, node.id);
+                        operation.name = variable[0];
+                        operation.number = variable[1].value;
+                        operation.unit = variable[1].unit;
+                        contents.append(operation);
+                    }
+                }
+                if (old != nil) {
+                    for (let previous in old.variables) {
+                        let kept = false;
+                        for (let variable in node.variables) {
+                            if (variable[0] == previous[0]) {
+                                kept = true;
+                            }
+                        }
+                        if (not kept) {
+                            last operation = new Operation(OpKind.Variable, node.id);
+                            operation.name = previous[0];
+                            operation.present = false;
+                            contents.append(operation);
+                        }
+                    }
+                }
+                for (let listener in node.listeners) {
+                    let previous: Listener = nil;
+                    if (old != nil) {
+                        for (let candidate in old.listeners) {
+                            if (candidate.event == listener.event) {
+                                previous = candidate;
+                            }
+                        }
+                    }
+                    if (previous != nil) {
+                        // The listener stays; a different callable only replaces the table entry.
+                        listener.id = previous.id;
+                    } else {
+                        listener.id = next_handler;
+                        next_handler += 1;
+                    }
+                    if (previous == nil || previous.prevent_default != listener.prevent_default ||
+                        previous.stop_propagation != listener.stop_propagation) {
+                        last operation = new Operation(OpKind.Handler, node.id);
+                        operation.name = listener.event;
+                        operation.handler = listener.id;
+                        operation.prevent_default = listener.prevent_default;
+                        operation.stop_propagation = listener.stop_propagation;
+                        listeners.append(operation);
+                    }
+                }
+                if (old != nil) {
+                    for (let previous in old.listeners) {
+                        let kept = false;
+                        for (let listener in node.listeners) {
+                            if (listener.event == previous.event) {
+                                kept = true;
+                            }
+                        }
+                        if (not kept) {
+                            last operation = new Operation(OpKind.Handler, node.id);
+                            operation.name = previous.event;
+                            operation.present = false;
+                            listeners.append(operation);
+                        }
+                    }
+                }
+                // A retained node writes no property, so a value the user is editing in another component stays.
+                if (node.fresh || old == nil) {
+                    for (let property in node.properties) {
+                        last operation = new Operation(OpKind.Property, node.id);
+                        operation.name = property.name;
+                        operation.boolean = property.boolean;
+                        operation.flag = property.flag;
+                        operation.value = property.text;
+                        properties.append(operation);
+                    }
+                }
+                changes(node.children, contents, listeners, properties, pass);
+            }
+        };
+
+        let register = func(nodes: VNode[list]) {
+            for (let node in nodes) {
+                node.old = nil;
+                for (let listener in node.listeners) {
+                    handlers.set(listener.id.to_string(), listener.callable);
+                    if (listener.component != nil) {
+                        targets.set(listener.id.to_string(), listener.component);
+                    }
+                }
+                register(node.children);
+            }
+        };
+
+        /// @brief Makes a prepared plan's tree the mounted one, after the host applied its operations.
+        export let accept = func(plan: Plan) {
+            if (plan.diagnostic != nil) {
+                trap_with_message("an invalid plan cannot be accepted");
+            }
+            mounted = plan.tree;
+            mounted_pass = plan.pass;
+            handlers = string_maps.create<storage.Slot>();
+            targets = string_maps.create<ui.Component>();
+            register(mounted);
+        };
+
+        /// @brief Forgets the mounted tree and its handlers, as after the host emptied the root.
+        export let reset = func {
+            mounted = new();
+            handlers = string_maps.create<storage.Slot>();
+            targets = string_maps.create<ui.Component>();
+            mounted_pass = 0;
+            passes += 1;
+        };
+
+        /// @brief Calls the handler that a listener of the mounted tree holds; false when the handler is unknown or
+        /// takes another record type.
+        export let deliver = func<E>(handler: uint64, event: E) -> bool {
+            last found = handlers.get(handler.to_string());
+            if (optional.is_none<storage.Slot>(found)) {
+                return false;
+            }
+            last slot = optional.expect<storage.Slot>(found, "handler");
+            if (slot is storage.Payload<func(E) -> void>) {
+                (slot as storage.Payload<func(E) -> void>).value(event);
+                return true;
+            }
+            return false;
+        };
+
+        /// @brief Whether the tree this root has mounted was placed in pass `pass`.
+        export let holds = func(pass: uint64) -> bool => pass != 0 && pass == mounted_pass;
+
+        /// @brief The number of handlers of the mounted tree.
+        export let handler_count = func -> int => handlers.size();
+
+        /// @brief The component whose view holds the listener `handler`, or nil.
+        export let target_of = func(handler: uint64) -> ui.Component {
+            last found = targets.get(handler.to_string());
+            if (optional.is_none<ui.Component>(found)) {
+                return nil;
+            }
+            return optional.expect<ui.Component>(found, "target");
+        };
+
+        /// @brief The number of template descriptors parsed so far.
+        export let template_count = func -> int => descriptors.length;
+
+        /// @brief The template descriptor parsed `index`-th (from 0).
+        export let template_at = func(index: int) -> string => descriptors[index];
+
+        /// @brief The number of host nodes of the mounted tree.
+        export let node_count = func -> int => count_nodes(mounted);
+
+        let count_nodes = func(nodes: VNode[list]) -> int {
+            let total = 0;
+            for (let node in nodes) {
+                total += 1 + count_nodes(node.children);
+            }
+            return total;
+        };
+    );
+
+    let put_u8 = func(out: uint8[list], value: uint8) {
+        out.append(value);
+    };
+
+    let put_u32 = func(out: uint8[list], value: uint32) {
+        out.append((value & 255) as uint8);
+        out.append(((value >> 8) & 255) as uint8);
+        out.append(((value >> 16) & 255) as uint8);
+        out.append(((value >> 24) & 255) as uint8);
+    };
+
+    let put_u64 = func(out: uint8[list], value: uint64) {
+        put_u32(out, (value & 4294967295) as uint32);
+        put_u32(out, (value >> 32) as uint32);
+    };
+
+    let put_text = func(out: uint8[list], text: string) {
+        put_u32(out, text.byte_length as uint32);
+        let i = 0;
+        while (i < text.byte_length) {
+            out.append(text.byte_at(i));
+            i += 1;
+        }
+    };
+
+    /// @brief Encodes operations in the commit encoding, version 1: the version byte, a count, and each operation
+    /// as its code (1 to 9), its node and its fields, little-endian, texts as a byte length and UTF-8.
+    export let encode_commit = func(operations: Operation[list]) -> uint8[list] {
+        last out: uint8[list] = new();
+        put_u8(out, 1);
+        put_u32(out, operations.length as uint32);
+        for (let operation in operations) {
+            last code: uint8 = match (operation.kind) {
+                OpKind.Remove => 1,
+                OpKind.Element => 2,
+                OpKind.Text => 3,
+                OpKind.Move => 4,
+                OpKind.SetText => 5,
+                OpKind.Attribute => 6,
+                OpKind.Variable => 7,
+                OpKind.Handler => 8,
+                OpKind.Property => 9,
+            };
+            put_u8(out, code);
+            put_u32(out, operation.id);
+            match (operation.kind) {
+                OpKind.Element => {
+                    put_u32(out, operation.parent);
+                    put_u32(out, operation.before);
+                    put_u8(out, operation.svg ? 1 : 0);
+                    put_text(out, operation.name);
+                },
+                OpKind.Text => {
+                    put_u32(out, operation.parent);
+                    put_u32(out, operation.before);
+                    put_text(out, operation.value);
+                },
+                OpKind.Move => {
+                    put_u32(out, operation.parent);
+                    put_u32(out, operation.before);
+                },
+                OpKind.SetText => {
+                    put_text(out, operation.value);
+                },
+                OpKind.Attribute => {
+                    put_text(out, operation.name);
+                    put_u8(out, operation.present ? 1 : 0);
+                    if (operation.present) {
+                        put_text(out, operation.value);
+                    }
+                },
+                OpKind.Variable => {
+                    put_text(out, operation.name);
+                    put_u8(out, operation.present ? 1 : 0);
+                    if (operation.present) {
+                        put_u64(out, operation.number.to_bits());
+                        put_text(out, operation.unit);
+                    }
+                },
+                OpKind.Handler => {
+                    put_text(out, operation.name);
+                    put_u64(out, operation.present ? operation.handler : 0);
+                    put_u8(out, (operation.prevent_default ? 1 : 0) | (operation.stop_propagation ? 2 : 0));
+                },
+                OpKind.Property => {
+                    put_text(out, operation.name);
+                    put_u8(out, operation.boolean ? 1 : 0);
+                    if (operation.boolean) {
+                        put_u8(out, operation.flag ? 1 : 0);
+                    } else {
+                        put_text(out, operation.value);
+                    }
+                },
+                OpKind.Remove => {},
+            }
+        }
+        return out;
+    };
+);

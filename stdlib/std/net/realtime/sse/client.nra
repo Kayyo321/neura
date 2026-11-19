@@ -1,0 +1,379 @@
+let.promote _ = import:Std.Time.Clock;
+let.promote _ = import:Std.Io.Closeable;
+let duration = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let.promote _ = import:Std.Core.Optional;
+let parser = import:Std.Net.Realtime.Sse.Parser;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Net.Realtime.Sse.SseEvent;
+let strings = import:Std.Text.Strings;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief A reconnecting event-stream client with `Last-Event-ID` cursor recovery (WHATWG HTML section 9.2.3,
+/// the EventSource processing model, without the browser parts).
+///
+/// The network rides on an injected fetch function that turns an `SseRequest` into an `SseResponse` whose body
+/// is a chunk source, and time on an injected `Std.Time.Clock`, so the client runs the same over
+/// `Std.Net.Http`, a test double, or any other transport. `next` returns the events in order and handles the
+/// connection: status 204 ends the stream (`None`, no reconnection); another status than 200, or a media type
+/// other than `text/event-stream`, fails the connection (an Err, no reconnection); a fetch error, a body read
+/// error, or the end of the body reestablishes the connection after the reconnection time, sending the last
+/// event ID in `Last-Event-ID` when it is not empty. The reconnection time starts at `DefaultReconnectionMillis`
+/// and each valid `retry` field replaces it. Optional exponential backoff doubles the wait after each
+/// consecutive failed fetch up to `max_backoff_millis`; `max_attempts` bounds the consecutive failed fetches.
+/// Errors are Custom errors with the codes `sse.failed` and `sse.gave_up`, or the parser's `sse.limit`.
+/// @see [Std.Net.Realtime.Sse.Client](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-Sse-Client)
+#Since("0.3.0")
+export let Client = module (
+    /// @brief The reconnection time before any `retry` field, in milliseconds. The specification leaves it to
+    /// the implementation ("a few seconds").
+    export const DefaultReconnectionMillis: int64 = 3000;
+    /// @brief The media type an event-stream response must have.
+    export const EventStreamType: string = "text/event-stream";
+
+    /// @brief The EventSource ready states.
+    export let ReadyState = enum (Connecting, Open, Closed);
+
+    /// @brief One connection attempt: the URL and the cursor to resume from.
+    #[Final, Immutable]
+    export let SseRequest = class (
+        /// @brief The event-stream URL.
+        export last url: string;
+        /// @brief The last event ID; empty when the request carries no `Last-Event-ID`.
+        export last last_event_id: string;
+        /// @brief The 1-based number of this attempt since the client was made.
+        export last attempt: int;
+
+        /// @brief Stores the fields.
+        export let init = func(target: string, cursor: string, number: int) {
+            url = target;
+            last_event_id = cursor;
+            attempt = number;
+        };
+
+        /// @brief The request header lines: `Accept: text/event-stream`, `Cache-Control: no-store`, and
+        /// `Last-Event-ID` when the cursor is not empty.
+        #NoDiscard
+        export let header_lines = func -> string[list] {
+            last lines: string[list] = new;
+            lines.append("Accept: " .. EventStreamType);
+            lines.append("Cache-Control: no-store");
+            if (last_event_id.byte_length > 0) {
+                lines.append("Last-Event-ID: " .. last_event_id);
+            }
+            return lines;
+        };
+
+        /// @brief Equal when the URL, cursor and attempt number are equal.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not request: SseRequest) {
+                return false;
+            }
+            return url == request.url && last_event_id == request.last_event_id && attempt == request.attempt;
+        };
+
+        /// @brief Combines the three fields.
+        export let.override hash_code = func -> uint32 =>
+            hashing.combine(hashing.combine(strings.hash(url), strings.hash(last_event_id)),
+                hashing.of_int64(attempt as int64));
+
+        /// @brief `SseRequest(url, Last-Event-ID "...", attempt n)`.
+        export let.override to_string = func -> string =>
+            "SseRequest(" .. url .. ", Last-Event-ID \"" .. last_event_id .. "\", attempt " .. attempt.to_string() .. ")";
+    );
+
+    /// @brief The response to an attempt: status, media type, and the body as a chunk source that returns
+    /// `None` at the end of the body.
+    #Final
+    export let SseResponse = class (
+        /// @brief The HTTP status code.
+        export last status: int;
+        /// @brief The Content-Type header value.
+        export last content_type: string;
+        /// @brief Reads the next chunk of the body.
+        export last body: func() -> Result<Optional<uint8[list]>>;
+
+        /// @brief Stores the fields.
+        export let init = func(code: int, media_type: string, reader: func() -> Result<Optional<uint8[list]>>) {
+            status = code;
+            content_type = media_type;
+            body = reader;
+        };
+
+        /// @brief `SseResponse(status, content type)`.
+        export let.override to_string = func -> string =>
+            "SseResponse(" .. status.to_string() .. ", " .. content_type .. ")";
+    );
+
+    /// @brief A reconnecting event-stream client. Not for use by several tasks at once.
+    #[Final, NotThreadSafe]
+    export let EventSourceClient = class implements Closeable (
+        /// @brief The event-stream URL.
+        export last url: string;
+        /// @brief The ready state.
+        export let state: ReadyState = ReadyState.Connecting;
+            | get: state;
+
+        /// @brief The last event ID string, sent as `Last-Event-ID` on reconnection.
+        export let last_event_id: string;
+            | get: last_event_id;
+
+        /// @brief The current reconnection time in milliseconds.
+        export let reconnection_millis: int64 = DefaultReconnectionMillis;
+            | get: reconnection_millis;
+
+        /// @brief The number of consecutive failed fetches.
+        export let failures: int = 0;
+            | get: failures;
+
+        /// @brief The number of fetches made so far.
+        export let attempts: int = 0;
+            | get: attempts;
+
+        /// @brief The consecutive failed fetches after which `next` gives up; 0, the default, never gives up.
+        export let max_attempts: int = 0;
+        /// @brief The cap of exponential backoff in milliseconds; 0, the default, waits the reconnection time
+        /// after every failure.
+        export let max_backoff_millis: int64 = 0;
+
+        /// @brief Makes one attempt.
+        last fetch: func(SseRequest) -> Result<SseResponse>;
+        /// @brief Waits between attempts.
+        last clock: Clock;
+        /// @brief Reads the open response's body.
+        let body: func() -> Result<Optional<uint8[list]>> = no_body;
+        /// @brief Whether a response body is open.
+        let has_body: bool = false;
+        /// @brief Whether the next attempt waits first (every attempt but the first).
+        let wait_first: bool = false;
+        /// @brief The parser of the open response.
+        let stream: parser.EventStreamParser = parser.create();
+        /// @brief Events parsed but not yet returned, from `queue_index` on.
+        let queue: SseEvent[list] = new;
+        /// @brief The next event of the queue to return.
+        let queue_index: int = 0;
+
+        /// @brief A client for `target` that resumes after `cursor` (empty for a new stream), fetching with
+        /// `fetcher` and waiting on `timer`.
+        export let init = func(target: string, cursor: string, fetcher: func(SseRequest) -> Result<SseResponse>,
+            timer: Clock) {
+            url = target;
+            last_event_id = cursor;
+            fetch = fetcher;
+            clock = timer;
+        };
+
+        /// @brief The next event, `None` once the stream has ended (status 204 or `close`), or an error that
+        /// failed the connection.
+        #NoDiscard
+        export let next = func -> Result<Optional<SseEvent>> {
+            while (true) {
+                if (queue_index < queue.length) {
+                    last event = queue[queue_index];
+                    queue_index = queue_index + 1;
+                    return Result<Optional<SseEvent>>.Ok(Optional<SseEvent>.Some(event));
+                }
+                if (state == ReadyState.Closed) {
+                    return Result<Optional<SseEvent>>.Ok(Optional<SseEvent>.None);
+                }
+                if (not has_body) {
+                    match (open()) {
+                        Result.Ok(_) => {},
+                        Result.Err(e) => {
+                            return Result<Optional<SseEvent>>.Err(e);
+                        },
+                    }
+                } else {
+                    match (read()) {
+                        Result.Ok(_) => {},
+                        Result.Err(e) => {
+                            return Result<Optional<SseEvent>>.Err(e);
+                        },
+                    }
+                }
+            }
+            return Result<Optional<SseEvent>>.Ok(Optional<SseEvent>.None);
+        };
+
+        /// @brief Closes the client: no further fetch is made and `next` returns `None`.
+        export let close = func -> Result<Unit> {
+            state = ReadyState.Closed;
+            has_body = false;
+            body = no_body;
+            queue = new;
+            queue_index = 0;
+            return Result<Unit>.Ok(Unit.Value);
+        };
+
+        /// @brief The wait before the next attempt: the reconnection time, doubled per consecutive failure up
+        /// to `max_backoff_millis` when backoff is on.
+        #NoDiscard
+        export let next_delay_millis = func -> int64 {
+            let delay = reconnection_millis;
+            if (max_backoff_millis <= reconnection_millis) {
+                return delay;
+            }
+            for (let i = 1; i < failures; i++) {
+                if (delay >= max_backoff_millis / 2) {
+                    return max_backoff_millis;
+                }
+                delay = delay * 2;
+            }
+            return delay;
+        };
+
+        /// @brief Makes one attempt (after the wait); opens the body, ends, fails, or records a failure.
+        let open = func -> Result<Unit> {
+            if (max_attempts > 0 && failures >= max_attempts) {
+                state = ReadyState.Closed;
+                return Result<Unit>.Err(errors.custom("sse.gave_up",
+                    "gave up after " .. failures.to_string() .. " failed attempts"));
+            }
+            if (wait_first) {
+                match (clock.sleep(duration.of_millis(next_delay_millis()))) {
+                    Result.Ok(_) => {},
+                    Result.Err(e) => {
+                        state = ReadyState.Closed;
+                        return Result<Unit>.Err(e);
+                    },
+                }
+            }
+            wait_first = true;
+            state = ReadyState.Connecting;
+            attempts = attempts + 1;
+            match (fetch(new SseRequest(url, last_event_id, attempts))) {
+                Result.Err(_) => {
+                    failures = failures + 1;
+                },
+                Result.Ok(response) => {
+                    if (response.status == 204) {
+                        state = ReadyState.Closed;
+                        return Result<Unit>.Ok(Unit.Value);
+                    }
+                    if (response.status != 200) {
+                        return fail("the response status is " .. response.status.to_string() .. ", not 200");
+                    }
+                    return fail("the response media type is \"" .. response.content_type .. "\", not text/event-stream") unless is_event_stream(response.content_type);
+                    failures = 0;
+                    state = ReadyState.Open;
+                    body = response.body;
+                    has_body = true;
+                    stream = parser.resuming(last_event_id);
+                },
+            }
+            return Result<Unit>.Ok(Unit.Value);
+        };
+
+        /// @brief Reads one chunk of the open body and queues its events; a read error or the end of the body
+        /// drops the body so that the next call reconnects.
+        let read = func -> Result<Unit> {
+            match (body()) {
+                Result.Err(_) => {
+                    drop_body();
+                },
+                Result.Ok(chunk) => {
+                    match (chunk) {
+                        Optional.None => {
+                            drop_body();
+                        },
+                        Optional.Some(bytes) => {
+                            match (stream.feed(bytes)) {
+                                Result.Ok(events) => {
+                                    queue = events;
+                                    queue_index = 0;
+                                    last_event_id = stream.last_event_id;
+                                    match (stream.reconnection_time) {
+                                        Optional.Some(millis) => {
+                                            reconnection_millis = millis;
+                                        },
+                                        Optional.None => {},
+                                    }
+                                },
+                                Result.Err(e) => {
+                                    drop_body();
+                                    state = ReadyState.Closed;
+                                    return Result<Unit>.Err(e);
+                                },
+                            }
+                        },
+                    }
+                },
+            }
+            return Result<Unit>.Ok(Unit.Value);
+        };
+
+        /// @brief Forgets the open body and its undispatched block.
+        let drop_body = func {
+            stream.finish();
+            has_body = false;
+            body = no_body;
+            state = ReadyState.Connecting;
+        };
+
+        /// @brief Fails the connection: closed, no reconnection.
+        let fail = func(message: string) -> Result<Unit> {
+            state = ReadyState.Closed;
+            return Result<Unit>.Err(errors.custom("sse.failed", message));
+        };
+
+        /// @brief `EventSourceClient(url, state)`.
+        export let.override to_string = func -> string =>
+            "EventSourceClient(" .. url .. ", " .. state.to_string() .. ")";
+    );
+
+    /// @brief Decodes each event of a client into a `T` with a decoding hook, such as a JSON decoder for
+    /// streamed model tokens.
+    #[Final, NotThreadSafe]
+    export let TypedEventSource = class<T> implements Closeable (
+        /// @brief The client that supplies the events.
+        export last source: EventSourceClient;
+        /// @brief Turns an event into a value.
+        last decode: func(SseEvent) -> Result<T>;
+
+        /// @brief Reads `client`, decoding with `decoder`.
+        export let init = func(client: EventSourceClient, decoder: func(SseEvent) -> Result<T>) {
+            source = client;
+            decode = decoder;
+        };
+
+        /// @brief The next decoded value, `None` at the end, or the client's or decoder's error. After a decoder
+        /// error the client stays open and the next call reads the following event.
+        #NoDiscard
+        export let next = func -> Result<Optional<T>> {
+            return match (source.next()) {
+                Result.Err(e) => Result<Optional<T>>.Err(e),
+                Result.Ok(item) => match (item) {
+                    Optional.None => Result<Optional<T>>.Ok(Optional<T>.None),
+                    Optional.Some(event) => match (decode(event)) {
+                        Result.Ok(value) => Result<Optional<T>>.Ok(Optional<T>.Some(value)),
+                        Result.Err(e) => Result<Optional<T>>.Err(e),
+                    },
+                },
+            };
+        };
+
+        /// @brief Closes the client.
+        export let close = func -> Result<Unit> => source.close();
+
+        /// @brief `TypedEventSource(url)`.
+        export let.override to_string = func -> string => "TypedEventSource(" .. source.url .. ")";
+    );
+
+    /// @brief A client for a new stream at `url`.
+    #NoDiscard
+    export let connect = func(url: string, fetch: func(SseRequest) -> Result<SseResponse>, clock: Clock)
+        -> EventSourceClient => new EventSourceClient(url, "", fetch, clock);
+
+    /// @brief Whether a Content-Type value names `text/event-stream`, ignoring parameters, surrounding
+    /// whitespace and ASCII case.
+    #[NoDiscard, Pure]
+    export let is_event_stream = func(content_type: string) -> bool {
+        last semicolon = strings.index_of(content_type, ";");
+        last media = semicolon < 0 ? content_type : content_type.slice(0, semicolon);
+        return strings.equals_ignore_ascii_case(strings.trim(media), EventStreamType);
+    };
+
+    /// @brief The body of no response: always at its end.
+    let no_body = func -> Result<Optional<uint8[list]>> => Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.None);
+);

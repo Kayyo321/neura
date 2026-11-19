@@ -142,7 +142,7 @@ private:
         return std::nullopt;
     }
 
-    const IrProgram& program_;
+    [[maybe_unused]] const IrProgram& program_;
     std::vector<SymbolId> nodes_;
     std::map<SymbolId, std::size_t> index_;
     std::vector<std::vector<ContainmentStep>> edges_;

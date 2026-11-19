@@ -1,0 +1,7 @@
+error[E0504]: class must declare interface method 'area'
+ --> $DIR/interface-unsatisfied.nra:5:1
+  |
+5 | let P = record implements Shape (x: int);
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For more information about this error, try `neura explain E0504`.

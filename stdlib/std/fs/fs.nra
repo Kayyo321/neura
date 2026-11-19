@@ -37,12 +37,11 @@ export let Fs = module (
         };
 
         /// @brief Tests equality of the kind, size, and modification time.
-        #Pure
+        /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is FileMetadata)) {
+            if (other is not metadata: FileMetadata) {
                 return false;
             }
-            last metadata = other as FileMetadata;
             return kind == metadata.kind && size == metadata.size &&
                 (modified == nil ? metadata.modified == nil : modified === metadata.modified);
         };
@@ -56,8 +55,8 @@ export let Fs = module (
         /// @brief Formats the metadata as Kind(size, modified), with nil for an absent timestamp.
         #Pure
         export let.override to_string = func -> string =>
-            kind.to_string() + "(" + size.to_string() + ", " +
-                (modified == nil ? "nil" : modified.to_string()) + ")";
+            kind.to_string() .. "(" .. size.to_string() .. ", " ..
+            (modified == nil ? "nil" : modified.to_string()) .. ")";
     );
 
     /// @brief Carries the provider's entry kind, byte size and timestamp fields, or an error code.
@@ -99,9 +98,7 @@ export let Fs = module (
         match (read_bytes(path)) {
             result.Result.Ok(data) => {
                 let [valid, text] = string.from_utf8(data);
-                if (!valid) {
-                    return result.Result<string>.Err(bytes.invalid_utf8(path.to_string()));
-                }
+                return result.Result<string>.Err(bytes.invalid_utf8(path.to_string())) unless valid;
                 return result.Result<string>.Ok(text);
             },
             result.Result.Err(failure) => {
@@ -151,7 +148,7 @@ export let Fs = module (
     export let list = func(path: Path) -> result.Result<Path[list]> {
         match (list_names(path.to_string())) {
             NamesOutcome.Ok(names) => {
-                last entries: Path[list] = [];
+                last entries: Path[list] = new;
                 for (let name in names) {
                     entries.append(path.join(name));
                 }
@@ -310,7 +307,7 @@ export let Fs = module (
 
     /// @brief Reads an open file in chunks until EOF or a read error.
     let read_open = func(file: files.File) -> result.Result<uint8[list]> {
-        let data: uint8[list] = [];
+        let data: uint8[list] = new;
         do {
             match (file.read(CopyBufferSize)) {
                 result.Result.Ok(chunk) => {

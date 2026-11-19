@@ -1,0 +1,14 @@
+error[E0504]: 'Fixed' must have an exported field 'count: int32' that can be assigned
+ --> $DIR/last-set.nra:7:1
+  |
+3 |     let count: int;
+  |         ----- 'count' is required here
+...
+7 | let Fixed = class implements Counter (
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^... 'Fixed' does not satisfy the property 'count' of 'Counter'
+8 |     export last count: int = 0;
+  |                 ----- 'count' is declared here
+  |
+  = note: 'count' cannot be assigned after construction
+
+For more information about this error, try `neura explain E0504`.

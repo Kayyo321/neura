@@ -1,0 +1,88 @@
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.Mac.Authenticator;
+let constant_time = import:Std.Crypto.Core.ConstantTime;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let.promote _ = import:Std.Crypto.StreamingDigest;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief HMAC (FIPS 198-1, RFC 2104) over any StreamingDigest (Stdlib.md section 21.5).
+/// @see [Std.Crypto.Mac.Hmac](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Mac-Hmac)
+#Since("0.3.0")
+export let Hmac = module (
+    /// @brief HMAC with the digest H, such as `Hmac<Sha256>`. A key longer than H's block is hashed first; a
+    /// shorter one is padded with zeros. The policy is checked for HMAC and for H.
+    #[Final, Since("0.3.0")]
+    export let Hmac = class<H: StreamingDigest<H>> implements Authenticator (
+        /// @brief The inner digest, already fed the inner pad.
+        let inner: H;
+        /// @brief The key xor the outer pad, kept until `finish`.
+        let outer_pad: uint8[list] = new;
+        let done: bool = false;
+
+        /// @brief Keys the MAC. The caller may wipe its key afterwards.
+        export let init = func(key: uint8[list]) {
+            crypto_policy.require(Algorithm.Hmac);
+            last block = H.block_length();
+            let padded = key;
+            if (key.length > block) {
+                let digest = H.create();
+                digest.update(key);
+                padded = digest.finish();
+            }
+            let inner_pad: uint8[list] = new;
+            for (let i = 0; i < block; i++) {
+                last b: uint8 = i < padded.length ? padded[i] : 0;
+                inner_pad.append(b ^ 54);
+                outer_pad.append(b ^ 92);
+            }
+            inner = H.create();
+            inner.update(inner_pad);
+            words.wipe(inner_pad);
+        };
+
+        /// @brief `Algorithm.Hmac`.
+        export let algorithm = func -> Algorithm => Algorithm.Hmac;
+
+        /// @brief H's output length.
+        export let tag_length = func -> int => H.output_length();
+
+        export let update = func(bytes: uint8[list]) {
+            if (done) {
+                trap_with_message("invalid state: mac finished");
+            }
+            inner.update(bytes);
+        };
+
+        export let finish = func -> uint8[list] {
+            if (done) {
+                trap_with_message("invalid state: mac finished");
+            }
+            done = true;
+            let outer = H.create();
+            outer.update(outer_pad);
+            outer.update(inner.finish());
+            words.wipe(outer_pad);
+            return outer.finish();
+        };
+
+        export let verify = func(tag: uint8[list]) -> bool => constant_time.ct_eq(finish(), tag);
+
+        export let.override to_string = func -> string => "Hmac(<redacted>)";
+    );
+
+    /// @brief The HMAC tag of the message under the key.
+    #[NoDiscard, Since("0.3.0")]
+    export let mac = func<H: StreamingDigest<H>>(key: uint8[list], message: uint8[list]) -> uint8[list] {
+        let hmac = new Hmac<H>(key);
+        hmac.update(message);
+        return hmac.finish();
+    };
+
+    /// @brief Whether `tag` is the full HMAC tag of the message, compared in constant time.
+    #[NoDiscard, Since("0.3.0")]
+    export let verify = func<H: StreamingDigest<H>>(key: uint8[list], message: uint8[list], tag: uint8[list]) -> bool {
+        let hmac = new Hmac<H>(key);
+        hmac.update(message);
+        return hmac.verify(tag);
+    };
+);

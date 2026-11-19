@@ -1,0 +1,11 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: SLH-DSA-SHA2-128s public key must be 32 bytes
+let slh_dsa = import:Std.Crypto.Pqc.SlhDsa;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = new slh_dsa.SlhDsaPublicKey(slh_dsa.ParameterSet.Sha2_128s, new([1]));
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,2 @@
+// `set` is contextual: outside an instance constructor it is an ordinary name.
+let make = func(x: int) => set;

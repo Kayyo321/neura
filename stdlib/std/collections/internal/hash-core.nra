@@ -44,11 +44,11 @@ export let HashCore = module (
     /// @brief The index and entry metadata for an open-addressed hash table.
     export let HashCore = class (
         /// @brief Power-of-two array of dense entry numbers, empty slots, and tombstones.
-        export let index: int[list] = [];
+        export let index: int[list] = new;
         /// @brief Spread hashes in insertion order.
-        export let hashes: uint32[list] = [];
+        export let hashes: uint32[list] = new;
         /// @brief False for a removed entry.
-        export let live: bool[list] = [];
+        export let live: bool[list] = new;
         /// @brief The number of live entries.
         export let count: int = 0;
         /// @brief Advanced by every structural change and every compaction.
@@ -148,7 +148,7 @@ export let HashCore = module (
             modifications += 1;
             let length = hashes.length;
             if (entry == length - 1) {
-                while (length > 0 && !live[length - 1]) {
+                while (length > 0 && not live[length - 1]) {
                     length -= 1;
                     hashes.remove_at(length);
                     live.remove_at(length);
@@ -167,7 +167,7 @@ export let HashCore = module (
         /// @brief The old entry numbers of the live entries, in order.
         #Pure
         export let live_entries = func -> int[list] {
-            last order: int[list] = [];
+            last order: int[list] = new;
             last length = live.length;
             let entry = 0;
             while (entry < length) {
@@ -194,8 +194,8 @@ export let HashCore = module (
         /// @brief Empties the core at its initial table size.
         export let reset = func {
             index = empty_index(initial_size);
-            hashes = [];
-            live = [];
+            hashes = new;
+            live = new;
             count = 0;
             tombstones = 0;
             mask = initial_size - 1;
@@ -216,7 +216,7 @@ export let HashCore = module (
             if (live.length != length || length > (size >> 1)) {
                 trap_with_message("invalid state: hash table entries");
             }
-            last seen: int[list] = [];
+            last seen: int[list] = new;
             let live_count = 0;
             let entry = 0;
             while (entry < length) {
@@ -229,7 +229,7 @@ export let HashCore = module (
             if (live_count != count) {
                 trap_with_message("invalid state: hash table count");
             }
-            if (length > 0 && !live[length - 1]) {
+            if (length > 0 && not live[length - 1]) {
                 trap_with_message("invalid state: hash table trailing dead entry");
             }
             last dead = length - count;
@@ -245,7 +245,7 @@ export let HashCore = module (
                     stones += 1;
                     filled += 1;
                 } else if (value != Empty) {
-                    if (value < 0 || value >= length || !live[value] || seen[value] != 0) {
+                    if (value < 0 || value >= length || not live[value] || seen[value] != 0) {
                         trap_with_message("invalid state: hash table index");
                     }
                     seen[value] = 1;
@@ -265,6 +265,9 @@ export let HashCore = module (
                 trap_with_message("invalid state: hash table load");
             }
         };
+
+        /// @brief Names the table and its entry count.
+        export let.override to_string = func -> string => "HashCore(" .. count.to_string() .. " entries)";
     );
 
     /// @brief The table size for `capacity` entries: the smallest power of two at
@@ -293,7 +296,7 @@ export let HashCore = module (
 
     /// @brief Allocates `size` index slots initialized to `Empty`.
     let empty_index = func(size: int) -> int[list] {
-        last slots: int[list] = [];
+        last slots: int[list] = new;
         let i = 0;
         while (i < size) {
             slots.append(Empty);
@@ -304,7 +307,7 @@ export let HashCore = module (
 
     /// @brief Copies cached hashes at the old entry numbers in `order`.
     let reordered_hashes = func(old: uint32[list], order: int[list]) -> uint32[list] {
-        last result: uint32[list] = [];
+        last result: uint32[list] = new;
         last count = order.length;
         let i = 0;
         while (i < count) {
@@ -316,7 +319,7 @@ export let HashCore = module (
 
     /// @brief Builds a list of `count` true flags for compacted entries.
     let all_live = func(count: int) -> bool[list] {
-        last result: bool[list] = [];
+        last result: bool[list] = new;
         let i = 0;
         while (i < count) {
             result.append(true);

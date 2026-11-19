@@ -1,0 +1,18 @@
+// expect: 16:1 the program has more than one entry point
+let program = import:Std.Program;
+
+let Server = module:program.Entry (
+    export let serve = func(path: string) -> string;
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        serve("/");
+        return program.ExitCode.Ok;
+    };
+);
+
+let First = module:Server (
+    export let.override serve = func(path: string) -> string => path;
+);
+let Second = module:Server (
+    export let.override serve = func(path: string) -> string => path;
+);

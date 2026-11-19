@@ -154,10 +154,17 @@ TaskDumps::~TaskDumps() {
     signalled_request.store(nullptr, std::memory_order_relaxed);
 }
 
-Host::Host(const nvm::Capabilities& capabilities)
-    : services(output, error, input, capabilities) {
+Host::Host(const nvm::Capabilities& capabilities, nvm::ServerExchange* exchange, std::uint64_t response_bytes,
+           nvm::SqlExchange* sql_exchange)
+    : services(output, error, input, capabilities),
+      application(exchange, capabilities.http_server, capabilities.app, response_bytes),
+      sql(sql_exchange, capabilities.sql),
+      secrets(capabilities.entropy) {
     registry.add(console);
     services.register_all(registry);
+    application.register_all(registry);
+    sql.register_all(registry);
+    secrets.register_all(registry);
 }
 
 std::vector<std::uint8_t> read_file(const fs::path& path) {
@@ -310,6 +317,7 @@ nvm::RunResult result_of(const nvm::Trace& trace) {
     result.steps = trace.steps;
     result.host_requests = trace.entries.size();
     result.peak_heap_cells = trace.peak_heap_cells;
+    result.peak_stack_cells = trace.peak_stack_cells;
     return result;
 }
 
@@ -388,6 +396,11 @@ int run(const nvr::Image& image, Host& host, std::span<const std::string> argume
     nvm::TaskClock* clock = options.virtual_time && !options.replay ? &virtual_clock : nullptr;
     host.services.set_clock(clock);
     nvm::RunResult result;
+    const auto begin = [&] {
+        if (!options.ending) return;
+        options.ending->started = true;
+        options.ending->started_at = std::chrono::steady_clock::now();
+    };
     // NEURA_TIER_CHECK=2 does not check a replayed run. A recorded run is
     // checked: every input the recorder gives it reaches the shadow too.
     if (options.replay) limits.tier_check_off = "the run replays a trace";
@@ -396,6 +409,7 @@ int run(const nvr::Image& image, Host& host, std::span<const std::string> argume
         // output is reproduced from the recorded requests so that the
         // replayed run prints what the recorded one printed.
         const auto expected = read_trace_file(*options.replay);
+        begin();
         const auto replayed = nvm::replay(
             image, expected, arguments, limits, [&](const nvm::TraceEntry& entry) {
                 nvm::replay_console_output(entry.import, entry.version, entry.arguments, entry.completion,
@@ -406,19 +420,28 @@ int run(const nvr::Image& image, Host& host, std::span<const std::string> argume
         }
         result = result_of(replayed.trace);
     } else if (options.record) {
+        // A trace would hold every secret byte: no secret buffer is created.
+        host.secrets.set_recording(true);
         const auto bindings = nvm::bind(image, host.registry);
+        begin();
         const auto trace = nvm::record(image, bindings, arguments, limits, clock);
         host.services.end_run();
+        host.secrets.release_all();
         const auto text = nvm::write_trace(trace);
         write_file(*options.record, std::vector<std::uint8_t>(text.begin(), text.end()));
         result = result_of(trace);
     } else {
         const auto bindings = nvm::bind(image, host.registry);
+        begin();
         result = nvm::run(image, bindings, arguments, limits, clock);
         host.services.end_run();
+        host.secrets.release_all();
     }
     if (options.stats) {
         std::cerr << "stats: steps " << result.steps << ", peak heap cells " << result.peak_heap_cells
+                  // Only an image that uses regions reports their cells (NVR 1.7).
+                  << (nvr::uses_regions(image) ? ", peak stack cells " + std::to_string(result.peak_stack_cells)
+                                               : std::string())
                   << ", host requests " << result.host_requests << ", " << image_costs(image)
                   << ", image bytes " << image_bytes;
         // Only an image with tasks reports them, so other output is unchanged.
@@ -437,6 +460,10 @@ int run(const nvr::Image& image, Host& host, std::span<const std::string> argume
         print_profile(image, result);
     }
     if (!result.completed) {
+        if (options.ending) {
+            options.ending->trapped = true;
+            options.ending->trap_class = std::string(nvm::describe(result.trap.kind));
+        }
         std::cerr << name << ": trap: " << nvm::describe(result.trap, image) << '\n';
         return nvm::exit_status(result.trap);
     }

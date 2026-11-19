@@ -1,7 +1,10 @@
 #include "verifier.hpp"
+#include "any.hpp"
+#include "class_hooks.hpp"
 
 #include "aggregate.hpp"
 #include "attributes.hpp"
+#include "conformance.hpp"
 #include "control_flow.hpp"
 #include "float.hpp"
 #include "host_binding.hpp"
@@ -11,6 +14,7 @@
 #include "reference_storage.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <cstddef>
 #include <set>
 #include <utility>
@@ -33,6 +37,7 @@ std::string_view kind_name(TypeKind kind) {
     case TypeKind::Enum: return "enum";
     case TypeKind::Callable: return "callable";
     case TypeKind::Tuple: return "tuple";
+    case TypeKind::Any: return "any";
     }
     return "<invalid>";
 }
@@ -74,6 +79,8 @@ bool is_statement(IrOp op) {
     case IrOp::Fail:
     case IrOp::TrapMessage:
     case IrOp::TaskScope:
+    case IrOp::Cleanup:
+    case IrOp::Yield:
         return true;
     default:
         return false;
@@ -131,6 +138,9 @@ public:
         check_symbols();
         check_bodies();
         check_static_constants();
+        // Every event is wrapped exactly once (docs/design/Hooks030.md).
+        if (program_.hooks_elaborated && issues_.empty())
+            if (const auto problem = check_class_hook_events(program_)) report({}, "class hook events: " + *problem);
         return std::move(issues_);
     }
 
@@ -142,7 +152,39 @@ private:
         bool scoped_value = false;
         // Enclosing TaskScope statements of this body.
         unsigned task_scopes = 0;
+        // Cleanups registered before this point in the enclosing blocks,
+        // and whether the region is a Cleanup's return list, where Pending
+        // may appear (docs/design/Lifetime030.md).
+        unsigned cleanups = 0;
+        bool return_list = false;
+        bool cleanup_list = false;
     };
+
+    // The suspension indexes of the body being checked, in written order.
+    std::vector<std::uint64_t> yields_;
+
+    // The any tag tests that select the regions being checked: a constant
+    // local of type any and the tag its AnyTag equals (AnyUnpack).
+    std::vector<std::pair<SymbolId, std::uint32_t>> any_tags_;
+
+    // `AnyTag(load L) == k` or `k == AnyTag(load L)` for a constant local L.
+    std::optional<std::pair<SymbolId, std::uint32_t>> tag_fact(const IrNode& condition) const {
+        if (condition.op != IrOp::Binary || condition.text != "==" || condition.operands.size() != 2) return std::nullopt;
+        for (std::size_t i = 0; i < 2; ++i) {
+            const auto& tag = condition.operands[i];
+            const auto& constant = condition.operands[1 - i];
+            if (tag.op != IrOp::AnyTag || tag.operands.size() != 1 || constant.op != IrOp::Integer) continue;
+            const auto& load = tag.operands.front();
+            if (load.op != IrOp::Load || !load.operands.empty() || !valid(load.symbol) ||
+                symbol(load.symbol).kind != SymbolKind::Local || !symbol(load.symbol).constant)
+                continue;
+            std::uint32_t value = 0;
+            const auto [end, error] = std::from_chars(constant.text.data(), constant.text.data() + constant.text.size(), value);
+            if (error != std::errc{} || end != constant.text.data() + constant.text.size()) continue;
+            return std::pair{load.symbol, value};
+        }
+        return std::nullopt;
+    }
 
     const IrProgram& program_;
     std::vector<VerificationIssue> issues_;
@@ -401,6 +443,24 @@ private:
                                                                         : AttributeId::AccessorSet;
                 const auto* back = symbol(field).kind == SymbolKind::Field ? find_attribute(symbol(field), link)
                                                                             : nullptr;
+                // A property adapter (docs/design/Records030.md) serves a field
+                // without clauses, its class's own or inherited, which does not
+                // name it, so outside access to the field stays direct.
+                const auto* made = find_attribute(entry, AttributeId::Generated);
+                // An accessor override serves the inherited field of the
+                // accessor it overrides.
+                if (valid(entry.overrides)) {
+                    if (accessor_of(entry.overrides) != accessor_of(id))
+                        report(entry.span, "accessor override " + name(id) + " serves " + name(field) +
+                                           ", which the accessor it overrides does not serve");
+                    break;
+                }
+                if (made && made->value.items[0].text == "property.adapter") {
+                    if (symbol(field).kind != SymbolKind::Field || back || !entry.has_body)
+                        report(entry.span, "adapter " + name(id) + " serves " + name(field) +
+                                           ", which is not a field without accessors");
+                    break;
+                }
                 if (!back || back->value.symbol != id || symbol(field).owner != entry.owner) {
                     report(entry.span, "accessor " + name(id) + " serves " + name(field) +
                                        ", which does not name it");
@@ -411,6 +471,20 @@ private:
                 if (!valid(entry.owner) || symbol(entry.owner).kind != SymbolKind::Class)
                     report(entry.span, "synchronized marks a method of a class, not " + name(id));
                 break;
+            case AttributeId::HostEffects:
+                // A function with a body is summarized from its body; a
+                // contract on one would be trusted by nobody.
+                if (entry.has_body || !entry.external || !entry.host_binding)
+                    report(entry.span, "a host-effects contract belongs to a host binding without a body, not " +
+                                           name(id));
+                break;
+            case AttributeId::UiFactory: {
+                const auto descriptor = attribute.value.symbol;
+                if (valid(descriptor) && (symbol(descriptor).kind != SymbolKind::Global ||
+                    !symbol(descriptor).constant || symbol(descriptor).type.kind != TypeKind::String))
+                    report(entry.span, "the descriptor of " + name(id) + " must be a string constant");
+                break;
+            }
             case AttributeId::KernelBinding:
                 if (attribute.value.items[0].text.empty())
                     report(entry.span, "a kernel binding of " + name(id) + " needs a kernel name");
@@ -423,10 +497,133 @@ private:
                      symbol(source_file(program_, id)).library_path.empty()))
                     report(entry.span, "invalid standard library kernel binding of " + name(id));
                 break;
+            case AttributeId::ParameterDefault:
+            case AttributeId::ParameterDefaultVariant:
+                check_parameter_default(id, entry, attribute);
+                break;
+            case AttributeId::FunctionExtension:
+                if (entry.parameters.empty())
+                    report(entry.span, "an extension function needs a receiver parameter, and " + name(id) +
+                                           " has none");
+                break;
+            case AttributeId::ClassRecord:
+                check_record(id, entry, attribute.value.symbol);
+                break;
+            case AttributeId::StaticImplements: {
+                // docs/design/Records030.md: the requirement is a bodyless
+                // static function of an interface, and its implementation a
+                // static function with a body and as many parameters.
+                const auto requirement = attribute.value.items[0].symbol;
+                const auto& required = symbol(requirement);
+                const bool is_requirement = required.kind == SymbolKind::Function && !required.has_body &&
+                    !required.external && valid(required.owner) && is_static_scope(symbol(required.owner)) &&
+                    valid(symbol(required.owner).owner) &&
+                    symbol(symbol(required.owner).owner).kind == SymbolKind::Interface;
+                if (!is_requirement || !entry.has_body || !valid(entry.owner) ||
+                    symbol(entry.owner).kind != SymbolKind::Module ||
+                    entry.parameters.size() != required.parameters.size())
+                    report(entry.span, "static.implements of " + name(id) + " names " + name(requirement) +
+                                           ", which it does not implement");
+                break;
+            }
+            case AttributeId::AccessorVirtual:
+                if (!find_attribute(entry, AttributeId::AccessorOf) || !entry.has_body)
+                    report(entry.span, "accessor.virtual marks an accessor with a body, not " + name(id));
+                break;
+            case AttributeId::PropertyRequirement: {
+                const auto setter = attribute.value.items[1].integer == 1;
+                const auto expected = std::string(setter ? "$set_" : "$get_") + attribute.value.items[0].text;
+                if (entry.has_body || entry.name != expected || !valid(entry.owner) ||
+                    symbol(entry.owner).kind != SymbolKind::Interface ||
+                    entry.parameters.size() != (setter ? 1U : 0U))
+                    report(entry.span, "property requirement " + name(id) + " is not a bodyless '" + expected +
+                                           "' of an interface");
+                break;
+            }
+            case AttributeId::Generated: {
+                const auto& generator = attribute.value.items[0].text;
+                if (generator != "record" && generator != "property.adapter" && generator != "derive:json.codec")
+                    report(entry.span, name(id) + " names the unknown generator '" + generator + "'");
+                break;
+            }
             default:
                 break;
             }
         }
+    }
+
+    // A record (docs/design/Records030.md) names its own constructor, and
+    // every instance field it declares is assigned once.
+    void check_record(SymbolId id, const IrSymbol& entry, SymbolId constructor) {
+        if (symbol(constructor).kind != SymbolKind::Function || symbol(constructor).owner != id ||
+            symbol(constructor).name != "init")
+            report(entry.span, "record " + name(id) + " names " + name(constructor) + " as its constructor");
+        for (SymbolId field = 0; field < program_.symbols.size(); ++field) {
+            const auto& item = symbol(field);
+            if (item.kind == SymbolKind::Field && item.owner == id && !last_binding(item))
+                report(item.span, "field " + name(field) + " of record " + name(id) + " is not 'last'");
+        }
+    }
+
+    // A default (docs/design/Calls030.md) belongs to a parameter of a
+    // function without a variadic parameter, and its literal is a value of
+    // the parameter's type.
+    void check_parameter_default(SymbolId id, const IrSymbol& entry, const IrAttribute& attribute) {
+        if (!valid(entry.owner) || symbol(entry.owner).kind != SymbolKind::Function ||
+            symbol(entry.owner).variadic != VariadicKind::None) {
+            report(entry.span, "a default of " + name(id) + " belongs to a parameter of a function without a variadic "
+                                                             "parameter");
+            return;
+        }
+        const auto& type = entry.type;
+        if (attribute.id == AttributeId::ParameterDefaultVariant) {
+            const auto& variant = symbol(attribute.value.symbol);
+            if (variant.kind != SymbolKind::Variant || !variant.payload_types.empty() || type.kind != TypeKind::Enum ||
+                type.symbol != variant.owner)
+                report(entry.span, "the default of " + name(id) + " is not a variant without payload of its type");
+            return;
+        }
+        const auto kind = attribute.value.items[0].integer;
+        const auto& literal = attribute.value.items[1];
+        const auto width = [&]() -> unsigned {
+            unsigned bits = 0;
+            const auto digits = std::string_view(type.name).substr(type.name.starts_with("int") ? 3 : 4);
+            std::from_chars(digits.data(), digits.data() + digits.size(), bits);
+            return bits;
+        };
+        bool fits = false;
+        switch (kind) {
+        case 0:
+            fits = type.kind == TypeKind::Bool && literal.kind == AttributeValueKind::Bool;
+            break;
+        case 1:
+            if (type.kind == TypeKind::Integer && type.name.starts_with("int") &&
+                literal.kind == AttributeValueKind::Signed) {
+                const auto bits = width();
+                const auto value = attribute_signed_value(literal);
+                fits = bits == 64 || (value >= -(std::int64_t{1} << (bits - 1)) &&
+                                      value < (std::int64_t{1} << (bits - 1)));
+            }
+            break;
+        case 2:
+            if (type.kind == TypeKind::Integer && type.name.starts_with("uint") &&
+                literal.kind == AttributeValueKind::Unsigned) {
+                const auto bits = width();
+                fits = bits == 64 || literal.integer < (std::uint64_t{1} << bits);
+            }
+            break;
+        case 3:
+            if (const auto format = float_format(type); format && literal.kind == AttributeValueKind::Unsigned)
+                fits = format->width() == 64 || literal.integer < (std::uint64_t{1} << format->width());
+            break;
+        case 4:
+            fits = type.kind == TypeKind::String && literal.kind == AttributeValueKind::Text;
+            break;
+        default:
+            fits = class_reference(type) && literal.kind == AttributeValueKind::Bool && literal.integer == 0;
+            break;
+        }
+        if (!fits) report(entry.span, "the default of " + name(id) + " is not a value of " + type.name);
     }
 
     void check_static_constants() {
@@ -477,7 +674,9 @@ private:
                 report(span, "symbol " + name(body.owner) + " cannot own a body");
                 continue;
             }
+            yields_.clear();
             check_region(body.instructions, context);
+            check_yield_indexes(span);
             if (context.function != no_symbol && owner.type.kind != TypeKind::Void &&
                 !always_returns(body.instructions)) {
                 report(span, "function " + name(body.owner) + " can finish without returning " +
@@ -488,10 +687,72 @@ private:
 
     void check_region(const std::vector<IrNode>& region, Context& context) {
         scopes_.emplace_back();
+        const auto cleanups = context.cleanups;
         for (const auto& node : region) {
             check_statement(node, context);
+            // A Cleanup is registered from where it stands to the end of
+            // its block.
+            if (node.op == IrOp::Cleanup) ++context.cleanups;
         }
+        context.cleanups = cleanups;
         scopes_.pop_back();
+    }
+
+    // docs/design/Lifetime030.md, Lowering and artifacts: a Cleanup is a
+    // direct statement of a block of a function body; its lists neither
+    // break nor continue, and its return list exists only in a function
+    // that returns a value.
+    void check_cleanup(const IrNode& node, Context& context) {
+        expect_operands(node, 0, "cleanup");
+        if (context.function == no_symbol) report(node.span, "a cleanup appears outside a function body");
+        if (context.scoped_value) report(node.span, "a cleanup appears among the statements of a scoped value");
+        if (context.cleanup_list) report(node.span, "a cleanup appears inside a cleanup list");
+        if (node.body.empty()) report(node.span, "a cleanup has an empty list");
+        const auto loop_control = [](const auto& self, const std::vector<IrNode>& region) -> bool {
+            return std::ranges::any_of(region, [&](const IrNode& item) {
+                return item.op == IrOp::Break || item.op == IrOp::Continue ||
+                       (item.op != IrOp::Loop && (self(self, item.body) || self(self, item.alternative)));
+            });
+        };
+        if (loop_control(loop_control, node.body) || loop_control(loop_control, node.alternative))
+            report(node.span, "a cleanup list contains break or continue");
+        if (!node.alternative.empty() && valid(context.function) && symbol(context.function).type.kind == TypeKind::Void)
+            report(node.span, "a cleanup has a return list in a function that returns no value");
+        auto inner = context;
+        inner.cleanup_list = true;
+        inner.loops = 0;
+        check_region(node.body, inner);
+        inner.return_list = true;
+        check_region(node.alternative, inner);
+    }
+
+    // A Yield is a direct statement of a function that carries
+    // generator.resume, outside every task scope and every registered
+    // cleanup, and no local is in scope where it stands.
+    void check_yield(const IrNode& node, const Context& context) {
+        expect_operands(node, 0, "yield");
+        if (!valid(context.function) || !has_attribute(symbol(context.function), AttributeId::GeneratorResume))
+            report(node.span, "a yield appears outside a generator's resume function");
+        if (context.task_scopes != 0) report(node.span, "a yield appears inside a task scope");
+        if (context.cleanups != 0 || context.cleanup_list) report(node.span, "a yield appears with a cleanup pending");
+        for (const auto& scope : scopes_)
+            for (const auto local : scope)
+                if (valid(local) && symbol(local).kind == SymbolKind::Local)
+                    report(node.span, "a yield appears in the scope of the local " + name(local));
+        std::uint64_t index = 0;
+        const auto [end, error] = std::from_chars(node.text.data(), node.text.data() + node.text.size(), index);
+        if (error != std::errc{} || end != node.text.data() + node.text.size() || index == 0)
+            report(node.span, "a yield's suspension index is not a positive integer");
+        yields_.push_back(index);
+    }
+
+    void check_yield_indexes(const Span& span) {
+        for (std::size_t i = 0; i < yields_.size(); ++i)
+            if (yields_[i] != i + 1) {
+                report(span, "the suspension indexes of a body are not 1 to " + std::to_string(yields_.size()) +
+                             " in written order");
+                return;
+            }
     }
 
     bool visible(SymbolId local) const {
@@ -544,7 +805,7 @@ private:
             return;
         }
         if (node.op != IrOp::Block && node.op != IrOp::Branch && node.op != IrOp::Loop &&
-            node.op != IrOp::TaskScope) {
+            node.op != IrOp::TaskScope && node.op != IrOp::Cleanup) {
             expect_no_regions(node, "a simple statement");
         }
         if (node.type.kind != TypeKind::Void) {
@@ -565,14 +826,18 @@ private:
             }
             check_region(node.body, context);
             break;
-        case IrOp::Branch:
+        case IrOp::Branch: {
             if (expect_operands(node, 1, "branch")) {
                 check_value(node.operands.front(), context);
                 expect_type(node.operands.front(), TypeKind::Bool, "branch condition");
             }
+            const auto selected = node.operands.empty() ? std::nullopt : tag_fact(node.operands.front());
+            if (selected) any_tags_.push_back(*selected);
             check_region(node.body, context);
+            if (selected) any_tags_.pop_back();
             check_region(node.alternative, context);
             break;
+        }
         case IrOp::Loop:
             if (expect_operands(node, 1, "loop")) {
                 check_value(node.operands.front(), context);
@@ -613,6 +878,8 @@ private:
             --context.task_scopes;
             break;
         case IrOp::Return: check_return(node, context); break;
+        case IrOp::Cleanup: check_cleanup(node, context); break;
+        case IrOp::Yield: check_yield(node, context); break;
         case IrOp::Break:
         case IrOp::Continue:
             expect_operands(node, 0, "loop control");
@@ -802,7 +1069,8 @@ private:
         }
         const auto& destination = node.operands[0];
         const auto& source = node.operands[1];
-        if (destination.op != IrOp::Load && destination.op != IrOp::Field && destination.op != IrOp::Index) {
+        if (destination.op != IrOp::Load && destination.op != IrOp::Field && destination.op != IrOp::Index &&
+            destination.op != IrOp::Pending) {
             report(destination.span, "store destination is not a binding, field, or element");
         }
         check_value(destination, context);
@@ -819,11 +1087,9 @@ private:
         require_assignable(source.type, destination.type, node.span, "stored value");
     }
 
+    // NeuraIR 1.12: a return may leave a scoped value, as the postfix `?`
+    // does (docs/design/Matching030.md); break and continue still cannot.
     void check_return(const IrNode& node, Context& context) {
-        if (context.scoped_value) {
-            report(node.span, "return cannot leave a scoped value");
-            return;
-        }
         if (context.function == no_symbol) {
             report(node.span, "return appears outside a function body");
             return;
@@ -892,6 +1158,39 @@ private:
             expect_operands(node, 0, "nil");
             if (!class_reference(node.type)) report(node.span, "nil must have a class reference type");
             break;
+        case IrOp::AnyPack:
+            // A type parameter's value is checked on the specialized program.
+            if (expect_operands(node, 1, "any pack") && !any_holdable(node.operands.front().type) &&
+                node.operands.front().type.kind != TypeKind::TypeParameter)
+                report(node.span, "any pack requires a value that an any can hold, not " +
+                                  describe(node.operands.front().type));
+            if (node.type.kind != TypeKind::Any) report(node.span, "any pack must produce an any");
+            break;
+        case IrOp::AnyTag:
+            if (expect_operands(node, 1, "any tag") && node.operands.front().type.kind != TypeKind::Any)
+                report(node.span, "any tag requires an any");
+            if (node.type != IrType{TypeKind::Integer, "uint32", no_symbol, {}}) report(node.span, "any tag must produce uint32");
+            break;
+        case IrOp::AnyUnpack: {
+            if (!expect_operands(node, 1, "any unpack")) break;
+            const auto tag = any_tag(node.type);
+            if (!tag || (node.type.kind == TypeKind::Object && !class_reference(node.type))) {
+                report(node.span, "any unpack must produce a value that an any can hold");
+                break;
+            }
+            const auto& source = node.operands.front();
+            const bool local = source.op == IrOp::Load && source.operands.empty() && valid(source.symbol) &&
+                               symbol(source.symbol).kind == SymbolKind::Local && symbol(source.symbol).constant &&
+                               source.type.kind == TypeKind::Any;
+            if (!local) {
+                report(node.span, "any unpack must read a constant local of type any");
+                break;
+            }
+            if (std::ranges::find(any_tags_, std::pair{source.symbol, *tag}) == any_tags_.end())
+                report(node.span, "any unpack of " + name(source.symbol) + " as " + describe(node.type) +
+                                  " is not inside a region selected by a test of its tag " + std::to_string(*tag));
+            break;
+        }
         case IrOp::ClassHash:
         case IrOp::ClassText:
         case IrOp::ClassCast:
@@ -1014,6 +1313,22 @@ private:
         case IrOp::TextEqual:
             check_text_operation(node);
             break;
+        case IrOp::TypeOf: {
+            const IrType parts{TypeKind::Tuple, {}, no_symbol,
+                               {IrType{TypeKind::Integer, "int32", no_symbol, {}},
+                                IrType{TypeKind::String, "string", no_symbol, {}},
+                                IrType{TypeKind::String, "string", no_symbol, {}}}};
+            if (node.type != parts) report(node.span, "typeof yields [int32, string, string]");
+            if (node.operands.size() > 1 || (node.operands.empty() && node.type_arguments.size() != 1))
+                report(node.span, "typeof takes one operand or one type argument");
+            break;
+        }
+        case IrOp::ConcatText:
+            if (node.operands.size() < 2) report(node.span, "a text concatenation needs at least two operands");
+            for (const auto& operand : node.operands)
+                require_assignable(operand.type, IrType{TypeKind::String, "string", no_symbol, {}}, operand.span, "text concatenation operand");
+            if (node.type.kind != TypeKind::String) report(node.span, "a text concatenation yields a string");
+            break;
         case IrOp::ReinterpretFloat:
             if (expect_operands(node, 1, "float bit reinterpretation")) {
                 const auto& source = node.operands.front().type;
@@ -1024,6 +1339,16 @@ private:
             break;
         case IrOp::ScopedValue:
             check_scoped_value(node, context, allow_void);
+            break;
+        case IrOp::Pending:
+            expect_operands(node, 0, "pending");
+            if (!context.return_list || !valid(context.function) ||
+                symbol(context.function).type.kind == TypeKind::Void) {
+                report(node.span, "pending appears outside a cleanup's return list");
+            } else if (node.type != symbol(context.function).type) {
+                report(node.span, "pending has type " + describe(node.type) + ", not the function's result type " +
+                                  describe(symbol(context.function).type));
+            }
             break;
         case IrOp::SelectValue:
             check_select_value(node, context);
@@ -1045,6 +1370,18 @@ private:
         case IrOp::SchedulerCall:
             check_scheduler_call(node);
             break;
+        case IrOp::HookRead:
+        case IrOp::HookAdmit:
+            // docs/design/Hooks030.md, Stored form: only in an elaborated
+            // program, where the events are checked as a whole in run().
+            if (!program_.hooks_elaborated) report(node.span, "a class hook event outside an elaborated program");
+            if (expect_operands(node, 1, node.op == IrOp::HookRead ? "hook read" : "hook admission")) {
+                if (node.op == IrOp::HookRead && node.type != node.operands.front().type)
+                    report(node.span, "a hook read has the type of its operand");
+                if (node.op == IrOp::HookAdmit)
+                    require_assignable(node.operands.front().type, node.type, node.span, "admitted value");
+            }
+            break;
         case IrOp::CallClosure:
             check_call_closure(node);
             break;
@@ -1055,6 +1392,9 @@ private:
             }
             check_arity(node, 1);
             check_type_arguments(node);
+            break;
+        case IrOp::ConformanceCall:
+            check_conformance_call(node);
             break;
         case IrOp::ExternalCall:
             if (check_symbol_kind(node, {SymbolKind::Function}, "external call") &&
@@ -1157,6 +1497,48 @@ private:
         return true;
     }
 
+    // A call of a static requirement (docs/design/Records030.md) names a
+    // bodyless static function of an interface and goes through a type
+    // parameter that a bound of that interface constrains. Specialization
+    // replaces every one that runs, so one through a concrete type is left
+    // over.
+    void check_conformance_call(const IrNode& node) {
+        if (!check_symbol_kind(node, {SymbolKind::Function}, "conformance call")) return;
+        const auto& requirement = symbol(node.symbol);
+        const auto scope = requirement.owner;
+        if (requirement.has_body || requirement.external || !valid(scope) || !is_static_scope(symbol(scope)) ||
+            !valid(symbol(scope).owner) || symbol(symbol(scope).owner).kind != SymbolKind::Interface) {
+            report(node.span, "conformance call targets " + name(node.symbol) +
+                                  ", which is not a static requirement of an interface");
+            return;
+        }
+        check_arity(node, 0);
+        if (node.type_arguments.size() != 1) {
+            report(node.span, "conformance call names " + std::to_string(node.type_arguments.size()) +
+                                  " types; it goes through exactly one");
+            return;
+        }
+        const auto& through = node.type_arguments.front();
+        if (through.kind != TypeKind::TypeParameter) {
+            report(node.span, "conformance call through " + describe(through) + " remains after specialization");
+            return;
+        }
+        const auto interface = symbol(scope).owner;
+        bool bounded = false;
+        if (valid(through.symbol)) {
+            const auto& parameter = symbol(through.symbol);
+            std::vector<IrType> bounds;
+            if (parameter.bound) bounds.push_back(*parameter.bound);
+            bounds.insert(bounds.end(), parameter.additional_bounds.begin(), parameter.additional_bounds.end());
+            for (const auto& bound : bounds) {
+                for (const auto& view : nominal_views(program_, bound)) bounded = bounded || view.symbol == interface;
+            }
+        }
+        if (!bounded)
+            report(node.span, "conformance call through " + describe(through) + ", which no bound of " +
+                                  name(interface) + " constrains");
+    }
+
     void check_arity(const IrNode& node, std::size_t leading) {
         const auto parameters = valid(node.symbol) ? symbol(node.symbol).parameters.size() : 0;
         if (node.operands.size() != leading + parameters) {
@@ -1180,6 +1562,13 @@ private:
     }
 
     void check_make_closure(const IrNode& node) {
+        if (!node.text.empty() && node.text != bound_closure && node.text != generator_closure &&
+            !explicitly_owned_closure(node)) {
+            report(node.span, "unknown closure construction form");
+        }
+        if ((node.text == bound_closure || node.text == owned_bound) && node.operands.size() != 1) {
+            report(node.span, "a bound method requires one captured receiver");
+        }
         if (!is_function_value(node.type)) {
             report(node.span, "closure construction requires a function type");
             return;
@@ -1257,7 +1646,8 @@ private:
             const auto& parameter = symbol(generics[i]);
             const auto check = [&](const IrType& declared) {
                 const auto bound = substitute_type(declared, generics, node.type_arguments);
-                if (!assignable(node.type_arguments[i], bound)) {
+                if (!assignable(node.type_arguments[i], bound) &&
+                    !primitive_conforms(program_, node.type_arguments[i], bound)) {
                     report(node.span, "type argument " + describe(node.type_arguments[i]) + " does not satisfy the bound " +
                                       describe(bound) + " of " + name(generics[i]));
                 }
@@ -1370,12 +1760,16 @@ private:
     void check_select_value(const IrNode& node, Context& context) {
         if (expect_operands(node, 1, "select value"))
             expect_type(node.operands.front(), TypeKind::Bool, "selection condition");
+        const auto selected = node.operands.empty() ? std::nullopt : tag_fact(node.operands.front());
         for (const auto* region : {&node.body, &node.alternative}) {
             if (region->size() != 1) {
                 report(node.span, "each selection arm needs one result expression");
                 continue;
             }
+            const bool fact = selected && region == &node.body;
+            if (fact) any_tags_.push_back(*selected);
             check_value(region->front(), context);
+            if (fact) any_tags_.pop_back();
             require_assignable(region->front().type, node.type, node.span, "selection arm");
         }
     }

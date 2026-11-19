@@ -1,0 +1,349 @@
+let filesystem = import:Std.Fs.Fs;
+let hashing = import:Std.Core.Hash;
+let ips = import:Std.Net.Core.IpAddr;
+let.promote _ = import:Std.Net.Core.NetAddress;
+let paths = import:Std.Fs.Path;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+
+/// @brief The static host table `/etc/hosts`: parsing, forward lookup and reverse lookup.
+///
+/// The format follows hosts(5) as installed on the development machine (`man 5 hosts`, read 2026-11-17):
+/// one line per address, `IP_address canonical_hostname [aliases...]`, fields separated by any number of
+/// blanks or tabs, and text from `#` to the end of the line ignored. The address is IPv4 or IPv6 (an IPv6
+/// zone such as `fe80::1%eth0` is accepted, as `Std.Net.Core.IpAddr.parse` reads it). A name holds only
+/// ASCII letters, digits, `-` and `.`; each dot-separated label is 1 to 63 bytes and begins and ends with a
+/// letter or digit, and the whole name is at most 253 bytes; one trailing dot is accepted and dropped.
+/// hosts(5) asks a name to begin with a letter; this parser also accepts a leading digit, as RFC 1123
+/// section 2.1 allows. A line with an invalid address, with no name, or with an invalid name is skipped as a
+/// whole and reported as a `HostsProblem`; parsing never fails. Lookups compare names ASCII
+/// case-insensitively and answer in file order, both families together.
+/// @see [Std.Net.Dns.HostsFile](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-HostsFile)
+#Since("0.3.0")
+export let HostsFile = module (
+    /// @brief The usual location of the host table.
+    export const DefaultPath = "/etc/hosts";
+
+    /// @brief One accepted line: an address and its names, the canonical name first.
+    #Final
+    export let HostsEntry = class (
+        /// @brief The address of the line.
+        export last address: ips.IpAddr;
+        /// @brief The canonical name followed by the aliases, as written (trailing dot dropped).
+        export last names: string[list];
+
+        /// @brief An entry for `ip` with `host_names` (at least one).
+        export let init = func(ip: ips.IpAddr, host_names: string[list]) {
+            address = ip;
+            names = host_names;
+        };
+
+        /// @brief The first name on the line.
+        #NoDiscard
+        export let canonical_name = func -> string => names[0];
+
+        /// @brief Whether `name` is one of the entry's names, ASCII case-insensitively, a trailing dot ignored.
+        #NoDiscard
+        export let has_name = func(name: string) -> bool {
+            last wanted = normalize(name);
+            for (let n in names) {
+                if (strings.to_ascii_lower(n) == wanted) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        /// @brief Equal when the addresses are equal and the names are equal in order (case-sensitively).
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: HostsEntry) {
+                return false;
+            }
+            if (not ips.equals(address, that.address) || names.length != that.names.length) {
+                return false;
+            }
+            for (let i = 0; i < names.length; i++) {
+                if (names[i] != that.names[i]) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        /// @brief Combines the address hash and the name hashes.
+        export let.override hash_code = func -> uint32 {
+            let hash = ips.hash(address);
+            for (let n in names) {
+                hash = hashing.combine(hash, strings.hash(n));
+            }
+            return hash;
+        };
+
+        /// @brief The line form, such as "127.0.0.1 localhost loopback".
+        export let.override to_string = func -> string =>
+            ips.to_string(address) .. " " .. strings.join(names, " ");
+    );
+
+    /// @brief A skipped line: its 1-based number, its text, and why it was skipped.
+    #Final
+    export let HostsProblem = class (
+        /// @brief The 1-based line number.
+        export last line: int;
+        /// @brief The line as read, without its end-of-line characters.
+        export last text: string;
+        /// @brief Why the line was skipped.
+        export last reason: string;
+
+        /// @brief A problem on line `number`.
+        export let init = func(number: int, line_text: string, why: string) {
+            line = number;
+            text = line_text;
+            reason = why;
+        };
+
+        /// @brief Equal when the line number, text and reason are equal.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: HostsProblem) {
+                return false;
+            }
+            return line == that.line && text == that.text && reason == that.reason;
+        };
+
+        /// @brief Combines the line number, text and reason.
+        export let.override hash_code = func -> uint32 =>
+            hashing.combine(hashing.combine(line as uint32, strings.hash(text)), strings.hash(reason));
+
+        /// @brief Text such as "line 3: invalid address".
+        export let.override to_string = func -> string => "line " .. line.to_string() .. ": " .. reason;
+    );
+
+    /// @brief A parsed host table: its entries in file order and the lines it skipped.
+    #Final
+    export let HostsFile = class (
+        /// @brief The accepted lines in file order.
+        last table: HostsEntry[list];
+        /// @brief The skipped lines in file order.
+        last skipped: HostsProblem[list];
+
+        /// @brief A table of `accepted` entries and `rejected` lines.
+        export let init = func(accepted: HostsEntry[list], rejected: HostsProblem[list]) {
+            table = accepted;
+            skipped = rejected;
+        };
+
+        /// @brief The accepted entries in file order.
+        #NoDiscard
+        export let entries = func -> HostsEntry[list] => table;
+
+        /// @brief The skipped lines in file order.
+        #NoDiscard
+        export let problems = func -> HostsProblem[list] => skipped;
+
+        /// @brief The number of accepted entries.
+        #NoDiscard
+        export let size = func -> int => table.length;
+
+        /// @brief Every address listed for `name`, in file order, both families; empty when none.
+        #NoDiscard
+        export let lookup = func(name: string) -> ips.IpAddr[list] {
+            last found: ips.IpAddr[list] = new;
+            for (let entry in table) {
+                if (entry.has_name(name)) {
+                    found.append(entry.address);
+                }
+            }
+            return found;
+        };
+
+        /// @brief The addresses of `name` of one family (`AddressFamily.Ipv4` or `Ipv6`), in file order.
+        #NoDiscard
+        export let lookup_family = func(name: string, wanted: AddressFamily) -> ips.IpAddr[list] {
+            last found: ips.IpAddr[list] = new;
+            for (let ip in lookup(name)) {
+                if (ips.family(ip) == wanted) {
+                    found.append(ip);
+                }
+            }
+            return found;
+        };
+
+        /// @brief The IPv4 addresses of `name`.
+        #NoDiscard
+        export let lookup_v4 = func(name: string) -> ips.IpAddr[list] => lookup_family(name, AddressFamily.Ipv4);
+
+        /// @brief The IPv6 addresses of `name`.
+        #NoDiscard
+        export let lookup_v6 = func(name: string) -> ips.IpAddr[list] => lookup_family(name, AddressFamily.Ipv6);
+
+        /// @brief Every name listed for `ip` (equal addresses, zone included), in file order, canonical names
+        /// first within each line; empty when none.
+        #NoDiscard
+        export let reverse = func(ip: ips.IpAddr) -> string[list] {
+            last found: string[list] = new;
+            for (let entry in table) {
+                if (ips.equals(entry.address, ip)) {
+                    for (let n in entry.names) {
+                        found.append(n);
+                    }
+                }
+            }
+            return found;
+        };
+
+        /// @brief Equal when the entries and the problems are equal, in order.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: HostsFile) {
+                return false;
+            }
+            if (table.length != that.table.length || skipped.length != that.skipped.length) {
+                return false;
+            }
+            for (let i = 0; i < table.length; i++) {
+                return false unless table[i].equals(that.table[i]);
+            }
+            for (let i = 0; i < skipped.length; i++) {
+                return false unless skipped[i].equals(that.skipped[i]);
+            }
+            return true;
+        };
+
+        /// @brief Combines the hashes of the entries and the problems, consistent with equals.
+        export let.override hash_code = func -> uint32 {
+            let hash: uint32 = 17;
+            for (let entry in table) {
+                hash = hashing.combine(hash, entry.hash_code());
+            }
+            for (let problem in skipped) {
+                hash = hashing.combine(hash, problem.hash_code());
+            }
+            return hash;
+        };
+
+        /// @brief Text such as "HostsFile(3 entries, 1 problems)".
+        export let.override to_string = func -> string =>
+            "HostsFile(" .. table.length.to_string() .. " entries, " .. skipped.length.to_string() .. " problems)";
+    );
+
+    /// @brief A table with no entries.
+    #NoDiscard
+    export let empty = func -> HostsFile => new HostsFile(new, new);
+
+    /// @brief Parses host-table text; never fails. Invalid lines are skipped and listed in `problems`.
+    #NoDiscard
+    export let parse = func(text: string) -> HostsFile {
+        last accepted: HostsEntry[list] = new;
+        last rejected: HostsProblem[list] = new;
+        last lines = strings.lines(text);
+        for (let i = 0; i < lines.length; i++) {
+            last raw = lines[i];
+            last fields = fields_of(strip_comment(raw));
+            if (fields.length == 0) {
+                continue;
+            }
+            last parsed = ips.parse(fields[0]);
+            match (parsed) {
+                Result.Err(_) => {
+                    rejected.append(new HostsProblem(i + 1, raw, "invalid address " .. fields[0]));
+                },
+                Result.Ok(ip) => {
+                    if (fields.length < 2) {
+                        rejected.append(new HostsProblem(i + 1, raw, "no host name"));
+                    } else {
+                        last names: string[list] = new;
+                        let why = "";
+                        for (let k = 1; k < fields.length && why == ""; k++) {
+                            last problem = name_problem(fields[k]);
+                            if (problem != "") {
+                                why = "invalid host name " .. fields[k] .. ": " .. problem;
+                            } else {
+                                names.append(drop_trailing_dot(fields[k]));
+                            }
+                        }
+                        if (why != "") {
+                            rejected.append(new HostsProblem(i + 1, raw, why));
+                        } else {
+                            accepted.append(new HostsEntry(ip, names));
+                        }
+                    }
+                },
+            }
+        }
+        return new HostsFile(accepted, rejected);
+    };
+
+    /// @brief Reads and parses the file at `path` (usually `DefaultPath`). Fails only when the file cannot be
+    /// read as UTF-8 text.
+    #NoDiscard
+    export let read = func(path: string) -> Result<HostsFile> {
+        last text = filesystem.read_text(new paths.Path(path))?;
+        return Result<HostsFile>.Ok(parse(text));
+    };
+
+    /// @brief Why `name` is not a valid host-table name, or "" when it is.
+    #NoDiscard
+    export let name_problem = func(name: string) -> string {
+        last body = drop_trailing_dot(name);
+        if (body.byte_length == 0) {
+            return "empty name";
+        }
+        if (body.byte_length > 253) {
+            return "name longer than 253 bytes";
+        }
+        let label_start = 0;
+        for (let i = 0; i <= body.byte_length; i++) {
+            if (i == body.byte_length || body.byte_at(i) == 46) {
+                last length = i - label_start;
+                if (length == 0) {
+                    return "empty label";
+                }
+                if (length > 63) {
+                    return "label longer than 63 bytes";
+                }
+                if (not is_alnum(body.byte_at(label_start)) || not is_alnum(body.byte_at(i - 1))) {
+                    return "label must begin and end with a letter or digit";
+                }
+                label_start = i + 1;
+            } else if (not is_alnum(body.byte_at(i)) && body.byte_at(i) != 45) {
+                return "invalid character";
+            }
+        }
+        return "";
+    };
+
+    /// @brief Lower-cases a name and drops one trailing dot, the form lookups compare.
+    let normalize = func(name: string) -> string => strings.to_ascii_lower(drop_trailing_dot(name));
+
+    /// @brief The name without one trailing dot.
+    let drop_trailing_dot = func(name: string) -> string {
+        return if (name.byte_length > 0 && name.byte_at(name.byte_length - 1) == 46) -> name.slice(0, name.byte_length - 1)
+            else -> name;
+    };
+
+    /// @brief Whether the byte is an ASCII letter or digit.
+    let is_alnum = func(b: uint8) -> bool => (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122);
+
+    /// @brief The line up to its first `#`.
+    let strip_comment = func(line: string) -> string {
+        last hash = strings.index_of(line, "#");
+        return hash < 0 ? line : line.slice(0, hash);
+    };
+
+    /// @brief The fields of a line separated by spaces, tabs and carriage returns.
+    let fields_of = func(line: string) -> string[list] {
+        last fields: string[list] = new;
+        let start = -1;
+        for (let i = 0; i <= line.byte_length; i++) {
+            last blank = i == line.byte_length || line.byte_at(i) == 32 || line.byte_at(i) == 9
+                || line.byte_at(i) == 13;
+            if (blank) {
+                if (start >= 0) {
+                    fields.append(line.slice(start, i));
+                    start = -1;
+                }
+            } else if (start < 0) {
+                start = i;
+            }
+        }
+        return fields;
+    };
+);

@@ -1,0 +1,8 @@
+error[E0243]: template nesting a browser would repair
+ --> $DIR/template-link-repair.nra:1:34
+  |
+1 | let view = html() { <a href="/x"><button>Save</button></a> };
+  |                                  ^^^^^^^^ move this interactive element outside the enclosing tag
+  |                     ------------- enclosing element starts here
+
+For more information about this error, try `neura explain E0243`.

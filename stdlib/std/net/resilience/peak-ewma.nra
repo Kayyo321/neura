@@ -1,0 +1,157 @@
+let.promote _ = import:Std.Time.Clock;
+let durations = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let balancers = import:Std.Net.Resilience.LoadBalancer;
+let maths = import:Std.Math.Math;
+let randoms = import:Std.Random.Random;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief A load balancer by Peak EWMA latency, after Finagle's `PeakEwma` balancer and Linkerd's (tower)
+/// `PeakEwma`: power of two choices over a cost that combines a latency estimate with pending requests.
+///
+/// Each endpoint keeps a latency estimate `rtt` in nanoseconds, starting at `default_rtt`, and the monotonic time
+/// `stamp` of its last update. Observing a latency `x` at time `now` (the injected clock's monotonic reading) does:
+///
+/// - if `x > rtt` (a peak): `rtt = x`;
+/// - otherwise `w = exp(-(now - stamp) / tau)` and `rtt = rtt * w + x * (1 - w)`;
+/// - then `stamp = now`.
+///
+/// `report` observes the request's latency, whatever its outcome. Reading an endpoint's cost first observes a zero
+/// latency at the current time, so an idle estimate decays toward zero with time constant `tau`, and the cost is
+/// `rtt * (pending + 1)`. `pick` draws two distinct endpoints as `PowerOfTwoChoices` does and takes the one with the
+/// lower cost; a tie goes to the first draw. One endpoint is picked without drawing.
+/// @see [Std.Net.Resilience.PeakEwma](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-PeakEwma)
+#Since("0.3.0")
+export let PeakEwma = module (
+    /// @brief P2C over Peak EWMA cost.
+    #[Final, NotThreadSafe]
+    export let PeakEwma = class<Endpoint> implements balancers.LoadBalancer<Endpoint> (
+        /// @brief The endpoints, copied at construction.
+        last endpoints: Endpoint[list] = new;
+        /// @brief Pending requests per endpoint.
+        last waiting: int[list] = new;
+        /// @brief The latency estimate per endpoint, in nanoseconds.
+        last estimates: float64[list] = new;
+        /// @brief The monotonic reading of each endpoint's last update, in nanoseconds.
+        last stamps: int64[list] = new;
+        /// @brief The decay time constant in nanoseconds.
+        last tau: float64;
+        /// @brief The random source.
+        last random: randoms.Random;
+        /// @brief The monotonic clock.
+        last clock: Clock;
+
+        /// @brief A balancer over a copy of `targets`. Every estimate starts at `default_rtt` stamped with the clock's
+        /// reading at construction (zero if the clock fails then). Traps with "invalid argument: <name>" unless
+        /// `decay` is positive and `default_rtt` is not negative.
+        export let init = func(targets: Endpoint[list], decay: durations.Duration, default_rtt: durations.Duration,
+            source: randoms.Random, time: Clock) {
+            if (decay.to_nanos() <= 0) {
+                trap_with_message("invalid argument: decay");
+            }
+            if (default_rtt.is_negative()) {
+                trap_with_message("invalid argument: default_rtt");
+            }
+            tau = decay.to_nanos() as float64;
+            random = source;
+            clock = time;
+            last start = match (time.monotonic()) {
+                Result.Ok(reading) => reading.to_nanos(),
+                Result.Err(e) => 0 as int64,
+            };
+            for (let i = 0; i < targets.length; i++) {
+                endpoints.append(targets[i]);
+                waiting.append(0);
+                estimates.append(default_rtt.to_nanos() as float64);
+                stamps.append(start);
+            }
+        };
+
+        /// @brief The lower-cost of two random distinct endpoints.
+        export let pick = func -> Result<balancers.Selection<Endpoint>> {
+            last count = endpoints.length;
+            if (count == 0) {
+                return Result<balancers.Selection<Endpoint>>.Err(errors.custom(balancers.NoEndpointsCode,
+                    "the balancer has no endpoints"));
+            }
+            let index = 0;
+            if (count > 1) {
+                last a = random.next_int_below(count);
+                let b = random.next_int_below(count - 1);
+                if (b >= a) {
+                    b++;
+                }
+                last now = now_nanos()?;
+                last cost_a = cost_at(a, now);
+                last cost_b = cost_at(b, now);
+                index = cost_b < cost_a ? b : a;
+            }
+            waiting[index] = waiting[index] + 1;
+            return Result<balancers.Selection<Endpoint>>.Ok(new balancers.Selection<Endpoint>(index, endpoints[index]));
+        };
+
+        /// @brief Ends the pending request and observes its latency.
+        export let report = func(selection: balancers.Selection<Endpoint>, latency: durations.Duration, success: bool)
+            -> Result<Unit> {
+            last now = now_nanos()?;
+            if (waiting[selection.index] > 0) {
+                waiting[selection.index] = waiting[selection.index] - 1;
+            }
+            observe(selection.index, latency.to_nanos() as float64, now);
+            return Result<Unit>.Ok(Unit.Value);
+        };
+
+        /// @brief The cost of endpoint `index` now: the decayed estimate times (pending + 1).
+        #NoDiscard
+        export let cost = func(index: int) -> Result<float64> {
+            last now = now_nanos()?;
+            return Result<float64>.Ok(cost_at(index, now));
+        };
+
+        /// @brief The latency estimate of endpoint `index` in nanoseconds, as of its last update.
+        export let estimate = func(index: int) -> float64 => estimates[index];
+
+        /// @brief The number of endpoints.
+        export let size = func -> int => endpoints.length;
+
+        /// @brief The pending requests of endpoint `index`.
+        export let pending = func(index: int) -> int => waiting[index];
+
+        /// @brief Text such as "PeakEwma(3 endpoints)".
+        export let.override to_string = func -> string => "PeakEwma(" .. endpoints.length.to_string() .. " endpoints)";
+
+        /// @brief Decays the estimate to `now` and returns the cost.
+        let cost_at = func(index: int, now: int64) -> float64 {
+            observe(index, 0.0, now);
+            return estimates[index] * ((waiting[index] + 1) as float64);
+        };
+
+        /// @brief The Peak EWMA update with sample `sample` at `now`.
+        let observe = func(index: int, sample: float64, now: int64) {
+            if (sample > estimates[index]) {
+                estimates[index] = sample;
+            } else {
+                last elapsed = now > stamps[index] ? now - stamps[index] : 0 as int64;
+                last weight = maths.exp(-(elapsed as float64) / tau);
+                estimates[index] = estimates[index] * weight + sample * (1.0 - weight);
+            }
+            if (now > stamps[index]) {
+                stamps[index] = now;
+            }
+        };
+
+        /// @brief The clock's monotonic reading in nanoseconds.
+        let now_nanos = func -> Result<int64> {
+            last reading = clock.monotonic()?;
+            return Result<int64>.Ok(reading.to_nanos());
+        };
+    );
+
+    /// @brief A Peak EWMA balancer over a copy of `endpoints` with decay time `tau` and initial estimate
+    /// `default_rtt`.
+    #NoDiscard
+    export let of = func<Endpoint>(endpoints: Endpoint[list], tau: durations.Duration, default_rtt: durations.Duration,
+        random: randoms.Random, clock: Clock) -> PeakEwma<Endpoint> =>
+            new PeakEwma<Endpoint>(endpoints, tau, default_rtt, random, clock);
+);
