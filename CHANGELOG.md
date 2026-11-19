@@ -277,7 +277,7 @@ Applications and platforms:
 
 - Browser budgets B-W5 (about 130 ms against 8 ms) and B-W6 (about 290 ms against 50 ms) are missed; WebAssembly is several times slower than native code; continuous integration does not run browser or desktop tests.
 - `neura.http.fetch` is served only in a browser. Desktop packages are built for Linux only (`.dmg`, `.msix` and Windows targets are refused with `E1033`); `neura package --sign`, `--source-map` and `--report` are not implemented.
-- Native tier 3 runs only on x86-64 Linux. On macOS and AArch64 Linux, programs run on tier 2, and the asymmetric and post-quantum cryptography suites are not run on x86-64 macOS in continuous integration because they exceed its time limit there.
+- Native tier 3 runs only on x86-64 Linux. On macOS and AArch64 Linux, programs run on tier 2, and the advanced, asymmetric and post-quantum cryptography suites are not run on x86-64 macOS in continuous integration because they exceed its time limit there.
 - The VS Code extension for 0.3.0 is in its own repository; it is not part of these archives and is not yet published to an extension marketplace.
 
 ## [0.2.0] - 2026-11-11
