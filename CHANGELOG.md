@@ -17,6 +17,8 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ## Unreleased
 
+## [0.3.0] - 2026-11-20
+
 ### Added
 
 - Project packages are separated: an import of a module of a package outside the importer's `depends` closure is `E1030` in `neura build --target`, and `neura check` of a file inside a project uses its package's import roots and the same rule without `-I`.
