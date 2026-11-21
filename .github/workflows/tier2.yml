@@ -130,7 +130,7 @@ jobs:
           ctest --test-dir build --parallel "$(sysctl -n hw.ncpu)" --no-tests=error
           --output-on-failure --output-junit ctest-junit.xml -E "$EXCLUDE"
 
-      # 171 = the 177 tests Tier 1 requires on Linux without a GPU, less the 6
+      # 174 = the historical 180-test floor on Linux without a GPU, less the 6
       # that need the Linux native launcher (native-build, native-run,
       # native-container, native-policy, native-install, native-c-import).
       - name: Require every test to have run
@@ -240,5 +240,56 @@ jobs:
             build/build.log
             build/ctest-junit.xml
             build/Testing/Temporary/LastTest.log
+          if-no-files-found: warn
+          retention-days: 30
+
+  windows:
+    name: Build and test (Windows ${{ matrix.preset }})
+    runs-on: windows-2022
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [windows-msvc, windows-clang-cl]
+    steps:
+      - name: Keep LF line endings before checkout
+        shell: pwsh
+        run: git config --global core.autocrlf false
+      - name: Check out the repository and its submodule
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+      - name: Select the Windows build environment
+        uses: ./.github/actions/windows
+      - name: Configure
+        run: cmake --preset '${{ matrix.preset }}' -DNEURA_TEST_TIMEOUT_SCALE=12
+      - name: Build
+        run: cmake --build --preset '${{ matrix.preset }}' --parallel 4 2>&1 | tee build-${{ matrix.preset }}/build.log
+      - name: Require an MSVC build without Neura compiler warnings
+        if: ${{ matrix.preset == 'windows-msvc' }}
+        shell: pwsh
+        run: ./.github/scripts/check-msvc-warnings.ps1 build-windows-msvc/build.log
+      - name: Check the PE layout and execution-core closure
+        run: |
+          python scripts/check-windows-binaries.py build-${{ matrix.preset }}
+          python scripts/check-core-closure.py build-${{ matrix.preset }}
+          sh scripts/check-kernels.sh build-${{ matrix.preset }}
+      - name: Test
+        run: >
+          ctest --test-dir build-${{ matrix.preset }} --parallel 6 --no-tests=error
+          --output-on-failure --output-junit ctest-junit.xml
+      - name: Require every registered test to have run
+        if: ${{ !cancelled() }}
+        run: python scripts/check-test-report.py build-${{ matrix.preset }}/ctest-junit.xml --minimum 328
+      - name: Upload the build and test evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tier2-${{ matrix.preset }}
+          path: |
+            build-${{ matrix.preset }}/build.log
+            build-${{ matrix.preset }}/ctest-junit.xml
+            build-${{ matrix.preset }}/Testing/Temporary/LastTest.log
           if-no-files-found: warn
           retention-days: 30

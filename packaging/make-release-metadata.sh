@@ -16,7 +16,8 @@
 # (docs/design/Windows030.md, W23). Nothing else is named neura-*.tar.gz.
 # It writes, next to them:
 #
-#   SHA256SUMS            "<sha256>  <file>" for every archive, sorted by name
+#   SHA256SUMS            "<sha256>  <file>" for every archive and any
+#                         bootstrap installers present, sorted by name
 #   neura-release.txt     schema 1, which 0.2 clients read: the version and one
 #                         asset line for each target with a legacy archive
 #   neura-components.txt  neura-components 1, the version, the build that the
@@ -94,6 +95,11 @@ for file in $files; do
         build=$this_build
     elif [ "$build" != "$this_build" ]; then
         die "$file is build $this_build; another archive is build $build"
+    fi
+done
+for file in install.sh install.ps1; do
+    if [ -f "$file" ]; then
+        printf '%s  %s\n' "$(digest "$file")" "$file" >>"$work/sums"
     fi
 done
 # Each target has all three archives; Windows has the two product archives.

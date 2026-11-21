@@ -26,6 +26,7 @@ evidence. It needs `nm` (binutils or the Xcode tools).
 from __future__ import annotations
 
 import subprocess
+import re
 import sys
 from pathlib import Path
 
@@ -55,6 +56,11 @@ ALLOWED = {
     },
 }
 GLOBAL_KINDS = set("TDBRCGS")
+WINDOWS_SDK_OBJECTS = re.compile(
+    r"\b(neura_compiler|neura_decompiler|neura_cli_sdk|neura_cli_artifact|neura_cli_explain|neura_cli_tags|neura_libclang)"
+    r"(?:\.lib)?[:(]([^\s()]+\.obj)\b", re.IGNORECASE,
+)
+WINDOWS_DOCTOR_OBJECTS = {("neura_compiler", "c_import.cpp.obj"), ("neura_libclang", "libclang_loader.c.obj")}
 
 
 def symbols(path: Path, defined_only: bool = True) -> list[tuple[str, str, str]]:
@@ -110,6 +116,8 @@ def main() -> int:
     if len(sys.argv) != 2:
         sys.exit(__doc__)
     build = Path(sys.argv[1])
+    if sys.platform == "win32":
+        return windows_closure(build)
     owners, present = owners_of(build, SDK_LIBRARIES)
     libraries = sorted((build / "lib/neura").glob("libneura-*"))
     core_shared = [library for library in libraries if library.name.startswith("libneura-core")]
@@ -156,6 +164,28 @@ def main() -> int:
     else:
         print(f"checked against {len(owners)} global definitions of {len(present)} SDK libraries")
     return 1 if failed else 0
+
+
+def windows_closure(build: Path) -> int:
+    # PE files do not preserve their COFF symbol tables. The link map records
+    # the contributing objects, unlike /exports which sees only the tool ABI.
+    maps = sorted(build.glob("neura-core-*.map"))
+    if len(maps) != 1:
+        print(f"FAIL {build}: expected one core DLL link map, got {len(maps)}")
+        return 1
+    with maps[0].open(encoding="utf-8", errors="replace", newline=None) as source:
+        text = source.read()
+    sdk_objects = set(WINDOWS_SDK_OBJECTS.findall(text.lower()))
+    bad = sdk_objects - WINDOWS_DOCTOR_OBJECTS
+    if bad:
+        print(f"FAIL {maps[0].name}: holds SDK objects {', '.join(f'{library}:{obj}' for library, obj in sorted(bad))}")
+        return 1
+    notes = "; holds the libclang probe of neura doctor" if sdk_objects else ""
+    print(f"ok   {maps[0].name}: no unexpected SDK/compiler objects{notes}")
+    print("Windows DLLs are self-contained (W04); core objects in the SDK DLL are intentional.")
+    if not (build / "neura_compiler.lib").exists():
+        print("ok   no compiler library (configured with NEURA_SDK=OFF)")
+    return 0
 
 
 if __name__ == "__main__":

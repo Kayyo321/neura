@@ -24,7 +24,8 @@
         "VCPKG_TARGET_TRIPLET": "x64-windows-static",
         "CMAKE_C_COMPILER": "cl",
         "CMAKE_CXX_COMPILER": "cl",
-        "CMAKE_BUILD_TYPE": "Release"
+        "CMAKE_BUILD_TYPE": "Release",
+        "NEURA_TEST_TIMEOUT_SCALE": "12"
       }
     },
     {
@@ -50,19 +51,13 @@
     {
       "name": "windows-release",
       "displayName": "Windows x86-64 release archives",
-      "description": "NEURA_PORTABLE_RELEASE with the server components that packaging builds into NEURA_SERVER_COMPONENTS",
+      "description": "Portable Windows 0.3.0 archives; TLS, HTTP/2 and PostgreSQL are deferred to 0.3.1",
       "inherits": "windows-msvc",
       "cacheVariables": {
         "NEURA_PORTABLE_RELEASE": "ON",
-        "NEURA_ENABLE_SERVER_TLS": "ON",
-        "OPENSSL_ROOT_DIR": "$env{NEURA_SERVER_COMPONENTS}/openssl",
-        "OPENSSL_INCLUDE_DIR": "$env{NEURA_SERVER_COMPONENTS}/openssl/include",
-        "NEURA_ENABLE_SERVER_HTTP2": "ON",
-        "NEURA_NGHTTP2_ROOT": "$env{NEURA_SERVER_COMPONENTS}/nghttp2",
-        "NEURA_ENABLE_POSTGRES": "ON",
-        "NEURA_LIBPQ_SOURCE": "$env{NEURA_SERVER_COMPONENTS}/postgresql",
-        "NEURA_LIBPQ_BUILD": "$env{NEURA_SERVER_COMPONENTS}/postgresql",
-        "NEURA_COMPONENT_LICENSES": "$env{NEURA_SERVER_COMPONENTS}/licenses"
+        "NEURA_ENABLE_SERVER_TLS": "OFF",
+        "NEURA_ENABLE_SERVER_HTTP2": "OFF",
+        "NEURA_ENABLE_POSTGRES": "OFF"
       }
     }
   ],

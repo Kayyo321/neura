@@ -331,20 +331,13 @@ class Qualification:
         self.report(6, "test runner", None if result.returncode == 0 else tail(result.stdout + result.stderr))
 
     def check_native(self) -> None:
-        # The default launcher depends only on Windows system libraries
-        # (W30), so the executable runs in an environment without Neura.
         source = self.args.examples / "hello-world" / "hello-world.nra"
         result = self.run(self.home, ["neura", "build", "--native", source, "-o", "hello.exe"], cwd=self.hello)
-        reason = None
-        if result.returncode != 0:
-            reason = tail(result.stdout + result.stderr)
+        reason = "Windows has no native launcher in 0.3.0"
+        if result.returncode != 0 and reason in result.stderr and not (self.hello / "hello.exe").exists():
+            self.skip(7, "native executable", f"{reason}; verified that build --native refuses it")
         else:
-            env = {"SystemRoot": self.system_root, "PATH": f"{self.system_root}\\System32"}
-            run = subprocess.run([str(self.hello / "hello.exe")], env=env, cwd=self.hello, stdin=subprocess.DEVNULL, capture_output=True,
-                                 text=True, timeout=TIMEOUT)
-            if run.returncode != 0 or run.stdout != "Hello, World!\n":
-                reason = f"hello.exe printed {run.stdout!r} and exited {run.returncode}: {tail(run.stderr)}"
-        self.report(7, "native executable", reason)
+            self.report(7, "native executable", f"build --native did not refuse as expected: {tail(result.stdout + result.stderr)}")
 
     def check_update_check(self) -> None:
         # The release directory: the two archives and the metadata that
@@ -369,7 +362,7 @@ class Qualification:
             if self.args.require_previous:
                 self.report(9, "upgrade", "no previous archive was given and one is required")
             else:
-                self.skip(9, "upgrade", "no previous Windows archive was given; 0.3.0 is the first Windows release")
+                self.skip(9, "upgrade", "no previous Windows SDK archive was supplied")
             return
         old = self.profile("old")
         ok, log = self.install(old, self.args.previous)
@@ -507,7 +500,7 @@ class Qualification:
 
     def check_server(self) -> None:
         if not self.args.server_components:
-            self.skip(15, "server host", "the archives are not declared to hold the server components (--server-components)")
+            self.skip(15, "server host", "TLS, HTTP/2 and PostgreSQL are deferred on Windows in 0.3.0")
             return
         openssl = self.args.openssl or shutil.which("openssl")
         curl = self.args.curl or shutil.which("curl")

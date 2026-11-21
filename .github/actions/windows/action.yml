@@ -1,0 +1,18 @@
+name: Windows build environment
+description: Visual Studio x64, Python 3.12, libclang and a cached static libffi
+runs:
+  using: composite
+  steps:
+    - name: Select Python
+      uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+      with:
+        python-version: '3.12'
+    - name: Select the Visual Studio developer environment
+      id: developer
+      shell: pwsh
+      run: ./.github/scripts/windows-env.ps1
+    - name: Cache static vcpkg packages
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/vcpkg-cache
+        key: vcpkg-windows-x64-${{ steps.developer.outputs.compiler }}-${{ hashFiles('vcpkg.json') }}

@@ -135,6 +135,7 @@ endfunction()
 # import library is for the tool stubs of this build only and is not installed.
 function(neura_windows_add_shared target name component)
     add_library(${target} SHARED "${PROJECT_SOURCE_DIR}/src/cli/shared_library.cpp")
+    target_link_options(${target} PRIVATE "/MAP:$<TARGET_FILE_DIR:${target}>/$<TARGET_FILE_BASE_NAME:${target}>.map")
     foreach(library IN LISTS ARGN)
         target_link_options(${target} PRIVATE "/WHOLEARCHIVE:$<TARGET_FILE:${library}>")
     endforeach()
