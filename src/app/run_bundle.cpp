@@ -217,6 +217,12 @@ std::optional<std::vector<std::string>> host_command(const fs::path& directory, 
     verification.supported_requirements = supported_requirements();
     verification.allow_dev = allow_dev;
     auto bundle = verify_bundle_directory(directory, verification);
+#ifdef _WIN32
+    if (bundle.manifest().kind == TargetKind::Desktop) {
+        err << "neura run: " << windows_desktop_unavailable << '\n';
+        return std::nullopt;
+    }
+#endif
     const auto root = fs::canonical(directory);
     switch (bundle.manifest().kind) {
     case TargetKind::Web:

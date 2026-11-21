@@ -18,6 +18,10 @@
 
 namespace neura::app {
 
+#ifdef _WIN32
+inline constexpr char windows_desktop_unavailable[] = "the desktop host is unavailable on Windows in Neura 0.3.0";
+#endif
+
 namespace fs = std::filesystem;
 
 struct Project {

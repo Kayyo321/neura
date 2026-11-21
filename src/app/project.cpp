@@ -1176,6 +1176,10 @@ BuildResult build_target(Project& project, const BuildOptions& options) {
         throw Diagnostic(found->second.span, "--source-map is not available for project builds in Neura 0.3.0")
             .with_code("E1029");
     }
+#ifdef _WIN32
+    if (found->second.kind.value == TargetKind::Desktop)
+        fail_E1031(found->second.kind.span, windows_desktop_unavailable);
+#endif
     const auto out = options.out ? fs::absolute(*options.out) : project.resolved.root / "dist" / options.target;
     switch (found->second.kind.value) {
     case TargetKind::Web: return build_web(project, found->first, found->second, options, out);

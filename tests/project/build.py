@@ -107,7 +107,12 @@ def main():
     # --project ../neura.toml; two directories give identical bundles.
     # A desktop target's child is a native executable, which needs this system's native launcher.
     native = any((NEURA.parent / 'lib/neura/launchers').glob(f'*/neura-launcher{EXE}'))
-    if not native:
+    if WINDOWS:
+        native = False
+        result = run('build', '--target', 'desktop', cwd=first, env=env)
+        check(result.returncode != 0 and 'the desktop host is unavailable on Windows in Neura 0.3.0' in result.stderr
+              and not (first / 'dist/desktop').exists(), f'desktop target is refused: {result.stdout}{result.stderr}')
+    elif not native:
         print(f'note: no native launcher in {NEURA.parent / "lib/neura/launchers"}; the desktop target is not built')
     for name in ('server', 'web', 'desktop') if native else ('server', 'web'):
         for project in (first, second):

@@ -576,6 +576,9 @@ int package(const std::vector<std::string>& arguments) {
         if (format && (*format == "dmg" || *format == "msix" ||
                        (target.kind.value == TargetKind::Desktop && foreign(*format))))
             foreign_format(target.kind.span, *format);
+#ifdef _WIN32
+        if (target.kind.value == TargetKind::Desktop) cannot_package(target.kind.span, app::windows_desktop_unavailable);
+#endif
         const auto bundle = bundle_option ? fs::absolute(*bundle_option) : loaded.resolved.root / "dist" / *target_name;
         if (!app::is_bundle_directory(bundle)) {
             cannot_package(target.kind.span, "no built bundle in " + app::display_path(bundle) + "; build it with `neura build "
