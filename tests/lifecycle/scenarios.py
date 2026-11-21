@@ -2847,7 +2847,7 @@ def main() -> int:
     if len(sys.argv) != 5 or sys.argv[1] not in SUITES:
         print(__doc__, file=sys.stderr)
         return 2
-    suite, build, work, cmake = sys.argv[1], Path(sys.argv[2]), Path(sys.argv[3]), sys.argv[4]
+    suite, build, work, cmake = sys.argv[1], Path(sys.argv[2]).resolve(), Path(sys.argv[3]).resolve(), sys.argv[4]
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
     if WINDOWS:

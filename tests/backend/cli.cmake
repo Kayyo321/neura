@@ -19,6 +19,7 @@ function(neura prefix directory)
         RESULT_VARIABLE status
         OUTPUT_VARIABLE stdout
         ERROR_VARIABLE stderr
+        ENCODING UTF-8
     )
     set("${prefix}_status" "${status}" PARENT_SCOPE)
     set("${prefix}_stdout" "${stdout}" PARENT_SCOPE)
