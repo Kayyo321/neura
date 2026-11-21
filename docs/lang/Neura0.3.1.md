@@ -53,7 +53,20 @@ if (let [valid, text] = string.from_utf8(bytes); valid) {
 
 A condition is a `bool`, or a class or interface reference. A reference is true when it refers to an instance and false when it is `nil`. `if (!val)` is the nil check: its body runs when `val` is `nil`, the same way `if (!pointer)` runs when `pointer` is `NULL` in C. `if (val)` runs only when `val` refers to an instance.
 
-Numbers, strings, enums, and other values that cannot be `nil` are still not conditions. `and` and `or` still require `bool`. A reference becomes a `bool` through `!` or through a comparison, and that `bool` can then be combined with `and` or `or`.
+`not` and `!` are the same operator on a reference. `if (not val)` and `if (!val)` are the same nil check, and `not val` and `!val` give the same `bool` wherever they appear.
+
+A nil condition narrows like a type test. Inside the body of `if (val)`, `val` is known to be non-nil, so its members can be used without another check. The same holds in the `else` body of `if (!val)` or `if (not val)`, and in the code after such an `if` when its body always leaves through `return`, `break`, `continue`, or a trap.
+
+```neura
+if (not val) {
+    return;
+}
+console.println(val.message);  // val is non-nil here
+```
+
+Narrowing follows the same limits as narrowing with `is`. It applies to a local, a parameter, or a `last` binding that cannot change between the test and the use. It does not apply to a field or a reassignable module binding, which another call could set to `nil`. After the narrowed name is assigned again, it is no longer known to be non-nil.
+
+Numbers, strings, enums, and other values that cannot be `nil` are still not conditions. `and` and `or` still require `bool`. A reference becomes a `bool` through `!`, `not`, or a comparison, and that `bool` can then be combined with `and` or `or`.
 
 `Error` is a payload enum and cannot be `nil`. The test applies to a reference, such as a missing log entry:
 
@@ -80,6 +93,54 @@ if (val) {
 ```
 
 `val` is `nil`, so `!val` is true, the first body prints `nil`, and the second body does not run. After `val` is assigned an instance, `if (val)` runs and `if (!val)` does not. A comparison such as `val == nil` remains an ordinary `bool`. A number, a string, an enum, and a `bool` keep the condition rules they already have.
+
+## Windows native build
+
+From 0.3.1 on, Windows is a supported platform in its own right, not only through WSL 2. Every release publishes a native Windows archive. Every later release must keep it building, tested, and published, with the same gates as the Linux and macOS archives.
+
+### Install
+
+On Windows 10 and 11, one command in PowerShell installs Neura. It has the same copy-and-paste form as `install.sh`:
+
+```powershell
+irm https://github.com/Kayyo321/neura/releases/latest/download/install.ps1 | iex
+```
+
+`install.ps1` follows the same rules as `install.sh`:
+
+- It downloads the archive for the machine's architecture from the release.
+- It checks the archive's SHA-256 against the release metadata before unpacking it, and stops on a mismatch.
+- It writes only under the install root, `%LOCALAPPDATA%\Neura` by default, and needs no administrator rights.
+- It accepts the same choices as `install.sh`: a version or channel, the SDK or the runtime-only product, and the install root.
+
+The one difference from `install.sh`: to keep install a single command, it adds the `bin` directory to the user's `PATH`, in the user environment only, never the machine environment. `-NoPathUpdate` skips that step. The script can be downloaded and read before it is run, as `install.sh` can. It must run under Windows PowerShell 5.1 and PowerShell 7.
+
+After install, `neura update`, `neura uninstall`, the SDK/runtime split, and `neura doctor` behave as on Linux. An existing WSL install is unaffected.
+
+### Targets and parity
+
+- `x86_64-pc-windows-msvc` is required. `aarch64-pc-windows-msvc` is published when it passes the same gates. Otherwise it is listed as not yet supported.
+- Every language feature, standard library package, and tool that exists on Linux exists on Windows. Where Windows needs a different host mechanism, the behaviour seen from Neura code is the same:
+  - entropy: `BCryptGenRandom`;
+  - locked memory: `VirtualLock`;
+  - I/O readiness: IOCP or `WSAPoll`, instead of epoll and io_uring;
+  - request workers: `CreateProcess` instead of the fork-based zygote;
+  - file paths and line endings.
+
+  A host feature that Windows cannot provide is a documented, typed `Unsupported` result. It is never a crash or a silent difference.
+- Native tier-3 code generation either supports the Windows x64 calling convention or declines to tier 2 on Windows. Both paths must give identical results under the runtime-identity and tier-boundary gates.
+- Apps:
+  - `neura build --target web|server|desktop` and `neura run` work on Windows;
+  - `neura package` produces a Windows desktop package (`.zip`, and `.msix` once signing is set up), replacing today's E1033 refusal;
+  - the browser runtime is tested in Edge and Chrome on Windows.
+- The editor extension and the debugger work against the native Windows install.
+
+### Verification
+
+- CI builds and runs the full test suite on a Windows runner for every pull request and release.
+- `qualify.ps1`, or `qualify.sh` running under PowerShell, checks the Windows archive: contents, size budget, install, update from the previous release, and uninstall.
+- The lifecycle tests run against `install.ps1`: a fresh install, an update, a rollback, an uninstall, a path with spaces and non-ASCII characters, and a missing or corrupted download.
+- Manual qualification runs on a real Windows 10 or 11 machine before each final release: install with the one-line command, a desktop app, a server app, and the VS Code extension.
 
 ## `Std.Core.Pointer`
 
