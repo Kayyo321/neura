@@ -273,7 +273,8 @@ def main():
     if args.openssl:
         tls_reload(args.fixture, args.openssl)
     else:
-        fail_start(args.fixture, (PLAIN, (0, "certificate.pem", "private.key")), "no TLS adapter")
+        diagnostic = "TLS listeners are unavailable on Windows in Neura 0.3.0" if WINDOWS else "no TLS adapter"
+        fail_start(args.fixture, (PLAIN, (0, "certificate.pem", "private.key")), diagnostic)
 
 
 if __name__ == "__main__":
