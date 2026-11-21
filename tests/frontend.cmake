@@ -1472,3 +1472,137 @@ run_success(setter_code_page explain W0005)
 if(NOT setter_page MATCHES "^# W0005: setter that never stores its field" OR NOT setter_page STREQUAL setter_code_page)
     message(FATAL_ERROR "neura explain did not print the W0005 page by name and by code\n${setter_page}")
 endif()
+
+# Line endings (W08): source text is read with each CR LF as LF, so a program
+# checked out with CR LF line endings builds the same image, runs the same,
+# and reports the same diagnostics, at the same lines, columns and byte
+# offsets, as its LF original. file(CONFIGURE) writes the line endings it is
+# given on every host (file(WRITE) writes CR LF on Windows).
+set(line_endings_program [=[
+/// Prints a sum whose expression spans lines.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+// The text of a stylesheet, line breaks included, is part of the image.
+const sheet = css {
+    .total {
+        color: red;
+    }
+};
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        // A comment on a line of its own.
+        let total = 1 +
+            2;
+        console.print_line("total " + total.to_string());
+        return program.ExitCode.Ok;
+    };
+);
+]=])
+set(line_endings_rejected [=[
+/// Names a count.
+let label = func(count: int32) -> string {
+
+    let text: string = count;
+    return text;
+};
+]=])
+foreach(style IN ITEMS LF CRLF)
+    string(TOLOWER "${style}" name)
+    set(dir "${TEST_DIR}/line-endings-${name}")
+    file(MAKE_DIRECTORY "${dir}")
+    file(CONFIGURE OUTPUT "${dir}/program.nra" CONTENT "${line_endings_program}" @ONLY NEWLINE_STYLE ${style})
+    file(CONFIGURE OUTPUT "${dir}/rejected.nra" CONTENT "${line_endings_rejected}" @ONLY NEWLINE_STYLE ${style})
+    file(READ "${dir}/program.nra" bytes HEX)
+    string(FIND "${bytes}" "0d0a" crlf_at)
+    if((style STREQUAL "CRLF" AND crlf_at EQUAL -1) OR (style STREQUAL "LF" AND NOT crlf_at EQUAL -1))
+        message(FATAL_ERROR "line-endings-${name}/program.nra does not have ${style} line endings")
+    endif()
+    execute_process(COMMAND "${NEURA}" build program.nra -o program.nvr WORKING_DIRECTORY "${dir}"
+        RESULT_VARIABLE status ERROR_VARIABLE stderr)
+    if(NOT status STREQUAL "0")
+        message(FATAL_ERROR "neura build of the ${style} program failed (${status})\n${stderr}")
+    endif()
+    file(SHA256 "${dir}/program.nvr" image_${name})
+    execute_process(COMMAND "${NEURA}" run program.nvr WORKING_DIRECTORY "${dir}"
+        RESULT_VARIABLE status OUTPUT_VARIABLE output_${name} ERROR_VARIABLE stderr)
+    if(NOT status STREQUAL "0" OR NOT output_${name} STREQUAL "total 3\n")
+        message(FATAL_ERROR "The ${style} program printed '${output_${name}}' (${status})\n${stderr}")
+    endif()
+    foreach(format IN ITEMS human json)
+        execute_process(COMMAND "${CMAKE_COMMAND}" -E env COLUMNS=100
+            "${NEURA}" check --error-format=${format} --color=never rejected.nra WORKING_DIRECTORY "${dir}"
+            RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE diagnostics)
+        if(status STREQUAL "0")
+            message(FATAL_ERROR "neura check accepted the ${style} rejected.nra\n${diagnostics}")
+        endif()
+        # The two programs differ only in their directory.
+        string(REGEX REPLACE "[^\"\n ]*line-endings-${name}/" "" ${format}_${name} "${stdout}${diagnostics}")
+    endforeach()
+    if(NOT human_${name} MATCHES "rejected[.]nra:4:")
+        message(FATAL_ERROR "Expected the ${style} rejected.nra to be rejected at line 4\n${human_${name}}")
+    endif()
+endforeach()
+if(NOT image_lf STREQUAL image_crlf)
+    message(FATAL_ERROR "The CR LF program built another image than its LF original")
+endif()
+if(NOT human_lf STREQUAL human_crlf)
+    message(FATAL_ERROR "The CR LF program's diagnostics differ from its LF original's\n"
+        "LF:\n${human_lf}\nCR LF:\n${human_crlf}")
+endif()
+if(NOT json_lf STREQUAL json_crlf)
+    message(FATAL_ERROR "The CR LF program's diagnostics (JSON) differ from its LF original's\n"
+        "LF:\n${json_lf}\nCR LF:\n${json_crlf}")
+endif()
+
+# The C runtime's declaration files on Windows (ForeignInterop.md, C imports):
+# the Universal C Runtime declares much of string.h in corecrt_*.h files, and
+# the Visual C++ runtime memcpy, memset, memcmp and strchr in
+# vcruntime_string.h. Each counts as part of the standard header that includes
+# it, like an underscore header; vcruntime.h itself, which every standard
+# header includes, does not.
+if(CMAKE_HOST_WIN32)
+    file(WRITE "${TEST_DIR}/vcruntime-string.nra" [=[
+let cstr = import:c("string.h");
+
+let copy = func(target: string, source: string) -> void {
+    cstr.memset(nil, 0, 0);
+    cstr.memcpy(nil, nil, 0);
+    cstr.memcmp(nil, nil, 0);
+    cstr.strchr(target, 0);
+    cstr.strlen(source);
+    cstr.strcmp(target, source);
+};
+]=])
+    run_success(unused check vcruntime-string.nra)
+    file(WRITE "${TEST_DIR}/vcruntime-header.nra" [=[
+let cstr = import:c("string.h");
+
+let cookie = func() -> void {
+    cstr.__security_init_cookie();
+};
+]=])
+    execute_process(COMMAND "${NEURA}" check --color=never vcruntime-header.nra WORKING_DIRECTORY "${TEST_DIR}"
+        RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+    if(status STREQUAL "0" OR NOT stderr MATCHES "error[[]E0305[]]" OR NOT stderr MATCHES "vcruntime-header[.]nra:4:5"
+       OR NOT stderr MATCHES "the C declaration '__security_init_cookie' was not imported: it is declared in vcruntime[.]h, not in the imported header string[.]h")
+        message(FATAL_ERROR "Expected E0305 for vcruntime.h's __security_init_cookie (${status})\n${stderr}")
+    endif()
+    # The Universal C Runtime defines the printf and scanf families inline
+    # and does not export them, so stdio.h cannot provide them; the note says
+    # why.
+    file(WRITE "${TEST_DIR}/ucrt-printf.nra" [=[
+let cio = import:c("stdio.h");
+
+let greet = func() -> void {
+    cio.printf("hello\n");
+};
+]=])
+    execute_process(COMMAND "${NEURA}" check --color=never ucrt-printf.nra WORKING_DIRECTORY "${TEST_DIR}"
+        RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+    if(status STREQUAL "0" OR NOT stderr MATCHES "error[[]E0305[]]" OR NOT stderr MATCHES "ucrt-printf[.]nra:4:5"
+       OR NOT stderr MATCHES "the C declaration 'printf' was not imported: it is a variadic inline function of the Universal C Runtime, which does not export it; use Std[.]Io")
+        message(FATAL_ERROR "Expected E0305 for the UCRT's inline printf (${status})\n${stderr}")
+    endif()
+endif()

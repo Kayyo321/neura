@@ -10,9 +10,12 @@ succeeds (with warnings) or fails; its standard error is what is compared. For
 each test, in a fresh temporary directory:
 
 1. `neura check --error-format=human --color=never <name>.nra` runs with
-   COLUMNS=100. Its standard error, with the temporary directory replaced by
-   `$DIR` and the repository root (where the standard library's sources
-   are) by `$ROOT`, must equal `<name>.stderr`.
+   COLUMNS=100. Its standard error, with CR LF line endings as LF and with
+   the temporary directory replaced by `$DIR` and the repository root (where
+   the standard library's sources are) by `$ROOT`, in the generic spelling
+   with '/' and in the platform's own, must equal `<name>.stderr`.
+   Expectations are compared as stored, without newline translation, so an
+   expectation checked out with CR LF line endings fails.
 2. `neura check --error-format=json` runs repeatedly; the MachineApplicable
    edits that it reports for the test file are applied back to front until
    none remain (at most 50 rounds). When any edit applied, the result must
@@ -60,6 +63,40 @@ def apply_edits(data, edits):
     return data, applied
 
 
+def read_expected(path):
+    """The text of an expectation file exactly as stored."""
+    with open(path, encoding="utf-8", newline="") as file:
+        return file.read()
+
+
+def write_expected(path, text):
+    with open(path, "w", encoding="utf-8", newline="") as file:
+        file.write(text)
+
+
+def replace_root(text, root, name):
+    """Replaces the directory `root` at the start of paths with `name`.
+
+    Neura prints paths in the generic form, with '/' separators, on every
+    host. The platform's own spelling of the root (with backslashes on
+    Windows) is replaced too, keeping the separator after it, so that a path
+    printed in that form still differs from the expectation.
+    """
+    for spelling in dict.fromkeys((root.as_posix(), str(root))):
+        text = text.replace(spelling + "/", name + "/")
+    if os.sep != "/":
+        text = text.replace(str(root) + os.sep, name + os.sep)
+    return text
+
+
+def same_file(reported, path):
+    """Whether the file of an edit is `path`; Windows compares the two as
+    paths, whatever their separators and case."""
+    if reported == path:
+        return True
+    return os.name == "nt" and os.path.normcase(os.path.normpath(reported)) == os.path.normcase(os.path.normpath(path))
+
+
 def machine_edits(stderr, path):
     edits = []
     for line in stderr.decode("utf-8", "replace").splitlines():
@@ -69,7 +106,7 @@ def machine_edits(stderr, path):
         for suggestion in diagnostic.get("suggestions", []):
             if suggestion["applicability"] != "MachineApplicable":
                 continue
-            if all(edit["file"] == path for edit in suggestion["edits"]):
+            if all(same_file(edit["file"], path) for edit in suggestion["edits"]):
                 edits.extend(suggestion["edits"])
     return edits
 
@@ -90,13 +127,14 @@ def check_test(neura, source, bless):
         human = run(neura, ["check", "--error-format=human", "--color=never", source.name], directory)
         if human.returncode not in (0, 1):
             problems.append(f"neura check exited with status {human.returncode}")
-        stderr = human.stderr.decode("utf-8", "replace").replace(str(directory) + "/", "$DIR/")
-        stderr = stderr.replace(str(pathlib.Path(__file__).resolve().parent.parent) + "/", "$ROOT/")
+        stderr = human.stderr.decode("utf-8", "replace").replace("\r\n", "\n")
+        stderr = replace_root(stderr, directory, "$DIR")
+        stderr = replace_root(stderr, pathlib.Path(__file__).resolve().parent.parent, "$ROOT")
         if bless:
-            expected_stderr.write_text(stderr, encoding="utf-8")
+            write_expected(expected_stderr, stderr)
         elif not expected_stderr.exists():
             problems.append(f"missing {expected_stderr.name}; observed:\n{stderr}")
-        elif stderr != expected_stderr.read_text(encoding="utf-8"):
+        elif stderr != read_expected(expected_stderr):
             problems.append(f"standard error differs from {expected_stderr.name}; observed:\n{stderr}")
 
         path = str(work)
@@ -118,10 +156,10 @@ def check_test(neura, source, bless):
         if changed:
             fixed = data.decode("utf-8", "replace")
             if bless:
-                expected_fixed.write_text(fixed, encoding="utf-8")
+                write_expected(expected_fixed, fixed)
             elif not expected_fixed.exists():
                 problems.append(f"machine-applicable edits apply but {expected_fixed.name} is missing; fixed:\n{fixed}")
-            elif fixed != expected_fixed.read_text(encoding="utf-8"):
+            elif fixed != read_expected(expected_fixed):
                 problems.append(f"the fixed source differs from {expected_fixed.name}; fixed:\n{fixed}")
             accepted = run(neura, ["check", source.name], directory)
             if accepted.returncode != 0:

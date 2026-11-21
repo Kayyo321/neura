@@ -21,6 +21,7 @@
 #include "neura-ir/verifier.hpp"
 #include "tooling/formatter.hpp"
 #include "tooling/json.hpp"
+#include "util/line_endings.hpp"
 #include "util/source_map.hpp"
 
 #include <algorithm>
@@ -533,9 +534,7 @@ int check_fix(const Options& options) {
         for (auto& [name, list] : edits) {
             const auto file = sources.find(name);
             const auto bytes = read_file(name);
-            if (!std::ranges::equal(bytes, file->text(), [](std::uint8_t a, char b) {
-                    return a == static_cast<unsigned char>(b);
-                })) {
+            if (neura::util::normalize_crlf(std::string(bytes.begin(), bytes.end())) != file->text()) {
                 refused.emplace(name, "it changed while it was being checked");
                 continue;
             }
