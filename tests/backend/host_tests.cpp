@@ -1209,6 +1209,16 @@ NEURA_TEST(host, secret_memory_is_locked_and_released) {
     expect_error(call("neura.memory.lock.create", {i32(65537)}), host_error::invalid_input, "size past 64 KiB");
 
     // The kernel's view of the mapping: locked and excluded from core dumps.
+    // AddressSanitizer intercepts mlock and makes it do nothing, so a
+    // sanitized build has no locked mapping to find.
+#if defined(__SANITIZE_ADDRESS__)
+#define NEURA_TEST_MLOCK_INTERCEPTED 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define NEURA_TEST_MLOCK_INTERCEPTED 1
+#endif
+#endif
+#if !defined(NEURA_TEST_MLOCK_INTERCEPTED)
     std::ifstream smaps("/proc/self/smaps");
     std::string line;
     bool in_region = false;
@@ -1230,6 +1240,7 @@ NEURA_TEST(host, secret_memory_is_locked_and_released) {
     check(locked, "a mapping is locked");
     check(dont_dump, "the locked mapping is excluded from core dumps (dd)");
     check(wipe_on_fork, "the locked mapping is wiped in a forked child (wf)");
+#endif
 
     expect_ok(call("neura.memory.lock.release", {handle}), "release");
     check_equal(secrets.live_buffers(), std::size_t{0}, "released");

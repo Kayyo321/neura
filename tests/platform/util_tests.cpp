@@ -181,7 +181,10 @@ void test_comparisons() {
     check(Int128(-1) < Int128(0), "signed -1 < 0");
     check(signed_of(0x8000000000000000, 0) < signed_of(0x7fffffffffffffff, ones), "signed minimum < maximum");
     check(UInt128(0) < unsigned_of(0x8000000000000000, 0), "unsigned 0 < 2^127");
-    check(static_cast<UInt128>(Int128(-1)) > UInt128(ones), "unsigned 2^128 - 1 > 2^64 - 1");
+    // Not against UInt128(ones): GCC's -Wtype-limits rejects comparing the
+    // native unsigned __int128 with a zero-extended 64-bit value.
+    check(static_cast<UInt128>(Int128(-1)) == unsigned_of(ones, ones), "-1 converts to unsigned 2^128 - 1");
+    check(unsigned_of(ones, ones) > unsigned_of(0, ones), "unsigned 2^128 - 1 > 2^64 - 1");
     check(signed_of(0, ones) > signed_of(0, 1), "low word decides");
     check(Int128(5) == std::int64_t{5}, "equal to an int64_t");
     check(std::max(Int128(-9), Int128(4)) == Int128(4), "std::max");

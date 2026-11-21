@@ -149,20 +149,24 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-  # The tests are split into two shards by CTest number, each built and run
-  # by its own job: run as one job they no longer fit its time limit.
+  # The tests are split into six shards by CTest number, each built and run
+  # by its own job: in two shards the 0.3.0 suite no longer fit the time
+  # limits.
   sanitizers:
-    name: Address and undefined-behavior sanitizers (Linux x86-64, shard ${{ matrix.shard }} of 2)
+    name: Address and undefined-behavior sanitizers (Linux x86-64, shard ${{ matrix.shard }} of 6)
     runs-on: ubuntu-24.04
-    timeout-minutes: 330
+    timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3, 4, 5, 6]
     env:
       CC: gcc-14
       CXX: g++-14
       NEURA_LIBCLANG_REQUIRED: "1"
+      # Tells the suites with a latency limit of their own that the build is
+      # sanitized (tests/server/server_host_test.py).
+      NEURA_TEST_SANITIZERS: "1"
       ASAN_OPTIONS: detect_leaks=1:strict_string_checks=1:abort_on_error=0
       UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
     steps:
@@ -179,18 +183,21 @@ jobs:
             gcc-14 g++-14 libffi-dev libclang1-19 libclang-common-19-dev
 
       # A static executable cannot carry the sanitizer runtime, so the static
-      # launcher and the static dispatcher are left out of this configuration. backend-reference and
-      # decompiler-behavior each ran for more than their usual limit of an hour
-      # here without a sanitizer report, so each gets three hours. program-fuzz
-      # gets two hours instead of ten minutes, for the same reason.
+      # launcher and the static dispatcher are left out of this configuration.
+      # Every time limit is multiplied by 6: at the usual limits 28 tests of
+      # the 0.3.0 suite ran out of time here without a sanitizer report. With
+      # the scale, backend-reference gets 5.5 hours (it ran for more than 3),
+      # decompiler-behavior 3 hours (it took 2.6) and program-fuzz 2 hours
+      # (it took 1).
       - name: Configure
         run: >
           cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
           -DNEURA_STATIC_LAUNCHER=OFF
           -DNEURA_STATIC_DISPATCHER=OFF
-          -DNEURA_REFERENCE_TEST_TIMEOUT=10800
-          -DNEURA_DECOMPILER_BEHAVIOR_TEST_TIMEOUT=10800
-          -DNEURA_PROGRAM_FUZZ_TEST_TIMEOUT=7200
+          -DNEURA_TEST_TIMEOUT_SCALE=6
+          -DNEURA_REFERENCE_TEST_TIMEOUT=3300
+          -DNEURA_DECOMPILER_BEHAVIOR_TEST_TIMEOUT=1800
+          -DNEURA_PROGRAM_FUZZ_TEST_TIMEOUT=1200
           "-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
           "-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
           "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined"
@@ -214,16 +221,15 @@ jobs:
       # Under AddressSanitizer the NVM heap takes every entry from operator
       # new, which makes the tests that run many programs several times slower
       # than in a Release build: backend-placement and decompiler-lift each ran
-      # for more than an hour. A test without a limit of its own gets three
-      # hours.
+      # for more than an hour.
       #
-      # -I takes every second test, starting at the shard's number.
+      # -I takes every sixth test, starting at the shard's number.
       - name: Test
         run: |
           ulimit -s 1048576
           ctest --test-dir build --parallel "$(nproc)" --no-tests=error \
-            --output-on-failure --output-junit ctest-junit.xml --timeout 10800 \
-            -I "${{ matrix.shard }},,2" -E "^(native-install|native-container)$"
+            --output-on-failure --output-junit ctest-junit.xml \
+            -I "${{ matrix.shard }},,6" -E "^(native-install|native-container)$"
 
       - name: Upload the build log and the test report
         if: ${{ !cancelled() }}

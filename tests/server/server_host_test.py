@@ -492,6 +492,11 @@ def test_keep_alive_latency(args, image):
     # A response leaves without waiting for the client's delayed
     # acknowledgement (TCP_NODELAY, and the head sent with a small body):
     # with Nagle's algorithm each keep-alive response took about 40 ms.
+    # A sanitized build (Tier 2 sets NEURA_TEST_SANITIZERS=1) handles each
+    # request too slowly for the limit to tell that stall apart.
+    if os.environ.get("NEURA_TEST_SANITIZERS") == "1":
+        print("skipped: the latency limit does not hold in a sanitized build", flush=True)
+        return
     host = Host(args, image)
     try:
         connection = http.client.HTTPConnection("127.0.0.1", host.port, timeout=30)
