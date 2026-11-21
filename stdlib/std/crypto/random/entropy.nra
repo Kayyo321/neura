@@ -88,7 +88,9 @@ export let Entropy = module (
 
     /// @brief A number that changes whenever the process may have been duplicated: a POSIX `fork()` in the
     /// child, or a restore of a virtual machine snapshot (the Linux VM generation ID, `MADV_WIPEONFORK` pages).
-    /// A generator that sees it change must reseed before it produces output.
+    /// A generator that sees it change must reseed before it produces output. This function is not implemented
+    /// in 0.3.0 and traps on every host. The host service it would use, `neura.process.generation`, is the
+    /// constant 0 on Windows: Windows has no `fork()`, and a snapshot restore is not detected.
     /// @stub the runtime has no host operation that reports fork or VM-clone generations
     #[NoDiscard, Since("0.3.0")]
     export let fork_generation = func -> uint64 {

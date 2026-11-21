@@ -26,12 +26,39 @@ let PathTests = module (
         test.assert_equal_string("C:/x", normalized("C:/x"));
     };
 
+    // A leading ASCII letter, a colon and a slash is a drive root on every host; `\` is an ordinary character.
+    export let test_drive_root_normalization = func() -> void {
+        test.assert_equal_string("C:/", normalized("C:/"));
+        test.assert_equal_string("C:/", normalized("C:///"));
+        test.assert_equal_string("C:/x", normalized("C://x//"));
+        test.assert_equal_string("c:/a/..", normalized("c:/./a/.."));
+        test.assert_equal_string("C:", normalized("C:"));
+        test.assert_equal_string("C:x", normalized("C:x"));
+        test.assert_equal_string("C:\\x", normalized("C:\\x"));
+        test.assert_equal_string("1:/x", normalized("1:/x"));
+        test.assert_equal_string("/C:/x", normalized("/C:/x"));
+        // A relative path whose first component is a drive designator keeps `./`, so it stays relative.
+        test.assert_equal_string("./C:/x", normalized("./C:/x"));
+        test.assert_equal_string("./C:/x", normalized("./C://x/"));
+        test.assert_equal_string("C:", normalized("./C:"));
+        test.assert_equal_string("./C:/x", normalized(normalized("./C:/x")));
+    };
+
     export let test_is_absolute = func() -> void {
         test.assert(path.of("/a").is_absolute);
         test.assert(path.of("/").is_absolute);
         test.assert(!path.of("a/b").is_absolute);
         test.assert(!path.of("").is_absolute);
-        test.assert(!path.of("C:/x").is_absolute);
+        test.assert(path.of("C:/x").is_absolute);
+        test.assert(path.of("C:/").is_absolute);
+        test.assert(path.of("z:/a").is_absolute);
+        test.assert(path.of("/C:/x").is_absolute);
+        test.assert(!path.of("C:").is_absolute);
+        test.assert(!path.of("C:x").is_absolute);
+        test.assert(!path.of("C:\\x").is_absolute);
+        test.assert(!path.of("1:/x").is_absolute);
+        test.assert(!path.of("./C:/x").is_absolute);
+        test.assert(!path.of("CD:/x").is_absolute);
     };
 
     export let test_join = func() -> void {
@@ -44,6 +71,24 @@ let PathTests = module (
         test.assert_equal_string("a/..", text(path.of("a").join("..")));
     };
 
+    export let test_join_drive_roots = func() -> void {
+        test.assert_equal_string("C:/y", text(path.of("a/b").join("C:/y")));
+        test.assert_equal_string("D:/y", text(path.of("C:/x").join("D:/y")));
+        test.assert_equal_string("D:/y", text(path.of("/x").join("D:/y")));
+        test.assert_equal_string("/b", text(path.of("C:/a").join("/b")));
+        test.assert_equal_string("C:/x", text(path.of("C:/").join("x")));
+        test.assert_equal_string("C:/a/b/c", text(path.of("C:/a").join("b//c/")));
+        test.assert_equal_string("C:/a/..", text(path.of("C:/a").join("..")));
+        test.assert_equal_string("C:/a", text(path.of("C:/a").join("")));
+        // Joining to a relative drive designator gives a relative path, never a drive root.
+        last joined = path.of("C:").join("x");
+        test.assert_equal_string("./C:/x", text(joined));
+        test.assert(!joined.is_absolute);
+        test.assert_equal_string("a/C:/x", text(path.of("a").join("./C:/x")));
+        test.assert_equal_string("./C:/x", text(path.of(".").join("./C:/x")));
+        test.assert_equal_string("/C:/x", text(path.of("/").join("./C:/x")));
+    };
+
     export let test_parent = func() -> void {
         test.assert_equal_string("a", text(path.of("a/b").parent()));
         test.assert_equal_string("/", text(path.of("/a").parent()));
@@ -53,6 +98,12 @@ let PathTests = module (
         test.assert(path.of("/").parent() == nil);
         test.assert(path.of(".").parent() == nil);
         test.assert(path.of("..").parent() == nil);
+        test.assert_equal_string("C:/", text(path.of("C:/a").parent()));
+        test.assert_equal_string("C:/a", text(path.of("C:/a/b").parent()));
+        test.assert(path.of("C:/").parent() == nil);
+        test.assert(path.of("C:").parent() == nil);
+        test.assert_equal_string("C:", text(path.of("./C:/x").parent()));
+        test.assert_equal_string("/C:", text(path.of("/C:/x").parent()));
     };
 
     export let test_file_name_stem_extension = func() -> void {
@@ -77,6 +128,10 @@ let PathTests = module (
         test.assert_none<string>(path.of("a/..").file_name());
         test.assert_none<string>(path.of("/").stem());
         test.assert_none<string>(path.of("..").extension());
+        test.assert_none<string>(path.of("C:/").file_name());
+        test.assert_equal_string("a.txt", test.assert_some<string>(path.of("C:/a.txt").file_name()));
+        test.assert_equal_string("txt", test.assert_some<string>(path.of("C:/a.txt").extension()));
+        test.assert_equal_string("C:", test.assert_some<string>(path.of("C:").file_name()));
     };
 
     export let test_components = func() -> void {
@@ -91,6 +146,18 @@ let PathTests = module (
         test.assert_equal_string("..", relative[0]);
         test.assert_equal_int32(0, path.of(".").components().length);
         test.assert_equal_int32(1, path.of("/").components().length);
+        let drive = path.of("C:/Users//me/").components();
+        test.assert_equal_int32(3, drive.length);
+        test.assert_equal_string("C:/", drive[0]);
+        test.assert_equal_string("Users", drive[1]);
+        test.assert_equal_string("me", drive[2]);
+        let root = path.of("d:/").components();
+        test.assert_equal_int32(1, root.length);
+        test.assert_equal_string("d:/", root[0]);
+        let designator = path.of("./C:/x").components();
+        test.assert_equal_int32(2, designator.length);
+        test.assert_equal_string("C:", designator[0]);
+        test.assert_equal_string("x", designator[1]);
     };
 
     export let test_resolve_lexically = func() -> void {
@@ -100,6 +167,11 @@ let PathTests = module (
         test.assert_equal_string("/", text(path.of("/..").resolve_lexically()));
         test.assert_equal_string("/b", text(path.of("/a/../../b").resolve_lexically()));
         test.assert_equal_string("x/y", text(path.of("x/y").resolve_lexically()));
+        test.assert_equal_string("C:/", text(path.of("C:/..").resolve_lexically()));
+        test.assert_equal_string("C:/b", text(path.of("C:/a/../../b").resolve_lexically()));
+        last relative = path.of("a/../C:/x").resolve_lexically();
+        test.assert_equal_string("./C:/x", text(relative));
+        test.assert(!relative.is_absolute);
     };
 
     export let test_starts_with = func() -> void {
@@ -111,6 +183,13 @@ let PathTests = module (
         test.assert(!path.of("a/b").starts_with(path.of("/a")));
         test.assert(!path.of("/a/b").starts_with(path.of("a")));
         test.assert(path.of("a/b").starts_with(path.of(".")));
+        test.assert(path.of("C:/a/b").starts_with(path.of("C:/a")));
+        test.assert(path.of("C:/a").starts_with(path.of("C:/")));
+        test.assert(!path.of("C:/a").starts_with(path.of("/")));
+        test.assert(!path.of("/a").starts_with(path.of("C:/")));
+        test.assert(!path.of("D:/a").starts_with(path.of("C:/")));
+        test.assert(!path.of("c:/a").starts_with(path.of("C:/a")));
+        test.assert(!path.of("C:/a").starts_with(path.of("C:")));
     };
 
     export let test_relative_to = func() -> void {
@@ -124,6 +203,26 @@ let PathTests = module (
         test.assert(path.of("a").relative_to(path.of("../b")) == nil);
         let joined = path.of("/a/d").join(text(path.of("/a/b/c").relative_to(path.of("/a/d"))));
         test.assert_equal_string("/a/b/c", text(joined.resolve_lexically()));
+    };
+
+    export let test_relative_to_drive_roots = func() -> void {
+        test.assert_equal_string("b/c", text(path.of("C:/a/b/c").relative_to(path.of("C:/a"))));
+        test.assert_equal_string("../b/c", text(path.of("C:/a/b/c").relative_to(path.of("C:/a/d"))));
+        test.assert_equal_string("a", text(path.of("C:/a").relative_to(path.of("C:/"))));
+        test.assert_equal_string(".", text(path.of("C:/").relative_to(path.of("C:/"))));
+        test.assert(path.of("C:/a").relative_to(path.of("D:/a")) == nil);
+        test.assert(path.of("C:/a").relative_to(path.of("/a")) == nil);
+        test.assert(path.of("/a").relative_to(path.of("C:/a")) == nil);
+        test.assert(path.of("C:/a").relative_to(path.of("c:/a")) == nil);
+        test.assert(path.of("C:/a").relative_to(path.of("a")) == nil);
+        last base = path.of("C:/a/d");
+        last joined = base.join(text(path.of("C:/a/b/c").relative_to(base)));
+        test.assert_equal_string("C:/a/b/c", text(joined.resolve_lexically()));
+        // A relative result whose first component is a drive designator stays relative and joins back.
+        last designator = path.of("/C:/x").relative_to(path.of("/"));
+        test.assert_equal_string("./C:/x", text(designator));
+        test.assert(!designator.is_absolute);
+        test.assert_equal_string("/C:/x", text(path.of("/").join(text(designator))));
     };
 
     export let test_equality_hash_order = func() -> void {
@@ -142,5 +241,9 @@ let PathTests = module (
         test.assert(path.of("é").compare_to(path.of("z")) == ordering.Ordering.Greater);
         test.assert_equal_string("a/b", a.to_string());
         test.assert_equal<path.Path>(a, b);
+        test.assert(path.of("C:/x").equals(path.of("C://x/")));
+        test.assert(!path.of("C:/x").equals(path.of("c:/x")));
+        test.assert(!path.of("C:/x").equals(path.of("./C:/x")));
+        test.assert(path.of("C:/").compare_to(path.of("C:/a")) == ordering.Ordering.Less);
     };
 );

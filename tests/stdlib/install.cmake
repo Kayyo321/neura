@@ -53,10 +53,15 @@ if(NOT status STREQUAL "0" OR NOT stdout STREQUAL "installed library\n" OR NOT s
 endif()
 
 # The image labels library blocks by their library path, never by where the
-# library was installed.
+# library was installed. The directory is searched for as text, not as a
+# regular expression, since a path can hold `+`, `(` or `.`; on Windows it is
+# searched for with `\` separators too.
+file(TO_NATIVE_PATH "${TEST_DIR}" native_test_dir)
 file(STRINGS "${TEST_DIR}/away/hello.nvr" image_strings)
 foreach(string IN LISTS image_strings)
-    if(string MATCHES "${TEST_DIR}")
+    string(FIND "${string}" "${TEST_DIR}" generic_at)
+    string(FIND "${string}" "${native_test_dir}" native_at)
+    if(NOT generic_at EQUAL -1 OR NOT native_at EQUAL -1)
         message(FATAL_ERROR "the image contains an installation path: ${string}")
     endif()
 endforeach()

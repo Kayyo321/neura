@@ -14,11 +14,14 @@ let tcp_dns = import:Std.Net.Dns.TcpDnsTransport;
 let transports = import:Std.Net.Dns.DnsTransport;
 let udp_dns = import:Std.Net.Dns.UdpDnsTransport;
 
-/// @brief A stub resolver in Neura: `/etc/hosts`, then the cache, then the network, with search-list expansion,
+/// @brief A stub resolver in Neura: the hosts table, then the cache, then the network, with search-list expansion,
 /// CNAME chasing, response matching, truncation fallback, retries, rotation and split-horizon routing.
 ///
 /// - **Order.** For A and AAAA questions the hosts table answers first (as glibc's default `hosts: files dns`).
-///   Then the `DnsCache`, then the upstream servers.
+///   Then the `DnsCache`, then the upstream servers. The resolver reads no file itself: it is given a
+///   `HostsFile` and a `ResolvConf`, usually read from `/etc/hosts` and `/etc/resolv.conf` on Linux and macOS;
+///   on Windows, from the hosts file that `HostsFile.DefaultPath` describes and from servers the program
+///   configures (Windows has no `resolv.conf`).
 /// - **Search list** (resolv.conf(5), `man 5 resolv.conf`). A name ending in a dot is tried as is and only so.
 ///   A name with at least `ndots` dots is tried as is first, then with each search domain appended; a name with
 ///   fewer dots is tried with each search domain first, then as is. The next candidate is tried after a name

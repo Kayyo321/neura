@@ -24,6 +24,10 @@
 #                          lines (status defaults to 0) and a .out file. Each
 #                          image also round-trips through disassemble and
 #                          assemble byte for byte, and decompile runs on it.
+#   <name>.windows.out     Replaces <name>.out on Windows, for a program or
+#                          trap whose output shows the host's C data model.
+# Header lines are read with file(STRINGS), which drops carriage returns, so a
+# header ends the same with LF or CRLF line ends.
 if(NOT DEFINED NEURA OR NOT DEFINED SOURCE_DIR OR NOT DEFINED TEST_DIR OR NOT DEFINED AREA)
     message(FATAL_ERROR "Provide NEURA, SOURCE_DIR, TEST_DIR, and AREA")
 endif()
@@ -127,6 +131,12 @@ function(check_programs kind default_status)
     foreach(source IN LISTS sources)
         get_filename_component(name "${source}" NAME_WE)
         string(REGEX REPLACE "[.]nra$" ".out" expected_file "${source}")
+        # Output that depends on the host's C data model (LLP64 on Windows)
+        # is given for Windows in <name>.windows.out.
+        string(REGEX REPLACE "[.]nra$" ".windows.out" windows_expected_file "${source}")
+        if(CMAKE_HOST_WIN32 AND EXISTS "${windows_expected_file}")
+            set(expected_file "${windows_expected_file}")
+        endif()
         file(READ "${expected_file}" expected)
         read_header(header "${source}" "${default_status}")
         set(run_dir "${TEST_DIR}/${kind}-${name}")

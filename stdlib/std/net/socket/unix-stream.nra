@@ -18,7 +18,8 @@ let.promote _ = import:Std.Core.Unit;
 /// and close are those of a `Std.Net.TcpStream` over the Unix socket's ID. Opening one uses the host's
 /// `neura.net.unix.connect` (or `UnixListener`'s `neura.net.unix.listen`). A connecting socket's peer is the address it
 /// dialed and an accepted socket's local address is its listener's; the other address needs a host service and
-/// traps (a client's local address is usually unnamed). Not available on Windows.
+/// traps (a client's local address is usually unnamed). On Windows, whose `AF_UNIX` serves streams, a Unix-domain
+/// stream is named by a path; an abstract name fails with Unsupported there, as on every system but Linux.
 /// @see [Std.Net.Socket.UnixStream](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-UnixStream)
 #Since("0.3.0")
 export let UnixStream = module (
