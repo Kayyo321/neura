@@ -122,7 +122,7 @@ with TemporaryDirectory() as temporary:
         data = (out / path).read_bytes()
         check(sha(data) == entry["sha256"] and len(data) == entry["bytes"], f"{path} does not match its entry")
         check(path.split("/")[-1].split(".")[0] == entry["sha256"], f"{path} is not named by its digest")
-    on_disk = sorted(str(p.relative_to(out)) for p in out.rglob("*") if p.is_file())
+    on_disk = sorted(p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file())
     check(on_disk == sorted([*files, "app.nvr", "app.nvr.styles.json"]), f"unexpected files {on_disk}")
 
     asset = f"assets/{sha(logo)}.png"

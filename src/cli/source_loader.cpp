@@ -66,9 +66,11 @@ fs::path relative_to_root(const fs::path& path, const fs::path& root) {
 
 // Source text as the lexer reads it (W08): each CR LF is LF, so a file
 // checked out with CR LF line endings has the spans, the diagnostics and the
-// image of its LF original. Every source, template and stylesheet read from
-// the disk passes through here before it is recorded and parsed; the text of
-// an overlay is the language server's, which normalizes it itself.
+// image of its LF original. Every source and template read from the disk
+// passes through here before it is recorded and parsed; the text of an
+// overlay is the language server's, which normalizes it itself. Stylesheets
+// do not: their text is bundled byte for byte (docs/apps/Css.md), and the
+// bundle digests are digests of those bytes.
 std::string lf_source(std::string text) {
     if (text.find('\r') == std::string::npos) return text;
     return util::normalize_crlf(text);
@@ -177,11 +179,7 @@ ResolvedTemplate read_template(const Token& path, const fs::path& root) {
 
 // The bytes of a file the build reads, from an overlay or the disk, or
 // nullopt when there is none. `too_large` is set when it exceeds `maximum`.
-// Source text (`text`) read from the disk has its CR LF line endings as LF,
-// and the limit applies to that text; an overlay holds an editor's text,
-// which the language server has normalized already (W08).
-std::optional<std::string> read_input_file(const fs::path& normalized, std::size_t maximum, bool& too_large,
-                                           bool text = false) {
+std::optional<std::string> read_input_file(const fs::path& normalized, std::size_t maximum, bool& too_large) {
     const auto name = path_name(normalized);
     std::string source;
     too_large = false;
@@ -192,12 +190,10 @@ std::optional<std::string> read_input_file(const fs::path& normalized, std::size
         if (!source_exists(normalized)) return std::nullopt;
         std::ifstream input(normalized, std::ios::binary);
         if (!input) return std::nullopt;
-        // CR LF endings at most double the length of the text.
-        source.resize((text ? 2 * maximum : maximum) + 1);
+        source.resize(maximum + 1);
         input.read(source.data(), static_cast<std::streamsize>(source.size()));
         source.resize(static_cast<std::size_t>(input.gcount()));
         if (input.bad()) return std::nullopt;
-        if (text) source = lf_source(std::move(source));
     }
     too_large = source.size() > maximum;
     return source;
@@ -318,7 +314,7 @@ std::pair<BundleFileSyntax, std::vector<BundleFileSyntax>> import_stylesheet(con
         return cached->second;
     constexpr std::size_t maximum = 1024 * 1024;
     bool too_large = false;
-    auto source = read_input_file(file, maximum, too_large, true);
+    auto source = read_input_file(file, maximum, too_large);
     if (!source) style_reference_error(span, "no stylesheet exists at this path");
     if (too_large) style_reference_error(span, "the stylesheet exceeds 1 MiB");
     if (!nvr::valid_utf8(*source)) style_reference_error(span, "the stylesheet must contain valid UTF-8");
@@ -367,7 +363,7 @@ void resolve_stylesheet(StylesheetSyntax& syntax, SourceDependencies& dependenci
         const auto within = relative_to_root(normalized, root);
         if (within.empty() || *within.begin() == "..") template_file_error(path, root, "this path leaves the source root");
         bool too_large = false;
-        auto source = read_input_file(normalized, maximum, too_large, true);
+        auto source = read_input_file(normalized, maximum, too_large);
         if (!source) template_file_error(path, root, "no stylesheet file exists at this path");
         if (too_large) template_file_error(path, root, "the stylesheet exceeds 1 MiB");
         if (!nvr::valid_utf8(*source)) template_file_error(path, root, "the stylesheet must contain valid UTF-8");
