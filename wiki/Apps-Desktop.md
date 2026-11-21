@@ -7,6 +7,8 @@ This page is the reference for Neura desktop applications as implemented: the wi
 
 *Status:* Neura 0.3.0, qualified on Linux x86-64 under Xvfb with the pinned Electron 45.3.3, implemented by autonomous agents and awaiting owner confirmation. **No Neura component renders in a desktop window yet:** the renderer's NVM and components (`desktop.mount`) need the browser runtime and components of the application platform, so the pages of the tests are fixture scripts that call the bridge. Windows and macOS runners, `.dmg`, `.msix`, signing and `neura contracts` (generated dispatchers) are not implemented.
 
+On Windows 0.3.0 the project commands report `the desktop host is unavailable on Windows in Neura 0.3.0` for desktop build, dev, run and package. Windows desktop hosting is deferred with the PE launcher.
+
 ## Writing the native child
 
 A desktop child is a program whose `main` returns `Std.Desktop.run_application(registry, start)`. `start` opens the first window and ends with `context.run(dispatcher)`:

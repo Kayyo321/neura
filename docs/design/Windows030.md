@@ -1,17 +1,17 @@
 # Neura 0.3.0: native Windows
 
-This note fixes how Neura is built and runs natively on Windows (`x86_64-windows-msvc`), without WSL, before the port is made. It covers the toolchain, the build structure and the platform layer, the Windows form of the product layout of [SDK tools and the direct runtime](Products030.md), and the decisions W01 to W35 that every Windows code path follows: text and paths, processes and console events, the runtime's host services, the JIT, the server host, `neurad`, native executables, desktop bundles, project tools, installation, archives and the release. It also records how the work is divided between packages, what stays out of scope with the refusal each case gives, and the risks.
+This note describes how Neura is built and runs natively on Windows (`x86_64-windows-msvc`) without WSL. It covers the toolchain, platform layer, Windows layout for the [SDK and runtime](Products030.md), host services, tools, installation and release. Decisions W01 to W35 also record the work deferred from 0.3.0 and its runtime refusals.
 
-Status: every decision of this note is *decided* as of 2026-11-20. A decided row is the rule the port's changes implement; it is not a record that the change has landed or passed its checks, and "Results" says what has been measured. The decisions were taken while planning the port, not confirmed by the owner row by row; a decision the owner changes is changed here and in the implementation in one later change, with the reason. A package that cannot meet a decision stops and reports it instead of choosing another behavior ([AGENTS.md](../../AGENTS.md)). The pages listed under "Recorded in" own the user-visible rule once the implementing change lands; until then this note is the reference.
+The initial design decisions were made on 2026-11-20. Windows 0.3.0 defers the JIT (W11), TLS, HTTP/2 and PostgreSQL (W28), native launchers and C-import linking (W19, W30), and desktop hosting (W31). The decision table describes the intended release behavior. [Results](#results) records measured evidence, and [Verification](#verification) lists the checks still required for release qualification.
 
-The port changes no language rule and no image byte. The same source and options give byte-identical images on Linux, macOS and Windows (W13). POSIX code paths and POSIX CMake text stay as they are: Windows code goes into `#ifdef _WIN32` branches, into the platform layer, or into the Windows build files below, and Linux and macOS keep building and passing their suites unchanged.
+The port adds no language rule or NVR format revision. The verification target in W13 is byte-identical images built on Linux, macOS and Windows from the same source and options. Windows-specific code belongs in `_WIN32` branches, in the platform layer or in the Windows build hooks. Changes visible to POSIX need review and tests on those targets.
 
 ## Scope
 
 | Item | Value |
 | --- | --- |
 | Target | `x86_64-windows-msvc`: Windows 10 version 2004 (build 19041) or later, Windows 11, Windows Server 2022 or later, on x86-64 (W03). Windows on Arm64 is not a 0.3.0 target. |
-| Products | Both. Neura-runtime: `neura`, `neura-run`, `neura-inspect`, `neura-doctor`, `neura-update`, `neura-uninstall`, `neura-server-host`, `neurad`. Neura-sdk adds `neurac`, `neura-test`, `neura-lsp`, `neura-fmt`, `neura-debug`, `neura-decompile`, `neura-doc`, `neura-cbind`, `neura-asm`, `neura-disasm`, `neura-explain`, `neura-tags`, `neura-new`, `neura-package`, `neura-dev`, the native launcher and C import. |
+| Products | Both. Neura-runtime: `neura`, `neura-run`, `neura-inspect`, `neura-doctor`, `neura-update`, `neura-uninstall`, `neura-server-host`, `neurad`. Neura-sdk adds `neurac`, `neura-test`, `neura-lsp`, `neura-fmt`, `neura-debug`, `neura-decompile`, `neura-doc`, `neura-cbind`, `neura-asm`, `neura-disasm`, `neura-explain`, `neura-tags`, `neura-new`, `neura-package`, `neura-dev`, and libclang-backed header reading. |
 | Build hosts | Windows with Visual Studio 2022 (W01). MinGW, MSYS2 GCC and Cygwin are not build hosts; Git for Windows supplies `bash`, GNU tar and `gzip` to the packaging scripts and the tests, not a compiler. |
 | Release | Windows ships in 0.3.0 for both products, unsigned, with build-provenance attestations (W35). |
 | Not covered | The services and flavors under "Out of scope", each with its refusal. |
@@ -45,8 +45,8 @@ About 104 warnings remain, mostly CRT deprecations (C4996), narrowing (C4244, C4
 | Reference compiler | cl.exe from Visual Studio 2022 17.14 or later (MSVC v143, toolset 14.44 or later) with Ninja and the Windows SDK 10.0.22621 or later. Releases are built with it. |
 | Second compiler | clang-cl from the Visual Studio "C++ Clang tools" component (LLVM 19), built in CI. No fix and no JIT path may depend on one compiler. |
 | CMake | 3.24 or later on Windows, checked by `cmake/NeuraWindows.cmake`; the POSIX minimum stays 3.20. |
-| Dependencies | vcpkg in manifest mode: `vcpkg.json` at the root with `libffi` and an optional `gpu` feature (`vulkan-headers` and the `glslang` tools), a pinned `builtin-baseline`, triplet `x64-windows-static`. CI uses the runner's preinstalled vcpkg, developers the copy that comes with Visual Studio. OpenSSL, nghttp2 and libpq keep the pinned-source recipe of the server components, extended with an MSVC recipe. |
-| Presets | `CMakePresets.json` adds `windows-msvc`, `windows-msvc-debug`, `windows-clang-cl` and `windows-release` (`NEURA_PORTABLE_RELEASE` with the server components), each with build and test presets. The file stays at schema 2, which CMake 3.20 reads, so `wasm-runtime` keeps the POSIX minimum: the Windows presets therefore set vcpkg's toolchain as `CMAKE_TOOLCHAIN_FILE` and carry no host condition (a schema 3 feature). They are listed on every host and fail at configure on one without `cl` or `clang-cl`. Each builds in `build-<preset>` at the root, beside `stdlib/`, which is where a build-tree tool looks for the standard library (`<bin>/../stdlib`), as with `cmake -B build`. `wasm-runtime` is unchanged. |
+| Dependencies | vcpkg in manifest mode: `vcpkg.json` at the root with `libffi` and an optional `gpu` feature (`vulkan-headers` and the `glslang` tools), a pinned `builtin-baseline`, triplet `x64-windows-static`. CI uses the runner's preinstalled vcpkg, developers the copy that comes with Visual Studio. OpenSSL, nghttp2 and libpq stay in the POSIX release recipe for 0.3.0. |
+| Presets | `CMakePresets.json` adds `windows-msvc`, `windows-msvc-debug`, `windows-clang-cl` and `windows-release` (`NEURA_PORTABLE_RELEASE` with TLS, HTTP/2 and PostgreSQL set to `OFF`), each with build and test presets. The file stays at schema 2, which CMake 3.20 reads, so `wasm-runtime` keeps the POSIX minimum: the Windows presets therefore set vcpkg's toolchain as `CMAKE_TOOLCHAIN_FILE` and carry no host condition (a schema 3 feature). They are listed on every host and fail at configure on one without `cl` or `clang-cl`. Each builds in `build-<preset>` at the root, beside `stdlib/`, which is where a build-tree tool looks for the standard library (`<bin>/../stdlib`), as with `cmake -B build`. `wasm-runtime` is unchanged. |
 | Build and test prerequisites | A Developer PowerShell for VS 2022 (or a shell after `vcvars64.bat`), CPython 3.11 or later (not the Microsoft Store alias), Git for Windows, and `NEURA_LIBCLANG` naming a libclang 14 to 21 for the C import tests. None of them is a runtime prerequisite. |
 | Commands | `cmake --preset windows-msvc`, `cmake --build --preset windows-msvc`, `ctest --preset windows-msvc`. |
 
@@ -117,7 +117,7 @@ Three rules apply to every package. New code includes Windows headers only throu
 | W08 | Line endings | decided | [Core language](../lang/CoreLanguage.md), [Tooling](../lang/Tooling.md), [Projects030](Projects030.md) |
 | W09 | Paths | decided | [Standard library](../lang/Stdlib.md), [NVM](../runtime/NVM.md), [Projects030](Projects030.md) |
 | W10 | Processes, exit statuses and console events | decided | [Tooling](../lang/Tooling.md), [Errors](../lang/Errors.md), [Server host](../runtime/ServerHost.md), [Service](../runtime/Service.md) |
-| W11 | JIT | decided | [NVM](../runtime/NVM.md) |
+| W11 | JIT | deferred to 0.3.1 | [NVM](../runtime/NVM.md) |
 | W12 | Stack size | decided | this note |
 | W13 | Floating point and image identity | decided | [NVM](../runtime/NVM.md), [Backend](../Backend.md) |
 | W14 | Sockets and readiness | decided | [NVM](../runtime/NVM.md) |
@@ -125,7 +125,7 @@ Three rules apply to every package. New code includes Windows headers only throu
 | W16 | File-system semantics | decided | [NVM](../runtime/NVM.md), [Standard library](../lang/Stdlib.md) |
 | W17 | Console services | decided | [NVM](../runtime/NVM.md) |
 | W18 | Environment | decided | [NVM](../runtime/NVM.md), [Standard library](../lang/Stdlib.md) |
-| W19 | Dynamic libraries, DLL search and C import linking | decided | [Foreign interop](../lang/ForeignInterop.md), [NVM](../runtime/NVM.md), [Tooling](../lang/Tooling.md) |
+| W19 | Dynamic libraries, DLL search and C import linking | DLL loading and header reading in scope, C import linking deferred | [Foreign interop](../lang/ForeignInterop.md), [NVM](../runtime/NVM.md), [Tooling](../lang/Tooling.md) |
 | W20 | Locked memory | decided | [NVM](../runtime/NVM.md), [Standard library](../lang/Stdlib.md) |
 | W21 | Process generation | decided | [NVM](../runtime/NVM.md) |
 | W22 | Install layout | decided | [Install](../Install.md), [Lifecycle030](Lifecycle030.md) |
@@ -134,10 +134,10 @@ Three rules apply to every package. New code includes Windows headers only throu
 | W25 | Manifest file modes | decided | [Lifecycle030](Lifecycle030.md) |
 | W26 | Update transport | decided | [Install](../Install.md) |
 | W27 | Server host | decided | [Server host](../runtime/ServerHost.md) |
-| W28 | TLS trust and OpenSSL configuration | decided | [Server host](../runtime/ServerHost.md), [Install](../Install.md), [SQL](../runtime/Sql.md) |
+| W28 | TLS, HTTP/2, PostgreSQL and TLS trust | deferred to 0.3.1 | [Server host](../runtime/ServerHost.md), [Install](../Install.md), [SQL](../runtime/Sql.md) |
 | W29 | `neurad` | decided | [Service030](Service030.md), [Service](../runtime/Service.md) |
-| W30 | Native executables | decided | [Standalone executables](../lang/Standalone.md), [Standalone design](Standalone.md) |
-| W31 | Desktop | decided | [Desktop030](Desktop030.md), [Providers](../runtime/Providers.md) |
+| W30 | Native executables | deferred to 0.3.1 | [Standalone executables](../lang/Standalone.md), [Standalone design](Standalone.md) |
+| W31 | Desktop | deferred to 0.3.1 | [Desktop030](Desktop030.md), [Providers](../runtime/Providers.md) |
 | W32 | Project tools | decided | [Projects](../apps/Projects.md), [Projects030](Projects030.md) |
 | W33 | GPU | decided | [GPU execution](../lang/GpuExecution.md) |
 | W34 | Testing | decided | [Continuous integration](../ContinuousIntegration.md), [CONTRIBUTING](../../CONTRIBUTING.md) |
@@ -171,7 +171,7 @@ Statically linked tools were rejected for size when the products were split ([Pr
 
 ### W05: CRT and portable release
 
-Every Windows binary links the static CRT (`/MT`, `/MTd` in Debug). libffi, OpenSSL, nghttp2 and libpq are static `/MT` builds. `NEURA_PORTABLE_RELEASE` on Windows means exactly that plus `/Brepro`, and no longer stops the configure. A released Windows binary may import only `kernel32`, `advapi32`, `bcrypt`, `ws2_32`, `mswsock`, `crypt32`, `secur32`, `user32`, `shell32`, `ole32`, `wer`, `psapi`, `ntdll` and the Neura DLL; no `vcruntime`, `msvcp` or `api-ms-win-crt` import is allowed. `scripts/check-windows-binaries.py` enforces the list in the release workflow.
+Every Windows binary links the static CRT (`/MT`, `/MTd` in Debug). libffi uses the static vcpkg triplet. `NEURA_PORTABLE_RELEASE` sets the portable Windows settings, including `/Brepro`. A released Windows binary may import only allowlisted Windows system DLLs and its product's Neura DLL. `scripts/check-windows-binaries.py` enforces the import and export boundaries in the release workflow.
 
 [Install](../Install.md) promises that the archives need nothing else from the system. The static CRT removes the Visual C++ redistributable as a prerequisite, and the C-only boundary of W04 makes a CRT per module safe.
 
@@ -199,7 +199,7 @@ Tools print paths in generic form, with `/` and the drive letter as the file sys
 
 The Windows file-system host accepts `/` and `\`, absolute drive paths, root-relative paths (on the current drive) and UNC text with backslashes. It refuses with `invalid_input` (4) a drive-relative `X:name`, a `:` inside a component (alternate data streams), the reserved device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1` to `COM9`, `LPT1` to `LPT9`, `CONIN$`, `CONOUT$`), and a component that ends in a dot or a space. `--allow-fs` prefixes are canonicalized with `GetFinalPathNameByHandleW` and compared component by component, ordinally and without case. The project manifest's local paths reject the same Windows-hostile names as bundle entries do, on every host.
 
-Without a drive-root rule a Windows absolute path is relative to `Path`, and `join` appends to it. The rule changes POSIX results only for text that starts with a letter, a colon and a slash. Refusing device names and alternate data streams keeps the prefix sandbox from being bypassed, and the manifest rules then mean the same on every host.
+Absolute path components start with `/` or the complete drive root such as `C:/`. Roots compare by their bytes, so `C:/` and `c:/` are distinct. A relative path whose first component is a drive designator keeps a leading `./` when more components follow, as in `./C:/x`. This keeps a relative path from becoming absolute through `join`, `relative_to` or `resolve_lexically`. The rule applies on every host and changes POSIX results for these drive-shaped components. See [the standard library contract](../lang/Stdlib.md#112-stdfs).
 
 ### W10: Processes, exit statuses and console events
 
@@ -219,11 +219,9 @@ Scripts and tests keep seeing the POSIX shell's statuses for interrupts, and rea
 
 ### W11: JIT
 
-Tiers 2 and 3 are ported to Windows x86-64. The generated code keeps its internal register convention, so the tier 3 lowering and the register allocator are unchanged; only the two boundaries change. Entries from C++ (the tier 2 region prologue and the tier 3 trampoline) save `rsi`, `rdi` and `xmm6` to `xmm15` and move the arguments from `rcx` and `rdx` to the internal registers. Helper calls go through an adapter that moves the five argument registers to `rcx`, `rdx`, `r8`, `r9` and the stack, with the 32-byte home area. Code memory is written through `VirtualAlloc` and made executable with `VirtualProtect`, never writable and executable at once, and unwind data is registered with `RtlAddFunctionTable` so debuggers, crash dumps and stack walks see the frames.
+Windows 0.3.0 uses portable execution for NVM regions. `--jit=auto` selects the interpreter, and `--jit=on` fails before execution with `--jit=on: Windows has no JIT in 0.3.0`. Windows CI uses a CTest time scale of 12. The Windows Debug build keeps the tier 3 context layout assertions and uses a pointer-owned value pool for compatibility with MSVC's checked iterators.
 
-`--jit=auto` and the tier 3 default turn on for Windows x86-64 only in the same change that adds a green Windows identity leg (`scripts/runtime-identity.py --extended` and `scripts/tier-boundary.py` with the JIT off and on). Until then `auto` uses the interpreter with the reason `not enabled by default on x86-64 Windows (use --jit=on)`.
-
-This is full support with the evidence standard of Linux and the existing policy for macOS and AArch64. Every helper returns a 64-bit value or nothing and takes at most five scalar or pointer arguments, and every register that Win64 treats as volatile is already in the conservative SysV clobber sets, so adapters at the two boundaries are complete.
+A future Win64 implementation needs qualified calling-convention adapters, unwind data, and identity comparisons with the interpreter before enabling native code.
 
 ### W12: Stack size
 
@@ -239,7 +237,7 @@ Float lowering is bit-exact only without contraction. MSVC evaluates function ar
 
 ### W14: Sockets and readiness
 
-Winsock 2.2 is started once per process before any socket is used. Sockets are held in pointer-width fields. Readiness uses `WSAPoll` for sockets and `WaitForMultipleObjects` for handles; `NEURA_IO_BACKEND` is ignored on Windows. Listeners use `SO_EXCLUSIVEADDRUSE` where POSIX uses `SO_REUSEADDR`, and a listener with an empty host is dual-stack (`IPV6_V6ONLY` 0), as on Linux. `send_file` uses `TransmitFile`.
+Winsock 2.2 is started once per process before any socket is used. Sockets are held in pointer-width fields. Readiness uses `WSAPoll` for sockets and `WaitForMultipleObjects` for handles. `NEURA_IO_BACKEND` is ignored on Windows. Listeners use `SO_EXCLUSIVEADDRUSE` where POSIX uses `SO_REUSEADDR`. IPv6 sockets in the Windows host provider are dual-stack (`IPV6_V6ONLY=0`), including TCP and UDP binds to `::`. `send_file` uses `TransmitFile`.
 
 | Socket option | Windows |
 | --- | --- |
@@ -278,7 +276,9 @@ The table lists representative rows; the complete mapping is recorded in [NVM](.
 
 Files are opened with `FILE_SHARE_READ`, `FILE_SHARE_WRITE` and `FILE_SHARE_DELETE` and are not inherited. `Append` is `FILE_APPEND_DATA`. Remove and rename use POSIX semantics where the volume supports them (`FileDispositionInfoEx` with `POSIX_SEMANTICS` and `IGNORE_READONLY_ATTRIBUTE`, `FileRenameInfoEx` with `POSIX_SEMANTICS` and `REPLACE_IF_EXISTS`), falling back to `DeleteFileW` and `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING`, so a read-only or open file can be removed as on POSIX. `stat` without following reports every reparse point as `Other`. The modification time is `LastWriteTime`. Long paths use the `\\?\` prefix. The providers do not retry sharing violations, which answer `permission_denied` (2); the lifecycle and the formatter retry a bounded number of times.
 
-This matches the POSIX results the standard library tests expect, such as `remove_tree` and renaming over a file, and keeps `remove_tree` from following junctions.
+Write mode opens or creates the file before truncating its handle. Directory rename into its own subtree returns `InvalidInput`, including when a junction would lead into that subtree. Renaming a path to itself or changing only its case is allowed. If the volume lacks the rename operation needed to replace an empty directory, the fallback returns `Unsupported`.
+
+`remove_tree` leaves junction targets untouched.
 
 ### W17: Console services
 
@@ -300,9 +300,7 @@ Tools call `SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS)` when the
 
 `Std.DynamicForeign`'s `library.open` treats text that contains `/` or `\` or starts with a drive as a path, loaded with `LoadLibraryExW` and `LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR` with the default directories. A bare name is searched in the application directory, `System32`, then each `PATH` entry by full path. Any extension is accepted, so the tests keep `libmathops.so`. Library 0 searches the executable, `ucrtbase.dll`, `kernel32.dll`, then the other loaded modules in `EnumProcessModulesEx` order. The ABI is Win64 through libffi's `FFI_WIN64`: `long` is 4 bytes, `wchar_t` is 2 bytes and unsigned, and aggregates whose size is not 1, 2, 4 or 8 bytes are passed by reference.
 
-The embedded native library of a native executable is a DLL, written to a unique file in a private temporary directory, loaded, and deleted after `FreeLibrary`. `neura build` links C import libraries with clang-cl, else with cl and `link.exe` (`--cc` and `CC` override): `/LD` or `link /DLL`, `/WHOLEARCHIVE` for each library, a generated `/EXPORT` list and `/Brepro`. `.lib` and `.a` COFF archives are accepted and import libraries are refused. libclang is found through `NEURA_LIBCLANG`, the LLVM installation (`%ProgramW6432%/LLVM/bin` and the registry key `HKLM\SOFTWARE\LLVM\LLVM`), the Visual Studio LLVM component, then `PATH` entries by full path, never the current directory.
-
-This closes DLL planting through the current directory and keeps the documented rule that a path loads that file meaningful on Windows. A Windows DLL exports nothing by default, so the export list is what makes the embedded library's symbols reachable.
+For an image with an embedded DLL, the runtime writes it into a private temporary directory and deletes it after unloading. A subsequent embedded load can clean up abandoned directories from processes that already exited. Windows 0.3.0 reads C headers through libclang and refuses a build requiring C import linking with `linking C imports is not supported on Windows in this release`. `NEURA_LIBCLANG` can select the supported DLL by full path. The loader searches installed LLVM, Visual Studio and then `PATH` entries by full path. The current directory is excluded from implicit DLL lookup.
 
 ### W20: Locked memory
 
@@ -354,9 +352,7 @@ This keeps the single socket readiness model of the POSIX host, since `WSAPoll` 
 
 ### W28: TLS trust and OpenSSL configuration
 
-OpenSSL 3.5.9 is built static (`/MT`) with `no-shared`, `no-module` and `no-engine`, and `--openssldir` under `%ProgramFiles%/Common Files/SSL`. Neura initializes it with `OPENSSL_INIT_NO_LOAD_CONFIG` on Windows. Client verification without a CA file uses the Windows certificate store through `SSL_CTX_load_verify_store(ctx, "org.openssl.winstore:")`. libpq's `verify-full` on Windows needs an explicit `sslrootcert`, and the provider's error says so.
-
-A user-writable or missing `OPENSSLDIR` on Windows is a known configuration-injection vector. `/etc/ssl` does not exist, so the default verify paths would fail every verification. libpq builds its own `SSL_CTX` and offers no hook for the store.
+Windows 0.3.0 serves HTTP/1.1 and supports SQLite. The server host refuses TLS listeners and HTTP/2 options that enable the protocol, and SQL pool setup refuses PostgreSQL. `Std.Net.Tls` reports that TLS is unavailable. The refusals name the Windows 0.3.0 limit. OpenSSL, nghttp2 and libpq integration and the Windows TLS trust policy are deferred to 0.3.1.
 
 ### W29: `neurad`
 
@@ -378,15 +374,11 @@ This keeps the supervisor's poll-based design: `AF_UNIX` sockets can be waited o
 
 ### W30: Native executables
 
-`neura build --native` works on Windows. The output is a static PE launcher with the payload appended after the image; the reader bounds the payload's end by the certificate table when there is one, so an output can be Authenticode-signed after it is built. `-o name` gains `.exe` when the name has no extension. The default launcher depends only on Windows system libraries. `--static` is refused.
-
-[Standalone executables](Standalone.md) (N11) excluded PE only because of concerns about trailing data, which bounding the payload by the certificate table resolves. `CreateProcess` cannot start a file without an extension.
+The PE launcher is deferred to 0.3.1. `neura build --native` refuses on Windows with `--native: Windows has no native launcher in 0.3.0; run the image with 'neura run' instead`. Building an `.nvr` image and running it through `neura run` are available.
 
 ### W31: Desktop
 
-Desktop bundles run on Windows under the pinned Electron 45.3.3 for `win32-x64`. The native child of a Windows-target bundle is `app-<hash>.exe`. The data directory is `%LOCALAPPDATA%/<id>` with an owner-only DACL. `neura package --target desktop` builds the `.zip`; `.msix` remains E1033.
-
-A desktop bundle is already per target system, because its child is a native executable. An MSIX cannot be installed unsigned, and `--sign` is refused on every host ([Desktop030](Desktop030.md#packages)).
+Desktop hosting and packaging on Windows are deferred to 0.3.1. They require a Windows native child (W30). The project commands refuse desktop operations requiring that child on Windows 0.3.0.
 
 ### W32: Project tools
 
@@ -408,7 +400,7 @@ The CI report refuses skipped entries, and hosted runners may lack the symbolic-
 
 ### W35: Release scope
 
-Windows ships in 0.3.0 for both products. `release.yml` gains the `x86_64-windows-msvc` build and qualification legs, and qualification runs `packaging/qualify.py` with Windows rules: checks 9 (update from the previous release) and 13 (the 0.2 bridge) do not apply to the first Windows release and report as not run, an exception the release process's go/no-go list records. The Windows SDK and runtime archives may be at most 125% of the same build's `x86_64-linux-gnu` archives of the same product, measured in the first green trial and recorded in [Release030](Release030.md). Windows binaries are not Authenticode-signed in 0.3.0, and the attestations are their provenance. The local lightweight tag `v0.3.0` (at `fbff1b80`) is recreated on the final `main` commit only after the owner's explicit go-ahead.
+Windows ships in 0.3.0 for both products. `release.yml` builds and qualifies `x86_64-windows-msvc`. `packaging/qualify.py` reports check 9 (`update` from the previous release) as `NOT RUN` when the previous release has no Windows archive and check 13 (the 0.2 bridge) as `NOT RUN` because there is no Windows 0.2 client. The [release process](../ReleaseProcess.md#go-or-no-go) records these exceptions. The Windows SDK and runtime archives may be at most 125% of the same build's `x86_64-linux-gnu` archives of the same product. Record measurements from the first green trial in [Release030](Release030.md). Windows binaries ship unsigned in 0.3.0 and carry build-provenance attestations. The owner handles tag creation and publication through the release process.
 
 There is no rc.3 Windows archive for the existing rule of the budget to compare against, so the budget is relative to Linux. Moving a tag and publishing a release are irreversible steps that only the owner takes.
 
@@ -457,8 +449,13 @@ Each case below has a defined refusal; none is left to fail in an unspecified wa
 
 | Item | Reason | Refusal |
 | --- | --- | --- |
+| Native JIT | Win64 code generation and calling conventions await qualification | `--jit=auto` uses the interpreter. `--jit=on` fails with `Windows has no JIT in 0.3.0` |
+| Native executable generation | The PE launcher is deferred to 0.3.1 | `neura build --native` reports `Windows has no native launcher in 0.3.0` |
+| Linking C imports | COFF static libraries and the Windows native linker need a port | A build that needs linking reports `linking C imports is not supported on Windows in this release` |
+| Server TLS, HTTP/2, `Std.Net.Tls` and PostgreSQL | OpenSSL, nghttp2 and libpq integration is deferred to 0.3.1 | TLS listener startup, HTTP/2 enablement and PostgreSQL pool setup name the Windows 0.3.0 limit. `Std.Net.Tls` reports that TLS is unavailable in the runtime |
+| Desktop host and desktop project operations | The Windows Electron host and its native child need qualification | Desktop build, dev, run and package report `the desktop host is unavailable on Windows in Neura 0.3.0` |
 | The server host's fork-based worker zygote (`--worker-start zygote`) | Windows has no fork, and cloning a Win32 process that uses the CRT and Winsock is unsupported, so a pre-forked worker cannot be made safely | The existing `--worker-start zygote needs Linux`; the default on Windows is exec, as on macOS |
-| The fully static launcher (`neura build --native --static`, `neura-launcher-static`, `NEURA_STATIC_LAUNCHER=ON`) | Windows has no stable system-call interface: every PE imports `kernel32` and `ntdll`, and the default launcher already depends only on system DLLs | `neura build`: `--static: Neura has no static launcher for x86_64-windows-msvc; the default launcher depends only on Windows system libraries`; CMake keeps `NEURA_STATIC_LAUNCHER requires Linux` |
+| The fully static launcher (`neura build --native --static`, `neura-launcher-static`, `NEURA_STATIC_LAUNCHER=ON`) | The fully static launcher requires Linux | The general `--native` refusal applies. CMake keeps `NEURA_STATIC_LAUNCHER requires Linux` |
 | Unix-domain datagram sockets and the abstract namespace (`neura.net.unix.datagram`, `unix.send_to`, `unix.receive_from`, `@` names) | Windows `AF_UNIX` implements only stream sockets and has no abstract namespace | 13 (`Unsupported`), as macOS answers for abstract names; the standard library's documentation and tests say so |
 | Linux-only socket services: pipe, splice, MPTCP, `TCP_USER_TIMEOUT`, `SO_REUSEPORT` | No Windows equivalent; macOS answers the same way today | 13 (`Unsupported`), documented in [NVM](../runtime/NVM.md) |
 | The epoll and io_uring backends (`NEURA_IO_BACKEND`, `nvm-wait-source-epoll`, `nvm-wait-source-io-uring`) | Linux kernel interfaces | `NEURA_IO_BACKEND` is ignored on Windows, as documented; the two CTest entries stay Linux-only |
@@ -468,8 +465,8 @@ Each case below has a defined refusal; none is left to fail in an unspecified wa
 | Authenticode signing of release binaries | Not a platform limitation: the project has no code-signing certificate, and SignPath Foundation requires a published Windows binary first ([Code signing](../CodeSigning.md)) | Releases state that the binaries are unsigned and rely on build-provenance attestations; SmartScreen and Smart App Control warnings are documented |
 | Windows on Arm64 (`aarch64-windows-msvc`) | Outside the x86-64 scope; it needs an AArch64 Windows variant of the JIT (`x18` reserved, other unwind codes), its own launcher and a qualifying runner | No archive is published; [Install](../Install.md) lists it as unsupported; the x86-64 build under emulation is not qualified |
 | The POSIX-only fields of the service launch envelope (umask, resource limits, nice) | Windows has no umask, no resource limits of that kind and no nice value | Not captured or sent by Windows clients; the priority class stands in for nice; documented in [Service030](Service030.md) |
-| Test-only Linux mechanisms: the Vulkan fault loader, the user-namespace cases of `native-install`, Xvfb desktop runs | They depend on Linux loader, namespace and X11 facilities; the features they guard are covered on Windows by other cases (headful desktop runs, PE launcher installs) | Not registered on Windows, and listed in [Continuous integration](../ContinuousIntegration.md) |
-| `server-sql-postgres` in hosted Windows CI | The suite starts PostgreSQL 16, 17 and 18 in Linux containers, which GitHub's Windows runners cannot run; the provider itself is built and shipped on Windows | Excluded with `-E` in the Windows CI legs, as on macOS, and run by hand against a native PostgreSQL before the release |
+| Test-only Linux mechanisms: the Vulkan fault loader, the user-namespace cases of `native-install`, Xvfb desktop runs | They depend on Linux loader, namespace and X11 facilities | They do not run on Windows. See [Continuous integration](../ContinuousIntegration.md) |
+| `server-sql-postgres` | Windows 0.3.0 defers the PostgreSQL provider | Windows tests exercise the unsupported provider response. Release qualification reports the PostgreSQL probe as `NOT RUN` |
 
 ## Verification
 
@@ -479,9 +476,9 @@ Each case below has a defined refusal; none is left to fail in an unspecified wa
 | Builds | The `windows-msvc`, `windows-clang-cl` and `windows-msvc-debug` presets build with no errors, and a configure with `NEURA_SDK=OFF` builds the runtime-only set |
 | Product layout | `dumpbin /exports` on both DLLs lists only `neura_tool_*`; `dumpbin /dependents` shows each tool importing exactly one Neura DLL and system DLLs, and `neura.exe` none; `dumpbin /directives` shows only the static CRT; the release check enforces the allowlist of W05 |
 | Text and console | `neura --version` prints `neura <version> (x86_64-windows-msvc, commit ...)` followed by LF only; `neura run` of a hello-world image works from a directory with a non-ASCII name and from an install of the `core` component; Ctrl+C during a long program exits with 130 |
-| Suites | The Windows CTest list (the Linux list minus the entries under "Out of scope") passes in Tier 1 and Tier 2, with cl and with clang-cl, and the MSVC warning gate is clean |
+| Suites | The Windows CTest registrations pass with cl and clang-cl, and the MSVC warning gate is clean. The GitHub jobs run on `windows-2022` |
 | Image identity | `lift-portable`'s fixed digest, and the comparison of the images built on Linux and Windows from one corpus (W13) |
-| JIT | The Windows identity leg of the JIT workflow (W11) before `--jit=auto` turns on |
+| JIT | The Windows JIT test verifies that `--jit=auto` uses the interpreter and that an explicit JIT request names the 0.3.0 limitation |
 | POSIX unchanged | Tier 1 and Tier 2 on Linux and macOS pass with unchanged test counts on the pushed branch |
 | Release | A trial of the release workflow is green on all five targets, and qualification on `windows-2022` passes every applicable check (W35); a manual check on Windows 10 22H2 and Windows 11 follows [Release process](../ReleaseProcess.md) |
 
@@ -490,7 +487,7 @@ Each case below has a defined refusal; none is left to fail in an unspecified wa
 | Risk | Handling |
 | --- | --- |
 | Differences in argument evaluation order or STL ordering under cl change graphs and so images | `lift-portable` and the cross-host image comparison stay green; a mismatch is fixed in the code, not accepted |
-| Silent JIT corruption if a helper call site bypasses the Win64 adapter or a prologue misses `rsi`, `rdi` or `xmm6` to `xmm15` | `--jit=auto` stays off on Windows until the identity leg is green |
+| The Win64 native ABI needs verification | Windows 0.3.0 uses the interpreter and refuses an explicit JIT request |
 | Inheriting sockets through the handle list fails when a non-IFS layered service provider is installed | The server host and `neurad` report it clearly; a connect-back channel is the fallback if field reports show it |
 | Antivirus and indexer handles cause sporadic sharing violations on rename and delete | Only the lifecycle, the formatter and the bundle writer retry, so provider-level tests must not depend on the immediate deletion of a file another process scans |
 | Windows starts processes slowly (tens of milliseconds), and a run without the JIT is several times slower | CI timeouts use scale factors; the 1,000-request server load case may need the scaled limit |

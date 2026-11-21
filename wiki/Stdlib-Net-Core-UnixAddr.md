@@ -18,27 +18,27 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **UnixAddr** · [`export let UnixAddr = class implements NetAddress`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/unix-addr.nra#L24)
+- **UnixAddr** · [`export let UnixAddr = class implements NetAddress`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/unix-addr.nra#L26)
   A Unix-domain socket address. Tagged `#Final`, `#NoDiscard`, `#Immutable`, `#ThreadSafe`. Since 0.3.0.
-- **UnixAddr.UnixAddr** · [`export last path: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/unix-addr.nra#L26)
+- **UnixAddr.UnixAddr** · [`export last path: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/unix-addr.nra#L28)
   The filesystem path, or the abstract name without its leading NUL.
-- **UnixAddr.UnixAddr** · [`export last is_abstract: bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/unix-addr.nra#L28)
+- **UnixAddr.UnixAddr** · [`export last is_abstract: bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/unix-addr.nra#L30)
   True for a Linux abstract-namespace name.
-- **UnixAddr.UnixAddr** · [`export let init = func(name: string, abstract_namespace: bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/unix-addr.nra#L32)
+- **UnixAddr.UnixAddr** · [`export let init = func(name: string, abstract_namespace: bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/unix-addr.nra#L34)
   Constructs the address; traps when the name is empty or longer than 107 bytes, or when a path contains a NUL byte.
-- **UnixAddr.UnixAddr** · [`export let family = func -> AddressFamily`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/unix-addr.nra#L43)
+- **UnixAddr.UnixAddr** · [`export let family = func -> AddressFamily`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/unix-addr.nra#L45)
   Always `AddressFamily.Unix`. Tagged `#Pure`.
-- **UnixAddr.UnixAddr** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/unix-addr.nra#L46)
+- **UnixAddr.UnixAddr** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/unix-addr.nra#L48)
   Tests whether another object is a `UnixAddr` of the same kind and name.
-- **UnixAddr.UnixAddr** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/unix-addr.nra#L55)
+- **UnixAddr.UnixAddr** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/unix-addr.nra#L57)
   Combines the kind with the name's hash. Tagged `#Pure`.
-- **UnixAddr.UnixAddr** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/unix-addr.nra#L60)
+- **UnixAddr.UnixAddr** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/unix-addr.nra#L62)
   The path, or `@` followed by the abstract name. Tagged `#Pure`.
-- **UnixAddr** · [`export let of_path = func(path: string) -> UnixAddr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/unix-addr.nra#L66)
+- **UnixAddr** · [`export let of_path = func(path: string) -> UnixAddr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/unix-addr.nra#L68)
   The address of a filesystem path; traps when the path is empty, longer than 107 bytes, or contains NUL. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **UnixAddr** · [`export let abstract_name = func(name: string) -> UnixAddr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/unix-addr.nra#L71)
+- **UnixAddr** · [`export let abstract_name = func(name: string) -> UnixAddr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/unix-addr.nra#L73)
   The address of a Linux abstract-namespace name (given without the leading NUL); traps when the name is empty or longer than 107 bytes. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **UnixAddr** · [`export let parse = func(text: string) -> Result<UnixAddr>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/unix-addr.nra#L78)
+- **UnixAddr** · [`export let parse = func(text: string) -> Result<UnixAddr>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/unix-addr.nra#L80)
   Parses `@name` as an abstract name and any other text as a path. Errors: Empty for "" or a lone `@`; OutOfRange at offset 107 (108 for `@name`) when the name is too long; InvalidCharacter at a NUL byte in a path. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 

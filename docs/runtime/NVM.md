@@ -163,7 +163,8 @@ The native code generator (`src/jit`) compiles a region program to machine code,
 | AArch64 Linux | interpreter | native code (experimental) | encodings against an assembler's, and generation of the unit-test programs; not by execution |
 | AArch64 macOS | interpreter | native code (experimental) | as AArch64 Linux; the `MAP_JIT` path is not run |
 | x86-64 macOS | interpreter | native code (experimental) | the x86-64 code generator as on Linux; the macOS mapping path is not run |
-| Others (Windows, other processors) | interpreter | an error | no code generator |
+| Windows x86-64 | interpreter | `Windows has no JIT in 0.3.0` | Win64 JIT deferred |
+| Other processors and systems | interpreter | an error | no code generator |
 
 `--jit=on` starts by running a small generated program; when it cannot be mapped or does not run as generated, or there is no code generator for the processor and system, the run fails before it starts. `auto` uses the interpreter in those cases, silently. A CI job definition (`.github/workflows/jit.yml`) runs the identity comparison with `--jit=on` on AArch64 Linux and macOS runners, so `auto` can be extended once it passes there.
 
@@ -329,7 +330,9 @@ The standard console service is `neura.console.write_line` version 1. It takes a
 | `neura.ffi.call` | int64 function, uint8 list signature, uint8 list arguments | uint8 list | A call through libffi; the formats are below |
 | `neura.ffi.upcall.create` | int64 arena, int64 stub, uint8 list signature | int64 address | An upcall stub ([Callbacks](#callbacks)) |
 
-**Socket services.** These version 1 services belong to the network group and share the socket IDs of `neura.net.*`, so `neura.net.read`, `write`, `accept`, `local_port` and `close` work on the streams, listeners and datagram sockets they open. None of them overlaps: in an image with tasks, a call that waits holds up the other tasks for at most its timeout. Windows answers each with 13 (`Unsupported`). `Std.Net.Internal.Sockets` binds them for the public `Std.Net` types.
+**Socket services.** These version 1 services belong to the network group and share the socket IDs of `neura.net.*`, so `neura.net.read`, `write`, `accept`, `local_port` and `close` work on the streams, listeners and datagram sockets they open. None of them overlaps. In an image with tasks, a call that waits holds up the other tasks for at most its timeout. `Std.Net.Internal.Sockets` binds them for the public `Std.Net` types.
+
+On Windows, Winsock TCP listeners and UDP sockets bound to the IPv6 wildcard `::` also accept IPv4 traffic. Windows supports Unix-domain stream sockets at UTF-8 paths. Unix-domain datagrams, the abstract namespace, MPTCP, pipe and splice answer 13 (`Unsupported`) on Windows. See the [Windows socket decision](../design/Windows030.md#w14-sockets-and-readiness) for option mappings.
 
 | Service | Parameters | Success | Behavior |
 | --- | --- | --- | --- |
@@ -350,7 +353,7 @@ The standard console service is `neura.console.write_line` version 1. It takes a
 | `neura.net.pipe` | | [int64 read ID, int64 write ID] | A pipe whose two ends are socket IDs, for `splice`. Linux only (13 elsewhere) |
 | `neura.net.splice` | int64 from, int64 to, int64 count | int64 | Moves up to the count of bytes from a stream or pipe end to another inside the kernel (`splice(2)`), so they never reach the NVM; one side must be a pipe end. 0 at the end of the input. Waits until the input is readable and the output writable. Linux only |
 
-**TLS services.** In a build with `NEURA_ENABLE_SERVER_TLS`, the providers link the pinned OpenSSL 3.5 and offer TLS 1.2 and 1.3 streams; in any other build each call with the network group answers 13. The streams have their own IDs, numbered from 1 in each run and closed when the run ends. None of them overlaps.
+**TLS services.** In a build with `NEURA_ENABLE_SERVER_TLS`, the providers link the pinned OpenSSL 3.5 and offer TLS 1.2 and 1.3 streams. Calls with the network group answer 13 in builds without it, including Windows 0.3.0. The streams have their own IDs, numbered from 1 in each run and closed when the run ends. None of them overlaps.
 
 | Service | Parameters | Success | Behavior |
 | --- | --- | --- | --- |

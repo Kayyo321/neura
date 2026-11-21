@@ -4,16 +4,18 @@ GitHub Actions checks every pull request before it is merged and publishes the [
 
 ## Tier 1: pull request checks
 
-[`tier1.yml`](../.github/workflows/tier1.yml) runs on every pull request, on every push to `main`, and on merge queue entries. It has four jobs.
+[`tier1.yml`](../.github/workflows/tier1.yml) runs on every pull request, on every push to `main`, and on merge queue entries.
 
 | Job | What it runs | Fails when |
 | --- | --- | --- |
 | Documentation and workflows | `scripts/test-checks.py`, `scripts/check-workflows.py`, `scripts/check-docs.py`, `scripts/update-stdlib-wiki-api.py --check`, `scripts/generate-wiki.py --check`, `scripts/gen-kernels.py --check`, and `scripts/build-site.py --check` | A check script misbehaves on its own test inputs; a workflow breaks a [workflow rule](#workflow-rules); a link in a tracked Markdown file names a missing file, wiki page, or heading; a standard library reference page is stale; a generated wiki page differs from the docs page it is generated from, or `wiki/` holds a page that is neither generated nor listed as hand-written; or the kernel table, the kernel reference, or the `Std.Internal.Kernels` declarations differ from what `src/kernels/` generates. |
 | Build and test (Linux x86-64) | A Release build with GCC 14 on Ubuntu 24.04 with the server components of the release archives (TLS, HTTP/2 and the PostgreSQL provider, built by `packaging/build-server-components.sh` and cached under a key of the component lock and that script; [server host](runtime/ServerHost.md#release-archives)), `scripts/check-kernels.sh`, `scripts/check-core-closure.py`, then every CTest entry | The build fails; the compiler reports a warning in a file outside `third_party/`; the kernel archive calls a libm function or a libc function other than the memory builtins; a binary of the execution core holds an object of a compiler library or loads `libneura-sdk`, or `libneura-sdk` holds a copy of a core object ([tools](lang/Tooling.md#tools-and-the-neura-dispatcher)); a test fails, including `doc-examples` when a documentation example does not compile or run as its directive says; a test is skipped, disabled, or not run; or the run holds fewer tests than the workflow's `--minimum`. |
 | Runtime-only build (Linux x86-64) | A Release build with `-DNEURA_SDK=OFF` and no submodule, `scripts/check-core-closure.py`, an install of the `core` component, `neura --version`, `neura doctor`, and `neura build`, which must fail and name the missing SDK | The core does not build or install without the SDK; the build reports a warning; `doctor` fails; or `neura build` does not report the missing SDK. |
+| Build and test (Windows x86-64) | `windows-msvc` on `windows-2022`, the repository checks, kernel and core closure checks, the Windows binary layout check, and CTest with `NEURA_TEST_TIMEOUT_SCALE=12` | Neura's sources emit an MSVC warning, a binary violates the Windows layout, or a test is skipped, fails, or is missing. |
+| Runtime-only build (Windows x86-64) | `windows-msvc` with `NEURA_SDK=OFF`, `core` installation and execution of an `.nvr` built by the SDK job | The core needs the SDK to build or run, a dependency or warning check fails, or `neura build` does not report the missing SDK. |
 | Tier 1 | Reads the results of the other three jobs | Any job ended as anything other than `success`, including `skipped` and `cancelled`. |
 
-**Tier 1** is the status check that a branch rule should require. GitHub treats a skipped job as passing, so requiring the other two jobs directly would let a pull request merge without them having run. The Tier 1 job always runs and fails unless all three succeeded.
+**Tier 1** is the status check that a branch rule should require. The aggregator always runs and fails unless the documentation and workflow job and both Linux jobs succeeded. The Windows jobs report their own results during the port's qualification. Their inclusion in the aggregator depends on green CI evidence.
 
 The CTest entry `doc-examples` runs [`scripts/check-doc-examples.py`](../scripts/check-doc-examples.py), which compiles or runs every fenced `neura` block in `README.md`, `docs/`, and `prompts/`. Each block must have a directive on the line above it (one blank line is allowed): `<!-- example: check -->` for a complete source file that `neura check` accepts; `<!-- example: run -->` for a program whose exact output under `neura build` and `neura run --deny-all` is the `text` block after it; `<!-- example: test -->` for a test module that `neura test` passes; `<!-- example: rejected: <text> -->` for a file that `neura check` rejects with a diagnostic containing `<text>`; and `<!-- example: fragment: <reason> -->` for a block that is not a complete file, which is not compiled and must say why. The check fails, naming `file:line`, for a block with a missing or unknown directive, a fragment with no reason, or a `run` with no `text` block after it. Each block runs in a fresh temporary directory as `example.nra` with `NEURA_GPU=off` and a 60-second limit.
 
@@ -23,7 +25,7 @@ A pull request that adds CTest entries raises `--minimum` in the workflow to the
 
 ### What Tier 1 does not cover
 
-Tier 1 builds and tests one configuration: Linux on x86-64 with GCC 14. It does not build or test Neura on macOS, on another processor architecture, or with another compiler, and it does not run sanitizers; [Tier 2](#tier-2-platform-and-sanitizer-runs) does, when a maintainer starts it. Release archives are built, tested, and qualified by [Tier 3](#tier-3-release-qualification), which runs for a release tag. No workflow builds or tests Neura on Windows, runs fuzzing, or checks links to other websites.
+Tier 1 builds Linux x86-64 with GCC 14 and Windows x86-64 with MSVC. [Tier 2](#tier-2-platform-and-sanitizer-runs) covers macOS, Linux arm64, clang-cl on Windows, and sanitizers when a maintainer starts it. [Tier 3](#tier-3-release-qualification) builds and qualifies release archives.
 
 ## Tier 2: platform and sanitizer runs
 
@@ -33,11 +35,12 @@ Tier 1 builds and tests one configuration: Linux on x86-64 with GCC 14. It does 
 | --- | --- |
 | Build and test (Linux arm64) | Release, GCC 14, Ubuntu 24.04 on arm64, `NEURA_TEST_TIMEOUT_SCALE=12`, a 360-minute limit, every CTest entry. |
 | Build and test (macOS arm64) and (macOS x86-64) | Release, Apple Clang, macOS 15, libffi and pkgconf from Homebrew, `NEURA_TEST_TIMEOUT_SCALE=12`, a 360-minute limit, every CTest entry CMake registers on macOS; the x86-64 job leaves out the crypto suites that release.yml also leaves out there ([tests that run on fewer targets](#tests-that-run-on-fewer-targets)). |
+| Build and test (Windows `windows-msvc` and `windows-clang-cl`) | Release, `windows-2022`, `NEURA_TEST_TIMEOUT_SCALE=12`, a 360-minute limit, CTest and the Windows binary layout and core closure checks. |
 | Address and undefined-behavior sanitizers (Linux x86-64, shards 1 to 6) | GCC 14 with `-fsanitize=address,undefined`, without the static launcher or the static dispatcher (`NEURA_STATIC_DISPATCHER=OFF`), with a 1 GiB stack and every time limit multiplied by 6 (`NEURA_TEST_TIMEOUT_SCALE=6`): 5.5 hours for `backend-reference`, 3 hours for `decompiler-behavior`, 2 hours for `program-fuzz`, every CTest entry except `native-install` and `native-container`. Each shard builds the same configuration and runs every sixth test by CTest number. |
 
 The sanitizer job leaves out two tests that cannot hold in its configuration: `native-install` requires a launcher that needs only the C library, and `native-container` rewrites an executable it has just run, which the leak checker's helper process can still hold open. It raises the stack because sanitized frames are several times larger, and `backend-reference` runs test programs 400 calls deep in an evaluator that recurses on the native stack. It sets `NEURA_TEST_SANITIZERS=1`, which skips two checks a sanitized build cannot meet: `server-host`'s keep-alive latency limit of 30 ms, and `backend-host`'s check that secret memory is locked, because AddressSanitizer makes `mlock` do nothing.
 
-Each job uploads its build log and CTest report. Only the macOS jobs run `check-test-report.py`. In the Linux arm64 and sanitizer jobs a skipped test does not fail the job: read the report before treating a green job as full coverage of that configuration. A green Tier 2 run is not required to merge a pull request.
+Each job uploads its build log and CTest report. The macOS and Windows jobs run `check-test-report.py`. In the Linux arm64 and sanitizer jobs a skipped test does not fail the job, so read the report before treating a green job as full coverage of that configuration. A green Tier 2 run is not required to merge a pull request.
 
 ## Native code: the JIT on other platforms
 
@@ -90,9 +93,21 @@ The first two commands build the configuration of the Tier 1 job; `cmake -S . -B
 
 The scripts need Python 3 and Git, and use no packages outside the Python standard library. `check-docs.py` reads the Markdown files that Git tracks, so `git add` a new page before checking it. It does not use the network: links to other websites are listed with `--list-external` and are not fetched.
 
+From a Visual Studio 2022 developer PowerShell with the [Windows build prerequisites](design/Windows030.md#toolchain-and-build) installed, run:
+
+```powershell
+cmake --preset windows-msvc -DNEURA_TEST_TIMEOUT_SCALE=12
+cmake --build --preset windows-msvc
+python scripts/check-windows-binaries.py build-windows-msvc
+python scripts/check-core-closure.py build-windows-msvc
+ctest --preset windows-msvc --parallel 6 --output-on-failure
+```
+
+The Windows CI jobs add build and test logs and use `NEURA_LIBCLANG_REQUIRED=1` with a supported Visual Studio libclang. A local Smart App Control block on an unsigned executable or DLL leaves the test unverified on that machine. Record the block and use the `windows-2022` CI result for that check.
+
 ## Tier 3: release qualification
 
-[`release.yml`](../.github/workflows/release.yml) runs for a `v*` tag, and by hand for a branch as a trial that publishes nothing. For each supported target it builds the server components from their pinned, checksum-verified sources (a tag caches only the source archives; a trial started by hand may reuse the components an earlier trial built on the same runner image), builds and tests the tagged commit with them, packs the three archives of the target (Neura-sdk, Neura-runtime, and the legacy archive for 0.2 clients), and runs the lifecycle checks of [`packaging/qualify.sh`](../packaging/qualify.sh) on them on a second runner, including the update from the published 0.2 releases with their own clients. Its publishing job is the only job in the repository with a token that can write. It runs in the protected `release` environment, after a maintainer approves it. The [release process](ReleaseProcess.md) describes each job and check.
+[`release.yml`](../.github/workflows/release.yml) runs for a `v*` tag, and by hand for a branch as a trial that publishes nothing. On Linux and macOS it builds the pinned server components, packs three archives per target, and runs [`packaging/qualify.sh`](../packaging/qualify.sh) on a second runner. On Windows it builds the SDK and runtime archives with `windows-release` and runs [`packaging/qualify.py`](../packaging/qualify.py) on a second `windows-2022` runner. The publishing job runs in the protected `release` environment after a maintainer approves it. The [release process](ReleaseProcess.md) describes the individual checks and Windows exceptions.
 
 ### Time limits
 
@@ -102,11 +117,12 @@ Every test's CTest time limit is set for a developer machine with the x86-64 JIT
 
 | Test or case | Where it runs | Why, and where the same code is covered |
 | --- | --- | --- |
-| `server-sql-postgres` | Linux | The PostgreSQL servers it starts run in Docker, which the macOS runners lack. The provider is built into every archive, and qualification check 15 shows it is present on every target. |
+| `server-sql-postgres` | Linux | The PostgreSQL servers it starts run in Docker, which the macOS runners lack. Qualification check 15 checks that the provider is present in the Linux and macOS archives. Windows 0.3.0 defers the PostgreSQL provider. |
 | `stdlib-crypto-advanced`, `stdlib-crypto-asymmetric`, `stdlib-crypto-pqc` and its `stdlib-crypto-pqc-slh-dsa-sign-*` parts | Every target but x86-64 macOS | Without the JIT each takes hours on the Intel runner, which ran the crypto suites five to six times slower than the arm one in release trial 21. There `stdlib-crypto-advanced` was still running when the job reached its 360-minute limit, after every other test had passed; it took 3,034 s on arm macOS and 2,618 s on arm Linux. They are pure Neura code with no host services, so the arm64 macOS run (same compiler, C++ library and interpreter, without the JIT) and the x86-64 Linux run (same processor architecture) cover what they test; that is an inference, not a run on x86-64 macOS. |
 | `server-host`: `test_refused_assignment` | Linux | Its test hook refuses the Assign with `shutdown(SHUT_RD)`, which makes the host's send fail on Linux only; on macOS the send succeeds and the request ends at its deadline. The retry it checks is the host's own code, the same on every system, and runs on both Linux targets. |
 | `server-host`: `test_dead_ready_worker`, `test_zygote_restart`, `test_process_bound`, the zygote cases | Linux | They read `/proc` or use the worker zygote, which is Linux-only ([server host](runtime/ServerHost.md)). |
-| `service-*` suites, `native-*` | Linux | The runtime service suites read `/proc` and use `memfd_create`; macOS has no native launcher. |
+| POSIX `service-*` suites, native launcher execution | Linux | The POSIX service suites read `/proc` and use `memfd_create`. The Windows service has separate tests. macOS and Windows have no native launcher in 0.3.0. |
+| TLS, HTTP/2 and desktop host cases | Linux and macOS as applicable | Windows 0.3.0 defers TLS, HTTP/2 and desktop hosting. Tests for the Windows refusals cover the applicable command and service entry points. |
 
 `scripts/check-repository-settings.py` is not part of Tier 1. It compares the repository's GitHub settings with the files in `.github/settings` and needs a signed-in `gh`; see [repository settings](RepositorySettings.md).
 

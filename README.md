@@ -24,13 +24,21 @@ Neura is a statically typed programming language and a toolchain for compiling i
 
 ## Install
 
-On Linux, on macOS, and on Windows inside a WSL 2 distribution, one command installs a release:
+On Linux, macOS, and inside a WSL 2 distribution:
 
 ```sh
 curl --proto '=https' --tlsv1.2 -fsSL https://github.com/Kayyo321/neura/releases/latest/download/install.sh | sh
 ```
 
 It downloads Neura-sdk for your machine, verifies it, and installs it under your home directory without `sudo`, with `neura` and each of its tools linked in `~/.local/bin`. That one installation compiles, runs, tests, and decompiles Neura programs. Add `| sh -s -- --components runtime` for Neura-runtime, which only runs built images and adds the runtime service, or `sdk,service` for both. [Install and update](docs/Install.md) lists the supported platforms and describes each step, `neura update`, and `neura uninstall`.
+
+On x86-64 Windows, Neura 0.3.0 introduces native SDK and runtime archives. In PowerShell, install the latest stable release with a Windows archive:
+
+```powershell
+irm https://github.com/Kayyo321/neura/releases/latest/download/install.ps1 | iex
+```
+
+The installer uses `%LOCALAPPDATA%\Neura` and adds the tools to your user `Path`. See [Windows installation](docs/Install.md#windows-installation) for release candidates, verification, and platform limits.
 
 ## Your first program
 
