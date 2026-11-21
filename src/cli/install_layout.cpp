@@ -409,11 +409,12 @@ std::optional<ComponentManifest> parse_manifest(std::string_view text, std::stri
         if (!manifest.files.empty() && !(manifest.files.back().path < file.path)) return fail(i, "the files are not sorted by path, or one is repeated");
         manifest.files.push_back(std::move(file));
     }
+    const bool windows = manifest.target.ends_with("-windows-msvc");
     for (const auto& tool : manifest.tools) {
-        const auto path = "bin/" + tool;
+        const auto path = "bin/" + tool + (windows ? ".exe" : "");
         const auto found = std::ranges::find_if(manifest.files, [&](const ManifestFile& f) { return f.path == path; });
         if (found == manifest.files.end() || found->mode != 0755) {
-            error = "the tool " + tool + " has no file bin/" + tool + " with mode 755";
+            error = "the tool " + tool + " has no file " + path + " with mode 755";
             return std::nullopt;
         }
     }

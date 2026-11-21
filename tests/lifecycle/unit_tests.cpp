@@ -469,6 +469,13 @@ int manifest_suite() {
     const auto parsed_service = parse_manifest(service, error);
     CHECK(parsed_service && parsed_service->protocol == "service 1.0" && check_known_manifest(*parsed_service).empty());
     CHECK(parsed_service && format_manifest(*parsed_service) == service);
+    const std::string windows_core = "neura-component 1\nname core\nversion 0.3.0\nbuild abc\ntarget x86_64-windows-msvc\n"
+                                     "tool neura\nfile 755 " + digest_x + " 1 bin/neura.exe\n";
+    CHECK(parse_manifest(windows_core, error).has_value());
+    auto missing_extension = windows_core;
+    missing_extension.erase(missing_extension.find("bin/neura.exe") + std::string("bin/neura").size(), 4);
+    CHECK(!parse_manifest(missing_extension, error));
+    CHECK(error == "the tool neura has no file bin/neura.exe with mode 755");
     // The service component of a build without neurad: no tool and no file.
     const auto empty_service = parse_manifest(
         "neura-component 1\nname service\nversion 0.3.0\nbuild abc\ntarget x86_64-linux-gnu\nrequires core\nprotocol service 1.0\n", error);

@@ -410,14 +410,14 @@ def components(bin_dir: Path, mixed: Path) -> None:
         check(run([str(neura), "run", paths["HELLO_NVR"]], work, None) == (1, b"", expected.encode()),
               "missing neura-run")
         status, out, _ = run([str(neura), "doctor"], work, None)
-        check(status == 1 and f"FAIL  components: the Neura core is incomplete: neura-run missing from {neura.parent}. "
+        check(status == 1 and f"FAIL  components: the Neura core is incomplete: neura-run missing from {neura.parent.as_posix()}. "
               "Reinstall Neura\n".encode() in out, f"doctor reports the missing core tool\n{out.decode()}")
 
         # Part of the SDK missing.
         neura = copy_tools(bin_dir, work / "no-fmt", [name for name in core + sdk if name != "neura-fmt"])
         status, out, _ = run([str(neura), "doctor"], work, None)
         check(status == 1 and f"FAIL  components: the Neura-sdk component is incomplete: neura-fmt missing from "
-              f"{neura.parent}. Reinstall Neura\n".encode() in out, f"doctor reports the incomplete SDK\n{out.decode()}")
+              f"{neura.parent.as_posix()}. Reinstall Neura\n".encode() in out, f"doctor reports the incomplete SDK\n{out.decode()}")
 
         # The service component of `neura runtime`, in a copy without neurad.
         core_dir = work / "core"
