@@ -90,17 +90,25 @@ CASES = {
                 'let i: Box<int> = new(1); let s: Box<string> = new("x"); let x = i.x; let text = s.x;', 0, ''),
 }
 
+# Windows 0.3.0 supports an interpreted tier 3 and an interpreted shadow check.
+NATIVE_JIT = os.name != 'nt'
+SHADOW_ARGS = ['--jit=on'] if NATIVE_JIT else ['--jit=off']
+SHADOW_ENV = {'NEURA_TIER_CHECK': '2', 'NEURA_TIER_EAGER': '1'}
+if not NATIVE_JIT:
+    SHADOW_ENV['NEURA_TIER3'] = 'interp'
+
 MODES = [
     (['--tier=0'], {}), (['--tier=1'], {}), (['--tier=2'], {}),
-    (['--jit=off'], {}), (['--jit=on'], {}),
+    (['--jit=off'], {}),
+    *([(['--jit=on'], {})] if NATIVE_JIT else []),
     ([], {'NEURA_TIER3': 'interp', 'NEURA_TIER_EAGER': '1'}),
-    (['--jit=on'], {'NEURA_TIER_CHECK': '2', 'NEURA_TIER_EAGER': '1'}),
+    (SHADOW_ARGS, SHADOW_ENV),
     ([], {'NEURA_TIER_PROGRAMS': '1', 'NEURA_TIER_EAGER': '1'}),
 ]
 
 
 def run(args, extra=None, status=0, message=''):
-    result = subprocess.run([NEURA, *args], capture_output=True, text=True,
+    result = subprocess.run([NEURA, *args], capture_output=True, encoding='utf-8',
                             env={**os.environ, 'NEURA_GPU': 'off', 'NEURA_TIER3_VERIFY': '1', **(extra or {})}, timeout=120)
     if result.returncode != status or message not in result.stderr:
         raise AssertionError(f'{args} {extra}: expected {status} {message!r}, got '
@@ -142,7 +150,7 @@ def linked_provider(work):
     # subclass. Its prebuilt parameter/result still produce linked events.
     library = work / 'library.nra'
     library.write_text('let Library = module (export let Base = class(); '
-                       'export let echo = func(x: Base) -> Base => x;);')
+                       'export let echo = func(x: Base) -> Base => x;);', encoding='utf-8', newline='\n')
     nir = work / 'library.nir'
     run(['emit-ir', library, '-o', nir])
     original = nir.read_bytes()
@@ -153,13 +161,15 @@ def linked_provider(work):
                       '| get: { log = log * 2 + 1; return instance; }; '
                       '| set: { log = log * 2; return value; };);' +
                       ENTRY.replace('BODY', 'let item: Child = new; let copy = lib.echo(item); '
-                                            'if (log != 20) { return program.ExitCode.Failure; }'))
+                                            'if (log != 20) { return program.ExitCode.Failure; }'),
+                      encoding='utf-8', newline='\n')
     execute(work, source, '')
     assert nir.read_bytes() == original, 'the provider was rebuilt'
 
 
 def malformed(work):
-    base = (work / 'references.nvra').read_text()
+    with (work / 'references.nvra').open(encoding='utf-8', newline=None) as stream:
+        base = stream.read()
     pattern = r'(exit state (OP) immediate \d+ arguments \[ )([^\]]+)(\] result)'
     for op, arity, expected in [('write-field', 3, 'field write exceeds layout'),
                                 ('write-global', 2, 'global write exceeds table'),
@@ -172,7 +182,7 @@ def malformed(work):
         extra = (match[3].split()[-1] + ' ') * 64
         text = base[:match.end(3)] + extra + base[match.end(3):]
         assembly = work / 'invalid.nvra'
-        assembly.write_text(text)
+        assembly.write_text(text, encoding='utf-8', newline='\n')
         run(['assemble', assembly, '-o', work / 'invalid.nvr'], status=1, message=expected)
 
 
@@ -183,7 +193,8 @@ def main():
             execute(work, FIXTURES / f'{name}.nra', expected)
         for name, (declarations, body, status, trap) in CASES.items():
             path = work / f'{name}.nra'
-            path.write_text('let program = import:Std.Program;\n' + declarations + '\n' + ENTRY.replace('BODY', body))
+            path.write_text('let program = import:Std.Program;\n' + declarations + '\n' + ENTRY.replace('BODY', body),
+                            encoding='utf-8', newline='\n')
             execute(work, path, '', status, trap)
         linked_provider(work)
         malformed(work)
@@ -192,7 +203,8 @@ def main():
             source = work / 'width.nra'
             annotation = ', '.join(['Session'] * width)
             source.write_text('let program = import:Std.Program; let Session = class(| get: instance;); '
-                              f'let use = func(value: [{annotation}]) {{}};\n' + ENTRY.replace('BODY', ''))
+                              f'let use = func(value: [{annotation}]) {{}};\n' + ENTRY.replace('BODY', ''),
+                              encoding='utf-8', newline='\n')
             args = ['build', source, '-o', work / 'width.nvr']
             if width == 32:
                 run(args)
