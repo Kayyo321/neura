@@ -2,6 +2,7 @@ let bytes = import:Std.Io.Internal.Bytes;
 let.promote _ = import:Std.Time.Duration;
 let host = import:Std.Net.Socket.Internal.HostCalls;
 let host_error = import:Std.Core.Internal.HostError;
+let.promote _ = import:Std.Core.Error;
 let.promote _ = import:Std.Core.Optional;
 let.promote _ = import:Std.Core.Result;
 let socket = import:Std.Net.Internal.Socket;
@@ -53,7 +54,9 @@ export let TlsStream = module (
             return Result<uint8[list]>.Err(bytes.closed("stream", label)) unless open_now;
             return match (host.tls_read(id, max, timeout_nanos)) {
                 host.BytesOutcome.Ok(chunk) => Result<uint8[list]>.Ok(chunk),
-                host.BytesOutcome.Error(code) => Result<uint8[list]>.Err(host_error.io(code, "TLS read failed", label)),
+                host.BytesOutcome.Error(code) => Result<uint8[list]>.Err(host_error.io(code, host_error.kind_of(code) == IoErrorKind.Unsupported
+                        ? "TLS operation is unavailable in this runtime"
+                        : "TLS read failed", label)),
             };
         };
 
@@ -72,7 +75,9 @@ export let TlsStream = module (
                             remaining.length);
                     },
                     host.CountOutcome.Error(code) => {
-                        return Result<Unit>.Err(host_error.io(code, "TLS write failed", label));
+                        return Result<Unit>.Err(host_error.io(code, host_error.kind_of(code) == IoErrorKind.Unsupported
+                        ? "TLS operation is unavailable in this runtime"
+                        : "TLS write failed", label));
                     },
                 }
             }
@@ -143,7 +148,9 @@ export let TlsStream = module (
             open_now = false;
             return match (host.tls_close(id)) {
                 host.DoneOutcome.Ok => bytes.ok(),
-                host.DoneOutcome.Error(code) => Result<Unit>.Err(host_error.io(code, "TLS close failed", label)),
+                host.DoneOutcome.Error(code) => Result<Unit>.Err(host_error.io(code, host_error.kind_of(code) == IoErrorKind.Unsupported
+                        ? "TLS operation is unavailable in this runtime"
+                        : "TLS close failed", label)),
             };
         };
 
