@@ -26,6 +26,81 @@ function(invoke)
     set(stderr "${stderr}" PARENT_SCOPE)
 endfunction()
 
+# Writes `content` byte for byte. On Windows file(WRITE) writes each LF as
+# CR LF, and an argument-list file must hold exactly the bytes it is given.
+# Text without an LF is written exactly, so each line is written on its own
+# and `cmake -E cat`, which copies bytes, joins the lines with a file that
+# holds one LF.
+set(newline "${directory}/newline")
+if(CMAKE_HOST_WIN32)
+    file(CONFIGURE OUTPUT "${newline}" CONTENT "\n" NEWLINE_STYLE LF)
+endif()
+function(write_bytes path content)
+    if(NOT CMAKE_HOST_WIN32)
+        file(WRITE "${path}" "${content}")
+        return()
+    endif()
+    set(pieces "")
+    set(lines "")
+    set(index 0)
+    while(TRUE)
+        set(piece "${path}.line${index}")
+        list(APPEND lines "${piece}")
+        string(FIND "${content}" "\n" at)
+        if(at EQUAL -1)
+            file(WRITE "${piece}" "${content}")
+            list(APPEND pieces "${piece}")
+            break()
+        endif()
+        string(SUBSTRING "${content}" 0 ${at} line)
+        file(WRITE "${piece}" "${line}")
+        list(APPEND pieces "${piece}" "${newline}")
+        math(EXPR at "${at} + 1")
+        string(SUBSTRING "${content}" ${at} -1 content)
+        math(EXPR index "${index} + 1")
+    endwhile()
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E cat ${pieces} OUTPUT_FILE "${path}" RESULT_VARIABLE failed)
+    file(REMOVE ${lines})
+    if(NOT failed STREQUAL "0")
+        message(FATAL_ERROR "could not write ${path}")
+    endif()
+endfunction()
+
+# Appends `content` byte for byte, as write_bytes writes it.
+function(append_bytes path content)
+    if(NOT CMAKE_HOST_WIN32)
+        file(APPEND "${path}" "${content}")
+        return()
+    endif()
+    write_bytes("${path}.tail" "${content}")
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E cat "${path}" "${path}.tail" OUTPUT_FILE "${path}.joined"
+                    RESULT_VARIABLE failed)
+    if(NOT failed STREQUAL "0")
+        message(FATAL_ERROR "could not append to ${path}")
+    endif()
+    file(REMOVE "${path}.tail")
+    file(RENAME "${path}.joined" "${path}")
+endfunction()
+
+# Writes 2^`doublings` LF bytes, without a line per LF on Windows.
+function(write_newlines path doublings)
+    if(NOT CMAKE_HOST_WIN32)
+        math(EXPR count "1 << ${doublings}")
+        string(REPEAT "\n" ${count} many)
+        file(WRITE "${path}" "${many}")
+        return()
+    endif()
+    file(CONFIGURE OUTPUT "${path}" CONTENT "\n" NEWLINE_STYLE LF)
+    foreach(step RANGE 1 ${doublings})
+        execute_process(COMMAND "${CMAKE_COMMAND}" -E cat "${path}" "${path}" OUTPUT_FILE "${path}.doubled"
+                        RESULT_VARIABLE failed)
+        if(NOT failed STREQUAL "0")
+            message(FATAL_ERROR "could not write ${path}")
+        endif()
+        file(RENAME "${path}.doubled" "${path}")
+    endforeach()
+endfunction()
+
 function(expect_result label expected_status expected_stdout expected_stderr)
     if(NOT status STREQUAL "${expected_status}" OR NOT stdout STREQUAL "${expected_stdout}" OR
        NOT stderr STREQUAL "${expected_stderr}")
@@ -42,8 +117,8 @@ expect_result("build all-arguments fixture" 0 "" "")
 # A comment, spaces and tabs between arguments, bare and quoted text, all
 # six escapes, a quoted empty argument, an empty line and a final line
 # without LF. A # with leading whitespace is an ordinary bare argument.
-file(WRITE "${lists}" "# a comment\n  bare\t\"two words\"  \n")
-file(APPEND "${lists}" [=["a\"b\\c\nd\re\tf\x21\xC3\xa9" ""
+write_bytes("${lists}" "# a comment\n  bare\t\"two words\"  \n")
+append_bytes("${lists}" [=["a\"b\\c\nd\re\tf\x21\xC3\xa9" ""
 
  #not-a-comment
 "#quoted" last]=])
@@ -51,14 +126,14 @@ invoke(run --each "${lists}" "${all}")
 set(expected "member\n<bare>\n<two words>\nmember\n<a\"b\\c\nd\re\tf!é>\n<>\nmember\nmember\n<#not-a-comment>\nmember\n<#quoted>\n<last>\n")
 # CMake may normalize carriage returns in text reads. Compare the exact
 # output file to ensure the escaped CR reaches the program as a byte.
-file(WRITE "${directory}/expected" "${expected}")
+write_bytes("${directory}/expected" "${expected}")
 execute_process(COMMAND "${CMAKE_COMMAND}" -E compare_files "${directory}/stdout" "${directory}/expected"
                 RESULT_VARIABLE bytes_differ)
 if(NOT status STREQUAL "0" OR NOT bytes_differ STREQUAL "0" OR NOT stderr STREQUAL "")
     message(FATAL_ERROR "the argument grammar produced status ${status}, output [${stdout}], stderr [${stderr}]")
 endif()
 
-file(WRITE "${lists}" "one extra\n\"two words\"\n#ignored\nhéllo\n")
+write_bytes("${lists}" "one extra\n\"two words\"\n#ignored\nhéllo\n")
 set(serial_output "")
 set(serial_steps 0)
 set(serial_peak 0)
@@ -87,7 +162,7 @@ invoke(run --no-gpu --stats --each "${lists}" "${first}")
 expect_result("aggregated stats" 0 "${serial_output}"
               "stats: members 3, steps ${serial_steps}, peak heap cells ${serial_peak}, host requests ${serial_requests}, ${image_costs}\ngpu: off\n")
 
-file(WRITE "${lists}" "one two\n\nthree")
+write_bytes("${lists}" "one two\n\nthree")
 invoke(run --each "${lists}" "${all}" -- common "common two")
 expect_result("common arguments come before each member's arguments" 0
               "member\n<common>\n<common two>\n<one>\n<two>\nmember\n<common>\n<common two>\nmember\n<common>\n<common two>\n<three>\n" "")
@@ -97,18 +172,18 @@ if(NOT status STREQUAL "139")
     message(FATAL_ERROR "expected the standalone empty argument list to trap with 139, got ${status}")
 endif()
 string(REPLACE "${first}: trap:" "${first}: ${lists}:3: trap:" trap_report "${stderr}")
-file(WRITE "${lists}" "before\n# skipped\n\nafter")
+write_bytes("${lists}" "before\n# skipped\n\nafter")
 invoke(run --each "${lists}" "${first}")
 expect_result("trap report uses the file line number and later members still run" 139 "first: before\nfirst: after\n" "${trap_report}")
 
-file(WRITE "${lists}" "# comment\nfailure\nsuccess\nother-failure\nlast")
+write_bytes("${lists}" "# comment\nfailure\nsuccess\nother-failure\nlast")
 invoke(run --each "${lists}" "${all}")
 expect_result("first nonzero status wins" 27
               "member\n<failure>\nmember\n<success>\nmember\n<other-failure>\nmember\n<last>\n"
               "${all}: ${lists}:2: exit status 27\n${all}: ${lists}:4: exit status 42\n")
 
 function(bad_line body diagnostic)
-    file(WRITE "${lists}" "valid\n# a comment\n${body}")
+    write_bytes("${lists}" "valid\n# a comment\n${body}")
     invoke(run --each "${lists}" "${first}")
     expect_result("line three error" 1 "" "neura: error: ${lists}: line 3: ${diagnostic}\n")
 endfunction()
@@ -127,16 +202,16 @@ bad_line([=[first "\xFF"]=] "argument 2 is not valid UTF-8")
 string(ASCII 255 invalid_byte)
 bad_line("${invalid_byte}" "argument 1 is not valid UTF-8")
 
-file(WRITE "${lists}" "# only comments\n# and no lists")
+write_bytes("${lists}" "# only comments\n# and no lists")
 invoke(run --each "${lists}" "${first}")
 expect_result("no lists" 1 "" "neura: error: ${lists}: no argument lists\n")
-file(WRITE "${lists}" "")
+write_bytes("${lists}" "")
 invoke(run --each "${lists}" "${first}")
 expect_result("empty file" 1 "" "neura: error: ${lists}: no argument lists\n")
 
 set(quiet_assembly "${directory}/quiet.nvra")
 set(quiet "${directory}/quiet.nvr")
-file(WRITE "${quiet_assembly}" [=[nvr 1.0 profile 1
+write_bytes("${quiet_assembly}" [=[nvr 1.0 profile 1
 entry 0
 type 0 text
 type 1 array 0
@@ -149,41 +224,37 @@ function 0 parameters 1 result 2 frame [ 1 ]
 ]=])
 invoke(assemble "${quiet_assembly}" -o "${quiet}")
 expect_result("assemble quiet fixture" 0 "" "")
-string(REPEAT "\n" 1048576 many)
-file(WRITE "${lists}" "${many}")
-unset(many)
+write_newlines("${lists}" 20)
 invoke(run --no-gpu --stats --each "${lists}" "${quiet}")
 if(NOT status STREQUAL "0" OR NOT stdout STREQUAL "" OR
    NOT stderr MATCHES "^stats: members 1048576, steps 1048576, [^\n]+\ngpu: off\n$")
     message(FATAL_ERROR "exactly 1,048,576 lists should all run\n${stderr}")
 endif()
-file(APPEND "${lists}" "\n")
+append_bytes("${lists}" "\n")
 invoke(run --each "${lists}" "${first}")
 expect_result("too many argument lists" 1 "" "neura: error: ${lists}: more than 1048576 argument lists\n")
 
 string(REPEAT "x" 67108861 huge)
-file(WRITE "${lists}" "#${huge}\n\n")
+write_bytes("${lists}" "#${huge}\n\n")
 unset(huge)
 invoke(run --no-gpu --stats --each "${lists}" "${quiet}")
 if(NOT status STREQUAL "0" OR NOT stdout STREQUAL "" OR
    NOT stderr MATCHES "^stats: members 1, steps 1, [^\n]+\ngpu: off\n$")
     message(FATAL_ERROR "exactly 64 MiB should be accepted\n${stderr}")
 endif()
-file(APPEND "${lists}" "\n")
+append_bytes("${lists}" "\n")
 invoke(run --each "${lists}" "${first}")
 expect_result("file exceeds 64 MiB" 1 "" "neura: error: ${lists}: larger than 64 MiB\n")
 
-if(NOT CMAKE_HOST_WIN32)
-    set(files "${directory}/file-lifetime.nvr")
-    invoke(build "${tests}/each/file-lifetime.nra" -o "${files}")
-    expect_result("build file lifetime fixture" 0 "" "")
-    file(WRITE "${directory}/data.txt" "contents\n")
-    file(WRITE "${lists}" "open\ncheck\nopen\n")
-    invoke(run --no-gpu "--allow-fs=${directory}" --each "${lists}" "${files}")
-    expect_result("a later member starts with all file slots free" 0 "" "")
-endif()
+set(files "${directory}/file-lifetime.nvr")
+invoke(build "${tests}/each/file-lifetime.nra" -o "${files}")
+expect_result("build file lifetime fixture" 0 "" "")
+file(WRITE "${directory}/data.txt" "contents\n")
+write_bytes("${lists}" "open\ncheck\nopen\n")
+invoke(run --no-gpu "--allow-fs=${directory}" --each "${lists}" "${files}")
+expect_result("a later member starts with all file slots free" 0 "" "")
 
-file(WRITE "${lists}" "one\n")
+write_bytes("${lists}" "one\n")
 foreach(mode IN ITEMS --record --replay --profile)
     if(mode STREQUAL "--profile")
         invoke(run --each "${lists}" "${mode}" "${first}")
