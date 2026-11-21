@@ -1,6 +1,7 @@
 #include "app/project.hpp"
 
 #include "cli/module_path.hpp"
+#include "cli/tool.hpp"
 #include "neura/version.hpp"
 #include "project/files.hpp"
 #include "project/toml.hpp"
@@ -27,12 +28,25 @@
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
 #endif
+#ifdef _WIN32
+#include "platform/error.hpp"
+#include "platform/file.hpp"
+#include "platform/process.hpp"
+#include "platform/self.hpp"
+#include "platform/text.hpp"
 
+#include <chrono>
+#include <thread>
+#endif
+
+#ifndef _WIN32
 extern char** environ;
+#endif
 
 // posix_spawn can start a child in another directory with glibc 2.29 and
 // macOS 10.15; elsewhere the compiler is given an absolute source path.
-#if defined(__APPLE__) || (defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 29)))
+// CreateProcessW takes the child's directory (W32).
+#if defined(_WIN32) || defined(__APPLE__) || (defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 29)))
 #define NEURA_SPAWN_CHDIR 1
 #else
 #define NEURA_SPAWN_CHDIR 0
@@ -399,7 +413,7 @@ struct Compiled {
 Compiled compile(const Project& project, const Target& target, const BuildOptions& options, const fs::path& scratch,
                  bool native, const std::string& output_name) {
     const auto source = entry_file(project, target);
-    std::vector<std::string> command{options.neura.string(), "build"};
+    std::vector<std::string> command{argument_path(options.neura), "build"};
     if (native) {
         // Desktop.md, "Writing the native child": the child lives as long as the application.
         for (const auto* arg : {"--native", "--deny-all", "--max-steps", "18446744073709551615", "--allow-clock"})
@@ -416,14 +430,16 @@ Compiled compile(const Project& project, const Target& target, const BuildOption
     }
     for (const auto& root : package_import_roots(project, target.package.value)) {
         command.emplace_back("-I");
-        command.push_back(root.string());
+        command.push_back(argument_path(root));
     }
     // The source is named relative to the project, as an import root sees it,
-    // so the image records no absolute path.
-    command.push_back(NEURA_SPAWN_CHDIR ? source.lexically_relative(project.resolved.root).string() : source.string());
+    // so the image records no absolute path. It is in generic form ('/'), so
+    // an image built on Windows records the same path as one built on Linux.
+    command.push_back(NEURA_SPAWN_CHDIR ? detail::path_text(source.lexically_relative(project.resolved.root))
+                                        : source.string());
     const auto out = scratch / output_name;
     command.emplace_back("-o");
-    command.push_back(out.string());
+    command.push_back(argument_path(out));
     fs::create_directories(scratch);
     if (const int status = spawn_and_wait(command, project.resolved.root); status != 0) {
         fail_E1029(target.entry.span, "the compiler failed for target entry '" + target.entry.value +
@@ -501,6 +517,49 @@ BundleManifest base_manifest(const Project& project, const Target& target) {
     return bundle;
 }
 
+#ifdef _WIN32
+// Windows refuses to rename a directory while another program (an antivirus
+// or an indexer scanning the new bundle, a browser fetching a page of the old
+// one) has a file in it open. Those holds are short, so a rename is retried
+// for about two seconds before it fails.
+void rename_with_retries(const fs::path& from, const fs::path& to, std::error_code& error) {
+    for (int attempt = 0;; ++attempt) {
+        error.clear();
+        fs::rename(from, to, error);
+        const bool held = error && error.category() == std::system_category() &&
+                          (error.value() == 5 /* ERROR_ACCESS_DENIED */ || error.value() == 32 /* ERROR_SHARING_VIOLATION */);
+        if (!held || attempt == 40) return;
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+}
+
+// Removes a directory without following a link or junction in it; what
+// cannot be removed now is left for the next build.
+void remove_directory(const fs::path& path) {
+    std::error_code error;
+    platform::remove_tree(path, error);
+}
+
+// Where finish() moves the previous bundle: <out>.neura-old, or the first of
+// <out>.neura-old-1 to -15 that is free. Leftovers of earlier builds are
+// removed first; one that a program still holds is skipped, so a single open
+// file cannot make every later build fail.
+fs::path aside_for(const fs::path& out) {
+    std::optional<fs::path> free;
+    for (int index = 0; index < 16; ++index) {
+        auto candidate = out;
+        candidate += index == 0 ? std::string(".neura-old") : ".neura-old-" + std::to_string(index);
+        remove_directory(candidate);
+        std::error_code error;
+        if (!free && fs::symlink_status(candidate, error).type() == fs::file_type::not_found) free = candidate;
+    }
+    if (free) return *free;
+    auto old = out;
+    old += ".neura-old";
+    return old;
+}
+#endif
+
 // Writes bundle.json, verifies the directory as a host would, and moves the
 // staging directory into place.
 BuildResult finish(Assembly& assembly, BundleManifest& bundle, const fs::path& out, const Span& site, bool dev) {
@@ -512,18 +571,54 @@ BuildResult finish(Assembly& assembly, BundleManifest& bundle, const fs::path& o
     verification.allow_dev = dev;
     auto verified = verify_bundle_directory(assembly.root(), verification);
     std::error_code error;
+#ifdef _WIN32
+    // The old bundle is moved aside first, so a file in it that is still
+    // open can never leave a half-removed bundle at `out` (W32). When the new
+    // bundle cannot be moved into place, the old one is moved back, so `out`
+    // keeps the previous bundle (neura dev starts it again).
+    const auto old = aside_for(out);
+    fs::create_directories(out.parent_path());
+    bool moved_aside = false;
+    if (fs::exists(fs::symlink_status(out, error))) {
+        rename_with_retries(out, old, error);
+        if (error) {
+            fail_E1029(site, "cannot move the previous bundle out of " + display_path(out) + ": " +
+                                 platform::error_message(error));
+        }
+        moved_aside = true;
+    }
+    rename_with_retries(assembly.root(), out, error);
+    if (error) {
+        auto message = "cannot move the bundle into " + display_path(out) + ": " + platform::error_message(error);
+        if (moved_aside) {
+            std::error_code restore;
+            rename_with_retries(old, out, restore);
+            if (restore) {
+                message += "; the previous bundle is in " + display_path(old) + " (" +
+                           platform::error_message(restore) + ")";
+            }
+        }
+        fail_E1029(site, message);
+    }
+    remove_directory(old);
+#else
     fs::remove_all(out, error);
     fs::create_directories(out.parent_path());
     fs::rename(assembly.root(), out, error);
     if (error) fail_E1029(site, "cannot move the bundle into " + out.string() + ": " + error.message());
+#endif
     return {out, verified.digest()};
 }
 
 fs::path staging_for(const fs::path& out) {
     auto staging = out;
     staging += ".neura-build";
+#ifdef _WIN32
+    remove_directory(staging);
+#else
     std::error_code error;
     fs::remove_all(staging, error);
+#endif
     fs::create_directories(staging);
     return staging;
 }
@@ -534,7 +629,7 @@ BuildResult build_web(Project& project, const std::string& name, const Target& t
     const auto runtime = web_runtime_dir(options);
     if (!runtime || !fs::is_regular_file(*runtime / "nvm.wasm")) {
         fail_E1031(target.kind.span, "the browser runtime target component is not installed: expected nvm.wasm, nvm.mjs and the page "
-             "modules in " + (runtime ? runtime->string() : (install_prefix() / "share/neura/web").string()) +
+             "modules in " + display_path(runtime ? *runtime : install_prefix() / "share/neura/web") +
                  " (or name a directory with --web-runtime or NEURA_WEB_RUNTIME)");
     }
     const auto staging = staging_for(out);
@@ -589,7 +684,7 @@ BuildResult build_web(Project& project, const std::string& name, const Target& t
     const auto listing = fs::path(compiled.path.string() + ".styles.json");
     if (fs::exists(listing)) {
         const auto styles = Json::parse(read_file(listing));
-        if (styles["schema"].integer(0) != 1) fail_E1029(target.span, "unknown schema of " + listing.filename().string());
+        if (styles["schema"].integer(0) != 1) fail_E1029(target.span, "unknown schema of " + detail::path_text(listing.filename()));
         std::set<std::string> linked;
         for (const auto& link : styles["stylesheets"].items()) linked.insert(link.string());
         for (const auto& entry : styles["files"].items()) {
@@ -766,11 +861,14 @@ BuildResult build_desktop(Project& project, const std::string& name, const Targe
     bundle.requirements.emplace("desktop_host", 1);
     const auto staging = staging_for(out);
     const auto scratch = out.parent_path() / (out.filename().string() + ".neura-image");
-    const auto compiled = compile(project, target, options, scratch, true, "app-child");
+    // The native child is built for this system. A Windows child is a PE
+    // file, which CreateProcess starts only by its .exe name (W31).
+    const auto suffix = tool::executable_file("");
+    const auto compiled = compile(project, target, options, scratch, true, "app-child" + suffix);
     fs::remove_all(scratch);
     Assembly assembly(staging, std::numeric_limits<std::uint64_t>::max(), target.span);
     assembly.embed(web.directory, "web/");
-    const auto child = "bin/app-" + std::string(sha256_of(compiled.image).hex());
+    const auto child = "bin/app-" + std::string(sha256_of(compiled.image).hex()) + suffix;
     assembly.add(child, compiled.image);
     fs::permissions(staging / child, fs::perms::owner_all | fs::perms::group_read | fs::perms::group_exec |
                                          fs::perms::others_read | fs::perms::others_exec);
@@ -831,7 +929,7 @@ Sha256Digest sha256_of(std::string_view bytes) {
 
 std::string read_file(const fs::path& path) {
     std::ifstream in(path, std::ios::binary);
-    if (!in) throw std::runtime_error("cannot read " + path.string());
+    if (!in) throw std::runtime_error("cannot read " + display_path(path));
     std::ostringstream buffer;
     buffer << in.rdbuf();
     return buffer.str();
@@ -842,10 +940,19 @@ void write_file(const fs::path& path, std::string_view bytes) {
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
     out.close();
-    if (!out) throw std::runtime_error("cannot write " + path.string());
+    if (!out) throw std::runtime_error("cannot write " + display_path(path));
 }
 
 fs::path tool_directory() {
+#ifdef _WIN32
+    // The module's own final path, never the current directory, so no tool
+    // or component is looked up where the user happens to stand.
+    std::error_code error;
+    const auto path = platform::executable_path(error);
+    if (error || path.empty())
+        throw std::runtime_error("cannot find the running executable: " + platform::error_message(error));
+    return path.parent_path();
+#else
 #ifdef __linux__
     std::error_code error;
     auto path = fs::read_symlink("/proc/self/exe", error);
@@ -857,6 +964,7 @@ fs::path tool_directory() {
     if (_NSGetExecutablePath(buffer.data(), &size) == 0) return fs::canonical(buffer.c_str()).parent_path();
 #endif
     return fs::current_path();
+#endif
 }
 
 fs::path install_prefix() { return tool_directory().parent_path(); }
@@ -884,11 +992,48 @@ void print_diagnostic(std::ostream& err, const Diagnostic& diagnostic) {
     }
 }
 
+std::string argument_path(const fs::path& path) {
+#ifdef _WIN32
+    return platform::native_utf8_path(path);
+#else
+    return path.string();
+#endif
+}
+
+std::string display_path(const fs::path& path) {
+#ifdef _WIN32
+    return detail::path_text(path);
+#else
+    return path.string();
+#endif
+}
+
 int spawn_and_wait(const std::vector<std::string>& arguments, const std::optional<fs::path>& directory) {
 #ifdef _WIN32
-    (void)arguments;
-    (void)directory;
-    return 1;
+    // CreateProcessW from the argument vector, never through cmd.exe, in a
+    // kill-on-close job, so the child and whatever it starts end with this
+    // process, as an interrupt ends a POSIX process group (W10, W32).
+    std::error_code error;
+    platform::Spawn spawn;
+    try {
+        spawn.program = platform::path_from_utf8(arguments.front());
+    } catch (const std::system_error& invalid) {
+        error = invalid.code();
+    }
+    spawn.arguments = arguments;
+    if (directory) spawn.working_directory = *directory;
+    spawn.job = platform::JobMode::kill_on_close;
+    auto child = error ? platform::Process{} : platform::Process::start(spawn, error);
+    if (!child) {
+        std::cerr << "neura: cannot start " << arguments.front() << ": " << platform::error_message(error) << '\n';
+        return 127;
+    }
+    const auto status = child.wait(std::nullopt, error);
+    if (!status) {
+        std::cerr << "neura: cannot wait for " << arguments.front() << ": " << platform::error_message(error) << '\n';
+        return 1;
+    }
+    return status->shell_status();
 #else
     std::vector<char*> argv;
     for (const auto& argument : arguments) argv.push_back(const_cast<char*>(argument.c_str()));
@@ -935,7 +1080,7 @@ std::optional<fs::path> find_manifest(const std::optional<std::string>& project,
         std::error_code error;
         if (fs::is_directory(path, error)) path /= "neura.toml";
         if (!fs::is_regular_file(path, error)) {
-            err << "neura: no project manifest at " << path.string() << '\n';
+            err << "neura: no project manifest at " << display_path(path) << '\n';
             return std::nullopt;
         }
         return path;

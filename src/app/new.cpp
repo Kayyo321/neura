@@ -89,12 +89,13 @@ int create(const std::vector<std::string>& arguments) {
     std::error_code error;
     if (fs::exists(target, error)) {
         if (!fs::is_directory(target, error) || !fs::is_empty(target, error)) {
-            std::cerr << "neura new: " << target.string() << " is not an empty directory; nothing was written\n";
+            std::cerr << "neura new: " << app::display_path(target)
+                      << " is not an empty directory; nothing was written\n";
             return 1;
         }
     }
-    if (!name) name = fs::absolute(target).lexically_normal().filename().string();
-    if (name->empty()) name = fs::absolute(target).lexically_normal().parent_path().filename().string();
+    if (!name) name = project::detail::path_text(fs::absolute(target).lexically_normal().filename());
+    if (name->empty()) name = project::detail::path_text(fs::absolute(target).lexically_normal().parent_path().filename());
     if (!project::valid_project_name(*name)) {
         std::cerr << "neura new: '" << *name << "' is not a project name (lowercase letters, digits and hyphens); "
                   << "give one with --name\n";
@@ -119,7 +120,11 @@ int create(const std::vector<std::string>& arguments) {
     fs::create_directories(target);
     for (const auto& file : files) {
         auto relative = file.lexically_relative(source);
+        // A template keeps its Git files without the dot, so they do not
+        // apply to the SDK's own repository. .gitattributes keeps the
+        // project's text files LF on every host (W08).
         if (relative == "gitignore") relative = ".gitignore";
+        if (relative == "gitattributes") relative = ".gitattributes";
         app::write_file(target / relative, substitute(app::read_file(file), *name, *id));
     }
     try {
@@ -129,8 +134,9 @@ int create(const std::vector<std::string>& arguments) {
         app::print_diagnostic(std::cerr, diagnostic);
         return 1;
     }
-    std::cout << "Created " << *template_name << " project '" << *name << "' in " << target.string() << ".\n"
-              << "Build a target with `neura build --project " << (target / "neura.toml").string()
+    std::cout << "Created " << *template_name << " project '" << *name << "' in " << app::display_path(target)
+              << ".\n"
+              << "Build a target with `neura build --project " << app::display_path(target / "neura.toml")
               << " --target <name>`, serve one with `neura dev`, and see docs/apps/FirstProject.md.\n";
     return 0;
 }

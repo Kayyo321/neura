@@ -284,56 +284,140 @@ FilePin hash_file(const fs::path& path) {
 
 #else
 
-FilePin hash_file(const fs::path& path) {
-    std::error_code error;
-    if (fs::canonical(path, error) != path || error || !fs::is_regular_file(fs::symlink_status(path, error)) || error) {
-        throw ReadFailure("'" + path_text(path.filename()) + "' is not a regular file");
+using detail::FileHandle;
+using detail::FileState;
+using detail::Reparse;
+
+// Hashes an open file and refuses one that changed while it was read.
+FilePin hash_open(const FileHandle& file, const FileState& before, const std::string& name) {
+    util::Sha256 hash;
+    std::uint64_t size = 0;
+    std::array<std::uint8_t, 65536> buffer;
+    for (;;) {
+        DWORD count = 0;
+        if (!::ReadFile(file.get(), buffer.data(), static_cast<DWORD>(buffer.size()), &count, nullptr))
+            throw ReadFailure("cannot read '" + name + "'");
+        if (count == 0) break;
+        hash.update(std::span(buffer).first(count));
+        size += count;
     }
-    const auto digest = util::sha256_file(path);
-    if (!digest) throw ReadFailure("cannot read '" + path_text(path.filename()) + "'");
-    return {digest->size, *Sha256Digest::parse(digest->hex)};
+    const auto after = detail::state_of(file.get());
+    if (!after || size != after->size || *after != before) throw ReadFailure("'" + name + "' changed while it was read");
+    return {size, Sha256Digest::from_bytes(hash.finish())};
+}
+
+// The regular file at `path`, a canonical path: neither it nor any directory
+// on the way may be a link, a junction or another reparse point.
+FilePin hash_file_at(const fs::path& path, const std::string& name) {
+    const auto file = detail::open_no_follow(path);
+    const auto state = file.valid() ? detail::state_of(file.get()) : std::nullopt;
+    if (state && state->reparse() == Reparse::other) {
+        throw ReadFailure("'" + name + "' is not a regular file: " + detail::reparse_limitation);
+    }
+    if (!state || state->directory() || state->reparse() != Reparse::none) {
+        throw ReadFailure("'" + name + "' is not a regular file");
+    }
+    if (!detail::opened_at(file.get(), path)) throw ReadFailure("cannot open regular file '" + name + "' without following links");
+    return hash_open(file, *state, name);
+}
+
+FilePin hash_file(const fs::path& path) {
+    return hash_file_at(path, path_text(path.filename()));
 }
 
 class TreeReader {
 public:
-    TreeReader(fs::path root, const Span& at) : path_(std::move(root)), at_(at) {}
+    TreeReader(fs::path root, const Span& at) : path_(std::move(root)), at_(at), root_(open_directory("")) {}
 
-    std::vector<Child> children(std::string_view relative) const {
-        const auto root = relative.empty() ? path_ : path_ / path_from_text(relative);
-        std::error_code error;
-        if (fs::canonical(root, error) != root || error) throw ReadFailure("dependency directory changed during traversal");
-        std::vector<Child> result;
-        for (fs::directory_iterator it(root, error), end; !error && it != end; it.increment(error)) {
-            const auto name = path_text(it->path().filename());
-            const auto status = it->symlink_status(error);
-            if (error) break;
-            if (fs::is_symlink(status)) {
-                const auto destination = fs::canonical(it->path(), error);
-                if (!error && !within(destination, path_)) {
-                    outside(at_, "symbolic link '" + relative_name(relative, name) + "' leaves the dependency directory");
-                }
-                throw ReadFailure("dependency entry '" + relative_name(relative, name) + "' is a symbolic link");
-            }
-            if (!fs::is_directory(status) && !fs::is_regular_file(status)) {
-                throw ReadFailure("dependency entry '" + relative_name(relative, name) + "' is not a regular file or directory");
-            }
-            result.push_back({name, fs::is_directory(status) ? EntryKind::Directory : EntryKind::File});
+    std::vector<Child> children(std::string_view relative) {
+        const auto directory = open_directory(relative);
+        const auto identity = detail::identity_of(directory.get());
+        if (!identity || !seen_.insert(*identity).second) {
+            throw ReadFailure("dependency tree contains an unreadable or repeated directory");
         }
-        if (error) throw ReadFailure("cannot read dependency directory '" + std::string(relative) + "'");
+        // The entries of the open directory itself, so none comes from a
+        // directory that replaced it.
+        std::vector<Child> result;
+        std::vector<std::uint64_t> buffer(8192);
+        for (auto kind = FileIdBothDirectoryRestartInfo;; kind = FileIdBothDirectoryInfo) {
+            if (!::GetFileInformationByHandleEx(directory.get(), kind, buffer.data(),
+                                                static_cast<DWORD>(buffer.size() * sizeof buffer[0]))) {
+                if (::GetLastError() == ERROR_NO_MORE_FILES) break;
+                throw ReadFailure("cannot read dependency directory '" + std::string(relative) + "'");
+            }
+            for (auto* at = reinterpret_cast<const std::uint8_t*>(buffer.data());;) {
+                const auto& entry = *reinterpret_cast<const FILE_ID_BOTH_DIR_INFO*>(at);
+                const std::wstring_view wide(entry.FileName, entry.FileNameLength / sizeof(wchar_t));
+                if (wide != L"." && wide != L"..") {
+                    std::string name;
+                    try {
+                        name = path_text(fs::path(wide));
+                    } catch (const std::exception&) {
+                        throw ReadFailure("dependency tree contains a name without an unambiguous UTF-8 spelling");
+                    }
+                    // For a reparse point, EaSize holds its tag.
+                    const auto reparse = detail::reparse_of(entry.FileAttributes, entry.EaSize);
+                    if (reparse == Reparse::link) reject_link(relative_name(relative, name));
+                    if (reparse == Reparse::other) {
+                        throw ReadFailure("dependency entry '" + relative_name(relative, name) +
+                                          "' is not a regular file or directory: " + detail::reparse_limitation);
+                    }
+                    if ((entry.FileAttributes & FILE_ATTRIBUTE_DEVICE) != 0) {
+                        throw ReadFailure("dependency entry '" + relative_name(relative, name) +
+                                          "' is not a regular file or directory");
+                    }
+                    const bool is_directory = (entry.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+                    result.push_back({std::move(name), is_directory ? EntryKind::Directory : EntryKind::File});
+                }
+                if (entry.NextEntryOffset == 0) break;
+                at += entry.NextEntryOffset;
+            }
+        }
         std::ranges::sort(result, {}, &Child::name);
         return result;
     }
 
     FilePin file(std::string_view dir, const std::string& name) const {
-        const auto file = path_ / path_from_text(relative_name(dir, name));
-        std::error_code error;
-        if (fs::canonical(file, error) != file || error) throw ReadFailure("dependency file changed during traversal");
-        return hash_file(file);
+        return hash_file_at(expected(relative_name(dir, name)), name);
     }
 
 private:
+    fs::path expected(std::string_view relative) const {
+        return relative.empty() ? path_ : path_ / path_from_text(relative);
+    }
+
+    // A directory of the tree, opened where the canonical root and the names
+    // read so far put it, with no link or junction on the way.
+    FileHandle open_directory(std::string_view relative) const {
+        const auto path = expected(relative);
+        auto directory = detail::open_no_follow(path);
+        const auto state = directory.valid() ? detail::state_of(directory.get()) : std::nullopt;
+        if (state && state->reparse() == Reparse::other) {
+            throw ReadFailure("dependency directory '" + std::string(relative.empty() ? "." : relative) +
+                              "' is not a regular directory: " + detail::reparse_limitation);
+        }
+        if (!state || !state->directory() || state->reparse() != Reparse::none || !detail::opened_at(directory.get(), path)) {
+            throw ReadFailure("cannot open directory '" + std::string(relative.empty() ? "." : relative) +
+                              "' without following links");
+        }
+        return directory;
+    }
+
+    [[noreturn]] void reject_link(std::string_view rel) const {
+        // Canonicalization here classifies the error. No file or directory
+        // beyond the dependency root is opened for content.
+        std::error_code error;
+        const auto destination = fs::canonical(path_ / path_from_text(rel), error);
+        if (!error && !within(destination, path_)) {
+            outside(at_, "symbolic link '" + std::string(rel) + "' leaves the dependency directory");
+        }
+        throw ReadFailure("dependency entry '" + std::string(rel) + "' is a symbolic link");
+    }
+
     fs::path path_;
     const Span& at_;
+    FileHandle root_;
+    std::set<detail::FileIdentity> seen_;
 };
 
 #endif

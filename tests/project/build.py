@@ -8,6 +8,9 @@ page modules of hosts/web), so the check needs no Emscripten build; the page its
 tests/apps/web. Then it checks the refusals of the edge cases (E1022, E1024, E1027, E1029, E1031), `neura run`
 of each kind of bundle, and that a tampered bundle is refused before anything runs.
 
+On Windows a server bundle runs only where this build has neura-server-host.exe, and the desktop target is
+built only where it has the native launcher; otherwise those cases say that they are not run.
+
 usage: build.py <neura> <source directory> <scratch directory>
 """
 
@@ -25,6 +28,10 @@ NEURA = Path(sys.argv[1]).resolve()
 SOURCE = Path(sys.argv[2]).resolve()
 SCRATCH = Path(sys.argv[3]).resolve()
 FIXTURE = SOURCE / 'tests/project/build/app'
+WINDOWS = os.name == 'nt'
+EXE = '.exe' if WINDOWS else ''
+# The server host is part of every POSIX build; on Windows it comes with the Windows server host.
+SERVER_HOST = not WINDOWS or (NEURA.parent / f'neura-server-host{EXE}').exists()
 failures = []
 
 
@@ -36,7 +43,7 @@ def check(condition, what):
 
 def run(*args, cwd=None, env=None):
     return subprocess.run([str(NEURA), *map(str, args)], cwd=cwd, env=env, stdout=subprocess.PIPE,
-                          stderr=subprocess.PIPE, text=True, timeout=600)
+                          stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='replace', timeout=600)
 
 
 def refused(result, code, text, what):
@@ -69,9 +76,12 @@ def runtime():
 
 
 def edit(path, old, new):
-    text = path.read_text()
+    # UTF-8 and the file's own line endings on every host.
+    with open(path, encoding='utf-8', newline='') as file:
+        text = file.read()
     assert old in text, (path, old)
-    path.write_text(text.replace(old, new, 1))
+    with open(path, 'w', encoding='utf-8', newline='') as file:
+        file.write(text.replace(old, new, 1))
 
 
 def free_port():
@@ -95,8 +105,10 @@ def main():
 
     # Cases 5, 6, 7, 9: every target, the desktop one building its web target; run from a subdirectory with
     # --project ../neura.toml; two directories give identical bundles.
-    # A desktop target's child is a native executable, built on Linux only in 0.3.0.
-    native = sys.platform.startswith('linux')
+    # A desktop target's child is a native executable, which needs this system's native launcher.
+    native = any((NEURA.parent / 'lib/neura/launchers').glob(f'*/neura-launcher{EXE}'))
+    if not native:
+        print(f'note: no native launcher in {NEURA.parent / "lib/neura/launchers"}; the desktop target is not built')
     for name in ('server', 'web', 'desktop') if native else ('server', 'web'):
         for project in (first, second):
             result = run('build', '--project', '../neura.toml', '--target', name, cwd=project / 'server', env=env)
@@ -112,6 +124,20 @@ def main():
     again = tree(first / 'dist/web')
     run('build', '--target', 'web', cwd=first, env=env)
     check(tree(first / 'dist/web') == again, 'web: identical bytes when built twice')
+    if WINDOWS:
+        # The previous bundle is moved aside before the new one moves in (W32). A leftover aside directory that a
+        # program still holds open is skipped for another name, and removed by the first build after it is free.
+        aside = first / 'dist/web.neura-old'
+        aside.mkdir()
+        with open(aside / 'held', 'w') as held:  # open without FILE_SHARE_DELETE, so it cannot be removed
+            held.write('held')
+            held.flush()
+            results = [run('build', '--target', 'web', cwd=first, env=env) for _ in range(2)]
+        check(all(result.returncode == 0 for result in results) and tree(first / 'dist/web') == again,
+              'web: a held leftover of a previous bundle does not stop a rebuild')
+        result = run('build', '--target', 'web', cwd=first, env=env)
+        check(result.returncode == 0 and not any('.neura-' in path.name for path in (first / 'dist').iterdir()),
+              'web: the next build removes the released leftovers')
 
     web = json.loads((first / 'dist/web/bundle.json').read_text())
     files = {entry['path']: entry for entry in web['files']}
@@ -150,26 +176,31 @@ def main():
     check(result.returncode == 1 and 'neura dev' in result.stderr and 'static' in result.stderr, 'neura run of a web bundle is refused')
 
     # Case 13: neura run of a server bundle, with arguments for the host.
-    port = free_port()
-    database = SCRATCH / 'counter.db'
-    host = subprocess.Popen([str(NEURA), 'run', str(first / 'dist/server'), '--', '--listen', f'127.0.0.1:{port}',
-                             '--sql-pool', f'main=sqlite:{database}', '--config', 'greeting=hi'],
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    try:
-        body = None
-        for _ in range(600):
-            try:
-                with urllib.request.urlopen(f'http://127.0.0.1:{port}/hello?name=Ada', timeout=2) as response:
-                    body = response.read().decode()
-                break
-            except OSError:
-                time.sleep(0.1)
-        check(body == 'hi, Ada\n', 'neura run serves a server bundle')
-    finally:
-        host.terminate()
-        output, _ = host.communicate(timeout=30)
-        if body != 'hi, Ada\n':
-            print(output)
+    if SERVER_HOST:
+        port = free_port()
+        database = SCRATCH / 'counter.db'
+        host = subprocess.Popen([str(NEURA), 'run', str(first / 'dist/server'), '--', '--listen', f'127.0.0.1:{port}',
+                                 '--sql-pool', f'main=sqlite:{database}', '--config', 'greeting=hi'],
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8',
+                                errors='replace')
+        try:
+            body = None
+            for _ in range(600):
+                try:
+                    with urllib.request.urlopen(f'http://127.0.0.1:{port}/hello?name=Ada', timeout=2) as response:
+                        body = response.read().decode()
+                    break
+                except OSError:
+                    time.sleep(0.1)
+            check(body == 'hi, Ada\n', 'neura run serves a server bundle')
+        finally:
+            # On Windows this ends neura and, through their kill-on-close jobs, neura-run and the host.
+            host.terminate()
+            output, _ = host.communicate(timeout=30)
+            if body != 'hi, Ada\n':
+                print(output)
+    else:
+        print(f'note: neura-server-host{EXE} is not built here; neura run of a server bundle is not run')
 
     # Cases 42, 43, 44 and a dev bundle: refused before anything runs.
     def tampered(name, change):

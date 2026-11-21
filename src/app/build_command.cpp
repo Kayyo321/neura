@@ -3,6 +3,9 @@
 
 #include "app/project.hpp"
 
+#include "cli/tool.hpp"
+#include "project/files.hpp"
+
 #include <algorithm>
 #include <iostream>
 
@@ -99,13 +102,13 @@ int project_build_main(const std::vector<std::string>& arguments) {
     }
     const auto manifest = find_manifest(project, std::cerr);
     if (!manifest) return 1;
-    options.neura = tool_directory() / "neura";
     try {
+        options.neura = tool_directory() / tool::executable_file("neura");
         auto loaded = load_project(*manifest);
         check_target(loaded, options.target);
         check_lock(loaded, options.update_lock);
         const auto result = build_target(loaded, options);
-        std::cout << result.directory.string() << ": bundle " << result.digest.hex() << '\n';
+        std::cout << display_path(result.directory) << ": bundle " << result.digest.hex() << '\n';
         if (fs::exists(result.directory / "404.html")) {
             // Case 12: history routing needs the static host's help.
             std::cout << "history routing: the host must answer every application path with index.html, or serve "
