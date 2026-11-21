@@ -408,6 +408,12 @@ private:
         scopes_.emplace_back();
         for (const auto& init : stmt.initializer) scan_statement(init, visit);
         for (const auto& expr : stmt.expressions) scan(expr, visit);
+        if (stmt.kind == StmtKind::If && !stmt.initializer.empty()) {
+            scan_body(stmt.body, visit);
+            scan_body(stmt.alternative, visit);
+            scopes_.pop_back();
+            return;
+        }
         scopes_.pop_back();
         switch (stmt.kind) {
         case StmtKind::Binding:
@@ -463,7 +469,12 @@ private:
     }
 
     void branch(const Statement& stmt, Flow& flow) {
+        if (!stmt.initializer.empty()) {
+            scopes_.emplace_back();
+            check_statement(stmt.initializer.front(), flow);
+        }
         const auto& condition = stmt.expressions.front();
+        read(condition, flow);
         const auto known = literal_condition(condition);
         auto yes = fork(flow);
         auto no = fork(flow);
@@ -481,6 +492,7 @@ private:
         };
         narrowed(stmt.body, yes, !stmt.negated_narrowing);
         narrowed(stmt.alternative, no, stmt.negated_narrowing);
+        if (!stmt.initializer.empty()) scopes_.pop_back();
         if (stmt.negated_narrowing && !yes.reachable)
             for (const auto& binding : stmt.bindings) hide(binding.text);
         flow.reachable = false;
@@ -577,6 +589,9 @@ private:
         case StmtKind::ForEach:
             loop(stmt, flow);
             return;
+        case StmtKind::If:
+            branch(stmt, flow);
+            return;
         case StmtKind::Select:
             select(stmt, flow);
             return;
@@ -613,9 +628,6 @@ private:
             for (const auto& binding : stmt.bindings) hide(binding.text);
             check_body(stmt.body, flow);
             scopes_.pop_back();
-            break;
-        case StmtKind::If:
-            branch(stmt, flow);
             break;
         case StmtKind::Match:
             match(stmt, flow);

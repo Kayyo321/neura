@@ -568,6 +568,8 @@ private:
     IrNode any_guard(const Expr& expr, Context& context, const std::function<IrNode()>& lower);
     IrNode general_match(const Statement& stmt, Context& context, bool produces_value, const IrType* expected,
                          bool call_argument, std::optional<IrNode> lowered_subject = std::nullopt);
+    IrNode lower_if(const Statement& stmt, Context& context, std::vector<IrNode>* hoisted = nullptr,
+                    Names* after = nullptr);
     IrNode narrowing_if(const Statement& stmt, Context& context, std::vector<IrNode>* hoisted = nullptr,
                         Names* after = nullptr);
     IrNode do_loop(const Statement& stmt, Context& context);
@@ -4853,14 +4855,8 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
         result.body = body(stmt.body, context);
         return result;
     }
-    case StmtKind::If: {
-        if (!stmt.bindings.empty()) return narrowing_if(stmt, context);
-        auto result = node(IrOp::Branch, stmt.span);
-        result.operands.push_back(value(stmt.expressions.front(), context, &bool_type));
-        result.body = body(stmt.body, context);
-        result.alternative = body(stmt.alternative, context);
-        return result;
-    }
+    case StmtKind::If:
+        return lower_if(stmt, context);
     case StmtKind::Match:
         return lower_match(stmt, context, false);
     case StmtKind::Destructure:
@@ -5254,12 +5250,31 @@ IrNode Lowering::for_each_iterable(const Statement& stmt, Context& context, IrNo
     return result;
 }
 
+IrNode Lowering::lower_if(const Statement& stmt, Context& context, std::vector<IrNode>* hoisted, Names* after) {
+    const auto branch = [&] {
+        if (!stmt.bindings.empty()) return narrowing_if(stmt, context, hoisted, after);
+        auto result = node(IrOp::Branch, stmt.span);
+        result.operands.push_back(value(stmt.expressions.front(), context, &bool_type));
+        result.body = body(stmt.body, context);
+        result.alternative = body(stmt.alternative, context);
+        return result;
+    };
+    if (stmt.initializer.empty()) return branch();
+
+    auto result = node(IrOp::Block, stmt.span);
+    context.scopes.emplace_back();
+    append_statement(result.body, stmt.initializer.front(), context);
+    result.body.push_back(branch());
+    context.scopes.pop_back();
+    return result;
+}
+
 void Lowering::append_statement(std::vector<IrNode>& instructions, const Statement& stmt, Context& context) {
     if (stmt.kind == StmtKind::If && stmt.negated_narrowing) {
         // `if (x is not y: T) A` where A cannot complete binds `y` for the
         // rest of the block (docs/design/Expressions030.md, Narrowing).
         Names after;
-        auto lowered = narrowing_if(stmt, context, &instructions, &after);
+        auto lowered = lower_if(stmt, context, &instructions, &after);
         auto& names = context.scopes.back();
         for (const auto& [name, id] : after) {
             if (names.contains(name))

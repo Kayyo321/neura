@@ -1,0 +1,33 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Entry = module:program.Entry (
+    let calls: int = 0;
+
+    let next = func() -> int {
+        calls += 1;
+        return calls;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last value: int;
+        if (#Note("Count once") let value = next(); value == 1) {
+            console.print_line(value.to_string());
+        }
+
+        if (let [valid, text]: [bool, string] = [false, "outer"]; valid) {
+            console.print_line("unreachable");
+        } else if (let value = next(); value == 2) {
+            console.print_line(text);
+            console.print_line(value.to_string());
+        } else {
+            console.print_line(text);
+            console.print_line(value.to_string());
+        }
+
+        value = 42;
+        console.print_line(value.to_string());
+        console.print_line(calls.to_string());
+        return program.ExitCode.Ok;
+    };
+);

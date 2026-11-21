@@ -183,6 +183,11 @@ private:
     }
 
     void branch(const Statement& stmt, Flow& flow, bool in_loop) {
+        if (!stmt.initializer.empty()) {
+            names_.emplace_back();
+            check_statement(stmt.initializer.front(), flow, in_loop);
+        }
+        read(stmt.expressions.front(), flow);
         const auto condition = literal_condition(stmt.expressions.front());
         auto yes = fork(flow);
         auto no = fork(flow);
@@ -198,6 +203,7 @@ private:
         };
         narrowed(stmt.body, yes, !stmt.negated_narrowing);
         narrowed(stmt.alternative, no, stmt.negated_narrowing);
+        if (!stmt.initializer.empty()) names_.pop_back();
         if (stmt.negated_narrowing && !yes.reachable)
             for (const auto& binding : stmt.bindings) names_.back().insert(binding.text);
         flow.reachable = false;
@@ -260,6 +266,9 @@ private:
         case StmtKind::ForEach:
             loop(stmt, flow, in_loop);
             return;
+        case StmtKind::If:
+            branch(stmt, flow, in_loop);
+            return;
         default:
             break;
         }
@@ -274,9 +283,6 @@ private:
             break;
         case StmtKind::Block:
             check_body(stmt.body, flow, in_loop);
-            break;
-        case StmtKind::If:
-            branch(stmt, flow, in_loop);
             break;
         case StmtKind::Match:
             match(stmt, flow, in_loop);

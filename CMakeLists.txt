@@ -1437,6 +1437,9 @@ if(BUILD_TESTING AND NEURA_SDK)
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/frontend.cmake"
     )
 
+    add_test(NAME parser-if-initializers COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressions/if_initializers.py" "$<TARGET_FILE:neura>")
+
     # Scoped tasks (docs/lang/Concurrency.md): conformance of the forms and
     # their checks, then compiled programs through every build route.
     add_test(NAME concurrency-frontend COMMAND ${CMAKE_COMMAND}

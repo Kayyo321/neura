@@ -867,7 +867,8 @@ private:
     // A declaration with the tags written before it. The documentation
     // comment may come before the tags, among them, or between them and the
     // declaration; the one closest to the declaration documents it.
-    Declaration tagged_declaration(std::optional<Declaration::Kind> owner = std::nullopt) {
+    Declaration tagged_declaration(std::optional<Declaration::Kind> owner = std::nullopt,
+                                   bool let_initializer = false) {
         if (!at("#")) return declaration(owner);
         const auto first = cursor_;
         auto tags = tag_list();
@@ -890,6 +891,7 @@ private:
             if (!destructure) error.note("tags apply to declarations only, not to statements or expressions");
             throw error;
         }
+        if (let_initializer && !at("let")) expected("'let' in an 'if' initializer");
         auto result = declaration(owner);
         if (result.name == "_") {
             throw Diagnostic(tags_span, "tags cannot apply to '_'").with_code("E0909")
@@ -1628,8 +1630,16 @@ private:
 
     // The condition of an `if`, where narrowings may stand
     // (docs/design/Expressions030.md, Narrowing).
-    Expr if_condition(Statement& statement) {
+    Expr if_condition(Statement& result_statement) {
         expect("(");
+        if (at("let") || at("#")) {
+            struct RestoreDepth {
+                unsigned& depth;
+                ~RestoreDepth() { --depth; }
+            } restore{block_depth_};
+            ++block_depth_;
+            result_statement.initializer.push_back(statement(true));
+        }
         const auto saved_root = std::exchange(narrowing_root_, cursor_);
         const auto saved_next = std::exchange(narrowing_next_, true);
         std::optional<Expr> result;
@@ -1642,7 +1652,7 @@ private:
         }
         narrowing_root_ = saved_root;
         narrowing_next_ = saved_next;
-        check_narrowings(*result, statement);
+        check_narrowings(*result, result_statement);
         try {
             expect(")");
         } catch (const Diagnostic&) {
@@ -1722,7 +1732,7 @@ private:
         statement.constant_bindings = !allowed.empty();
     }
 
-    Statement statement() {
+    Statement statement(bool let_initializer = false) {
         const auto start = cursor_;
         Statement result{};
         if (at_startup_block()) {
@@ -1732,7 +1742,7 @@ private:
         }
         if (at("#")) {
             result.kind = Statement::Kind::Binding;
-            result.declaration = std::make_unique<Declaration>(tagged_declaration());
+            result.declaration = std::make_unique<Declaration>(tagged_declaration(std::nullopt, let_initializer));
             result.span = result.declaration->span;
             return result;
         }
