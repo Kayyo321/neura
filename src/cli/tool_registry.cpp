@@ -6,7 +6,9 @@
 #include <cerrno>
 #include <cstring>
 
-#ifndef _WIN32
+#ifdef _WIN32
+#include "platform/windows.hpp"
+#else
 #include <fcntl.h>
 #include <sys/file.h>
 #include <sys/stat.h>
@@ -15,7 +17,9 @@
 
 // The parts of the tool registry that the dispatcher links: data, the
 // version line and the usage text, with no stream or file system code, so
-// that `neura` stays small when the C++ runtime is linked into it.
+// that `neura` stays small when the C++ runtime is linked into it. (The
+// Windows lease takes a std::filesystem::path: the Windows dispatcher uses
+// std::filesystem anyway.)
 
 namespace neura::tool {
 
@@ -143,12 +147,81 @@ std::string dispatch_token() {
 #endif
 }
 
+#ifdef _WIN32
+namespace {
+
+// Whether the marker at `root` is schema 2, where a missing lease file
+// means that the generation was removed.
+bool schema_2_root(const std::filesystem::path& root) {
+    const HANDLE file = ::CreateFileW((root / L"neura-install.txt").c_str(), GENERIC_READ,
+                                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                                      FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return false;
+    char head[15] = {};
+    DWORD count = 0;
+    const BOOL read = ::ReadFile(file, head, sizeof head, &count, nullptr);
+    ::CloseHandle(file);
+    return read && count == sizeof head && std::memcmp(head, "neura-install 2", sizeof head) == 0;
+}
+
+} // namespace
+
+LeaseHandle take_lease(const std::filesystem::path& executable, bool& removed) {
+    removed = false;
+    // <root>/versions/<generation>/bin/<tool>, with either separator.
+    const auto bin = executable.parent_path();
+    const auto generation = bin.parent_path();
+    const auto versions = generation.parent_path();
+    if (!executable.has_filename() || bin.filename() != L"bin" || !generation.has_filename() ||
+        versions.filename() != L"versions" || !versions.has_parent_path()) {
+        return no_lease;
+    }
+    const auto root = versions.parent_path();
+    // Not inheritable, so a child (which takes its own lease) does not keep
+    // this one; shared for delete, so a remover can delete the name.
+    const HANDLE file = ::CreateFileW((root / L"leases" / generation.filename()).c_str(), GENERIC_READ,
+                                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                                      FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        const DWORD error = ::GetLastError();
+        if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) return no_lease;
+        // No lease file: a root that a 0.2 client made runs without one; on
+        // a schema 2 root the generation was removed.
+        removed = schema_2_root(root);
+        return no_lease;
+    }
+    // The whole file, as every lock of the lifecycle takes it.
+    OVERLAPPED whole{};
+    if (!::LockFileEx(file, LOCKFILE_FAIL_IMMEDIATELY, 0, MAXDWORD, MAXDWORD, &whole)) {
+        if (::GetLastError() != ERROR_LOCK_VIOLATION) {
+            // A file system that cannot lock: run without a lease.
+            ::CloseHandle(file);
+            return no_lease;
+        }
+        // Held exclusively: a command is removing the generation, or only
+        // probing whether it is in use. Wait, then tell by the file's state.
+        whole = OVERLAPPED{};
+        if (!::LockFileEx(file, 0, 0, MAXDWORD, MAXDWORD, &whole)) {
+            ::CloseHandle(file);
+            return no_lease;
+        }
+    }
+    FILE_STANDARD_INFO info{};
+    if (!::GetFileInformationByHandleEx(file, FileStandardInfo, &info, sizeof info) || info.DeletePending ||
+        info.NumberOfLinks == 0) {
+        removed = true;
+        ::CloseHandle(file);
+        return no_lease;
+    }
+    return reinterpret_cast<LeaseHandle>(file);
+}
+#else
+LeaseHandle take_lease(const std::filesystem::path& executable, bool& removed) {
+    return take_lease(executable.c_str(), removed);
+}
+
 int take_lease(const char* executable, bool& removed) {
     removed = false;
-#ifdef _WIN32
-    (void)executable;
-    return -1;
-#else
     // <root>/versions/<generation>/bin/<tool>
     const std::string_view path(executable ? executable : "");
     const auto tool_slash = path.rfind('/');
@@ -203,8 +276,8 @@ int take_lease(const char* executable, bool& removed) {
         return -1;
     }
     return descriptor;
-#endif
 }
+#endif
 
 std::string executable_file(std::string_view name) {
 #ifdef _WIN32

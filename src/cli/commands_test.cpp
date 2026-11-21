@@ -45,6 +45,11 @@
 #include <system_error>
 #include <vector>
 
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
+
 namespace neura::cli {
 
 using neura::runner::Host;

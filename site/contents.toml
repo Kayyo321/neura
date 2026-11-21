@@ -138,6 +138,7 @@ pages = [
   { source = "docs/Release.md", label = "Release checklist" },
   { source = "docs/ReleaseProcess.md", label = "Release process" },
   { source = "docs/CodeSigning.md", label = "Code signing" },
+  { source = "docs/design/Windows030.md", label = "Native Windows design" },
   { source = "docs/ContinuousIntegration.md", label = "Continuous integration" },
   { source = "docs/RepositorySettings.md", label = "Repository settings" },
   { source = "docs/Wiki.md", label = "Wiki maintenance" },

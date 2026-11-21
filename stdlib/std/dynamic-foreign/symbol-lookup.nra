@@ -67,6 +67,9 @@ export let SymbolLookup = module (
     /// @brief Loads the library at `path`, or by name through the platform's search when `path` has no slash
     /// (such as "libm.so.6"), owned by `arena` (Java's SymbolLookup.libraryLookup). A library that cannot be
     /// loaded is an Io error of kind NotFound.
+    /// On Windows a `path` that contains `/` or `\`, or starts with a drive such as `C:`, loads that
+    /// file; any other name (such as "ucrtbase.dll") is searched in the application's directory, in `System32`
+    /// and then in each `PATH` directory, never in the current directory. Any file extension is accepted.
     export let library_lookup = func(path: string, arena: Arena) -> Result<SymbolLookup> {
         last scope = arena.scope();
         last id = native.open_library(scope.id(), path);
@@ -81,6 +84,9 @@ export let SymbolLookup = module (
     };
 
     /// @brief The libraries already loaded into the process, including the C library.
+    /// On Windows the lookup searches the executable, `ucrtbase.dll` (the C library), `kernel32.dll`,
+    /// and then the other loaded modules in the order the system lists them. `ucrtbase.dll` does not export the
+    /// functions that the C headers define inline, such as `printf`.
     export let default_lookup = func -> SymbolLookup => new(native.default_library(), scopes.global());
 
     /// @brief The native library linked into the image from C imports (ForeignInterop.md).

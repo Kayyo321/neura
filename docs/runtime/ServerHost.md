@@ -2,7 +2,7 @@
 
 `neura-server-host` serves a Neura server image over HTTP/1.1, HTTPS and, in builds with it, HTTP/2 ([below](#http2)). It owns the listeners, TLS and the HTTP wire, and runs no application code: each request is executed by a fresh worker process that loads the image, runs the whole program once for that one request, and exits. Nothing a program holds survives between requests; data that must outlive a request belongs in a file or a database the program reaches through its host services. The contract is [the backend design note](../design/Backend030.md); this page describes what the 0.3.0 host does.
 
-The host is built with every build on POSIX systems. The [release archives](#release-archives) of every target have HTTPS, HTTP/2 and the PostgreSQL provider. A build from source has them only when it is configured with them: HTTPS needs a build configured with `-DNEURA_ENABLE_SERVER_TLS=ON` and the static OpenSSL 3.5 archives the [server component lock](../../packaging/server-components.lock.toml) pins; a build without it refuses `--tls-listen`. HTTP/2 also needs `-DNEURA_ENABLE_SERVER_HTTP2=ON` with `-DNEURA_NGHTTP2_ROOT=<prefix>`, the install prefix of the static nghttp2 build the lock pins.
+The host is built on POSIX systems and Windows. The Linux and macOS [release archives](#release-archives) have HTTPS, HTTP/2 and the PostgreSQL provider. A POSIX source build needs `-DNEURA_ENABLE_SERVER_TLS=ON` and the static OpenSSL 3.5 archives from the [server component lock](../../packaging/server-components.lock.toml) for HTTPS. HTTP/2 also needs `-DNEURA_ENABLE_SERVER_HTTP2=ON` and `-DNEURA_NGHTTP2_ROOT=<prefix>` for the pinned static nghttp2. Windows 0.3.0 serves HTTP/1.1 and refuses TLS listeners, `--h2c` and PostgreSQL pools.
 
 ## A server image
 
@@ -135,7 +135,7 @@ Before it listens, the host runs one worker with a *startup check*: `Context.ser
 Every request still gets a new process that has run no Neura code and serves that one request. What differs is how the process gets its loaded image:
 
 - **zygote** (Linux): at startup the host starts one helper process, the zygote (`neura-zygote` in `ps`), which reads the image, computes its SHA-256, loads it and verifies it once, and then waits. For each worker the host passes it the worker's end of a new channel and the zygote forks; the fork is made with `CLONE_PARENT`, so the worker is a child of the host, which waits for it, limits it and kills it like any other worker. The zygote has one thread, runs no Neura code and holds no request data, so a forked worker starts in the same state a worker started with `exec` reaches after its verification. A zygote that ends is replaced, up to three times; after that, or when one cannot start, the host starts workers with `exec` and logs it.
-- **exec**: each worker is `neura-server-host --worker` started with `posix_spawn`, and reads, hashes, loads and verifies the image itself.
+- **exec**: each worker is `neura-server-host --worker` started with `posix_spawn` on POSIX or `CreateProcessW` on Windows. It reads, hashes, loads and verifies the image itself. On Windows the host puts the workers in a job object that ends them when the host closes.
 
 Forked workers share the zygote's address-space layout: address-space layout randomization differs between the host and its workers, but not from one worker to the next. A program that must not share its layout with other requests' workers runs with `--worker-start exec`.
 
@@ -180,7 +180,7 @@ A build without the option speaks HTTP/1.1 only: TLS listeners select `http/1.1`
 
 ## Release archives
 
-The release archives of every target (Linux and macOS, x86-64 and arm64) link the three server components statically: OpenSSL 3.5.9 for TLS, nghttp2 1.71.0 for HTTP/2, and libpq 18.7 for the [PostgreSQL provider](Sql.md#building). [`packaging/build-server-components.sh`](../../packaging/build-server-components.sh) builds them from the sources [the server component lock](../../packaging/server-components.lock.toml) pins, after checking each archive and each licence text against the lock's SHA-256, as static, position-independent libraries with hidden visibility; the release workflow, the Tier 1 build and a local release build run the same script and the same configure options:
+The Linux and macOS release archives on x86-64 and arm64 link the three server components statically. They use OpenSSL 3.5.9 for TLS, nghttp2 1.71.0 for HTTP/2, and libpq 18.7 for the [PostgreSQL provider](Sql.md#building). [`packaging/build-server-components.sh`](../../packaging/build-server-components.sh) builds them from the sources the server component lock pins, after checking each archive and licence text against the lock's SHA-256. The POSIX release workflow and Linux Tier 1 build use these configure options:
 
 ```text
 sh packaging/build-server-components.sh <prefix>
@@ -195,6 +195,8 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
 
 `neura-server-host` and `libneura-core` each hold a copy of OpenSSL: the host's TLS listeners use its own, and `Std.Net.Tls` and libpq, in `libneura-core`, use the library's. On Linux the native launcher holds a third, for `Std.Net.Tls` in executables that `neura build --native` makes, which accounts for most of the 6.8 MB by which a native Hello World on x86-64 outgrows 0.2.1-rc.3's (11,953,251 bytes against 5,127,992; the static OpenSSL libraries hold 6.5 MB of code and data). The copies are why the SDK archive outgrows the [size budget](../design/Release030.md) of 0.3.0. The OpenSSL of the archives reads `/etc/ssl/openssl.cnf` and takes its default trust anchors from `/etc/ssl` ([installation](../Install.md#supported-platforms)).
 
+The Windows archives carry HTTP/1.1 and SQLite. TLS, HTTP/2 and PostgreSQL qualification probes report `NOT RUN` on Windows in 0.3.0. See [release qualification](../ReleaseProcess.md#what-the-release-workflow-checks).
+
 ## Configuration, logs and signals
 
 `Context.config(key)` reads the environment variable `<prefix><key>` when `--config-env-prefix` is set, then the `--config` values, then the configuration file. The worker asks the host for each value over its channel; it never receives the whole configuration. Keys that start with `sql.` are pool settings: the host removes them before any worker starts and answers `None` for them.
@@ -202,6 +204,8 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
 The host and its workers write JSON lines on standard error: `time_ms`, `level`, `request_id` when there is one, `message`, and named fields. A record longer than 16 KiB keeps its first 2 KiB of message and gains `"truncated":"true"`.
 
 `SIGTERM` and `SIGINT` stop accepting, answer 503 to new requests, wait up to S-12 for the requests in flight and for the worker of each answered request to exit (with `--record-dir`, after its trace is written; a worker past its grace period is still killed), kill the remaining workers and exit (status 0, or 1 when a request was still running). `SIGHUP` rereads the certificate and key; a failed reload keeps the previous pair. When the host itself is killed, its workers see their channel close and exit.
+
+On Windows, Ctrl+C and Ctrl+Break start the same drain. The worker process bound is S-1 + S-2 + 1 because Windows uses exec workers and has no zygote.
 
 ## The admin listener
 

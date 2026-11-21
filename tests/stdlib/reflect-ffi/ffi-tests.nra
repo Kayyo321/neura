@@ -1,7 +1,8 @@
 // Std.Reflect.Ffi.Abi (docs/design/Reflect030.md, edge case 15): C layouts and argument classes for declared
 // targets. Vectors from clang 19.1.7: the C file below compiled with
 //   clang --target=<triple> -O0 -S -emit-llvm layouts.c
-// for x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, x86_64-pc-windows-msvc and wasm32-unknown-unknown,
+// for x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, x86_64-pc-windows-msvc (clang's spelling of Neura's
+// x86_64-windows-msvc) and wasm32-unknown-unknown,
 // reading the initializer of `v` (sizes, alignments, offsets) and the lowered signatures of the take_* functions:
 //   struct mixed { char c; int i; double d; };       struct longs { long a; char b; };
 //   struct pair { double x; double y; };             struct inner { short s; char c; };
@@ -37,13 +38,16 @@ let FfiTests = module (
     export let test_targets = func() -> void {
         test.assert(target("x86_64-unknown-linux-gnu").convention == abi.CallingConvention.SystemV64);
         test.assert(target("arm64-apple-darwin").convention == abi.CallingConvention.Aapcs64);
-        test.assert(target("x86_64-pc-windows-msvc").long_bytes == 4);
+        test.assert(target("x86_64-windows-msvc").long_bytes == 4);
+        test.assert(target("x86_64-windows-msvc").convention == abi.CallingConvention.Win64);
+        test.assert(target("x86_64-pc-windows-msvc").convention == abi.CallingConvention.Win64);
+        test.assert_none(abi.target("aarch64-windows-msvc"));
         test.assert(target("wasm32-unknown-unknown").pointer_bytes == 4);
         test.assert_none(abi.target("riscv64-unknown-linux-gnu"));
     };
 
     export let test_layouts = func() -> void {
-        for (let triple in ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "x86_64-pc-windows-msvc",
+        for (let triple in ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "x86_64-windows-msvc",
                             "wasm32-unknown-unknown"]) {
             last on = target(triple);
             last first = abi.layout(mixed(), on);
@@ -59,7 +63,7 @@ let FfiTests = module (
         }
         last lp64 = abi.layout(longs(), target("x86_64-unknown-linux-gnu"));
         test.assert_equal_string("size 16 align 8 a@0 b@8", lp64.to_string());
-        last llp64 = abi.layout(longs(), target("x86_64-pc-windows-msvc"));
+        last llp64 = abi.layout(longs(), target("x86_64-windows-msvc"));
         test.assert_equal_string("size 8 align 4 a@0 b@4", llp64.to_string());
         test.assert_equal_string("size 8 align 4 a@0 b@4", abi.layout(longs(), target("wasm32-unknown-unknown")).to_string());
     };
@@ -83,7 +87,7 @@ let FfiTests = module (
     };
 
     export let test_windows_and_wasm_classes = func() -> void {
-        last windows = "x86_64-pc-windows-msvc";
+        last windows = "x86_64-windows-msvc";
         test.assert_equal_string("[Indirect]", classes(pair(), windows));
         test.assert_equal_string("[Indirect]", classes(three(), windows));
         test.assert_equal_string("[Integer]", classes(longs(), windows));

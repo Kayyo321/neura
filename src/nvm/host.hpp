@@ -91,10 +91,13 @@ struct HostCompletion {
     static HostCompletion terminate(std::int32_t status) { return {true, {}, status}; }
 };
 
+// Readiness of a descriptor. On Windows the descriptor is a Winsock SOCKET
+// (pointer-width, waited for with WSAPoll), never a C runtime descriptor or a
+// HANDLE, which use WindowsWait; INVALID_SOCKET reads as -1.
 struct PosixWait {
     enum class Events { Read, Write, ReadWrite };
     struct Interest {
-        int descriptor = -1; // A negative descriptor uses the default poll-at-check behavior.
+        std::intptr_t descriptor = -1; // A negative descriptor uses the default poll-at-check behavior.
         Events events = Events::Read;
     };
 
@@ -223,14 +226,35 @@ public:
 };
 
 // Writes to a C stream and flushes after each line.
+//
+// On Windows, when the stream is a real console, the bytes are written as
+// UTF-16 with WriteConsoleW instead (W07, W17), so that UTF-8 text shows
+// correctly whatever the console's code page: complete UTF-8 sequences are
+// converted, a sequence split between two writes is held until its end
+// arrives (the held bytes count as written), and an invalid byte shows as
+// U+FFFD. Pipes and files get the bytes unchanged.
 class StreamSink final : public ConsoleSink {
 public:
+#ifdef _WIN32
+    explicit StreamSink(std::FILE* stream);
+    // Shows a sequence that never completed as U+FFFD.
+    ~StreamSink() override;
+#else
     explicit StreamSink(std::FILE* stream) : stream_(stream) {}
+#endif
     bool write(std::string_view bytes) override;
     SinkWrite write_some(std::string_view bytes) override;
 
 private:
     std::FILE* stream_;
+#ifdef _WIN32
+    SinkWrite write_console(std::string_view bytes);
+
+    // The console's HANDLE, or nullptr when the stream is not a console.
+    void* console_ = nullptr;
+    // The start of a UTF-8 sequence that the next write completes.
+    std::string partial_;
+#endif
 };
 
 // Collects output in memory. With a capacity, writes fail once the total

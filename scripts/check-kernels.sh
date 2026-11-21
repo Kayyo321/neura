@@ -20,6 +20,13 @@ set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 build=${1:-"$root/build"}
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+        python "$root/scripts/check-windows-binaries.py" "$build" --kernels-only
+        python "$root/scripts/gen-kernels.py" --check --root "$root"
+        exit 0
+        ;;
+esac
 archive="$build/libneura_kernels.a"
 if [ ! -f "$archive" ]; then
     echo "check-kernels: $archive does not exist; build the neura_kernels target first" >&2

@@ -5,7 +5,9 @@
 """
 
 import argparse
+import os
 import pathlib
+import stat
 import subprocess
 import sys
 import tempfile
@@ -21,6 +23,18 @@ COMMAND = [str(arguments.binary.resolve())] + ([] if arguments.standalone else [
 
 def execute(*flags, source=None):
     return subprocess.run(COMMAND + list(flags), input=source, capture_output=True, timeout=20)
+
+
+def can_symlink(directory):
+    """Whether this process may create symbolic links (on Windows, Developer
+    Mode or the privilege to create them)."""
+    probe = pathlib.Path(directory) / 'symlink-probe'
+    try:
+        probe.symlink_to(pathlib.Path(directory) / 'missing')
+    except OSError:
+        return False
+    probe.unlink()
+    return True
 
 
 class FormatterTests(unittest.TestCase):
@@ -240,9 +254,29 @@ let handle=func(value:Shape){match(value){Shape.Point{x,y}=>{if(x>y){return;}},S
         self.assertIn('    ) = new;\n\n    export let name:', formatted)
 
     def test_crlf_bom_and_unicode_comment(self):
+        # The source is formatted as the compiler reads it, with CR LF
+        # normalized to LF, and written with LF (W08).
         formatted = self.formatted(b'\xef\xbb\xbf/// Unicode: \xf0\x9f\x8c\xb8\r\nlet value=1;\r\n')
-        self.assertTrue(formatted.startswith('\ufeff/// Unicode: \U0001f338\r\n'))
-        self.assertNotIn('\n', formatted.replace('\r\n', ''))
+        self.assertEqual(formatted, '\ufeff/// Unicode: \U0001f338\nlet value = 1;\n')
+        self.assertEqual(self.formatted('let a=1;\rlet b=2;\r'), 'let a = 1;\rlet b = 2;\r')
+
+    def test_crlf_only_differences_are_formatted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / 'source.nra'
+            original = b'let count = 1;\r\nlet other = 2;\r\n'
+            path.write_bytes(original)
+            result = execute('--check', str(path))
+            self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
+            self.assertEqual(execute('--check', '--stdin', source=original).returncode, 0)
+            result = execute('--write', str(path))
+            self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
+            self.assertEqual(path.read_bytes(), original)
+            self.assertEqual(execute(str(path)).stdout, b'let count = 1;\nlet other = 2;\n')
+            path.write_bytes(b'let count=1;\r\nlet other = 2;\r\n')
+            self.assertEqual(execute('--check', str(path)).returncode, 1)
+            result = execute('--write', str(path))
+            self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
+            self.assertEqual(path.read_bytes(), b'let count = 1;\nlet other = 2;\n')
 
     def test_tabs_and_custom_width(self):
         source = 'let Example=module(export let value=1;);'
@@ -264,7 +298,9 @@ let handle=func(value:Shape){match(value){Shape.Point{x,y}=>{if(x>y){return;}},S
             path = pathlib.Path(directory) / 'source.nra'
             original = b'let count=1;'
             path.write_bytes(original)
-            path.chmod(0o640)
+            # The file's permissions survive the replacement: its mode, or on
+            # Windows its read-only attribute.
+            path.chmod(stat.S_IREAD if os.name == 'nt' else 0o640)
             result = execute('--check', str(path))
             self.assertEqual(result.returncode, 1)
             self.assertEqual(path.read_bytes(), original)
@@ -273,7 +309,12 @@ let handle=func(value:Shape){match(value){Shape.Point{x,y}=>{if(x>y){return;}},S
             self.assertEqual(result.returncode, 0, result.stderr.decode())
             self.assertEqual(result.stdout, b'')
             self.assertEqual(path.read_bytes(), b'let count = 1;\n')
-            self.assertEqual(path.stat().st_mode & 0o777, 0o640)
+            if os.name == 'nt':
+                self.assertTrue(path.stat().st_file_attributes & stat.FILE_ATTRIBUTE_READONLY)
+                self.assertEqual(sorted(item.name for item in path.parent.iterdir()), ['source.nra'])
+                path.chmod(stat.S_IREAD | stat.S_IWRITE)
+            else:
+                self.assertEqual(path.stat().st_mode & 0o777, 0o640)
             self.assertEqual(execute('--check', str(path)).returncode, 0)
 
     def test_invalid_batch_does_not_write_valid_files(self):
@@ -288,6 +329,8 @@ let handle=func(value:Shape){match(value){Shape.Point{x,y}=>{if(x>y){return;}},S
 
     def test_symlink_not_replaced(self):
         with tempfile.TemporaryDirectory() as directory:
+            if not can_symlink(directory):
+                self.skipTest('this process cannot create symbolic links')
             target = pathlib.Path(directory) / 'target.nra'
             link = pathlib.Path(directory) / 'link.nra'
             target.write_bytes(b'let count=1;')
@@ -688,7 +731,7 @@ let Inner = module (
             descriptors = []
             for name, text in (("before.nra", source), ("after.nra", formatted)):
                 path = pathlib.Path(temporary) / name
-                path.write_text(text)
+                path.write_bytes(text.encode("utf-8"))
                 result = subprocess.run([str(arguments.binary.resolve()), "emit-ir", "--no-optimize", str(path)],
                                         capture_output=True, text=True, timeout=60)
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -710,7 +753,7 @@ let Inner = module (
             with self.subTest(source=str(source.relative_to(repository))):
                 # The standard library and the examples are formatted:
                 # `neura fmt --check` passes on both trees.
-                self.assertEqual(self.formatted(source.read_bytes()), source.read_text())
+                self.assertEqual(self.formatted(source.read_bytes()), source.read_text(encoding='utf-8'))
 
 
 if __name__ == '__main__':

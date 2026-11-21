@@ -27,7 +27,7 @@ def copy_tools(bin_dir: Path) -> None:
     """Copies `neura` with the tools it starts and their shared libraries
     (docs/design/Products030.md), as the build tree lays them out."""
     source = NEURA.parent
-    for tool in [NEURA, *sorted(source.glob("neura-*")), source / "neurac"]:
+    for tool in [NEURA, *sorted(source.glob("neura-*")), source / f"neurac{NEURA.suffix}"]:
         if tool.is_file():
             shutil.copy2(tool, bin_dir / tool.name)
     if (source / "lib/neura").is_dir():
@@ -519,9 +519,9 @@ with TemporaryDirectory() as temporary:
     (root / "bin").mkdir()
     copy_tools(root / "bin")
     shutil.copytree(SOURCE / "stdlib", root / "stdlib")
-    (root / "stdlib/std/ui/testing.nra").write_text(SHIM)
-    (root / "main.nra").write_text(PROGRAM)
-    neura = str(root / "bin/neura")
+    (root / "stdlib/std/ui/testing.nra").write_text(SHIM, encoding="utf-8", newline="\n")
+    (root / "main.nra").write_text(PROGRAM, encoding="utf-8", newline="\n")
+    neura = str(root / "bin" / NEURA.name)
     built = subprocess.run([neura, "build", "main.nra", "-o", "main.nvr"], cwd=root, env=ENV,
                            capture_output=True, text=True)
     check(built.returncode == 0, built.stdout + built.stderr)

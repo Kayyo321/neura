@@ -1,0 +1,31 @@
+# Text files are stored and checked out with LF line endings on every host
+# (docs/design/Windows030.md, decision W08), so byte-exact tests, golden
+# outputs and image digests agree between a Windows checkout and a POSIX one.
+* text=auto eol=lf
+
+# Windows command scripts keep the line endings their interpreters expect.
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binary formats: never converted, never diffed as text.
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+*.wasm binary
+*.nvr binary
+*.zip binary
+*.gz binary
+*.tgz binary
+*.pdf binary
+
+# Test inputs whose exact bytes are the subject of the test: NeuraIR modules
+# written before tasks existed, and source text with control characters.
+tests/backend/nir-versions/before-tasks/* binary
+tests/ui/expressions/character-control.nra binary

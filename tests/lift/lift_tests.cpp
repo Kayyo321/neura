@@ -29,6 +29,7 @@
 #include "nvm/machine.hpp"
 #include "nvm/providers.hpp"
 #include "nvr/format.hpp"
+#include "util/int128.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -52,6 +53,12 @@
 #include <csignal>
 #include <sys/wait.h>
 #include <unistd.h>
+#elif defined(_WIN32)
+#include "platform/console.hpp"
+#include "platform/environment.hpp"
+#include "platform/process.hpp"
+#include "platform/self.hpp"
+#include "platform/text.hpp"
 #endif
 
 namespace neura::testing {
@@ -1818,7 +1825,7 @@ NEURA_TEST(overflow, enumerations_are_shared_only_between_identical_computations
 namespace overflow_fuzz {
 
 // Exact products and sums of 64-bit values.
-__extension__ typedef __int128 Wide;
+using Wide = neura::Int128;
 
 constexpr std::uint32_t max_lanes = 14;
 constexpr std::int64_t p61 = std::int64_t{1} << 61;
@@ -3140,10 +3147,45 @@ NEURA_TEST(overflow, exhaustive_fuzzing_finds_no_false_proof) {
 
 namespace overflow_defects {
 
+#ifdef _WIN32
+// The child's description of an NTSTATUS, in the words of the POSIX signal
+// that the same fault raises there.
+std::string describe_crash(const platform::ExitStatus& status) {
+    switch (status.value) {
+    case 0xC000008DU: // STATUS_FLOAT_DENORMAL_OPERAND
+    case 0xC000008EU: // STATUS_FLOAT_DIVIDE_BY_ZERO
+    case 0xC000008FU: // STATUS_FLOAT_INEXACT_RESULT
+    case 0xC0000090U: // STATUS_FLOAT_INVALID_OPERATION
+    case 0xC0000091U: // STATUS_FLOAT_OVERFLOW
+    case 0xC0000092U: // STATUS_FLOAT_STACK_CHECK
+    case 0xC0000093U: // STATUS_FLOAT_UNDERFLOW
+    case 0xC0000094U: // STATUS_INTEGER_DIVIDE_BY_ZERO
+    case 0xC0000095U: // STATUS_INTEGER_OVERFLOW (INT64_MIN / -1)
+    case 0xC00002B4U: // STATUS_FLOAT_MULTIPLE_FAULTS
+    case 0xC00002B5U: // STATUS_FLOAT_MULTIPLE_TRAPS
+        return "killed by SIGFPE";
+    case 0xC0000005U: // STATUS_ACCESS_VIOLATION
+    case 0xC0000006U: // STATUS_IN_PAGE_ERROR
+    case 0xC00000FDU: // STATUS_STACK_OVERFLOW
+        return "killed by signal 11";
+    case 0xC000001DU: // STATUS_ILLEGAL_INSTRUCTION
+    case 0xC0000096U: // STATUS_PRIVILEGED_INSTRUCTION
+        return "killed by signal 4";
+    case 0xC0000409U: // STATUS_STACK_BUFFER_OVERRUN, also abort() and fast fail
+        return "killed by signal 6";
+    default: return status.describe();
+    }
+}
+#endif
+
 // Runs `body` in a child process, so that a crash or a loop that does not
 // end fails the test instead of the suite: empty when the body returned
-// within `seconds`, else how the child ended.
-std::string in_child(const std::function<void()>& body, unsigned seconds) {
+// within `seconds`, else how the child ended. `test` is the name of the
+// calling test of the overflow suite: Windows has no fork, so the child is
+// this binary running only that test, with NEURA_LIFT_TEST_CHILD naming it,
+// and there in_child runs the body itself and exits.
+std::string in_child([[maybe_unused]] const Environment& environment, [[maybe_unused]] std::string_view test,
+                     const std::function<void()>& body, unsigned seconds) {
 #if defined(__unix__) || defined(__APPLE__)
     std::cout.flush();
     const auto child = fork();
@@ -3162,6 +3204,42 @@ std::string in_child(const std::function<void()>& body, unsigned seconds) {
                                   : "killed by signal " + std::to_string(signal);
     }
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) return "exited with status " + std::to_string(WEXITSTATUS(status));
+    return {};
+#elif defined(_WIN32)
+    constexpr std::string_view variable = "NEURA_LIFT_TEST_CHILD";
+    if (const auto selected = platform::get_env(variable); selected && *selected == test) {
+        platform::set_unattended_error_mode();
+        body();
+        std::cout.flush();
+        _exit(0);
+    }
+    std::cout.flush();
+    platform::Spawn spawn;
+    spawn.program = platform::executable_path();
+    spawn.arguments = {platform::native_utf8_path(spawn.program), "overflow",
+                       platform::native_utf8_path(environment.source_dir), std::string(test)};
+    auto variables = platform::environment();
+    std::erase_if(variables, [&](const auto& entry) { return entry.first == variable; });
+    variables.emplace_back(variable, test);
+    spawn.environment = std::move(variables);
+    spawn.job = platform::JobMode::kill_on_close;
+    std::error_code error;
+    auto child = platform::Process::start(spawn, error);
+    if (!child) return "could not be started: " + error.message();
+    const auto status = child.wait(std::chrono::seconds(seconds), error);
+    if (!status) {
+        if (error) return "could not be waited for: " + error.message();
+        child.kill_tree();
+        (void)child.wait(std::nullopt, error);
+        return "did not end within " + std::to_string(seconds) + " s";
+    }
+    switch (status->kind) {
+    case platform::ExitStatus::Kind::exited:
+        if (status->value != 0) return "exited with status " + std::to_string(status->value);
+        return {};
+    case platform::ExitStatus::Kind::signaled: return "killed by signal " + std::to_string(status->value);
+    case platform::ExitStatus::Kind::crashed: return describe_crash(*status);
+    }
     return {};
 #else
     body();
@@ -3209,7 +3287,9 @@ NEURA_TEST(overflow, the_most_negative_weight_on_a_step_pair_member_does_not_cra
     graph.nodes.push_back({nvr::Activation::Relu, -1, {{0, 1}}});
     graph.nodes.push_back({nvr::Activation::Identity, 0, {{2, std::numeric_limits<std::int64_t>::min()}}});
     graph.outputs = {3};
-    const auto outcome = overflow_defects::in_child([&] { (void)lift::prove_no_overflow(graph, false); }, 20);
+    const auto outcome = overflow_defects::in_child(
+        environment, "the_most_negative_weight_on_a_step_pair_member_does_not_crash_the_analysis",
+        [&] { (void)lift::prove_no_overflow(graph, false); }, 20);
     check(outcome.empty(), "prove_no_overflow on a graph that cannot overflow " + outcome);
 }
 
@@ -3227,6 +3307,7 @@ NEURA_TEST(overflow, a_wire_wider_than_2_63_does_not_escape_the_work_bound) {
     graph.nodes.push_back({nvr::Activation::Identity, 0, {{2, 1}}});
     graph.outputs = {3};
     const auto outcome = overflow_defects::in_child(
+        environment, "a_wire_wider_than_2_63_does_not_escape_the_work_bound",
         [&] {
             std::uint64_t work = std::uint64_t{1} << 22;
             (void)lift::prove_no_overflow(graph, true, &work);
@@ -3245,6 +3326,7 @@ NEURA_TEST(overflow, exhaustive_fuzzing_of_extreme_values_and_malformed_graphs) 
     using namespace overflow_fuzz;
     const auto factor = scale();
     const auto outcome = overflow_defects::in_child(
+        environment, "exhaustive_fuzzing_of_extreme_values_and_malformed_graphs",
         [&] {
             int status = 0;
             try {

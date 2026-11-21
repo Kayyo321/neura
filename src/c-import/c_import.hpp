@@ -59,10 +59,22 @@ struct LibclangStatus {
 // --c-include directory holds. On macOS they are in the SDK: the one named by
 // SDKROOT, else the developer directory's, the Command Line Tools', or Xcode's,
 // else the one `xcrun` reports. Imports parse with that SDK as -isysroot.
+//
+// On Windows they are the C headers of the MSVC tools and the Windows SDK,
+// found once per process: the directories of the INCLUDE variable followed by
+// those of EXTERNAL_INCLUDE, when INCLUDE names any (a Visual Studio developer
+// environment); otherwise the include directory of the default MSVC tools
+// version of the newest Visual Studio 2017 or later that has the tools (as
+// vswhere reports it), followed by the ucrt, shared, um, winrt and cppwinrt
+// directories of the newest Windows 10 or 11 SDK with a ucrt (below the
+// KitsRoot10 that the SDK records in the registry). Entries that are not
+// absolute are left out. Imports parse with -nostdlibinc and these
+// directories as -idirafter, so libclang reads the headers the search found,
+// after its builtin headers.
 std::vector<std::filesystem::path> system_header_directories();
 
 // Whether `directory` is one of those, so that a header found there needs no
-// -I. Always false outside macOS.
+// -I. Always false outside macOS and Windows.
 bool is_system_header_directory(const std::filesystem::path& directory);
 
 LibclangStatus probe_libclang(const CImportOptions& options);

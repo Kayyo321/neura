@@ -8,6 +8,11 @@
 #if defined(__unix__) || defined(__APPLE__)
 #include <pthread.h>
 #define NEURA_TESTS_HAVE_PTHREAD 1
+#elif defined(_WIN32)
+#include "platform/windows.hpp"
+
+#include <process.h>
+#define NEURA_TESTS_HAVE_WIN32_THREAD 1
 #endif
 
 namespace {
@@ -48,7 +53,7 @@ int run_suite(int argc, char** argv) {
     return failed == 0 ? 0 : 1;
 }
 
-#ifdef NEURA_TESTS_HAVE_PTHREAD
+#if defined(NEURA_TESTS_HAVE_PTHREAD) || defined(NEURA_TESTS_HAVE_WIN32_THREAD)
 struct Invocation {
     int argc;
     char** argv;
@@ -64,6 +69,13 @@ void* run_on_thread(void* raw) {
         invocation->status = 2;
     }
     return nullptr;
+}
+#endif
+
+#ifdef NEURA_TESTS_HAVE_WIN32_THREAD
+unsigned __stdcall run_on_win32_thread(void* raw) {
+    run_on_thread(raw);
+    return 0;
 }
 #endif
 
@@ -91,6 +103,19 @@ int main(int argc, char** argv) {
             pthread_join(thread, nullptr);
             return invocation.status;
         }
+    }
+#elif defined(NEURA_TESTS_HAVE_WIN32_THREAD)
+    // STACK_SIZE_PARAM_IS_A_RESERVATION makes the size the thread's reserve,
+    // not its initial commit, as pthreads does.
+    constexpr unsigned stack_bytes = 1U << 30;
+    Invocation invocation{argc, argv, 2};
+    const auto thread = _beginthreadex(nullptr, stack_bytes, run_on_win32_thread, &invocation,
+                                       STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
+    if (thread != 0) {
+        const auto handle = reinterpret_cast<HANDLE>(thread);
+        WaitForSingleObject(handle, INFINITE);
+        CloseHandle(handle);
+        return invocation.status;
     }
 #endif
     return run_suite(argc, argv);

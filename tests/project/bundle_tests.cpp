@@ -9,6 +9,13 @@
 
 #ifndef _WIN32
 #include <sys/stat.h>
+#else
+#include "platform/windows.hpp"
+
+#include <cstring>
+#include <string>
+#include <vector>
+#include <winioctl.h>
 #endif
 
 namespace {
@@ -77,6 +84,85 @@ void write(const fs::path& path, std::string_view content) {
     out.close();
     check(out.good(), "write a bundle fixture");
 }
+
+#ifdef _WIN32
+// A junction needs no privilege, unlike a symbolic link, so the link cases
+// use one wherever a directory link will do (W34).
+void make_junction(const fs::path& link, const fs::path& target) {
+    fs::create_directory(link);
+    HANDLE handle = ::CreateFileW(link.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+                                  FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    check(handle != INVALID_HANDLE_VALUE, "open the junction directory");
+    const std::wstring print = fs::absolute(target).native();
+    const std::wstring substitute = L"\\??\\" + print;
+    const std::size_t names = (substitute.size() + 1 + print.size() + 1) * sizeof(wchar_t);
+    std::vector<unsigned char> buffer(8 + 8 + names);
+    const auto put16 = [&](std::size_t offset, std::size_t value) {
+        const auto word = static_cast<WORD>(value);
+        std::memcpy(buffer.data() + offset, &word, sizeof word);
+    };
+    const DWORD tag = IO_REPARSE_TAG_MOUNT_POINT;
+    std::memcpy(buffer.data(), &tag, sizeof tag);
+    put16(4, 8 + names);                                  // ReparseDataLength
+    put16(8, 0);                                          // SubstituteNameOffset
+    put16(10, substitute.size() * sizeof(wchar_t));       // SubstituteNameLength
+    put16(12, (substitute.size() + 1) * sizeof(wchar_t)); // PrintNameOffset
+    put16(14, print.size() * sizeof(wchar_t));            // PrintNameLength
+    std::memcpy(buffer.data() + 16, substitute.c_str(), (substitute.size() + 1) * sizeof(wchar_t));
+    std::memcpy(buffer.data() + 16 + (substitute.size() + 1) * sizeof(wchar_t), print.c_str(),
+                (print.size() + 1) * sizeof(wchar_t));
+    DWORD bytes = 0;
+    const BOOL done = ::DeviceIoControl(handle, FSCTL_SET_REPARSE_POINT, buffer.data(), static_cast<DWORD>(buffer.size()),
+                                        nullptr, 0, &bytes, nullptr);
+    ::CloseHandle(handle);
+    check(done != 0, "make a junction");
+}
+
+// A file carrying another vendor's reparse point, which names no other file:
+// neither a link nor a regular file to the readers, as a FIFO is on POSIX.
+// Setting one needs no privilege.
+void make_foreign_reparse_point(const fs::path& path) {
+    write(path, "x");
+    HANDLE handle = ::CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+                                  FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    check(handle != INVALID_HANDLE_VALUE, "open the reparse point fixture");
+    constexpr std::string_view data = "neura";
+    std::vector<unsigned char> buffer(REPARSE_GUID_DATA_BUFFER_HEADER_SIZE + data.size());
+    auto* header = reinterpret_cast<REPARSE_GUID_DATA_BUFFER*>(buffer.data());
+    header->ReparseTag = 0x00004E52; // neither a Microsoft tag nor a name surrogate
+    header->ReparseDataLength = static_cast<WORD>(data.size());
+    header->ReparseGuid = {0x6f7a3c2e, 0x0d4b, 0x4c1e, {0x9a, 0x55, 0x2b, 0x1d, 0x3e, 0x4f, 0x5a, 0x6b}};
+    std::memcpy(header->GenericReparseBuffer.DataBuffer, data.data(), data.size());
+    DWORD bytes = 0;
+    const BOOL done = ::DeviceIoControl(handle, FSCTL_SET_REPARSE_POINT, buffer.data(), static_cast<DWORD>(buffer.size()),
+                                        nullptr, 0, &bytes, nullptr);
+    ::CloseHandle(handle);
+    check(done != 0, "set another vendor's reparse point");
+}
+
+// Whether this process may create symbolic links (an administrator, or
+// Developer Mode); hosted runners may not.
+bool file_symlinks(const fs::path& directory) {
+    std::error_code error;
+    fs::create_symlink("target", directory / "symlink-probe", error);
+    if (error) return false;
+    fs::remove(directory / "symlink-probe", error);
+    return true;
+}
+#endif
+
+#ifdef _WIN32
+// Grows a file to `size` bytes without writing them: a sparse file takes no
+// disk space for its unwritten range.
+void grow_sparse(const fs::path& path, std::uint64_t size) {
+    HANDLE handle = ::CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+    check(handle != INVALID_HANDLE_VALUE, "open the oversize fixture");
+    DWORD bytes = 0;
+    ::DeviceIoControl(handle, FSCTL_SET_SPARSE, nullptr, 0, nullptr, 0, &bytes, nullptr);
+    ::CloseHandle(handle);
+    fs::resize_file(path, size);
+}
+#endif
 
 std::string replace(std::string input, std::string_view before, std::string_view after) {
     const auto found = input.find(before);
@@ -242,6 +328,40 @@ void directory() {
     fs::remove(first / "index.html");
     check(::mkfifo((first / "index.html").c_str(), 0600) == 0, "create a pipe fixture");
     reject(verify, "E1029", "non-regular entry");
+#else
+    // The same refusals on Windows (W34): directory links are junctions,
+    // which need no privilege, and a reparse point of another vendor stands
+    // for the FIFO. A file symbolic link runs only where this process may
+    // create one.
+    grow_sparse(first / utf8(asset_path), std::uint64_t{2} << 30);
+    reject(verify, "E1029", "exceeds W-1");
+    fs::remove(first / utf8(asset_path));
+    if (file_symlinks(sandbox.path)) {
+        fs::create_symlink(second / utf8(asset_path), first / utf8(asset_path));
+        reject(verify, "E1029", "symbolic link");
+        reject([&] { stored.read_file(asset_path); }, "E1029", "symbolic link");
+        fs::remove(first / utf8(asset_path));
+    } else {
+        std::cout << "this process may not create symbolic links; the file-link case is not run\n";
+    }
+    fs::remove_all(first / "assets");
+    make_junction(first / "assets", second / "assets");
+    reject(verify, "E1029", "symbolic link");
+    reject([&] { stored.read_file(asset_path); }, "E1029", "symbolic link");
+    fs::remove(first / "assets");
+    write(first / utf8(asset_path), asset_bytes);
+    check(verify().digest() == pin(manifest_pin), "the restored bundle verifies");
+    const auto alias = sandbox.path / "linked-root";
+    make_junction(alias, first);
+    reject([&] { verify_bundle_directory(alias / ".", policy); }, "E1029", "root must be an existing directory without links");
+    fs::remove(alias);
+    fs::remove(first / "index.html");
+    make_foreign_reparse_point(first / "index.html");
+    reject(verify, "E1029", "non-regular entry");
+    reject(verify, "E1029", "reparse point that is not a link (such as a OneDrive cloud file)");
+    reject([&] { stored.read_file("index.html"); }, "E1029", "non-regular bundle file");
+    reject([&] { stored.read_file("index.html"); }, "E1029", "which Neura 0.3.0 does not read on Windows");
+    fs::remove(first / "index.html");
 #endif
 }
 

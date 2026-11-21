@@ -239,6 +239,20 @@ void packages_and_targets() {
     reject(concatenate({prefix, package, "assets = [\"/usr/share/icons\"]\n"}), "E1025", "\"/usr/share/icons\"", "expected a local path");
     reject(sample + "styles = [\"../shared.css\"]\n", "E1025", "\"../shared.css\"", "leaves the project");
     reject(sample + "\n[contracts]\nmanifest = \"../contracts.toml\"\n", "E1025", "\"../contracts.toml\"", "leaves the project");
+    // Names that Windows cannot create are refused on every host, so that a
+    // manifest means the same everywhere.
+    for (const auto path : {"ui/a:b", "ui/con", "ui/AUX.txt", "ui/com1/x", "ui/Lpt9.log", "ui/nul.tar.gz", "ui/name.",
+                            "ui/name "}) {
+        const auto quoted = "\"" + std::string(path) + "\"";
+        reject(replace(sample, "\"ui\"", quoted), "E1025", quoted, "path component");
+    }
+    reject(sample + "styles = [\"ui/prn.css\"]\n", "E1025", "\"ui/prn.css\"", "device name that Windows reserves");
+    reject(sample + "styles = [\"ui/x:y.css\"]\n", "E1025", "\"ui/x:y.css\"", "stream name");
+    reject(sample + "styles = [\"ui/x.css. \"]\n", "E1025", "\"ui/x.css. \"", "dot or a space");
+    for (const auto path : {"ui/console", "ui/com0", "ui/lpt10", "ui/nul-tools", "ui/.hidden", "ui/./a.b", "ui/x/../y.z"}) {
+        const auto app = parse_manifest(replace(sample, "\"ui\"", "\"" + std::string(path) + "\""), "neura.toml");
+        check(app.packages.at("ui").root.value == path, std::string("portable path component: ") + path);
+    }
     reject(concatenate({prefix, package, "depends = [\"missing\"]\n"}), "E1020", "\"missing\"", "unknown package dependency");
     reject(concatenate({prefix, package, "depends = [\"ui\"]\n"}), "E1020", "\"ui\"", "ui -> ui");
     reject(concatenate({prefix, package, "depends = [\"z\"]\n[packages.z]\nroot=\"z\"\ndepends=[\"ui\"]\n"}),

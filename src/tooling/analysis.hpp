@@ -71,7 +71,17 @@ struct EditorReference {
     int token_type{-1};
 };
 struct EditorDocument {
+    // `source` is the text with each CR LF normalized to LF, as the source
+    // loader reads a file (W08), so that its offsets are the compiler's
+    // spans. Its lines and UTF-16 columns are the editor's, whose text may
+    // end lines with CR LF.
     std::string uri, path, source;
+    // An open document's text as the editor holds it, when it differs from
+    // `source`; empty otherwise. The editor's changes apply to it.
+    std::string editor_source;
+    // The first line ending of the editor's text or the file ("\r\n", "\r"
+    // or "\n"), which the text of edits sent back to the editor uses.
+    std::string newline{"\n"};
     std::int64_t version{};
     bool open{}, library{};
     std::vector<Token> tokens;
@@ -81,6 +91,14 @@ struct EditorDocument {
     std::vector<std::size_t> line_starts;
     Json position(std::size_t offset) const;
     Json range(const Span &span) const;
+    // Sets the text from the editor's or the file's `text`: `source`, the
+    // editor's text when it differs (`keep_editor_source`, for an open
+    // document), and the newline.
+    void set_text(std::string text, bool keep_editor_source);
+    // `text`, written with `source`'s line endings, as the editor's text
+    // writes it: when that uses CR LF, each LF that no CR precedes becomes
+    // CR LF.
+    std::string editor_text(std::string_view text) const;
 };
 
 struct InlayOptions {

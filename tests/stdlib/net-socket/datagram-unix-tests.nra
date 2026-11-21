@@ -1,9 +1,10 @@
-// test-options: --allow-net
+// test-options: --allow-net --allow-env
 // host-dependent-counts: the Unix names carry an ephemeral UDP port, whose digits vary between runs
 let datagram_socket = import:Std.Net.Socket.DatagramSocket;
 let duration = import:Std.Time.Duration;
 let error = import:Std.Core.Error;
 let optional = import:Std.Core.Optional;
+let program = import:Std.Program;
 let result = import:Std.Core.Result;
 let socket_addr = import:Std.Net.Core.SocketAddr;
 let test = import:Std.Test;
@@ -17,7 +18,9 @@ let unix_stream = import:Std.Net.Socket.UnixStream;
 // UdpSocket, UnixDatagram, UnixListener and UnixStream over real sockets: UDP on the loopback interface, Unix
 // sockets named after a fresh UDP port, so parallel runs do not collide. On Linux the names are in the
 // abstract namespace. Elsewhere an abstract name is Unsupported (Std.Net.Core.UnixAddr), which the first test
-// checks, and the names are socket files in the working directory, which nothing here binds twice.
+// checks, and the names are socket files in the working directory, which nothing here binds twice. Windows has
+// no Unix-domain datagram sockets (Std.Net.Socket.UnixDatagram), so there the datagram test checks that opening
+// one is Unsupported; Unix-domain streams work there as elsewhere.
 let DatagramUnixTests = module (
     let kind_of = func(e: error.Error) -> error.IoErrorKind {
         return match (e) {
@@ -74,6 +77,12 @@ let DatagramUnixTests = module (
         return supported;
     };
 
+    // Whether the tests run on Windows, which sets OS to Windows_NT for every process.
+    let on_windows = func -> bool => match (program.Environment.get("OS")) {
+        program.Environment.Lookup.Found(value) => value == "Windows_NT",
+        _ => false,
+    };
+
     let unique_name = func(role: string) -> unix_addr.UnixAddr {
         last text = unique_text(role);
         return abstract_namespace() ? unix_addr.abstract_name(text) : unix_addr.of_path(text + ".sock");
@@ -108,6 +117,14 @@ let DatagramUnixTests = module (
 
     export let test_unix_datagram_round_trip = func {
         last name = unique_name("datagram");
+        if (on_windows()) {
+            // Windows AF_UNIX implements streams only: every Unix-domain datagram socket is Unsupported.
+            test.assert(kind_of(test.assert_err<unix_datagram.UnixDatagram>(unix_datagram.bind(name)))
+                == error.IoErrorKind.Unsupported);
+            test.assert(kind_of(test.assert_err<unix_datagram.UnixDatagram>(unix_datagram.unbound()))
+                == error.IoErrorKind.Unsupported);
+            return;
+        }
         last receiver = test.assert_ok<unix_datagram.UnixDatagram>(unix_datagram.bind(name));
         receiver.set_read_timeout(duration.of_seconds(5));
         last sender_name = unique_name("sender");

@@ -27,10 +27,10 @@ The following public declarations are taken from the module source; each links t
   A lookup that tries this one, then `other` (Java's SymbolLookup.or). Tagged `#Pure`.
 - **SymbolLookup.SymbolLookup** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/symbol-lookup.nra#L64)
   Names the lookup and its library identifier.
-- **SymbolLookup** · [`export let library_lookup = func(path: string, arena: Arena) -> Result<SymbolLookup>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/symbol-lookup.nra#L70)
-  Loads the library at `path`, or by name through the platform's search when `path` has no slash (such as "libm.so.6"), owned by `arena` (Java's SymbolLookup.libraryLookup). A library that cannot be loaded is an Io error of kind NotFound.
-- **SymbolLookup** · [`export let default_lookup = func -> SymbolLookup`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/symbol-lookup.nra#L84)
-  The libraries already loaded into the process, including the C library.
-- **SymbolLookup** · [`export let embedded = func -> SymbolLookup`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/symbol-lookup.nra#L87)
+- **SymbolLookup** · [`export let library_lookup = func(path: string, arena: Arena) -> Result<SymbolLookup>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/symbol-lookup.nra#L73)
+  Loads the library at `path`, or by name through the platform's search when `path` has no slash (such as "libm.so.6"), owned by `arena` (Java's SymbolLookup.libraryLookup). A library that cannot be loaded is an Io error of kind NotFound. On Windows a `path` that contains `/` or `\`, or starts with a drive such as `C:`, loads that file; any other name (such as "ucrtbase.dll") is searched in the application's directory, in `System32` and then in each `PATH` directory, never in the current directory. Any file extension is accepted.
+- **SymbolLookup** · [`export let default_lookup = func -> SymbolLookup`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/symbol-lookup.nra#L90)
+  The libraries already loaded into the process, including the C library. On Windows the lookup searches the executable, `ucrtbase.dll` (the C library), `kernel32.dll`, and then the other loaded modules in the order the system lists them. `ucrtbase.dll` does not export the functions that the C headers define inline, such as `printf`.
+- **SymbolLookup** · [`export let embedded = func -> SymbolLookup`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/symbol-lookup.nra#L93)
   The native library linked into the image from C imports (ForeignInterop.md).
 <!-- END SOURCE API -->

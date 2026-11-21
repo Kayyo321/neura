@@ -17,8 +17,15 @@
 #include <iostream>
 #include <string>
 
+#ifdef _WIN32
+#include "platform/console.hpp"
+#include "platform/environment.hpp"
+#include "platform/process.hpp"
+#include "platform/self.hpp"
+#else
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
 
 namespace {
 
@@ -29,6 +36,88 @@ void check(bool condition, const std::string& what) {
     ++failures;
     std::cout << "FAIL " << what << '\n';
 }
+
+} // namespace
+
+#ifdef _WIN32
+
+// Windows has no fork: each case runs in a new process of this program,
+// `neura_service_environment_tests --child N`, with its errors on NUL. The
+// MSVC C runtime's abort ends a process with exit code 3 (W10).
+namespace {
+
+const std::pair<const char*, void (*)()> readers[] = {
+    {"NEURA_TIER", [] { neura::nvm::tier_ceiling(); }},
+    {"NEURA_TIER_CHECK", [] { neura::nvm::tier_check_enabled(); }},
+    {"NEURA_TIER_CHECK_HEAP", [] { neura::nvm::tier_shadow_heap_always(); }},
+    {"NEURA_TIER_EAGER", [] { neura::nvm::tier_eager(); }},
+    {"NEURA_TIER_PROGRAMS", [] { neura::nvm::tier_programs_enabled(); }},
+    {"NEURA_TIER3", [] { neura::nvm::tier3_environment(); }},
+    {"NEURA_TIER3 (implicit)", [] { neura::nvm::tier3_environment_implicit(); }},
+    {"NEURA_TIER3_AFTER", [] { neura::nvm::tier3_after(); }},
+    {"NEURA_JIT", [] { neura::jit::environment_mode(); }},
+};
+constexpr int bound_case = static_cast<int>(std::size(readers));
+
+int child(int which) {
+    if (which >= 0 && which < bound_case) {
+        neura::nvm::hold_environment();
+        readers[which].second();
+        return 0;
+    }
+    // Bound after replacement: the reader sees the new value, not the old.
+    std::error_code error;
+    neura::platform::set_env("NEURA_TIER", "2", error);
+    neura::platform::set_env("NEURA_JIT", "on", error);
+    neura::nvm::hold_environment();
+    neura::platform::set_env("NEURA_TIER", "1", error);
+    neura::platform::set_env("NEURA_JIT", "off", error);
+    neura::nvm::bind_environment();
+    return neura::nvm::tier_ceiling() == 1 && neura::jit::environment_mode() == neura::jit::Mode::Off ? 0 : 3;
+}
+
+std::optional<neura::platform::ExitStatus> in_child(int which) {
+    neura::platform::Spawn spawn;
+    spawn.program = neura::platform::executable_path();
+    spawn.arguments = {"neura_service_environment_tests", "--child", std::to_string(which)};
+    // The abort message is expected; keep the test output readable.
+    spawn.input = neura::platform::Stdio::null();
+    spawn.error = neura::platform::Stdio::null();
+    std::error_code error;
+    auto process = neura::platform::Process::start(spawn, error);
+    if (!process) {
+        std::cout << "environment_tests: cannot start a child: " << error.message() << '\n';
+        return std::nullopt;
+    }
+    return process.wait();
+}
+
+bool aborted(const std::optional<neura::platform::ExitStatus>& status) {
+    return status && *status == neura::platform::ExitStatus::exited(3);
+}
+
+} // namespace
+
+int main(int argc, char** argv) {
+    neura::platform::set_unattended_error_mode();
+    if (argc == 3 && std::string(argv[1]) == "--child") return child(std::atoi(argv[2]));
+    check(neura::nvm::environment_bound(), "a process starts with its environment bound");
+    for (int which = 0; which < bound_case; ++which) {
+        check(aborted(in_child(which)), std::string("a held environment aborts the reader of ") + readers[which].first);
+    }
+    const auto status = in_child(bound_case);
+    check(status && status->success(), "a bound environment is read after it was replaced");
+    if (failures != 0) {
+        std::cout << failures << " check(s) failed\n";
+        return 1;
+    }
+    std::cout << "service environment passed\n";
+    return 0;
+}
+
+#else
+
+namespace {
 
 // Runs `body` in a child process and returns its wait status.
 int in_child(const std::function<int()>& body) {
@@ -90,3 +179,5 @@ int main() {
     std::cout << "service environment passed\n";
     return 0;
 }
+
+#endif

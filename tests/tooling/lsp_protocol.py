@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Real compiler/LSP contract checks, including unsaved cross-file source."""
 import json
+import os
 import pathlib
 import queue
 import subprocess
@@ -86,6 +87,18 @@ class Client:
 
 def params(path, line=0, character=0):
     return {'textDocument': {'uri': path.as_uri()}, 'position': {'line': line, 'character': character}}
+
+
+def link_directory(link, target):
+    """A symbolic link to a directory; on Windows, where creating one needs a
+    privilege, a junction, which does not."""
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except OSError:
+        if os.name != 'nt':
+            raise
+        import _winapi
+        _winapi.CreateJunction(str(target), str(link))
 
 
 class LanguageServerTests(unittest.TestCase):
@@ -678,6 +691,89 @@ class LanguageServerTests(unittest.TestCase):
         self.assertEqual(change['textDocument']['version'], 1)
         self.assertEqual(change['edits'][0]['newText'], ';')
 
+    def test_crlf_document_is_analyzed_as_lf_and_edited_with_crlf(self):
+        # W08: the document is read as the compiler reads the file, with CR LF
+        # normalized to LF, and the edits sent back use its CR LF.
+        path = self.root / 'crlf.nra'
+        source = 'let first=1;\r\nlet second = first;\r\n'
+        self.client.open(path, source)
+        symbols = self.client.request('textDocument/documentSymbol', params(path))
+        self.assertEqual(symbols[1]['selectionRange']['start'], {'line': 1, 'character': 4})
+        edits = self.client.request('textDocument/formatting', {**params(path),
+                                    'options': {'tabSize': 4, 'insertSpaces': True}})
+        self.assertEqual(len(edits), 1)
+        self.assertEqual(edits[0]['newText'], 'let first = 1;\r\nlet second = first;\r\n')
+        self.assertEqual(edits[0]['range'], {'start': {'line': 0, 'character': 0},
+                                             'end': {'line': 2, 'character': 0}})
+        # Only the line endings differ from the formatted text: no edit.
+        self.client.notify('textDocument/didChange', {'textDocument': {'uri': path.as_uri(), 'version': 2},
+                           'contentChanges': [{'range': {'start': {'line': 0, 'character': 9},
+                                                         'end': {'line': 0, 'character': 10}},
+                                               'text': ' = '}]})
+        self.assertEqual(self.client.request('textDocument/formatting', {**params(path),
+                         'options': {'tabSize': 4, 'insertSpaces': True}}), [])
+        # A change that inserts a CR LF line applies in the editor's text.
+        self.client.notify('textDocument/didChange', {'textDocument': {'uri': path.as_uri(), 'version': 3},
+                           'contentChanges': [{'range': {'start': {'line': 1, 'character': 0},
+                                                         'end': {'line': 1, 'character': 0}},
+                                               'text': 'let middle = 2;\r\n'}]})
+        symbols = self.client.request('textDocument/documentSymbol', params(path))
+        self.assertEqual([s['name'] for s in symbols], ['first', 'middle', 'second'])
+        self.assertEqual(symbols[2]['selectionRange']['start'], {'line': 2, 'character': 4})
+        diagnostics = [n['params']['diagnostics'] for n in self.client.notifications
+                       if n.get('method') == 'textDocument/publishDiagnostics'
+                       and n['params']['uri'] == path.as_uri()]
+        self.assertEqual(diagnostics[-1], [])
+
+    def test_edits_to_an_unopened_crlf_file_use_crlf(self):
+        # A file the editor has not opened comes from the compiler's text,
+        # whose CR LF is LF; the edits sent for it keep the file's CR LF.
+        module = self.root / 'math.nra'
+        main = self.root / 'main.nra'
+        module.write_bytes(b'let Math = module (\r\n'
+                           b'    export let add = func(a: int32, b: int32) -> int32 => a + b;\r\n'
+                           b');\r\n')
+        self.client.open(main, 'let math = import:Math;\nlet compute = func -> int32 => math.add(2, 3);\n')
+        definition = self.client.request('textDocument/definition', params(main, 1, 36))
+        self.assertEqual(definition['uri'], module.as_uri())
+        actions = self.client.request('textDocument/codeAction', {**params(module),
+                    'range': {'start': {'line': 1, 'character': 15}, 'end': {'line': 1, 'character': 16}},
+                    'context': {'diagnostics': [], 'only': ['refactor.rewrite']}})
+        action = next(item for item in actions if item['title'] == 'Generate Neura documentation comment')
+        change = action['edit']['documentChanges'][0]
+        self.assertEqual(change['textDocument']['uri'], module.as_uri())
+        self.assertIsNone(change['textDocument']['version'])
+        text = change['edits'][0]['newText']
+        self.assertIn('/// @brief add.\r\n', text)
+        self.assertNotIn('\n', text.replace('\r\n', ''))
+
+    def test_command_line_rename_keeps_crlf(self):
+        # `neura rename` changes the renamed names and nothing else of a
+        # CR LF file.
+        path = self.root / 'crlf-rename.nra'
+        path.write_bytes(b'let value = 1;\r\nlet twice = value + value;\r\n')
+        result = subprocess.run([BINARY, 'rename', path, '1:5', 'amount'], capture_output=True, text=True,
+                                cwd=self.root)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(path.read_bytes(), b'let amount = 1;\r\nlet twice = amount + amount;\r\n')
+
+    @unittest.skipUnless(os.name == 'nt', 'drive letters are Windows paths')
+    def test_drive_letter_case_and_encoded_colon_name_one_document(self):
+        # Editors send file:///c%3A/... for C:/...: both name one document,
+        # and the compiler finds its unsaved text.
+        module = self.root / 'math.nra'
+        main = self.root / 'main.nra'
+        drive, rest = module.as_uri()[len('file:///'):].split(':', 1)
+        editor_uri = 'file:///' + drive.lower() + '%3A' + rest
+        self.client.notify('textDocument/didOpen', {'textDocument': {
+            'uri': editor_uri, 'languageId': 'neura', 'version': 1,
+            'text': 'let Math = module (\n    export let add = func(a: int32, b: int32) -> int32 => a + b;\n);\n'}})
+        symbols = self.client.request('textDocument/documentSymbol', params(module))
+        self.assertEqual([s['name'] for s in symbols], ['Math'])
+        self.client.open(main, 'let math = import:Math;\nlet compute = func -> int32 => math.add(2, 3);\n')
+        definition = self.client.request('textDocument/definition', params(main, 1, 36))
+        self.assertEqual(definition['uri'], editor_uri)
+
     def test_real_entry_detection_and_configuration(self):
         path = self.root / 'app.nra'
         source = ('let program = import:Std.Program;\n'
@@ -700,7 +796,7 @@ class LanguageServerTests(unittest.TestCase):
         actual = self.root / 'actual'
         actual.mkdir()
         alias = self.root / 'alias'
-        alias.symlink_to(actual, target_is_directory=True)
+        link_directory(alias, actual)
         path = alias / 'app.nra'
         source = ('let program = import:Std.Program;\n'
                   'let App = module:program.Entry (\n'

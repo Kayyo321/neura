@@ -41,7 +41,8 @@ def main() -> int:
     full = sys.argv[1]
     version, _, prerelease = full.partition("-")
     root = Path(__file__).resolve().parent.parent
-    changelog = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    with (root / "CHANGELOG.md").open(encoding="utf-8", newline=None) as source:
+        changelog = source.read()
     body = section(changelog, f"[{version}]")
     if body is None and prerelease:
         body = section(changelog, "Unreleased")
@@ -67,23 +68,34 @@ Supported platforms, system requirements, and every step are in [Install and upd
 curl --proto '=https' --tlsv1.2 -fsSL https://github.com/{REPOSITORY}/releases/download/{tag}/install.sh | sh -s -- --version {full}
 ```
 
-That command works on Linux, on macOS, and inside WSL 2. To install by hand instead:
+On Windows x86-64, run this in PowerShell:
+
+```powershell
+& ([scriptblock]::Create((irm https://github.com/{REPOSITORY}/releases/download/{tag}/install.ps1))) -Version {full}
+```
+
+Both commands install Neura-sdk by default. For Neura-runtime, add `--components runtime` on Linux or macOS or `-Components runtime` on Windows. To install Neura-sdk by hand on Linux or macOS:
 
 ```sh
 # Download the archive for your platform and SHA256SUMS from this page, then:
 sha256sum --check --ignore-missing SHA256SUMS
-gh attestation verify neura-{full}-<target>.tar.gz --repo {REPOSITORY}   # optional: build provenance
-tar -xzf neura-{full}-<target>.tar.gz
-cd neura-{full}-<target>
+gh attestation verify neura-sdk-{full}-<target>.tar.gz --repo {REPOSITORY}   # optional: build provenance
+tar -xzf neura-sdk-{full}-<target>.tar.gz
+cd neura-sdk-{full}-<target>
 sh install.sh
 ```
 
-| File | Platform |
-| --- | --- |
-| `neura-{full}-x86_64-linux-gnu.tar.gz` | Linux on x86-64 with glibc 2.39 or newer, and Windows through WSL 2 |
-| `neura-{full}-aarch64-linux-gnu.tar.gz` | Linux on arm64 with glibc 2.39 or newer |
-| `neura-{full}-aarch64-apple-darwin.tar.gz` | macOS 15 or newer on Apple silicon |
-| `neura-{full}-x86_64-apple-darwin.tar.gz` | macOS 15 or newer on Intel |
+On Windows, compare the archive's `Get-FileHash` output with its entry in `SHA256SUMS`, optionally verify it with `gh attestation verify`, and run `install.cmd` from the unpacked archive.
+
+| Platform | Neura-sdk | Neura-runtime |
+| --- | --- | --- |
+| Linux on x86-64 with glibc 2.39 or newer | `neura-sdk-{full}-x86_64-linux-gnu.tar.gz` | `neura-runtime-{full}-x86_64-linux-gnu.tar.gz` |
+| Linux on arm64 with glibc 2.39 or newer | `neura-sdk-{full}-aarch64-linux-gnu.tar.gz` | `neura-runtime-{full}-aarch64-linux-gnu.tar.gz` |
+| macOS 15 or newer on Apple silicon | `neura-sdk-{full}-aarch64-apple-darwin.tar.gz` | `neura-runtime-{full}-aarch64-apple-darwin.tar.gz` |
+| macOS 15 or newer on Intel | `neura-sdk-{full}-x86_64-apple-darwin.tar.gz` | `neura-runtime-{full}-x86_64-apple-darwin.tar.gz` |
+| Windows 10 version 2004 or newer on x86-64 | `neura-sdk-{full}-x86_64-windows-msvc.tar.gz` | `neura-runtime-{full}-x86_64-windows-msvc.tar.gz` |
+
+The Linux and macOS `neura-{full}-<target>.tar.gz` archives support updates from 0.2 clients.
 
 ## Update and uninstall
 
@@ -91,7 +103,7 @@ sh install.sh
 
 ## Verification
 
-`SHA256SUMS` lists the SHA-256 of each archive. `neura-release.txt` is the metadata `neura update` reads. Each archive has a build provenance attestation that ties it to this repository's release workflow and the tagged commit. The files are not signed with an operating-system vendor's certificate; see the [code signing policy]({DOCS}/{tag}/docs/CodeSigning.md).
+`SHA256SUMS` lists the SHA-256 of each archive and bootstrap installer. `neura-components.txt` is the current update metadata. The `neura-release.txt` manifest serves the 0.2 clients. Each asset has a build provenance attestation that ties it to this repository's release workflow and the tagged commit. See the [code signing policy]({DOCS}/{tag}/docs/CodeSigning.md) for platform-specific details.
 """)
     print("\n".join(out))
     return 0

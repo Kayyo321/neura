@@ -21,8 +21,18 @@
 // was never created or was released answers invalid_input (4). Locked bytes
 // beyond 1 MiB per execution, or beyond what RLIMIT_MEMLOCK allows, answer
 // too_large (16). A platform without mlock, MADV_DONTDUMP and
-// MADV_WIPEONFORK (every one but Linux), and a run that records a trace,
+// MADV_WIPEONFORK (macOS and the BSDs), and a run that records a trace,
 // answer unsupported (13): a trace would hold the secret.
+//
+// On Windows (W20) the buffer is VirtualAlloc memory, excluded from Windows
+// Error Reporting's dumps (WerRegisterExcludedMemoryBlock) and locked with
+// VirtualLock after the process's working set limits are raised by its size
+// (SetProcessWorkingSetSizeEx); release zeroes it with SecureZeroMemory, then
+// unlocks, unregisters and frees it and lowers the limits again. There is no
+// fork, so the exclusion from forked children holds trivially. A working set
+// or memory quota that refuses the lock answers too_large; dump tools other
+// than Windows Error Reporting are outside the exclusion, as tools other than
+// the kernel's core dump are on Linux.
 
 #include "host.hpp"
 

@@ -609,9 +609,13 @@ Options read_options(int argc, char** argv) {
     if (!options.sql_pools.empty() && options.runtime && *options.runtime != RuntimeMode::Off) {
         throw RuntimeError("--sql-pool applies only to a direct run; run without --runtime", 1);
     }
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(NEURA_HAS_SERVICE)
+    // A build without the runtime service (cmake/windows/service.cmake).
     if (options.runtime && *options.runtime != RuntimeMode::Off) {
-        throw RuntimeError("the service is not available on this platform; run without --runtime", 5);
+        throw RuntimeError("the service is not available in this build; run without --runtime", 5);
+    }
+    if (options.runtime_report) {
+        throw RuntimeError("--runtime-report needs the runtime service, which this build does not have", 1);
     }
 #endif
     if (options.virtual_time && options.replay) {

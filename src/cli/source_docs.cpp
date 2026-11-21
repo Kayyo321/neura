@@ -2,6 +2,7 @@
 
 #include "parser/html_template.hpp"
 #include "parser/syntax.hpp"
+#include "util/line_endings.hpp"
 
 #include <algorithm>
 #include <fstream>
@@ -696,7 +697,7 @@ std::string read_source(const std::filesystem::path& file) {
     if (!input) throw std::runtime_error("cannot read " + file.string());
     std::string source(std::istreambuf_iterator<char>(input), {});
     if (input.bad()) throw std::runtime_error("error reading " + file.string());
-    return source;
+    return util::normalize_crlf(std::move(source));
 }
 
 } // namespace

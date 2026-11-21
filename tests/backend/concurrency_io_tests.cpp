@@ -1,7 +1,9 @@
 // Overlapping host requests and concurrent record and replay
 // (docs/lang/Concurrency.md sections 10.4, 11, and 15). Every provider here
 // is a fake the test controls: no real clock, socket, or file is used, so the
-// order of completions, cancellations, and clock readings is exact.
+// order of completions, cancellations, and clock readings is exact. The last
+// test is the exception: it drives the standard net providers over real
+// loopback sockets.
 //
 // The scenarios are compiled from tests/backend/concurrency-io/scenarios.nra,
 // which uses the library's own net bindings. The fakes serve them as follows:
@@ -18,9 +20,15 @@
 #include "nvm/trace_file.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <set>
+
+#ifdef _WIN32
+#include "platform/windows.hpp"
+#endif
 
 namespace neura::testing {
 namespace {
@@ -731,5 +739,258 @@ NEURA_TEST(concurrency, a_deadlock_and_a_pending_request_limit_trap_replay_as_ou
         check(replayed.replay.matches, "the limit trap replays: " + replayed.replay.difference);
     }
 }
+
+
+namespace {
+
+// What the process holds open: handles on Windows, descriptors elsewhere.
+std::size_t open_handles() {
+#ifdef _WIN32
+    DWORD count = 0;
+    ::GetProcessHandleCount(::GetCurrentProcess(), &count);
+    return count;
+#else
+    std::error_code error;
+    std::size_t count = 0;
+    for (std::filesystem::directory_iterator entry("/dev/fd", error), end; !error && entry != end;
+         entry.increment(error)) {
+        ++count;
+    }
+    return count;
+#endif
+}
+
+// The standard services with the net group and one queue of overlapping
+// requests, as a live run has.
+struct Loopback {
+    static nvm::Capabilities net_group() {
+        nvm::Capabilities capabilities;
+        capabilities.net = true;
+        return capabilities;
+    }
+    static HostValue text(std::string value) { return HostValue{0, std::move(value), {}}; }
+    static HostValue number(std::int64_t value) { return scalar(static_cast<std::uint64_t>(value)); }
+
+    nvm::StringSink output;
+    nvm::StringSink error;
+    nvm::StringSource input{""};
+    nvm::StandardServices services{output, error, input, net_group()};
+    nvm::HostRegistry registry;
+    nvm::SteadyTaskClock clock;
+    nvm::PendingRequests pending{clock};
+    std::uint64_t next_sequence = 0;
+    std::map<std::uint64_t, HostCompletion> answers;
+
+    Loopback() { services.register_all(registry); }
+
+    HostCompletion call(std::string_view name, std::vector<HostValue> arguments) {
+        auto* service = registry.find(name, 1);
+        check(service != nullptr, "the service " + std::string(name));
+        return service->invoke(HostRequest{0, 0, std::move(arguments)});
+    }
+
+    // Starts the cancellable form (version 2) of an overlapping service and
+    // returns the request's sequence number.
+    std::uint64_t begin(std::string_view name, std::vector<HostValue> arguments) {
+        auto* service = registry.find(name, 2);
+        check(service != nullptr && service->overlapping() && service->cancellable(),
+              "the cancellable form of " + std::string(name));
+        const auto sequence = next_sequence++;
+        HostRequest request{sequence, 0, std::move(arguments)};
+        request.now = clock.now();
+        pending.add(sequence, service->begin(request), true);
+        return sequence;
+    }
+
+    void take(std::vector<nvm::PendingRequests::Done> done) {
+        for (auto& answer : done) answers.emplace(answer.sequence, std::move(answer.completion));
+    }
+
+    // Waits, for at most 30 seconds, until each request has its answer.
+    void wait_for(const std::vector<std::uint64_t>& sequences) {
+        const auto give_up = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        const auto answered = [&] {
+            return std::all_of(sequences.begin(), sequences.end(),
+                               [&](std::uint64_t sequence) { return answers.contains(sequence); });
+        };
+        take(pending.poll());
+        while (!answered()) {
+            check(std::chrono::steady_clock::now() < give_up, "the loopback requests finish");
+            take(pending.wait(clock.now() + 100'000'000));
+        }
+    }
+
+    const HostValue& value_of(std::uint64_t sequence) const {
+        const auto& answer = answers.at(sequence);
+        check(answer.success, "request " + std::to_string(sequence) + " succeeds, not with error " +
+                                  std::to_string(answer.value.bits));
+        return answer.value;
+    }
+
+    std::uint64_t error_of(std::uint64_t sequence) const {
+        const auto& answer = answers.at(sequence);
+        check(!answer.success, "request " + std::to_string(sequence) + " fails");
+        return answer.value.bits;
+    }
+};
+
+} // namespace
+
+// The overlapping net services of the standard providers over real loopback
+// sockets, without an image: the connects, accepts, reads and writes of 50
+// connections (100 sockets) are pending at once in one queue. Then every
+// client waits to read: half of those reads are cancelled (15), and the
+// program closes the sockets of the others while they wait, so their cancel
+// finds the ID gone (4). A pending operation keeps its socket open until it
+// ends (a duplicate descriptor on POSIX, a reference on Windows), so the
+// server sees no end of the stream while that read waits, and reads it once
+// the read is gone. When the run
+// ends, every socket is closed, and the process holds no more handles or
+// descriptors than before. A first round with one connection opens what the
+// system keeps for later socket calls, such as Winsock's own handles.
+NEURA_TEST(concurrency, overlapping_loopback_sockets_are_all_closed) {
+    std::size_t before = 0;
+    for (const std::size_t connections : {std::size_t{1}, std::size_t{50}}) {
+        if (connections > 1) before = open_handles();
+        Loopback host;
+        const auto listener = host.call("neura.net.listen", {Loopback::text("127.0.0.1"), Loopback::number(0)});
+        check(listener.success, "listen on the loopback interface (error " + std::to_string(listener.value.bits) + ")");
+        const auto port = host.call("neura.net.local_port", {listener.value});
+        check(port.success, "the listener's port");
+
+        std::vector<std::uint64_t> connects;
+        std::vector<std::uint64_t> accepts;
+        for (std::size_t i = 0; i < connections; ++i) {
+            connects.push_back(host.begin("neura.net.connect", {Loopback::text("127.0.0.1"), port.value,
+                                                                Loopback::number(10'000'000'000)}));
+            accepts.push_back(host.begin("neura.net.accept", {listener.value}));
+        }
+        host.wait_for(connects);
+        host.wait_for(accepts);
+        std::vector<HostValue> clients;
+        std::vector<HostValue> servers;
+        for (std::size_t i = 0; i < connections; ++i) {
+            clients.push_back(host.value_of(connects[i]));
+            servers.push_back(host.value_of(accepts[i]));
+        }
+
+        // Every server waits for a message before any client sends one.
+        std::vector<std::uint64_t> reads;
+        for (const auto& server : servers) {
+            reads.push_back(host.begin("neura.net.read", {server, Loopback::number(64), Loopback::number(0)}));
+        }
+        host.take(host.pending.poll());
+        for (const auto read : reads) check(!host.answers.contains(read), "a read waits for its message");
+        std::vector<std::uint64_t> writes;
+        std::multiset<std::string> sent;
+        for (std::size_t i = 0; i < connections; ++i) {
+            const auto message = "message " + std::to_string(i);
+            writes.push_back(host.begin("neura.net.write", {clients[i], Loopback::text(message)}));
+            sent.insert(message);
+        }
+        host.wait_for(writes);
+        host.wait_for(reads);
+        std::multiset<std::string> received;
+        for (std::size_t i = 0; i < connections; ++i) {
+            check_equal(host.value_of(writes[i]).bits, std::uint64_t{8 + std::to_string(i).size()}, "the count written");
+            received.insert(host.value_of(reads[i]).bytes);
+        }
+        check(received == sent, "each message arrives once");
+
+        std::vector<std::uint64_t> idle;
+        for (const auto& client : clients) {
+            idle.push_back(host.begin("neura.net.read", {client, Loopback::number(64), Loopback::number(0)}));
+        }
+        host.take(host.pending.poll());
+        for (const auto read : idle) check(!host.answers.contains(read), "a read without data waits");
+        const auto half = connections / 2;
+        for (std::size_t i = 0; i < half; ++i) host.pending.cancel(idle[i]);
+        for (std::size_t i = half; i < connections; ++i) {
+            check(host.call("neura.net.close", {clients[i]}).success, "close a socket with a pending read");
+            // The pending read still holds the socket: its peer sees no end.
+            const auto open =
+                host.call("neura.net.read", {servers[i], Loopback::number(64), Loopback::number(10'000'000)});
+            check(!open.success && open.value.bits == host_error::timed_out,
+                  "the socket stays open while a pending read holds it");
+            host.pending.cancel(idle[i]);
+        }
+        host.wait_for(idle);
+        for (std::size_t i = 0; i < connections; ++i) {
+            check_equal(host.error_of(idle[i]), std::uint64_t{i < half ? host_error::cancelled : host_error::invalid_input},
+                        "a cancelled read, or one whose socket the program closed");
+        }
+        check(host.pending.empty(), "nothing is pending");
+        // The pending reads are gone, and with them the last references to
+        // the closed sockets: their peers read the end of the stream.
+        for (std::size_t i = half; i < connections; ++i) {
+            const auto end =
+                host.call("neura.net.read", {servers[i], Loopback::number(64), Loopback::number(5'000'000'000)});
+            check(end.success && end.value.bytes.empty(), "the peer of a closed socket reads the end of the stream");
+        }
+
+        check_equal(host.services.open_sockets(), 1 + connections + half, "the sockets the program has not closed");
+        host.services.end_run();
+        check_equal(host.services.open_sockets(), std::size_t{0}, "every socket is closed when the run ends");
+    }
+    const auto after = open_handles();
+    check(after <= before, "the process holds no more handles or descriptors than before: " + std::to_string(after) +
+                               " after, " + std::to_string(before) + " before");
+}
+
+#ifdef _WIN32
+// IPv6 sockets are dual-stack on Windows, as Linux and macOS make them by
+// default (IPV6_V6ONLY 0), although Windows itself defaults to IPv6 only: a
+// listener and a UDP socket bound to "::" are reached over IPv4, and a
+// connection or datagram to an IPv4-mapped address goes out. POSIX gets this
+// from a system setting that a test cannot rely on, so it runs here only.
+NEURA_TEST(concurrency, ipv6_wildcard_sockets_also_serve_ipv4) {
+    Loopback host;
+    const auto listener = host.call("neura.net.listen", {Loopback::text("::"), Loopback::number(0)});
+    check(listener.success, "listen on :: (error " + std::to_string(listener.value.bits) + ")");
+    const auto port = host.call("neura.net.local_port", {listener.value});
+    check(port.success, "the listener's port");
+    const auto client =
+        host.call("neura.net.connect", {Loopback::text("127.0.0.1"), port.value, Loopback::number(5'000'000'000)});
+    check(client.success, "an IPv4 connection to a listener on :: (error " + std::to_string(client.value.bits) + ")");
+    const auto server = host.call("neura.net.accept", {listener.value});
+    check(server.success, "accept the IPv4 connection");
+    check(host.call("neura.net.write", {client.value, Loopback::text("ping")}).success, "write over IPv4");
+    const auto ping = host.call("neura.net.read", {server.value, Loopback::number(64), Loopback::number(5'000'000'000)});
+    check(ping.success && ping.value.bytes == "ping", "the listener on :: reads the IPv4 message");
+
+    const auto v4_listener = host.call("neura.net.listen", {Loopback::text("127.0.0.1"), Loopback::number(0)});
+    check(v4_listener.success, "listen on 127.0.0.1");
+    const auto v4_port = host.call("neura.net.local_port", {v4_listener.value});
+    const auto mapped = host.call("neura.net.connect", {Loopback::text("::ffff:127.0.0.1"), v4_port.value,
+                                                        Loopback::number(5'000'000'000)});
+    check(mapped.success, "a connection to an IPv4-mapped address (error " + std::to_string(mapped.value.bits) + ")");
+    check(host.call("neura.net.accept", {v4_listener.value}).success, "accept the IPv4-mapped connection");
+
+    const auto wildcard = host.call("neura.net.udp.bind", {Loopback::text("::"), Loopback::number(0)});
+    check(wildcard.success, "bind a UDP socket to :: (error " + std::to_string(wildcard.value.bits) + ")");
+    const auto wildcard_port = host.call("neura.net.local_port", {wildcard.value});
+    check(wildcard_port.success, "the UDP socket's port");
+    const auto sender = host.call("neura.net.udp.bind", {Loopback::text("127.0.0.1"), Loopback::number(0)});
+    check(sender.success, "bind an IPv4 UDP socket");
+    const auto sent = host.call("neura.net.udp.send_to", {sender.value, Loopback::text("127.0.0.1"),
+                                                          wildcard_port.value, Loopback::text("query")});
+    check(sent.success && sent.value.bits == 5, "send an IPv4 datagram to the socket on ::");
+    const auto query =
+        host.call("neura.net.udp.receive_from", {wildcard.value, Loopback::number(64), Loopback::number(5'000'000'000)});
+    check(query.success && query.value.elements.size() == 3, "the socket on :: receives the IPv4 datagram");
+    check(query.value.elements[0].bytes == "query", "the datagram's bytes");
+    check_equal(query.value.elements[1].bytes, std::string("::ffff:127.0.0.1"), "the sender as an IPv4-mapped address");
+    const auto reply = host.call("neura.net.udp.send_to", {wildcard.value, query.value.elements[1],
+                                                           query.value.elements[2], Loopback::text("answer")});
+    check(reply.success && reply.value.bits == 6, "answer to the IPv4-mapped sender");
+    const auto answer =
+        host.call("neura.net.udp.receive_from", {sender.value, Loopback::number(64), Loopback::number(5'000'000'000)});
+    check(answer.success && answer.value.elements.size() == 3 && answer.value.elements[0].bytes == "answer",
+          "the IPv4 socket receives the answer");
+
+    host.services.end_run();
+    check_equal(host.services.open_sockets(), std::size_t{0}, "every socket is closed when the run ends");
+}
+#endif
 
 } // namespace neura::testing

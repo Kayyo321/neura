@@ -1,12 +1,17 @@
 #include "server/worker_messages.hpp"
 
+#include <algorithm>
 #include <cerrno>
 #include <climits>
 #include <cstring>
+#ifdef _WIN32
+#include "platform/windows.hpp"
+#else
 #include <fcntl.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#endif
 
 namespace neura::server::worker {
 namespace {
@@ -142,25 +147,57 @@ int wait_milliseconds(Clock::time_point deadline) {
     return milliseconds > INT_MAX ? INT_MAX : static_cast<int>(milliseconds);
 }
 
+// The socket calls of each host. POSIX passes MSG_DONTWAIT on every call
+// as well (see the constructor). Windows has no MSG_DONTWAIT and needs none,
+// since the constructor makes the socket non-blocking; Winsock reports
+// errors through WSAGetLastError, and there is no SIGPIPE.
+#ifdef _WIN32
+int poll_one(pollfd& entry, int timeout) { return ::WSAPoll(&entry, 1, timeout); }
+int send_now(platform::native_socket descriptor, const std::uint8_t* data, std::size_t size) {
+    const auto count = static_cast<int>(std::min<std::size_t>(size, INT_MAX));
+    return ::send(descriptor, reinterpret_cast<const char*>(data), count, 0);
+}
+int receive_now(platform::native_socket descriptor, std::uint8_t* data, std::size_t size) {
+    const auto count = static_cast<int>(std::min<std::size_t>(size, INT_MAX));
+    return ::recv(descriptor, reinterpret_cast<char*>(data), count, 0);
+}
+bool interrupted() { return platform::last_socket_error().interrupted(); }
+bool would_block() { return platform::last_socket_error().would_block(); }
+#else
+int poll_one(pollfd& entry, int timeout) { return ::poll(&entry, 1, timeout); }
+ssize_t send_now(int descriptor, const std::uint8_t* data, std::size_t size) {
+#ifdef MSG_NOSIGNAL
+    return ::send(descriptor, data, size, MSG_NOSIGNAL | MSG_DONTWAIT);
+#else
+    return ::send(descriptor, data, size, MSG_DONTWAIT);
+#endif
+}
+ssize_t receive_now(int descriptor, std::uint8_t* data, std::size_t size) {
+    return ::recv(descriptor, data, size, MSG_DONTWAIT);
+}
+bool interrupted() { return errno == EINTR; }
+bool would_block() { return errno == EAGAIN || errno == EWOULDBLOCK; }
+#endif
+
 // Polls one entry until the deadline: 1 ready, 0 timed out, -1 failed.
 int poll_until(pollfd& entry, Clock::time_point deadline) {
     for (;;) {
         entry.revents = 0;
-        const int ready = ::poll(&entry, 1, wait_milliseconds(deadline));
+        const int ready = poll_one(entry, wait_milliseconds(deadline));
         if (ready > 0) return (entry.revents & POLLNVAL) ? -1 : 1;
         if (ready == 0) return 0;
-        if (errno != EINTR) return -1;
+        if (!interrupted()) return -1;
     }
 }
 
 // Waits for `events` until the deadline: 1 ready, 0 timed out, -1 failed.
-int wait_for(int descriptor, short events, Clock::time_point deadline) {
+int wait_for(platform::native_socket descriptor, short events, Clock::time_point deadline) {
     for (;;) {
         pollfd entry{descriptor, events, 0};
-        const int ready = ::poll(&entry, 1, wait_milliseconds(deadline));
+        const int ready = poll_one(entry, wait_milliseconds(deadline));
         if (ready > 0) return (entry.revents & POLLNVAL) ? -1 : 1;
         if (ready == 0) return 0;
-        if (errno != EINTR) return -1;
+        if (!interrupted()) return -1;
     }
 }
 
@@ -174,7 +211,7 @@ Direction inbound(PeerRole role) {
 
 } // namespace
 
-Channel::Channel(int descriptor, PeerRole role, WorkerIdentity expected)
+Channel::Channel(platform::native_socket descriptor, PeerRole role, WorkerIdentity expected)
     : descriptor_(descriptor), role_(role), sequence_(std::move(expected)), decoder_(inbound(role)) {
     // send(2) and recv(2) below must never block: a full socket waits in
     // poll, with the deadline, and the worker reads meanwhile. MSG_DONTWAIT
@@ -182,13 +219,22 @@ Channel::Channel(int descriptor, PeerRole role, WorkerIdentity expected)
     // send(2), where a blocking AF_UNIX socket still sleeps until the peer
     // reads: a worker streaming its response before it reads the body and a
     // host sending that body then each sleep in send(2), past both deadlines.
+#ifdef _WIN32
+    // A worker's channel is the first socket it uses, so Winsock starts here.
+    if (platform::ensure_sockets() || !platform::set_nonblocking(descriptor_)) status_ = Status::Failed;
+#else
     if (const int flags = ::fcntl(descriptor_, F_GETFL); flags >= 0 && !(flags & O_NONBLOCK)) {
         (void)::fcntl(descriptor_, F_SETFL, flags | O_NONBLOCK);
     }
+#endif
 }
 
 Channel::~Channel() {
+#ifdef _WIN32
+    if (descriptor_ != platform::invalid_socket) (void)platform::close_socket(descriptor_);
+#else
     if (descriptor_ >= 0) ::close(descriptor_);
+#endif
 }
 
 Channel::Status Channel::send(FrameKind kind, std::span<const std::uint8_t> body, Clock::time_point deadline) {
@@ -206,18 +252,13 @@ Channel::Status Channel::send(FrameKind kind, std::span<const std::uint8_t> body
     while (offset < wire.size()) {
         // Never block inside send(2): a full socket waits in poll below, with
         // the deadline, and the worker reads what the host sends meanwhile.
-#ifdef MSG_NOSIGNAL
-        const auto written =
-            ::send(descriptor_, wire.data() + offset, wire.size() - offset, MSG_NOSIGNAL | MSG_DONTWAIT);
-#else
-        const auto written = ::send(descriptor_, wire.data() + offset, wire.size() - offset, MSG_DONTWAIT);
-#endif
+        const auto written = send_now(descriptor_, wire.data() + offset, wire.size() - offset);
         if (written > 0) {
             offset += static_cast<std::size_t>(written);
             continue;
         }
-        if (written < 0 && errno == EINTR) continue;
-        if (written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+        if (written < 0 && interrupted()) continue;
+        if (written < 0 && would_block()) {
             if (read_while_sending_ && !peer_closed_) {
                 pollfd entry{descriptor_, POLLOUT | POLLIN, 0};
                 const int ready = poll_until(entry, deadline);
@@ -225,7 +266,7 @@ Channel::Status Channel::send(FrameKind kind, std::span<const std::uint8_t> body
                 if (ready < 0) return status_ = Status::Failed;
                 if (entry.revents & POLLIN) {
                     std::uint8_t chunk[64 * 1024];
-                    const auto got = ::recv(descriptor_, chunk, sizeof chunk, MSG_DONTWAIT);
+                    const auto got = receive_now(descriptor_, chunk, sizeof chunk);
                     if (got > 0) buffer_.insert(buffer_.end(), chunk, chunk + got);
                     else if (got == 0) peer_closed_ = true;
                 }
@@ -249,14 +290,14 @@ Channel::Status Channel::fill(Clock::time_point deadline, bool wait) {
     if (peer_closed_) return Status::Closed;
     std::uint8_t chunk[64 * 1024];
     for (;;) {
-        const auto got = ::recv(descriptor_, chunk, sizeof chunk, MSG_DONTWAIT);
+        const auto got = receive_now(descriptor_, chunk, sizeof chunk);
         if (got > 0) {
             buffer_.insert(buffer_.end(), chunk, chunk + got);
             return Status::Ok;
         }
         if (got == 0) return Status::Closed;
-        if (errno == EINTR) continue;
-        if (errno != EAGAIN && errno != EWOULDBLOCK) return Status::Failed;
+        if (interrupted()) continue;
+        if (!would_block()) return Status::Failed;
         if (!wait) return Status::TimedOut;
         const int ready = wait_for(descriptor_, POLLIN, deadline);
         if (ready == 0) return Status::TimedOut;

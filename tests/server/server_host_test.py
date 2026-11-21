@@ -23,6 +23,15 @@ import time
 from pathlib import Path
 
 FAILURES = []
+LINUX = sys.platform.startswith("linux")
+# Windows (docs/design/Windows030.md, W10 and W34): the host runs in a
+# process group of its own, Ctrl+Break stands for SIGTERM, `neura-server-host
+# --reload <pid>` for SIGHUP, os.kill ends a process with TerminateProcess,
+# and the workers are found in a process snapshot instead of /proc.
+WINDOWS = os.name == "nt"
+NEW_GROUP = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if WINDOWS else {}
+TERMINATE = signal.CTRL_BREAK_EVENT if WINDOWS else signal.SIGTERM
+KILL = getattr(signal, "SIGKILL", 9)
 # "h2c" runs the suite with every host started with --h2c and request()
 # speaking HTTP/2 with prior knowledge through the test client
 # (tests/server/http2_test_client.cpp); raw sockets and http.client stay
@@ -45,7 +54,8 @@ class Host:
         h2c = ["--h2c"] if PROTOCOL == "h2c" else []
         command = [args.host, "--listen", "127.0.0.1:0", *h2c, *options, str(image)]
         self.process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=self.err, text=True,
-                                        env=env)
+                                        env=env, **NEW_GROUP)
+        self.executable = Path(args.host).name
         self.ports = {}
         self.ready = False
         deadline = time.time() + 30
@@ -77,6 +87,9 @@ class Host:
         return self.err_path.read_text()
 
     def children(self, zygote=False):
+        if WINDOWS:
+            # Every worker runs the host's executable; Windows has no zygote.
+            return [] if zygote else windows_children(self.process.pid, self.executable)
         # Workers are children of whichever host thread spawned them; a
         # worker forked by the zygote is a child of the host too. The zygote
         # is left out unless asked for.
@@ -93,7 +106,7 @@ class Host:
         # existed at one moment, the end of the reading.
         return sorted(pid for pid in set(pids) if exists(pid) and (comm(pid) == "neura-zygote") == zygote)
 
-    def stop(self, sig=signal.SIGTERM, timeout=15):
+    def stop(self, sig=TERMINATE, timeout=15):
         if self.process.poll() is None:
             self.process.send_signal(sig)
             try:
@@ -107,6 +120,50 @@ class Host:
 
 def exists(pid):
     return Path(f"/proc/{pid}").exists()
+
+
+def windows_children(parent, executable):
+    """The processes running `executable` that `parent` started, from a snapshot."""
+    import ctypes
+    from ctypes import wintypes
+
+    class Entry(ctypes.Structure):
+        _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD), ("th32ProcessID", wintypes.DWORD),
+                    ("th32DefaultHeapID", ctypes.c_size_t), ("th32ModuleID", wintypes.DWORD),
+                    ("cntThreads", wintypes.DWORD), ("th32ParentProcessID", wintypes.DWORD),
+                    ("pcPriClassBase", ctypes.c_long), ("dwFlags", wintypes.DWORD),
+                    ("szExeFile", ctypes.c_wchar * 260)]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+    kernel32.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(Entry)]
+    kernel32.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(Entry)]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    snapshot_processes = 0x2
+    snapshot = kernel32.CreateToolhelp32Snapshot(snapshot_processes, 0)
+    if snapshot is None or snapshot == wintypes.HANDLE(-1).value:
+        raise OSError(ctypes.get_last_error(), "CreateToolhelp32Snapshot failed")
+    pids = []
+    try:
+        entry = Entry()
+        entry.dwSize = ctypes.sizeof(Entry)
+        found = kernel32.Process32FirstW(snapshot, ctypes.byref(entry))
+        while found:
+            if entry.th32ParentProcessID == parent and entry.szExeFile.lower() == executable.lower():
+                pids.append(entry.th32ProcessID)
+            found = kernel32.Process32NextW(snapshot, ctypes.byref(entry))
+    finally:
+        kernel32.CloseHandle(snapshot)
+    return sorted(pids)
+
+
+def reload(args, host):
+    """Makes the host reread its TLS files: SIGHUP, or --reload on Windows."""
+    if WINDOWS:
+        subprocess.run([args.host, "--reload", str(host.process.pid)], check=True, capture_output=True, timeout=30)
+    else:
+        host.process.send_signal(signal.SIGHUP)
 
 
 def comm(pid):
@@ -492,6 +549,11 @@ def test_keep_alive_latency(args, image):
     # A response leaves without waiting for the client's delayed
     # acknowledgement (TCP_NODELAY, and the head sent with a small body):
     # with Nagle's algorithm each keep-alive response took about 40 ms.
+    # A sanitized build (Tier 2 sets NEURA_TEST_SANITIZERS=1) handles each
+    # request too slowly for the limit to tell that stall apart.
+    if os.environ.get("NEURA_TEST_SANITIZERS") == "1":
+        print("skipped: the latency limit does not hold in a sanitized build", flush=True)
+        return
     host = Host(args, image)
     try:
         connection = http.client.HTTPConnection("127.0.0.1", host.port, timeout=30)
@@ -551,7 +613,7 @@ def test_dead_ready_worker(args, image):
         ready = host.children()
         check(len(ready) == 2, f"two ready workers: {ready}")
         for pid in ready:
-            os.kill(pid, signal.SIGKILL)
+            os.kill(pid, KILL)
         time.sleep(0.2)
         status, _, body = request(host.port, "GET", "/hello")
         check(status == 200 and body == b"hello from http\n", f"after the ready workers died: {status} {body!r}")
@@ -565,7 +627,7 @@ def test_refused_assignment(args, image):
     # goes to a new worker, once, and runs exactly once. The test hook
     # NEURA_SERVER_TEST_REFUSE_ASSIGN=N makes the first N workers refuse.
     # The zygote exists on Linux only.
-    for start in ("zygote", "exec") if sys.platform.startswith("linux") else ("exec",):
+    for start in ("zygote", "exec") if LINUX else ("exec",):
         for ready in ("0", "1"):
             env = dict(os.environ, NEURA_SERVER_TEST_REFUSE_ASSIGN="1")
             host = Host(args, image, "--worker-start", start, "--ready-workers", ready, "--no-startup-check",
@@ -617,7 +679,7 @@ def test_zygote_restart(args, image):
             threads = len(list(Path(f"/proc/{pid}/task").glob("*")))
             check(threads == 1, f"the zygote has one thread: {threads}")
         for pid in zygotes:
-            os.kill(pid, signal.SIGKILL)
+            os.kill(pid, KILL)
         time.sleep(0.2)
         status, _, body = request(host.port, "GET", "/hello")
         check(status == 200 and body == b"hello from http\n", f"after the zygote died: {status} {body!r}")
@@ -630,8 +692,9 @@ def test_zygote_restart(args, image):
 
 def test_process_bound(args, image):
     # A worker holds its S-1 slot until it has been reaped, so the workers,
-    # exited or not, never outnumber S-1 plus S-2 (B-S4).
-    for start in ("zygote", "exec"):
+    # exited or not, never outnumber S-1 plus S-2 (B-S4). The zygote is
+    # Linux's.
+    for start in ("zygote", "exec") if LINUX else ("exec",):
         host = Host(args, image, "--worker-start", start, "--max-workers", "2", "--ready-workers", "1",
                     "--max-queue", "256")
         peak = [0]
@@ -697,7 +760,7 @@ def test_drain_completes_responses(args, image):
         thread = threading.Thread(target=nap)
         thread.start()
         time.sleep(0.4)
-        host.process.send_signal(signal.SIGTERM)
+        host.process.send_signal(TERMINATE)
         thread.join()
         code = host.process.wait(15)
         status, _, body = results.get("nap", (0, {}, b""))
@@ -713,6 +776,37 @@ def test_startup_check(args, image):
     check(code == 1 and not host.ports, f"refused startup: status {code}, ports {host.ports}")
     check("startup check failed" in host.stderr(), "startup failure is reported")
     host.stop()
+
+
+def test_windows_commands(args, image):
+    # Windows has no SIGHUP: `neura-server-host --reload <pid>` sets the
+    # host's reload event (W27). A worker needs the --channel its host gives
+    # it, and the zygote needs Linux.
+    host = Host(args, image)
+    try:
+        result = subprocess.run([args.host, "--reload", str(host.process.pid)], capture_output=True, text=True,
+                                timeout=30)
+        check(result.returncode == 0 and not result.stderr, f"--reload: {result.returncode} {result.stderr!r}")
+        deadline = time.time() + 10
+        while "reloaded the TLS certificate and key" not in host.stderr() and time.time() < deadline:
+            time.sleep(0.05)
+        check("reloaded the TLS certificate and key" in host.stderr(), "--reload reaches the host")
+        status, _, _ = request(host.port, "GET", "/hello")
+        check(status == 200, f"after --reload: {status}")
+    finally:
+        host.stop()
+    for options, expected in ((["--reload"], "--reload expects the process identifier"),
+                              (["--reload", "host"], "--reload expects the process identifier"),
+                              (["--reload", str(host.process.pid)], "no server host with process identifier")):
+        result = subprocess.run([args.host, *options], capture_output=True, text=True, timeout=30)
+        check(result.returncode == 1 and expected in result.stderr, f"{options}: {result.returncode} {result.stderr!r}")
+    result = subprocess.run([args.host, "--worker", str(image)], capture_output=True, text=True, timeout=60)
+    check(result.returncode == 70 and "--channel" in result.stderr,
+          f"a worker without its channel: {result.returncode} {result.stderr!r}")
+    result = subprocess.run([args.host, "--listen", "127.0.0.1:0", "--worker-start", "zygote", str(image)],
+                            capture_output=True, text=True, timeout=60)
+    check(result.returncode == 1 and "--worker-start zygote needs Linux" in result.stderr,
+          f"the zygote on Windows: {result.returncode} {result.stderr!r}")
 
 
 def test_record_replay(args, image):
@@ -743,7 +837,8 @@ def test_tls(args, image):
     if not args.tls:
         result = subprocess.run([args.host, "--tls-listen", "127.0.0.1:0", "--cert", "c.pem", "--key", "k.pem",
                                  str(image)], capture_output=True, text=True, timeout=60)
-        check(result.returncode == 1 and "TLS" in result.stderr, f"no TLS build: {result.stderr}")
+        expected = "TLS listeners are unavailable on Windows in Neura 0.3.0" if os.name == "nt" else "no TLS adapter"
+        check(result.returncode == 1 and expected in result.stderr, f"no TLS build: {result.stderr}")
         return
     directory = Path(args.work) / "tls"
     directory.mkdir(exist_ok=True)
@@ -783,7 +878,7 @@ def test_tls(args, image):
             # HTTP/2 selects h2 (decision 9 as amended), one without it
             # http/1.1.
             expected = "2" if args.http2_client else "1.1"
-            result = subprocess.run([args.curl, "-sS", "--http2", "--cacert", str(certificate), "-o", "/dev/null",
+            result = subprocess.run([args.curl, "-sS", "--http2", "--cacert", str(certificate), "-o", os.devnull,
                                      "-w", "%{http_version}", f"https://127.0.0.1:{host.ports['https']}/hello"],
                                     capture_output=True, text=True, timeout=30)
             check(result.returncode == 0 and result.stdout == expected,
@@ -825,7 +920,8 @@ def test_http2_curl(args, image):
     if not args.http2_client:
         result = subprocess.run([args.host, "--listen", "127.0.0.1:0", "--h2c", str(image)], capture_output=True,
                                 text=True, timeout=60)
-        check(result.returncode == 1 and "no HTTP/2" in result.stderr, f"--h2c without HTTP/2: {result.stderr}")
+        expected = "HTTP/2 is unavailable on Windows in Neura 0.3.0" if os.name == "nt" else "no HTTP/2"
+        check(result.returncode == 1 and expected in result.stderr, f"--h2c without HTTP/2: {result.stderr}")
         return
     if not args.curl:
         print("skipped: no curl")
@@ -991,7 +1087,7 @@ def test_http2_reload(args, image):
         fresh, fresh_key = tls_material(args, "h2-reload-next", "second")
         shutil.copy(fresh, certificate)
         shutil.copy(fresh_key, key)
-        host.process.send_signal(signal.SIGHUP)
+        reload(args, host)
         deadline = time.time() + 10
         after = ""
         while time.time() < deadline:
@@ -1036,7 +1132,7 @@ def main():
     tests = [test_basic, test_limits, test_step_limit, test_streaming, test_streamed_request_body,
              test_deadline_from_head, test_keep_alive_latency, test_admin, test_dead_ready_worker, test_refused_assignment, test_zygote_restart,
              test_process_bound, test_drain_completes_responses, test_startup_check, test_record_replay, test_without_host, test_tls,
-             test_http2_curl, test_http2_streams, test_http2_reload]
+             test_http2_curl, test_http2_streams, test_http2_reload, test_windows_commands]
     # These read /proc or need the worker zygote, which exists on Linux only
     # (docs/runtime/ServerHost.md, "Worker start").
     # test_refused_assignment's hook refuses with shutdown(SHUT_RD), which
@@ -1044,12 +1140,16 @@ def main():
     # send succeeds and the request waits for its deadline (504). The retry
     # it checks is the host's own code, the same on every system.
     linux_only = {"test_dead_ready_worker", "test_zygote_restart", "test_process_bound", "test_refused_assignment"}
+    # Windows finds the workers in a process snapshot instead of /proc.
+    windows_too = {"test_dead_ready_worker", "test_process_bound"}
     for test in tests:
         if args.only and args.only != test.__name__:
             continue
-        if test.__name__ in linux_only and not sys.platform.startswith("linux"):
+        if test.__name__ in linux_only and not LINUX and not (WINDOWS and test.__name__ in windows_too):
             print("--", test.__name__, "skipped: needs Linux (/proc, the worker zygote)", flush=True)
             continue
+        if test.__name__ == "test_windows_commands" and not WINDOWS:
+            continue  # Its commands exist on Windows only; SIGHUP and descriptor 3 stand for them elsewhere.
         if PROTOCOL == "h2c" and test.__name__.startswith("test_http2"):
             continue  # They choose their protocols themselves.
         print("--", test.__name__, flush=True)

@@ -23,6 +23,14 @@
 #include <memory>
 #include <set>
 
+#ifdef _WIN32
+#include "platform/console.hpp"
+#include "platform/error.hpp"
+#include "platform/file.hpp"
+#include "platform/socket.hpp"
+#include "platform/text.hpp"
+#include "platform/windows.hpp"
+#else
 #include <fcntl.h>
 #include <poll.h>
 #include <sys/file.h>
@@ -33,6 +41,7 @@
 #include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
 
 namespace neura::service {
 
@@ -40,6 +49,20 @@ namespace {
 
 using tooling::Json;
 using Millis = std::chrono::milliseconds;
+
+#ifdef _WIN32
+// The POSIX signal numbers Windows lacks, by which the supervisor records the
+// terminations it performs: it ends a worker's job with exit code 128 + N and
+// records signal N (W10).
+constexpr int SIGHUP = 1;
+constexpr int SIGKILL = 9;
+
+HANDLE handle_of(Descriptor descriptor) { return reinterpret_cast<HANDLE>(descriptor); }
+
+std::uint64_t own_pid() { return ::GetCurrentProcessId(); }
+#else
+std::uint64_t own_pid() { return static_cast<std::uint64_t>(::getpid()); }
+#endif
 
 // Timers, from the note; a test may shorten them through the supervisor's
 // own NEURA_TEST_SERVICE_TIMERS (name=milliseconds,...), and make the next
@@ -80,6 +103,36 @@ struct Timers {
     }
 };
 
+#ifdef _WIN32
+// The wake-up pair of the loop: the console handler writes the signal a
+// console event stands for (W10: Ctrl+C is SIGINT, Ctrl+Break SIGTERM, close,
+// logoff and shutdown SIGHUP), and the wait callback of a worker's process
+// writes 0 when the worker ends, in place of SIGCHLD.
+platform::native_socket wake_reader = platform::invalid_socket;
+platform::native_socket wake_writer = platform::invalid_socket;
+// Set when the loop has ended, for a handler of an event after which the
+// system ends the process once the handler returns.
+HANDLE loop_ended = nullptr;
+
+void wake(char byte) {
+    if (wake_writer != platform::invalid_socket) ::send(static_cast<SOCKET>(wake_writer), &byte, 1, 0);
+}
+
+bool on_console_event(platform::ConsoleEvent event) {
+    switch (event) {
+    case platform::ConsoleEvent::ctrl_c: wake(static_cast<char>(SIGINT)); return true;
+    case platform::ConsoleEvent::ctrl_break: wake(static_cast<char>(SIGTERM)); return true;
+    default:
+        // The system ends the process when this returns: give the loop its
+        // time to drain, within the system's limit.
+        wake(static_cast<char>(SIGHUP));
+        if (loop_ended != nullptr) ::WaitForSingleObject(loop_ended, 4'000);
+        return true;
+    }
+}
+
+void CALLBACK worker_ended(void*, BOOLEAN) { wake(0); }
+#else
 int signal_pipe[2] = {-1, -1};
 
 extern "C" void on_signal(int signal) {
@@ -88,6 +141,7 @@ extern "C" void on_signal(int signal) {
     [[maybe_unused]] const auto written = ::write(signal_pipe[1], &byte, 1);
     errno = saved;
 }
+#endif
 
 std::int64_t unix_now() { return static_cast<std::int64_t>(std::time(nullptr)); }
 
@@ -95,6 +149,11 @@ struct CacheEntry {
     std::array<std::uint8_t, 32> digest{};
     std::uint64_t size = 0;
     UniqueFd memory;
+#ifdef _WIN32
+    // A duplicate of `memory` with FILE_MAP_READ access only, which workers
+    // are given: only the supervisor holds a handle that can write.
+    UniqueFd readable;
+#endif
     std::uint64_t last_used = 0;
     int users = 0;
 };
@@ -122,6 +181,12 @@ struct Application {
     std::uint64_t commit_sequence = 0;
     // The descriptors of Commit: working directory, input, output, error.
     std::vector<UniqueFd> streams;
+#ifdef _WIN32
+    // The process that committed, whose console a worker attaches to when a
+    // stream is a console: a console handle works only in a process that is
+    // attached to its console.
+    std::uint64_t client_pid = 0;
+#endif
     int worker = -1;  // pid
     // A worker that was ready before the commit ran it.
     bool used_ready = false;
@@ -142,6 +207,13 @@ struct Worker {
     std::uint64_t application = 0;  // 0 while it waits in the pool
     bool fresh = false;
     bool channel_open = true;
+#ifdef _WIN32
+    // The wait for the process's end (RegisterWaitForSingleObject).
+    HANDLE wait = nullptr;
+    // The signal of the first termination the supervisor performed: the job
+    // ended with exit code 128 + it.
+    int terminated_by = 0;
+#endif
 };
 
 struct Connection {
@@ -207,6 +279,9 @@ private:
     void release(Application& application);
     void assign(Application& application);
     void start_worker(Application* for_application);
+    // kill(2) of a worker; on Windows the end of its job with exit code
+    // 128 + `signal`, recorded as that signal.
+    void signal_worker(int pid, int signal);
     void replenish();
     void finish(Application& application, Terminal state, int status, int signal);
     void terminate(Application& application, Terminal state, Millis grace);
@@ -232,6 +307,9 @@ private:
     UniqueFd lock_;
     UniqueFd lease_;
     UniqueFd listener_;
+#ifdef _WIN32
+    platform::FileLock ownership_;
+#endif
     fs::path state_dir_;
     fs::path records_;
     fs::path log_path_;
@@ -266,9 +344,16 @@ private:
 bool Supervisor::active_generation() const {
     if (!installation_.installed) return true;
     std::error_code error;
+#ifdef _WIN32
+    // `current` is a junction to versions/<generation> (W22).
+    const auto target = fs::canonical(installation_.root / "current", error);
+    if (error) return true;
+    return platform::utf8_path(target.filename()) == installation_.generation;
+#else
     const auto target = fs::read_symlink(installation_.root / "current", error);
     if (error) return true;
     return target.filename() == installation_.generation;
+#endif
 }
 
 void Supervisor::log(const std::string& line) {
@@ -278,11 +363,21 @@ void Supervisor::log(const std::string& line) {
         rotated += ".1";
         fs::rename(log_path_, rotated, error);
     }
-    if (std::FILE* file = std::fopen(log_path_.c_str(), "a")) {
+#ifdef _WIN32
+    // Binary, so that a line ends with LF as on POSIX.
+    std::FILE* file = log_path_.empty() ? nullptr : ::_wfopen(log_path_.c_str(), L"ab");
+#else
+    std::FILE* file = std::fopen(log_path_.c_str(), "a");
+#endif
+    if (file) {
         char stamp[32];
         const auto now = std::time(nullptr);
         std::tm parts{};
+#ifdef _WIN32
+        ::gmtime_s(&parts, &now);
+#else
         ::gmtime_r(&now, &parts);
+#endif
         std::strftime(stamp, sizeof stamp, "%Y-%m-%dT%H:%M:%SZ", &parts);
         std::fprintf(file, "%s %s\n", stamp, line.c_str());
         std::fclose(file);
@@ -293,11 +388,20 @@ void Supervisor::open_state() {
     state_dir_ = state_directory(installation_, installation_.generation);
     records_ = state_dir_ / "records";
     std::error_code error;
+#ifdef _WIN32
+    // The state directory below %LOCALAPPDATA%/Neura is private to this
+    // user: created with a protected DACL that only grants this user, which
+    // what is created below it inherits.
+    make_state_root(installation_);
+    fs::create_directories(records_, error);
+    if (error) throw TransportError("cannot create " + platform::utf8_path(records_) + ": " + error.message());
+#else
     fs::create_directories(records_, error);
     if (error) throw TransportError("cannot create " + records_.string() + ": " + error.message());
     ::chmod(state_root(installation_).c_str(), 0700);
     ::chmod(state_dir_.c_str(), 0700);
     ::chmod(records_.c_str(), 0700);
+#endif
     log_path_ = state_dir_ / "log";
 }
 
@@ -384,11 +488,22 @@ void Supervisor::prune_stored() {
     for (const auto& entry : fs::directory_iterator(state_dir_, error)) {
         const auto name = entry.path().filename().string();
         if (!name.starts_with("epoch-") || epochs_in_use.contains(name.substr(6))) continue;
+#ifdef _WIN32
+        const auto written = fs::last_write_time(entry.path(), error);
+        if (error) continue;
+        const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(
+                                 std::chrono::clock_cast<std::chrono::system_clock>(written).time_since_epoch())
+                                 .count();
+        if (now - static_cast<std::int64_t>(seconds) > static_cast<std::int64_t>(record_lifetime_seconds)) {
+            fs::remove(entry.path(), error);
+        }
+#else
         struct stat status{};
         if (::stat(entry.path().c_str(), &status) == 0 &&
             now - static_cast<std::int64_t>(status.st_mtime) > static_cast<std::int64_t>(record_lifetime_seconds)) {
             fs::remove(entry.path(), error);
         }
+#endif
     }
 }
 
@@ -434,6 +549,34 @@ void Supervisor::reject(int key, std::uint64_t sequence, Reason reason, const st
     if (close) close_connection(key);
 }
 
+#ifdef _WIN32
+void Supervisor::accept_connections() {
+    for (;;) {
+        const SOCKET socket = ::accept(static_cast<SOCKET>(listener_.get()), nullptr, nullptr);
+        if (socket == INVALID_SOCKET) return;
+        UniqueFd owned(static_cast<Descriptor>(socket), UniqueFd::Kind::socket);
+        set_cloexec(owned.get());
+        set_nonblocking(owned.get(), true);
+        // A supervisor accepts a connection only from its own user, and not
+        // from a process of a lower integrity level, which could otherwise
+        // have it run a program above its own level (W29).
+        const auto peer = peer_identity(owned.get());
+        if (!peer.known || !peer.same_user) {
+            log("refused a connection of another user");
+            continue;
+        }
+        if (peer.integrity < 0) {
+            log("refused a connection of a lower integrity level");
+            continue;
+        }
+        Connection connection;
+        connection.fd = std::move(owned);
+        connection.opened = Clock::now();
+        connections_.emplace(next_connection_++, std::move(connection));
+        ++accepted_;
+    }
+}
+#else
 void Supervisor::accept_connections() {
     for (;;) {
         const int fd = ::accept(listener_.get(), nullptr, nullptr);
@@ -453,6 +596,7 @@ void Supervisor::accept_connections() {
         ++accepted_;
     }
 }
+#endif
 
 void Supervisor::close_connection(int key) {
     const auto found = connections_.find(key);
@@ -557,7 +701,7 @@ void Supervisor::hello(int key, const Message& message) {
         .add(Tag::Limit, named_value("pending", max_pending))
         .add(Tag::Limit, named_value("cache-bytes", max_cache_bytes))
         .add(Tag::Limit, named_value("message-bytes", max_message_bytes))
-        .add_u64(Tag::Pid, static_cast<std::uint64_t>(::getpid()));
+        .add_u64(Tag::Pid, own_pid());
     reply(key, std::move(welcome));
 }
 
@@ -753,6 +897,88 @@ void Supervisor::image(int key, Received& received) {
         std::erase_if(applications_, [](const auto& entry) { return entry.second.number == 0; });
         return;
     }
+#ifdef _WIN32
+    if (!application->image_ready) {
+        // Copy the bytes into a page-file-backed section of the supervisor's
+        // own, hashing as they are copied; the client's file is never used
+        // afterwards. Workers get a duplicate that can only be mapped for
+        // reading, which is the Windows form of the sealed memory file.
+        const auto size = application->envelope.image_size;
+        const HANDLE source = handle_of(received.descriptors.front().get());
+        const auto fail = [&](Reason reason, const std::string& sentence) {
+            reject(key, message.sequence, reason, sentence);
+            release(*application);
+            std::erase_if(applications_, [](const auto& entry) { return entry.second.number == 0; });
+        };
+        const std::string mismatch_sentence =
+            "the bytes read are not of the size and digest the launch names; the image changed while it was launched";
+        // Only a file on a disk can be read at an offset without blocking.
+        if (::GetFileType(source) != FILE_TYPE_DISK) {
+            fail(Reason::ImageMismatch, mismatch_sentence);
+            return;
+        }
+        const auto capacity = std::max<std::uint64_t>(size, 1);
+        UniqueFd owned(reinterpret_cast<Descriptor>(
+            ::CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, static_cast<DWORD>(capacity >> 32),
+                                 static_cast<DWORD>(capacity & 0xFFFFFFFFu), nullptr)));
+        auto* view = owned ? static_cast<std::uint8_t*>(::MapViewOfFile(handle_of(owned.get()), FILE_MAP_WRITE, 0, 0,
+                                                                         static_cast<SIZE_T>(capacity)))
+                           : nullptr;
+        if (view == nullptr) {
+            fail(Reason::AdmissionCache, "the service cannot hold the image");
+            return;
+        }
+        util::Sha256 digest;
+        std::uint64_t copied = 0;
+        std::vector<std::uint8_t> buffer(1 << 20);
+        bool failed = false;
+        for (;;) {
+            OVERLAPPED at{};
+            at.Offset = static_cast<DWORD>(copied & 0xFFFFFFFFu);
+            at.OffsetHigh = static_cast<DWORD>(copied >> 32);
+            DWORD count = 0;
+            if (!::ReadFile(source, buffer.data(), static_cast<DWORD>(buffer.size()), &count, &at)) {
+                if (::GetLastError() == ERROR_HANDLE_EOF) break;
+                failed = true;
+                break;
+            }
+            if (count == 0) break;
+            if (copied + count > size) {
+                copied += count;
+                break;
+            }
+            digest.update(std::span(buffer.data(), static_cast<std::size_t>(count)));
+            std::memcpy(view + copied, buffer.data(), count);
+            copied += count;
+        }
+        ::UnmapViewOfFile(view);
+        if (failed || copied != size || digest.finish() != application->envelope.digest) {
+            fail(Reason::ImageMismatch, mismatch_sentence);
+            return;
+        }
+        HANDLE readable = nullptr;
+        if (!::DuplicateHandle(::GetCurrentProcess(), handle_of(owned.get()), ::GetCurrentProcess(), &readable,
+                               FILE_MAP_READ, FALSE, 0)) {
+            fail(Reason::AdmissionCache, "the service cannot hold the image");
+            return;
+        }
+        // Another launch may have brought the same bytes meanwhile.
+        if (!cached(application->envelope.digest)) {
+            CacheEntry entry;
+            entry.digest = application->envelope.digest;
+            entry.size = size;
+            entry.memory = std::move(owned);
+            entry.readable.reset(reinterpret_cast<Descriptor>(readable));
+            entry.last_used = ++clock_;
+            cache_.push_back(std::move(entry));
+        } else {
+            ::CloseHandle(readable);
+        }
+        application->image_reserved = false;
+        application->image_ready = true;
+        use_entry(application->envelope.digest, 1);
+    }
+#else
     if (!application->image_ready) {
         // Copy the bytes into memory of the supervisor's own, hashing as
         // they are copied; the client's object is never used afterwards.
@@ -826,6 +1052,7 @@ void Supervisor::image(int key, Received& received) {
         application->image_ready = true;
         use_entry(application->envelope.digest, 1);
     }
+#endif
     Message prepared;
     prepared.kind = Kind::Prepared;
     prepared.sequence = message.sequence;
@@ -875,6 +1102,13 @@ void Supervisor::commit(int key, Received& received) {
     application->commit_sequence = message.sequence;
     application->connection = key;
     application->streams = std::move(received.descriptors);
+#ifdef _WIN32
+    {
+        std::error_code error;
+        const auto pid = platform::peer_pid(static_cast<platform::native_socket>(connections_.at(key).fd.get()), error);
+        if (pid) application->client_pid = *pid;
+    }
+#endif
     application->state = Terminal::Starting;
     application->times.emplace_back("committed", clock_ns(Clock::now()));
     save(*application);
@@ -901,8 +1135,33 @@ void Supervisor::start_worker(Application* for_application) {
     worker.application = for_application ? for_application->number : 0;
     if (for_application) for_application->worker = worker.process.pid;
     set_nonblocking(worker.process.channel.get(), true);
+#ifdef _WIN32
+    // The end of the worker wakes the loop, as SIGCHLD does on POSIX.
+    HANDLE wait = nullptr;
+    if (::RegisterWaitForSingleObject(&wait, worker.process.process.native_handle(), worker_ended, nullptr, INFINITE,
+                                      WT_EXECUTEONLYONCE)) {
+        worker.wait = wait;
+    } else {
+        log("cannot wait for a worker's end: " + platform::error_message(static_cast<int>(::GetLastError())));
+    }
+#endif
     workers_.emplace(worker.process.pid, std::move(worker));
 }
+
+#ifdef _WIN32
+void Supervisor::signal_worker(int pid, int signal) {
+    const auto found = workers_.find(pid);
+    if (found == workers_.end()) return;
+    auto& worker = found->second;
+    if (worker.terminated_by == 0) worker.terminated_by = signal;
+    const auto job = worker.process.process.job();
+    if (job == nullptr || !::TerminateJobObject(job, static_cast<UINT>(128 + signal))) {
+        ::TerminateProcess(worker.process.process.native_handle(), static_cast<UINT>(128 + signal));
+    }
+}
+#else
+void Supervisor::signal_worker(int pid, int signal) { ::kill(pid, signal); }
+#endif
 
 void Supervisor::assign(Application& application) {
     // A ready worker, when the launch can use one; otherwise one started for it.
@@ -941,6 +1200,22 @@ void Supervisor::assign(Application& application) {
     assignment.kind = Kind::WorkerAssign;
     assignment.add_u8(Tag::Descriptors, 5).add(Tag::ApplicationId, application.id);
     put_envelope(assignment, application.envelope);
+#ifdef _WIN32
+    if (application.client_pid != 0) assignment.add_u64(Tag::Pid, application.client_pid);
+    std::vector<Descriptor> descriptors{entry ? entry->readable.get() : invalid_descriptor};
+    for (const auto& stream : application.streams) descriptors.push_back(stream.get());
+    try {
+        if (descriptors.front() == invalid_descriptor) throw TransportError("the image left the cache");
+        // The worker's channel is one end of a pair this process made, so
+        // the handles go to the worker's process by its handle.
+        send_message(worker.process.channel.get(), assignment, descriptors, Clock::now() + Millis(1000),
+                     worker.process.process.native_handle());
+    } catch (const std::exception& error) {
+        log(std::string("cannot assign a worker: ") + error.what());
+        signal_worker(worker.process.pid, SIGKILL);
+        return;
+    }
+#else
     std::vector<int> descriptors{entry ? entry->memory.get() : -1};
     for (const auto& stream : application.streams) descriptors.push_back(stream.get());
     try {
@@ -951,6 +1226,7 @@ void Supervisor::assign(Application& application) {
         ::kill(worker.process.pid, SIGKILL);
         return;
     }
+#endif
     application.streams.clear();
     application.times.emplace_back("assigned", clock_ns(Clock::now()));
     save(application);
@@ -979,7 +1255,7 @@ void Supervisor::replenish() {
     }
     if (retired_ || state_ != SupervisorState::Accepting || live_count() >= max_applications) {
         for (auto& [pid, worker] : workers_) {
-            if (worker.application == 0 && !worker.fresh) ::kill(pid, SIGKILL);
+            if (worker.application == 0 && !worker.fresh) signal_worker(pid, SIGKILL);
         }
         return;
     }
@@ -999,6 +1275,19 @@ void Supervisor::forward_signal(int key, const Message& message) {
     auto* application = by_id(message.get(Tag::ApplicationId));
     if (!application || !is_live(application->state) || application->worker < 0) return;
     int number = 0;
+#ifdef _WIN32
+    // A worker has no console, so a signal ends its job, with exit code
+    // 128 + N recorded as signal N; QUIT and WINCH are not forwarded (W29).
+    switch (static_cast<ForwardedSignal>(message.u8(Tag::SignalNumber))) {
+    case ForwardedSignal::Int: number = SIGINT; break;
+    case ForwardedSignal::Term: number = SIGTERM; break;
+    case ForwardedSignal::Hup: number = SIGHUP; break;
+    case ForwardedSignal::Quit:
+    case ForwardedSignal::Winch: return;
+    default: throw ProtocolError("unknown signal");
+    }
+    signal_worker(application->worker, number);
+#else
     switch (static_cast<ForwardedSignal>(message.u8(Tag::SignalNumber))) {
     case ForwardedSignal::Int: number = SIGINT; break;
     case ForwardedSignal::Term: number = SIGTERM; break;
@@ -1008,6 +1297,7 @@ void Supervisor::forward_signal(int key, const Message& message) {
     default: throw ProtocolError("unknown signal");
     }
     ::killpg(application->worker, number);
+#endif
     (void)key;
 }
 
@@ -1020,9 +1310,17 @@ void Supervisor::terminate(Application& application, Terminal state, Millis grac
     if (!application.stop_requested) {
         application.stop_requested = true;
         application.stop_state = state;
+#ifdef _WIN32
+        // A worker has no console that an event could reach: its job ends
+        // at once, as SIGTERM ends a program that does not handle it, and
+        // the grace period has nothing to wait for.
+        (void)grace;
+        signal_worker(application.worker, SIGTERM);
+#else
         application.kill_at = Clock::now() + grace;
         ::killpg(application.worker, SIGTERM);
         ::kill(application.worker, SIGTERM);
+#endif
     }
 }
 
@@ -1071,7 +1369,7 @@ void Supervisor::handle_worker(int pid) {
     } catch (const std::exception& error) {
         log(std::string("a worker's channel failed: ") + error.what());
         worker.channel_open = false;
-        ::kill(pid, SIGKILL);
+        signal_worker(pid, SIGKILL);
     }
 }
 
@@ -1116,6 +1414,62 @@ void Supervisor::stopped_reply(Application& application) {
     application.stop_waiters.clear();
 }
 
+#ifdef _WIN32
+void Supervisor::reap() {
+    std::vector<int> ended;
+    for (const auto& [pid, worker] : workers_) {
+        if (::WaitForSingleObject(worker.process.process.native_handle(), 0) == WAIT_OBJECT_0) ended.push_back(pid);
+    }
+    for (const int pid : ended) {
+        const auto found = workers_.find(pid);
+        DWORD code = 0;
+        ::GetExitCodeProcess(found->second.process.process.native_handle(), &code);
+        // Read what the worker said before it ended.
+        handle_worker(pid);
+        auto& worker = found->second;
+        const auto number = worker.application;
+        const bool was_ready = worker.process.ready;
+        const int terminated_by = worker.terminated_by;
+        // The callback has run or never will; this waits for it to finish.
+        if (worker.wait != nullptr) ::UnregisterWaitEx(worker.wait, INVALID_HANDLE_VALUE);
+        workers_.erase(found);
+        // A worker that ended before it reported ready: the pool tries once
+        // more on the next launch, not at once.
+        if (!was_ready) ready_retry_ = false;
+        if (number == 0) continue;
+        const auto at = applications_.find(number);
+        if (at == applications_.end()) continue;
+        auto& application = at->second;
+        if (!application.commit_replied) {
+            // The worker ended before it was given the launch: nothing ran.
+            if (application.connection >= 0) {
+                reject(application.connection, application.commit_sequence, Reason::WorkerUnavailable,
+                       "the worker ended before it reported ready; nothing was run");
+            }
+            release(application);
+            std::erase_if(applications_, [](const auto& entry) { return entry.second.number == 0; });
+            continue;
+        }
+        // A termination the supervisor performed is that signal (W10); an
+        // exception code (0xC0000000 and above) is a crash, the Windows form
+        // of a fatal signal, and its status is the code as a direct run's.
+        const bool signaled = terminated_by != 0 && code == static_cast<DWORD>(128 + terminated_by);
+        const int signal = signaled ? terminated_by : 0;
+        const int status = static_cast<int>(code);
+        if (application.reported) {
+            finish(application, application.reported_state, application.exit_status, 0);
+        } else if (application.stop_requested) {
+            finish(application, application.stop_state, signaled ? 128 + signal : status, signal);
+        } else if (signaled && signal != SIGKILL) {
+            finish(application, Terminal::Signaled, 128 + signal, signal);
+        } else if (!signaled && code >= 0xC0000000u) {
+            finish(application, Terminal::Signaled, status, 0);
+        } else {
+            finish(application, Terminal::WorkerLost, signaled ? 128 + signal : status, signal);
+        }
+    }
+}
+#else
 void Supervisor::reap() {
     for (;;) {
         int status = 0;
@@ -1159,6 +1513,7 @@ void Supervisor::reap() {
         }
     }
 }
+#endif
 
 // --- Control ----------------------------------------------------------------------
 
@@ -1177,7 +1532,7 @@ Message Supervisor::listing() const {
         .add(Tag::Epoch, std::string_view(reinterpret_cast<const char*>(epoch_.data()), epoch_.size()))
         .add(Tag::Generation, installation_.generation)
         .add(Tag::Build, build_)
-        .add_u64(Tag::Pid, static_cast<std::uint64_t>(::getpid()))
+        .add_u64(Tag::Pid, own_pid())
         .add(Tag::Limit, named_value("connections-accepted", accepted_));
     for (const auto& [number, application] : applications_) message.add(Tag::Record, record_text(application));
     return message;
@@ -1316,8 +1671,12 @@ void Supervisor::timers() {
             release(application);
         }
         if (application.kill_at && now >= *application.kill_at && application.worker > 0) {
+#ifdef _WIN32
+            signal_worker(application.worker, SIGKILL);
+#else
             ::killpg(application.worker, SIGKILL);
             ::kill(application.worker, SIGKILL);
+#endif
             application.kill_at.reset();
         }
     }
@@ -1325,7 +1684,7 @@ void Supervisor::timers() {
     for (auto& [pid, worker] : workers_) {
         if (!worker.process.ready && now - worker.process.spawned >= timers_.ready) {
             log("a worker did not report ready in time; it is killed");
-            ::kill(pid, SIGKILL);
+            signal_worker(pid, SIGKILL);
             worker.process.spawned = now + Millis(60'000);
         }
     }
@@ -1335,6 +1694,168 @@ void Supervisor::timers() {
     }
 }
 
+#ifdef _WIN32
+int Supervisor::run() {
+    // Nothing of the process that started it: no directory it could hold
+    // busy. It inherited no handle but its standard ones (the handle list of
+    // its start).
+    {
+        wchar_t system[MAX_PATH + 1];
+        const UINT length = ::GetSystemDirectoryW(system, MAX_PATH + 1);
+        if (length == 0 || length > MAX_PATH || !::SetCurrentDirectoryW(system)) log_path_.clear();
+    }
+    // The lease of its generation, held until it exits, as every tool of an
+    // installed generation holds one (docs/Install.md, "Generations in
+    // use"). Its workers take their own.
+    {
+        bool removed = false;
+        lease_.reset(static_cast<Descriptor>(tool::take_lease(self_, removed)));
+        if (removed) {
+            std::fprintf(stderr, "%s", tool::removed_generation_message);
+            return 1;
+        }
+    }
+    timers_.read();
+    build_ = own_build();
+    // The workers are of this build; only the supervisor's answers differ.
+    worker_build_ = build_;
+    if (timers_.other_build) build_ += " (a test of another build)";
+    own_environment_ = environment_entries();
+    random_bytes(epoch_);
+    const auto run = run_directory(true);
+    endpoint_ = endpoint_files(run, installation_.root, installation_.generation);
+    // <run>, or the private directory under %TEMP% that holds it.
+    make_private_directory(endpoint_.directory.parent_path());
+    make_private_directory(endpoint_.directory);
+    open_state();
+
+    // The lock decides which supervisor owns the endpoint; a socket file
+    // found by the holder of the lock is stale.
+    {
+        std::error_code error;
+        ownership_ = platform::FileLock::acquire(endpoint_.lock, platform::LockMode::exclusive,
+                                                 platform::LockWait::try_once, error);
+        if (!ownership_) {
+            if (error == std::errc::resource_unavailable_try_again) {
+                std::fprintf(stderr, "neura: neurad: a supervisor of this installation and generation is already running\n");
+                return 1;
+            }
+            throw TransportError("cannot open " + platform::utf8_path(endpoint_.lock) + ": " +
+                                 platform::error_message(error));
+        }
+    }
+    if (const auto error = platform::ensure_sockets()) {
+        throw TransportError("cannot start Winsock: " + platform::error_message(error));
+    }
+    ::DeleteFileW(endpoint_.socket.c_str());
+    const SOCKET listener = ::socket(AF_UNIX, SOCK_STREAM, 0);
+    if (listener == INVALID_SOCKET) {
+        throw TransportError("cannot create the socket: " + platform::last_socket_error().message());
+    }
+    listener_.reset(static_cast<Descriptor>(listener), UniqueFd::Kind::socket);
+    set_cloexec(listener_.get());
+    sockaddr_un address{};
+    address.sun_family = AF_UNIX;
+    const auto socket_path = platform::native_utf8_path(endpoint_.socket);
+    std::memcpy(address.sun_path, socket_path.data(), std::min(socket_path.size(), sizeof address.sun_path - 1));
+    // The socket file inherits the endpoint directory's DACL, which grants
+    // only this user.
+    if (::bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof address) != 0) {
+        throw TransportError("cannot bind " + platform::utf8_path(endpoint_.socket) + ": " +
+                             platform::last_socket_error().message());
+    }
+    if (::listen(listener, 64) != 0) {
+        throw TransportError("cannot listen: " + platform::last_socket_error().message());
+    }
+    set_nonblocking(listener_.get(), true);
+
+    {
+        std::error_code error;
+        const auto pair = platform::socket_pair(error);
+        if (error) throw TransportError("cannot create the wake-up pair: " + platform::error_message(error));
+        wake_reader = pair[0];
+        wake_writer = pair[1];
+        platform::set_nonblocking(wake_reader, true);
+        platform::set_nonblocking(wake_writer, true);
+    }
+    loop_ended = ::CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    platform::on_console_event(on_console_event);
+
+    prune_stored();
+    retired_ = !active_generation();
+    log("started: pid " + std::to_string(own_pid()) + ", epoch " + hex(epoch_) + ", generation " +
+        installation_.generation + (retired_ ? ", retired" : "") + (on_demand_ ? ", on demand" : ""));
+    replenish();
+
+    while (!stop_) {
+        std::vector<platform::PollItem> polled;
+        std::vector<std::pair<char, int>> owners;
+        polled.push_back({static_cast<platform::native_socket>(listener_.get()), platform::poll_in, 0});
+        owners.emplace_back('l', 0);
+        polled.push_back({wake_reader, platform::poll_in, 0});
+        owners.emplace_back('s', 0);
+        for (const auto& [key, connection] : connections_) {
+            polled.push_back({static_cast<platform::native_socket>(connection.fd.get()), platform::poll_in, 0});
+            owners.emplace_back('c', key);
+        }
+        for (const auto& [pid, worker] : workers_) {
+            if (!worker.channel_open) continue;
+            polled.push_back({static_cast<platform::native_socket>(worker.process.channel.get()), platform::poll_in, 0});
+            owners.emplace_back('w', pid);
+        }
+        const auto wait = std::chrono::duration_cast<Millis>(next_deadline() - Clock::now()).count();
+        const int ready = platform::poll(polled, static_cast<int>(std::clamp<long long>(wait, 0, 60'000)));
+        if (ready < 0 && !platform::last_socket_error().interrupted()) {
+            throw TransportError("poll failed: " + platform::last_socket_error().message());
+        }
+        for (std::size_t i = 0; ready > 0 && i < polled.size(); ++i) {
+            if (polled[i].revents == 0) continue;
+            const auto [kind, key] = owners[i];
+            if (kind == 'l') {
+                accept_connections();
+            } else if (kind == 's') {
+                char signals[64];
+                const int count = ::recv(static_cast<SOCKET>(wake_reader), signals, sizeof signals, 0);
+                for (int j = 0; j < count; ++j) {
+                    if (signals[j] == SIGTERM || signals[j] == SIGINT || signals[j] == SIGHUP) {
+                        state_ = SupervisorState::Draining;
+                        log("draining: signal " + std::to_string(signals[j]));
+                        replenish();
+                    }
+                }
+                reap();
+            } else if (kind == 'c') {
+                serve(key);
+            } else if (kind == 'w') {
+                handle_worker(key);
+            }
+        }
+        reap();
+        // Idle is measured from the end of the last application or
+        // connection, whichever came later.
+        if (live_count() > 0 || !connections_.empty()) idle_since_ = Clock::now();
+        timers();
+        if (can_exit()) stop_ = true;
+    }
+    log("exiting");
+    for (auto& [pid, worker] : workers_) signal_worker(pid, SIGKILL);
+    // The workers end before the supervisor does, so that a supervisor that
+    // is gone leaves no process holding its generation's lease.
+    for (auto& [pid, worker] : workers_) {
+        ::WaitForSingleObject(worker.process.process.native_handle(), INFINITE);
+        if (worker.wait != nullptr) ::UnregisterWaitEx(worker.wait, INVALID_HANDLE_VALUE);
+        worker.wait = nullptr;
+    }
+    workers_.clear();
+    // Live records of a supervisor that exits are kept for `inspect`; its
+    // readers report them as unknown. The socket file is removed while this
+    // supervisor still holds the lock, so it is never another's.
+    listener_.reset();
+    ::DeleteFileW(endpoint_.socket.c_str());
+    ::SetEvent(loop_ended);
+    return 0;
+}
+#else
 int Supervisor::run() {
     // Nothing of the process that started it: no directory it could hold
     // busy, and no descriptor above 2 it inherited.
@@ -1483,6 +2004,7 @@ int Supervisor::run() {
     ::unlink(endpoint_.socket.c_str());
     return 0;
 }
+#endif
 
 } // namespace
 
@@ -1495,7 +2017,11 @@ int supervisor_main(const std::vector<std::string>& arguments, const fs::path& s
         if (argument == "--foreground") {
             foreground = true;
         } else if (argument == "--root" && i + 1 < arguments.size()) {
+#ifdef _WIN32
+            root = platform::path_from_utf8(arguments[++i]);
+#else
             root = fs::path(arguments[++i]);
+#endif
         } else if (argument == "--on-demand") {
             on_demand = true;
         } else {
@@ -1510,12 +2036,27 @@ int supervisor_main(const std::vector<std::string>& arguments, const fs::path& s
     }
     auto installation = installation_of(self);
     std::error_code error;
+#ifdef _WIN32
+    const auto real_root = installation_at_root(*root).root;
+    if (!fs::exists(*root, error) || real_root != installation.root) {
+        std::fprintf(stderr, "neura: neurad: %s is not the root of this neurad's installation (%s)\n",
+                     platform::utf8_path(*root).c_str(), platform::utf8_path(installation.root).c_str());
+        return 1;
+    }
+    // Started at login from the Run key, neurad has a console of its own,
+    // which nothing reads: it lets it go so that no window stays open.
+    {
+        DWORD processes[2];
+        if (::GetConsoleProcessList(processes, 2) == 1) ::FreeConsole();
+    }
+#else
     const auto real_root = fs::canonical(*root, error);
     if (error || real_root != installation.root) {
         std::fprintf(stderr, "neura: neurad: %s is not the root of this neurad's installation (%s)\n", root->c_str(),
                      installation.root.c_str());
         return 1;
     }
+#endif
     if (installation.unmigrated) {
         std::fprintf(stderr, "neura: runtime: finish the 0.3.0 install first: run \"neura update --migrate-install\"\n");
         return status_not_run;

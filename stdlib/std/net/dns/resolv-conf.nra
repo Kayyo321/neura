@@ -26,11 +26,15 @@ let v4 = import:Std.Net.Core.Ipv4Addr;
 ///   `attempts:n` (default 2, capped to 5), `rotate` and `edns0`. Values above a cap are "silently capped";
 ///   a value that is not a nonnegative decimal number is reported and ignored. Other options are kept in
 ///   `unknown_options` without failing.
-/// Parsing never fails. The `LOCALDOMAIN` and `RES_OPTIONS` environment variables are not read.
+/// Parsing never fails. The `LOCALDOMAIN` and `RES_OPTIONS` environment variables are not read. A carriage
+/// return before the line feed is ignored. Windows has no `resolv.conf`: it keeps its name servers in the
+/// network adapter settings, which this module does not read, so a Windows program builds its configuration
+/// with `parse` or the constructor and names its servers itself.
 /// @see [Std.Net.Dns.ResolvConf](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-ResolvConf)
 #Since("0.3.0")
 export let ResolvConf = module (
-    /// @brief The usual location of the file.
+    /// @brief The usual location of the file on Linux and macOS. On Windows this constant names
+    /// `/etc/resolv.conf` on the current drive, which normally does not exist, so reading it fails with NotFound.
     export const DefaultPath = "/etc/resolv.conf";
     /// @brief MAXNS: the most name servers used.
     export const MaxNameservers: int = 3;

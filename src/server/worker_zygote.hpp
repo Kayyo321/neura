@@ -8,7 +8,9 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#ifndef _WIN32
 #include <sys/types.h>
+#endif
 #include <vector>
 
 namespace neura::server {
@@ -20,7 +22,16 @@ namespace neura::server {
 // with exec is; it skips only the exec, the image read, the digest and the
 // verification. Linux only: the zygote forks with CLONE_PARENT, so every
 // worker is a child of the host, which waits for it and kills it as it
-// does a worker it started itself.
+// does a worker it started itself. Elsewhere every function refuses (macOS
+// and Windows start workers with exec).
+
+// The process identifier of a worker: pid_t on POSIX, a Windows process
+// identifier (platform::process_id) on Windows, which has no zygote.
+#ifdef _WIN32
+using worker_pid = platform::process_id;
+#else
+using worker_pid = pid_t;
+#endif
 
 // True when this build can start workers from a zygote.
 bool zygote_supported();
@@ -49,18 +60,18 @@ public:
     // keeps and closes) as its descriptor 3, or -1. After -1, failed() tells
     // whether the zygote has ended (it is then of no further use) or only
     // that fork failed.
-    pid_t fork_worker(int channel, unsigned char flags);
+    worker_pid fork_worker(int channel, unsigned char flags);
     bool failed() const { return failed_; }
 
-    pid_t pid() const { return pid_; }
+    worker_pid pid() const { return pid_; }
 
     // Closes the control channel, kills the zygote and waits for it.
     void stop();
 
 private:
-    ZygoteClient(pid_t pid, int control) : pid_(pid), control_(control) {}
+    ZygoteClient(worker_pid pid, int control) : pid_(pid), control_(control) {}
 
-    pid_t pid_;
+    worker_pid pid_;
     int control_;
     bool failed_ = false;
     std::mutex mutex_;

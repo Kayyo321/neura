@@ -163,7 +163,7 @@ public:
         }
     }
 
-    void wake_on(int descriptor) override { wake_ = descriptor; }
+    void wake_on(WakeDescriptor descriptor) override { wake_ = descriptor; }
     bool ended() const { return ended_; }
     Status outcome() const { return last_.status; }
     int rejection() const { return last_.status_code; }
@@ -183,7 +183,7 @@ private:
     ConnectionClock::time_point deadline_;
     bool ended_ = false;
     bool truncated_ = false;
-    int wake_ = -1;
+    WakeDescriptor wake_ = no_wake;
     Piece last_{Status::End};
 };
 
@@ -431,7 +431,7 @@ ConnectionEnd serve_connection(ConnectionStream& stream, const Responder& respon
 
         // What the responder left of the body is read and discarded; a body
         // that cannot be read to its end closes the connection.
-        body.wake_on(-1);
+        body.wake_on(no_wake);
         while (!body.ended()) (void)body.read();
         if (body.outcome() != RequestBody::Status::End) {
             stream.close_after_response();

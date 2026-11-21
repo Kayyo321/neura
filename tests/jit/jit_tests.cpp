@@ -1727,6 +1727,12 @@ NEURA_TEST(jit, modes_parse_and_combine) {
     check(!jit::availability(jit::Mode::Off).enabled, "off is never enabled");
 #if defined(__x86_64__) && defined(__linux__)
     check(jit::availability(jit::Mode::Auto).enabled, "auto is enabled on x86-64 Linux");
+#elif defined(_WIN32)
+    check(!jit::host_has_backend(), "Windows JIT is deferred in 0.3.0");
+    const auto automatic = jit::availability(jit::Mode::Auto);
+    check(!automatic.enabled && automatic.reason == "Windows has no JIT in 0.3.0", "auto names the Windows limitation");
+    const auto forced = jit::availability(jit::Mode::On);
+    check(!forced.enabled && forced.error == "--jit=on: Windows has no JIT in 0.3.0", "on refuses the Windows limitation");
 #elif defined(__aarch64__) || defined(__APPLE__)
     check(!jit::availability(jit::Mode::Auto).enabled, "auto is off where the code is not verified by execution");
 #endif

@@ -9,6 +9,7 @@
 #include "service.hpp"
 
 #include "cli/commands.hpp"
+#include "cli/tool.hpp"
 #include "launcher/container.hpp"
 #include "tooling/json.hpp"
 
@@ -19,6 +20,16 @@
 #include <iostream>
 #include <thread>
 
+#ifdef _WIN32
+#include "platform/console.hpp"
+#include "platform/dirs.hpp"
+#include "platform/error.hpp"
+#include "platform/file.hpp"
+#include "platform/self.hpp"
+#include "platform/socket.hpp"
+#include "platform/text.hpp"
+#include "platform/windows.hpp"
+#else
 #include <fcntl.h>
 #include <poll.h>
 #include <spawn.h>
@@ -28,6 +39,7 @@
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
+#endif
 
 namespace neura::service {
 
@@ -38,6 +50,49 @@ using cli::RuntimeError;
 
 // --- Signals ----------------------------------------------------------------------------
 
+#ifdef _WIN32
+// Console events become forwarded signals (W29): Ctrl+C is Int, Ctrl+Break
+// Term, and closing the console, logging off or shutting down Hup. The
+// handler writes the signal's protocol number to a socket pair that the wait
+// loop reads with the connection.
+platform::native_socket forward_reader = platform::invalid_socket;
+platform::native_socket forward_writer = platform::invalid_socket;
+// Set once a Hup was sent: the system ends this process when the handler of
+// such an event returns, so the handler waits for it first.
+HANDLE hangup_sent = nullptr;
+
+bool forward_event(platform::ConsoleEvent event) {
+    ForwardedSignal signal = ForwardedSignal::Hup;
+    if (event == platform::ConsoleEvent::ctrl_c) signal = ForwardedSignal::Int;
+    if (event == platform::ConsoleEvent::ctrl_break) signal = ForwardedSignal::Term;
+    const char byte = static_cast<char>(signal);
+    ::send(static_cast<SOCKET>(forward_writer), &byte, 1, 0);
+    if (signal == ForwardedSignal::Hup && hangup_sent != nullptr) ::WaitForSingleObject(hangup_sent, 3'000);
+    return true;
+}
+
+void install_forwarding() {
+    std::error_code error;
+    const auto pair = platform::socket_pair(error);
+    if (error) return;
+    platform::set_nonblocking(pair[0], true);
+    platform::set_nonblocking(pair[1], true);
+    forward_reader = pair[0];
+    forward_writer = pair[1];
+    hangup_sent = ::CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    platform::on_console_event(forward_event);
+}
+
+HANDLE handle_of(Descriptor descriptor) { return reinterpret_cast<HANDLE>(descriptor); }
+
+UniqueFd open_handle(const fs::path& path, DWORD access, DWORD disposition, DWORD flags = FILE_ATTRIBUTE_NORMAL) {
+    return UniqueFd(reinterpret_cast<Descriptor>(
+        ::CreateFileW(path.c_str(), access, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                      disposition, flags, nullptr)));
+}
+
+std::string last_message() { return platform::error_message(static_cast<int>(::GetLastError())); }
+#else
 int forward_pipe[2] = {-1, -1};
 
 extern "C" void forward_handler(int signal) {
@@ -66,6 +121,7 @@ void install_forwarding() {
         ::sigaction(number, &action, nullptr);
     }
 }
+#endif
 
 // --- The launch -------------------------------------------------------------------------
 
@@ -233,13 +289,18 @@ int run_with_service(const cli::Options& options, Clock::time_point client_start
     if (const auto option = unsupported_option(options)) {
         return not_run({*option + " is not supported by the service; run without --runtime", true, "unsupported-option"});
     }
+#ifdef _WIN32
+    const auto installation = installation_of(options.executable.empty() ? platform::executable_path()
+                                                                          : options.executable);
+#else
     const auto installation = installation_of(options.executable.empty() ? fs::path("/proc/self/exe")
                                                                           : options.executable);
+#endif
     if (installation.unmigrated) {
         throw RuntimeError("finish the 0.3.0 install first: run \"neura update --migrate-install\"", status_not_run);
     }
     std::error_code error;
-    if (!fs::exists(installation.bin / "neurad", error)) {
+    if (!fs::exists(installation.bin / tool::executable_file("neurad"), error)) {
         return not_run({"the service component is not installed; install Neura-runtime, or run without --runtime", true,
                         "not-installed"});
     }
@@ -248,6 +309,43 @@ int run_with_service(const cli::Options& options, Clock::time_point client_start
     // native executable. The supervisor reads them from a descriptor and
     // checks them against the digest.
     const auto& path = options.files.front();
+#ifdef _WIN32
+    UniqueFd file = open_handle(path, GENERIC_READ, OPEN_EXISTING);
+    if (!file) throw std::runtime_error("cannot read " + platform::utf8_path(path));
+    auto bytes = runner::read_file(path);
+    UniqueFd image_fd;
+    if (!cli::has_image_magic(bytes) && launcher::is_container(bytes)) {
+        // The image inside a native executable, in a temporary file that is
+        // removed when its last handle closes.
+        bytes = cli::image_bytes_of(std::move(bytes));
+        std::error_code ignored;
+        const auto directory = platform::temp_directory(ignored);
+        if (!ignored) {
+            image_fd = open_handle(directory / platform::unique_name("neura-image-"), GENERIC_READ | GENERIC_WRITE,
+                                   CREATE_NEW, FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE);
+        }
+        std::size_t done = 0;
+        while (image_fd && done < bytes.size()) {
+            DWORD count = 0;
+            const auto chunk = static_cast<DWORD>(std::min<std::size_t>(bytes.size() - done, 1 << 20));
+            if (!::WriteFile(handle_of(image_fd.get()), bytes.data() + done, chunk, &count, nullptr) || count == 0) break;
+            done += count;
+        }
+        if (done != bytes.size()) {
+            return not_run({"the image could not be staged for the service", true, "image-staging"});
+        }
+    } else {
+        image_fd = std::move(file);
+    }
+    const auto lifetime = detach ? Lifetime::Detached : Lifetime::Foreground;
+    Envelope envelope;
+    try {
+        envelope = make_envelope(options, bytes, lifetime, client_start);
+    } catch (const std::system_error&) {
+        return not_run({"the environment holds a variable that is not valid text, which the service cannot carry", true,
+                        "unsupported-option"});
+    }
+#else
     UniqueFd file(::open(path.c_str(), O_RDONLY | O_CLOEXEC));
     if (!file) throw std::runtime_error("cannot read " + path.string());
     auto bytes = runner::read_file(path);
@@ -273,6 +371,7 @@ int run_with_service(const cli::Options& options, Clock::time_point client_start
     }
     const auto lifetime = detach ? Lifetime::Detached : Lifetime::Foreground;
     const auto envelope = make_envelope(options, bytes, lifetime, client_start);
+#endif
     RequestId request{};
     random_bytes(request);
     Message prepare;
@@ -290,6 +389,23 @@ int run_with_service(const cli::Options& options, Clock::time_point client_start
     UniqueFd detached_out;
     UniqueFd detached_err;
     UniqueFd detached_in;
+#ifdef _WIN32
+    if (detach) {
+        // Append-only handles: every write lands at the end, as O_APPEND.
+        const auto open_output = [](const fs::path& file) {
+            auto fd = open_handle(file, FILE_APPEND_DATA | SYNCHRONIZE, OPEN_ALWAYS);
+            if (!fd) throw RuntimeError("cannot open " + platform::utf8_path(file) + ": " + last_message(), 1);
+            return fd;
+        };
+        detached_out = open_output(*options.detach_stdout);
+        detached_err = open_output(*options.detach_stderr);
+        const auto input_path = options.detach_stdin.value_or(fs::path(L"NUL"));
+        detached_in = open_handle(input_path, GENERIC_READ, OPEN_EXISTING);
+        if (!detached_in) {
+            throw RuntimeError("cannot open " + platform::utf8_path(input_path) + ": " + last_message(), 1);
+        }
+    }
+#else
     if (detach) {
         const auto open_output = [](const fs::path& file) {
             UniqueFd fd(::open(file.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0666));
@@ -304,6 +420,7 @@ int run_with_service(const cli::Options& options, Clock::time_point client_start
             throw RuntimeError("cannot open " + options.detach_stdin->string() + ": " + std::strerror(errno), 1);
         }
     }
+#endif
 
     Session session;
     try {
@@ -337,7 +454,8 @@ int run_with_service(const cli::Options& options, Clock::time_point client_start
         }
         return not_run({sentence + "; nothing was run (" + reason_text + ")", false, reason_text});
     };
-    const auto exchange = [&](Message& message, const std::vector<int>& fds, Millis wait) -> std::optional<Received> {
+    const auto exchange = [&](Message& message, const std::vector<Descriptor>& fds,
+                              Millis wait) -> std::optional<Received> {
         message.sequence = ++session.sequence;
         send_message(session.fd.get(), message, fds, Clock::now() + wait);
         return receive_message(session.fd.get(), Clock::now() + wait);
@@ -369,12 +487,27 @@ int run_with_service(const cli::Options& options, Clock::time_point client_start
     }
 
     // The commit: from here the launch is never run directly.
+#ifdef _WIN32
+    // The worker enters the directory by its path, which it reads from this
+    // handle (Windows cannot enter a directory by a handle).
+    UniqueFd cwd = open_handle(L".", FILE_READ_ATTRIBUTES, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS);
+    if (!cwd) throw RuntimeError("cannot open the working directory: " + last_message(), 1);
+    // A standard handle that this process lacks is NUL for the application.
+    std::vector<UniqueFd> missing;
+    const auto standard = [&](DWORD which) -> Descriptor {
+        const HANDLE handle = ::GetStdHandle(which);
+        if (handle != nullptr && handle != INVALID_HANDLE_VALUE) return reinterpret_cast<Descriptor>(handle);
+        missing.push_back(open_handle(L"NUL", which == STD_INPUT_HANDLE ? GENERIC_READ : GENERIC_WRITE, OPEN_EXISTING));
+        return missing.back().get();
+    };
+#else
     UniqueFd cwd(::open(".", O_RDONLY | O_CLOEXEC
 #ifdef O_DIRECTORY
                                  | O_DIRECTORY
 #endif
                         ));
     if (!cwd) throw RuntimeError(std::string("cannot open the working directory: ") + std::strerror(errno), 1);
+#endif
     if (!detach) install_forwarding();
     const auto request_text = hex(request);
     const auto unknown = [&](const std::string& id) -> int {
@@ -394,9 +527,16 @@ int run_with_service(const cli::Options& options, Clock::time_point client_start
     Message commit;
     commit.kind = Kind::Commit;
     commit.add(Tag::Token, prepared.get(Tag::Token)).add_u8(Tag::Descriptors, 4);
+#ifdef _WIN32
+    const std::vector<Descriptor> streams =
+        detach ? std::vector<Descriptor>{cwd.get(), detached_in.get(), detached_out.get(), detached_err.get()}
+               : std::vector<Descriptor>{cwd.get(), standard(STD_INPUT_HANDLE), standard(STD_OUTPUT_HANDLE),
+                                         standard(STD_ERROR_HANDLE)};
+#else
     const std::vector<int> streams = detach ? std::vector<int>{cwd.get(), detached_in.get(), detached_out.get(),
                                                                detached_err.get()}
                                             : std::vector<int>{cwd.get(), 0, 1, 2};
+#endif
     std::optional<Received> committed;
     try {
         commit.sequence = ++session.sequence;
@@ -447,6 +587,48 @@ int run_with_service(const cli::Options& options, Clock::time_point client_start
         // Wait for the outcome, forwarding signals.
         MessageReader reader;
         bool lost = false;
+#ifdef _WIN32
+        const bool forwarding = forward_reader != platform::invalid_socket;
+        while (!ended && !lost) {
+            platform::PollItem polled[2] = {{static_cast<platform::native_socket>(session.fd.get()), platform::poll_in, 0},
+                                            {forward_reader, platform::poll_in, 0}};
+            const int ready = platform::poll(std::span(polled, forwarding ? 2 : 1), -1);
+            if (ready < 0) {
+                if (platform::last_socket_error().interrupted()) continue;
+                lost = true;
+                break;
+            }
+            if (forwarding && polled[1].revents != 0) {
+                char signals[16];
+                const int count = ::recv(static_cast<SOCKET>(forward_reader), signals, sizeof signals, 0);
+                for (int i = 0; i < count; ++i) {
+                    Message signal;
+                    signal.kind = Kind::Signal;
+                    signal.sequence = ++session.sequence;
+                    signal.add(Tag::ApplicationId, application).add_u8(Tag::SignalNumber, static_cast<std::uint8_t>(signals[i]));
+                    try {
+                        send_message(session.fd.get(), signal, {}, Clock::now() + Millis(1000));
+                    } catch (const std::exception&) {
+                        lost = true;
+                    }
+                    if (signals[i] == static_cast<char>(ForwardedSignal::Hup)) ::SetEvent(hangup_sent);
+                }
+            }
+            if (polled[0].revents & (platform::poll_in | platform::poll_hangup | platform::poll_error)) {
+                try {
+                    if (!reader.fill(session.fd.get())) {
+                        lost = true;
+                        break;
+                    }
+                    while (auto message = reader.take()) {
+                        if (message->message.kind == Kind::Outcome) ended = ended_of(message->message);
+                    }
+                } catch (const std::exception&) {
+                    lost = true;
+                }
+            }
+        }
+#else
         while (!ended && !lost) {
             pollfd polled[2] = {{session.fd.get(), POLLIN, 0}, {forward_pipe[0], POLLIN, 0}};
             const int ready = ::poll(polled, forward_pipe[0] >= 0 ? 2 : 1, -1);
@@ -487,6 +669,7 @@ int run_with_service(const cli::Options& options, Clock::time_point client_start
                 }
             }
         }
+#endif
         if (!ended) {
             ended = poll_outcome(installation, request, epoch);
             if (!ended) return unknown(application);

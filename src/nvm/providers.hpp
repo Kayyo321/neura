@@ -52,7 +52,23 @@ inline constexpr std::uint32_t other = 100;
 
 // The code for an operating-system error number.
 std::uint32_t from_errno(int error);
+#ifdef _WIN32
+// The code for a Win32 error (GetLastError(), a DWORD) and for a Winsock
+// error (WSAGetLastError()), by the table of docs/runtime/NVM.md (W15). New
+// Windows code maps through these, never through errno. Winsock codes are
+// Win32 codes too: from_win32 passes the Winsock range (10000 to 11999) to
+// from_wsa, and from_wsa passes every other value to from_win32.
+std::uint32_t from_win32(unsigned long error);
+std::uint32_t from_wsa(int error);
+#endif
 } // namespace host_error
+
+// Whether a failed send() should be made again at once rather than reported.
+// EINTR means a signal interrupted it. On Apple systems the kernel can also
+// answer EPROTOTYPE for a stream whose peer is tearing the connection down,
+// a transient state after which the same call reports EPIPE or ECONNRESET;
+// libuv retries it for the same reason.
+bool retry_send(int error);
 
 // At most this many file IDs and this many socket IDs are open at once in a
 // run (Stdlib.md section 5.5).
@@ -112,6 +128,29 @@ std::string native_target_triple();
 // directory entry itself (remove, rename, make_directory). Returns the
 // components, or an error code: invalid_input for an empty path or one with a
 // NUL byte, other for more than 40 links.
+//
+// On Windows (W09) '/' and '\' both separate components, and the first
+// component is the root: a drive ("C:") or a UNC share ("//server/share").
+// The path may be absolute on a drive, root-relative (on the current
+// directory's drive or share), relative, or UNC text that starts with two
+// separators. "." and ".." are applied lexically first, as Windows opens a
+// path (GetFullPathNameW); then the longest prefix that exists is opened
+// (following links, junctions and short names) and replaced by its final
+// path (GetFinalPathNameByHandleW), and the rest is appended as given; with
+// `follow_last` false the final component is appended unresolved. Refused
+// with invalid_input: a drive-relative "X:name", a ':' inside a component
+// (alternate data streams), a reserved device name (CON, PRN, AUX, NUL, COM1
+// to COM9, LPT1 to LPT9, CONIN$, CONOUT$, with or without an extension or
+// trailing spaces, and COM and LPT with a superscript digit, which Windows
+// also treats as devices), a component that ends in a dot or a space, the
+// characters <>"|?* and control characters, and the device namespaces
+// "\\?\" and "\\.\". A link or junction that exists but whose target does
+// not answers not_found, since its target cannot be resolved to check it
+// against a prefix; a link loop answers other; a component that exists but
+// cannot be opened answers the code of that failure (from_win32); a final
+// name that is not valid UTF-16 answers unsupported. text() is the generic
+// form ("C:/a/b", "C:/" for a drive root, "//server/share/a"), and within()
+// compares components ordinally without case (CompareStringOrdinal).
 struct ResolvedPath {
     std::vector<std::string> components;
     std::uint32_t error = 0;
@@ -136,19 +175,56 @@ public:
     // none. When it is readable, read() does not block, so an overlapping
     // read can wait for it.
     virtual int descriptor() const { return -1; }
+#ifdef _WIN32
+    // The Win32 HANDLE that read() takes its bytes from (a console, a pipe or
+    // a file), or nullptr when it has none. An overlapping read waits for a
+    // console handle and polls a pipe (W17).
+    virtual void* handle() const { return nullptr; }
+    // Whether read() holds bytes it took from the handle and has not returned
+    // yet, so the next read() returns them without blocking.
+    virtual bool buffered() const { return false; }
+#endif
 };
 
 // Reads a file descriptor, normally standard input.
+//
+// On Windows the descriptor is a C runtime descriptor whose handle is read
+// (W17). A real console is read with ReadConsoleW and converted to UTF-8: a
+// surrogate pair split between two reads is joined, and an unpaired
+// surrogate becomes U+FFFD. In line-input mode (the console's default) a
+// read returns once Enter is pressed, the whole line is taken from the
+// console at once (what does not fit in `max` is returned by the next reads),
+// its "\r\n" is delivered as "\n" as a POSIX terminal delivers it, and
+// Ctrl+Z at the start of a line is the end of input (the rest of that line
+// is discarded; a later read waits for more input, as after Ctrl+D on a
+// POSIX terminal). Pipes and files are read with ReadFile, and a broken pipe
+// is the end of input. A descriptor without a handle answers other (100), as
+// a closed descriptor does on POSIX.
 class DescriptorSource final : public ConsoleSource {
 public:
     explicit DescriptorSource(int descriptor) : descriptor_(descriptor) {}
     Read read(std::size_t max) override;
 #ifndef _WIN32
     int descriptor() const override { return descriptor_; }
+#else
+    void* handle() const override;
+    bool buffered() const override { return !pending_.empty(); }
 #endif
 
 private:
     int descriptor_;
+#ifdef _WIN32
+    // Reads console input into pending_ until it holds at least one byte or
+    // the end of input; returns an error code, or 0.
+    std::uint32_t read_console(void* console, bool& end);
+
+    // Console text read but not yet returned (UTF-8), and a high surrogate
+    // that ended the last read and waits for its pair.
+    std::string pending_;
+    wchar_t high_surrogate_ = 0;
+    // Whether the next console text starts a line (for Ctrl+Z).
+    bool line_start_ = true;
+#endif
 };
 
 // Serves fixed input, `chunk` bytes at most per read.

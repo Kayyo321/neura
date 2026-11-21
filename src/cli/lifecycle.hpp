@@ -44,7 +44,8 @@ struct UpdateOptions {
     // version's own release otherwise.
     bool source_given = false;
     bool require_attestation = false;
-    // --install-from <dir>, which install.sh runs, and --add <dir>.
+    // --install-from <dir>, which install.sh (install.ps1 on Windows) runs,
+    // and --add <dir>.
     std::string install_from;
     std::string add;
     bool force = false;

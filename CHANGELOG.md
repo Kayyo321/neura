@@ -21,6 +21,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ### Added
 
+- Native Windows x86-64 SDK and runtime archives (`x86_64-windows-msvc`) for Windows 10 version 2004 or later, Windows 11, and Windows Server 2022 or later. The PowerShell installer installs per user, and `neura doctor`, `update`, and `uninstall` manage native archive installs. Native `neurad` runs `.nvr` images, and `neura-server-host` serves HTTP/1.1 with SQLite. See [Windows installation](docs/Install.md#windows-installation).
 - Project packages are separated: an import of a module of a package outside the importer's `depends` closure is `E1030` in `neura build --target`, and `neura check` of a file inside a project uses its package's import roots and the same rule without `-I`.
 - `neura dev --target <name> [--port <n>]` (the `neura-dev` tool): builds into `dist/dev/<target>`, serves a web bundle on `127.0.0.1:4310` with reload and in-place stylesheet swaps, or runs and restarts the server or desktop host, and reaps everything it started on an interrupt, a hangup or the end of input ([Developing](docs/apps/Projects.md#developing)).
 - `neura package --target <server|desktop>` (the `neura-package` tool): a reproducible `.tar.gz` of a server bundle with `neura-run`, `neura-server-host` and the core library, whose `run` script verifies the bundle at every start, or a desktop `.tar.gz`/`.deb` through the desktop packager; refuses `.dmg`, `.msix`, `--sign` and web targets (`E1033`) and `neura dev` bundles (`E1029`).
@@ -181,6 +182,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ### Changed
 
+- `Std.Fs.Path` treats a drive root, an ASCII letter followed by `:/` such as `C:/`, as an absolute root on every host, so on Linux and macOS too `Path.of("C:/x").is_absolute` holds and `join`, `parent`, `components`, `starts_with` and `relative_to` keep the drive root. A relative path that begins with a drive-shaped component keeps a leading `./` when more components follow (`./C:/x`). Roots compare by their bytes, `\` stays an ordinary character, and UNC roots are not modelled ([Std.Fs](docs/lang/Stdlib.md#112-stdfs)).
 - A range literal used directly as a for-each source, `for (let i in 0 .. n)` with `..` or `..=` and any step, is counted without building the range, so it allocates nothing and no longer needs stack cells for every element or fails for want of them; its elements, evaluation order and failures (a zero step, an over-long range) are unchanged ([Core language](docs/lang/CoreLanguage.md#loops)). A generator may now `yield` inside such a loop, which was `E0477` because the built range could not survive the `yield`. Images of such loops change; other images are byte-identical.
 - The tags `#SerialName`, `#Skip` and `#Sensitive` are informational instead of reserved: `Std.Reflect.Codec` reads them (`derive json.Codec` does not), and a program that writes them is no longer rejected with `E0908`.
 - A scope-bound value, a `Task<T>` or a `Scope`, is no longer converted to `class`, to an interface or to `any`, by assignment, an argument, `as`, or an untyped variadic argument: `E0605` ([Types](docs/lang/Types.md#scope-bound-types)). No source in the repository did so.
@@ -250,6 +252,8 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - A local copied from another local or a parameter (`let value = current;`) could read the source's later value when the source was assigned later in the same block and the copy was then used across an operation that ends the block: captured by a `new func` (a copied tuple too), passed to a constructor or a virtual method, or passed to a call before an argument that is itself a call. A `while` loop that ran `let value = current; current = current + 1; actions.append(new func() -> int => value);` made closures that returned 1 and 2 instead of 0 and 1, with and without `--no-optimize`. Earlier releases have the same defect. IRtoNeuronConversion now copies such a value to a slot of its own before the block ends; programs without this pattern keep their images.
 
 ### Known issues
+
+- Windows 0.3.0 runs images on the interpreter. The JIT, `neura build --native`, desktop hosting, server TLS and HTTP/2, `Std.Net.Tls`, PostgreSQL, and linking C imports are deferred to 0.3.1. The Windows executables, DLLs and installers ship unsigned. SmartScreen may warn and Smart App Control may block execution. See [native Windows scope](docs/design/Windows030.md#out-of-scope).
 
 Performance against 0.2.1-rc.3 (x86-64 Linux, `scripts/bench-wall.py --long`, median of 5 runs on the same machine; the 0.3.0 gates of [the baseline](docs/design/Release030.md#performance-gate) for these items are waived for this release):
 

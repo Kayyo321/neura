@@ -8,6 +8,7 @@
 // links only this.
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <ostream>
@@ -63,7 +64,8 @@ void usage(std::ostream& out);
 std::string executable_file(std::string_view name);
 
 // The real path of the running executable: /proc/self/exe on Linux, the
-// loader's path on macOS, else `launch` resolved against PATH.
+// loader's path on macOS, the module's final path on Windows
+// (platform::executable_path), else `launch` resolved against PATH.
 std::filesystem::path executable_path(const std::filesystem::path& launch);
 
 // The argument `neura` puts first when it starts a tool.
@@ -71,7 +73,12 @@ inline constexpr std::string_view dispatch_prefix = "--neura-dispatch=";
 std::string dispatch_token();
 
 // A tool's start: strips the dispatch token, checks that it names this
-// build, and answers `--help` and `--version` given alone. The result holds
+// build, and answers `--help` and `--version` given alone. On Windows it
+// first sets up the process as every tool needs it (W10): no error dialogs,
+// binary standard streams, UTF-8 console output, DLL loads from the system
+// directories only, exit statuses 130, 131 and 129 for console events that
+// no handler of the tool takes, and Windows 10 version 2004 or later (W03).
+// The result holds
 // an exit status when the tool must stop, else the argument vector of the
 // command, whose element 1 is always one of the tool's command words.
 struct Start {
@@ -80,19 +87,38 @@ struct Start {
 };
 Start start(const Tool& tool, int argc, char** argv);
 
-// The descriptor of the shared lease this process holds on its installed
-// generation (docs/design/Lifecycle030.md, "Generations in use"), or -1.
-int lease_descriptor();
+// A lease: a file descriptor on POSIX, a HANDLE value on Windows (which
+// never collides with -1, INVALID_HANDLE_VALUE).
+#ifdef _WIN32
+using LeaseHandle = std::intptr_t;
+#else
+using LeaseHandle = int;
+#endif
+inline constexpr LeaseHandle no_lease = -1;
+
+// The handle of the shared lease this process holds on its installed
+// generation (docs/design/Lifecycle030.md, "Generations in use"), or
+// no_lease.
+LeaseHandle lease_descriptor();
 
 // Takes the shared lease of the generation that holds `executable`, the
 // real path of the running executable, when it is
-// <root>/versions/<generation>/bin/<tool>: a shared flock, not waited for,
-// on <root>/leases/<generation>, close-on-exec. Returns the descriptor, or
-// -1 when the process runs without a lease (not an installed generation, a
+// <root>/versions/<generation>/bin/<tool>: a shared lock on
+// <root>/leases/<generation>, not inherited by children; a lock held
+// exclusively is waited for. POSIX locks with flock on a close-on-exec
+// descriptor; Windows with LockFileEx over the whole file on a
+// non-inheritable handle opened with FILE_SHARE_READ | FILE_SHARE_WRITE |
+// FILE_SHARE_DELETE. Returns the handle, which the caller owns, or no_lease
+// when the process runs without a lease (not an installed generation, a
 // root without leases/ that a 0.2 client made, or a file system that cannot
 // lock). Sets `removed` when the generation was removed or is being
-// removed, which the caller reports. POSIX only; -1 on Windows.
+// removed, which the caller reports.
+LeaseHandle take_lease(const std::filesystem::path& executable, bool& removed);
+#ifndef _WIN32
+// The same for a path in a C string, which the dispatcher uses so that it
+// needs no std::filesystem code.
 int take_lease(const char* executable, bool& removed);
+#endif
 
 // The message for `removed`.
 inline constexpr const char* removed_generation_message = "neura: this generation of neura was removed; run the command again\n";

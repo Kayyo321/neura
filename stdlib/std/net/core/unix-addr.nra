@@ -6,11 +6,13 @@ let.promote _ = import:Std.Core.Result;
 /// @brief Unix-domain socket addresses: a filesystem path, or a name in the Linux abstract namespace
 /// (unix(7)).
 ///
-/// On Linux `sockaddr_un.sun_path` is 108 bytes. A path may hold at most 107 bytes, leaving room for the
-/// terminating NUL, and may not contain NUL. An abstract name is stored in `sun_path` after a leading NUL
-/// byte, so it may hold at most 107 bytes; this type keeps the name without that NUL and writes it `@name`
-/// (the `ss` and `systemd` convention). The abstract namespace is Linux-only: on other systems a runtime
-/// reports it as unsupported when the address is used. Both kinds must be non-empty here; the empty
+/// On Linux `sockaddr_un.sun_path` is 108 bytes, as it is on Windows. A path may hold at most 107 bytes, leaving
+/// room for the terminating NUL, and may not contain NUL. An abstract name is stored in `sun_path` after a
+/// leading NUL byte, so it may hold at most 107 bytes; this type keeps the name without that NUL and writes it
+/// `@name` (the `ss` and `systemd` convention). The abstract namespace is Linux-only: on other systems a runtime
+/// reports it as unsupported when the address is used. Windows serves Unix-domain streams and listeners at a
+/// path but no Unix-domain datagram sockets, which fail with Unsupported there for any address. The address
+/// itself is the same value on every host. Both kinds must be non-empty here; the empty
 /// abstract name (Linux autobind) is not modelled. A `UnixAddr` is an immutable class, so each value is one
 /// heap object; this runtime does not provide zero-allocation value types.
 /// @see [Std.Net.Core.UnixAddr](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Core-UnixAddr)

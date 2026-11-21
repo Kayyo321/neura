@@ -121,6 +121,7 @@ REPOSITORY_ONLY = (
     "docs/design/Reflect030.md",
     "docs/design/Standalone.md",
     "docs/design/Stdlib.md",
+    "docs/design/Windows030.md",
 )
 
 # Docs pages matched by these patterns have no wiki page either. The explain page of each diagnostic

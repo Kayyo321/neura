@@ -21,7 +21,9 @@ jobs:
   linux-arm64:
     name: Build and test (Linux arm64)
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 60
+    # Without the x86-64 JIT the suite takes over two hours on this runner,
+    # as in release.yml (docs/ContinuousIntegration.md, "Time limits").
+    timeout-minutes: 360
     env:
       CC: gcc-14
       CXX: g++-14
@@ -48,7 +50,7 @@ jobs:
           ldd --version | head -1
 
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNEURA_TEST_TIMEOUT_SCALE=12
 
       - name: Build
         run: cmake --build build --parallel "$(nproc)" 2>&1 | tee build/build.log
@@ -76,15 +78,21 @@ jobs:
   macos:
     name: Build and test (macOS ${{ matrix.architecture }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
+    # Without the x86-64 JIT the suite takes hours on these runners. The
+    # time-limit scale and the crypto suites the Intel runner leaves to the
+    # other targets follow release.yml (docs/ContinuousIntegration.md, "Time
+    # limits" and "Tests that run on fewer targets").
+    timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:
         include:
           - architecture: arm64
             runner: macos-15
+            exclude: "^$"
           - architecture: x86-64
             runner: macos-15-intel
+            exclude: "^(stdlib-crypto-advanced|stdlib-crypto-asymmetric|stdlib-crypto-pqc(-.*)?)$"
     env:
       NEURA_LIBCLANG_REQUIRED: "1"
       HOMEBREW_NO_AUTO_UPDATE: "1"
@@ -110,17 +118,19 @@ jobs:
           xcode-select --print-path
 
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNEURA_TEST_TIMEOUT_SCALE=12
 
       - name: Build
         run: cmake --build build --parallel "$(sysctl -n hw.ncpu)" 2>&1 | tee build/build.log
 
       - name: Test
+        env:
+          EXCLUDE: ${{ matrix.exclude }}
         run: >
           ctest --test-dir build --parallel "$(sysctl -n hw.ncpu)" --no-tests=error
-          --output-on-failure --output-junit ctest-junit.xml
+          --output-on-failure --output-junit ctest-junit.xml -E "$EXCLUDE"
 
-      # 171 = the 177 tests Tier 1 requires on Linux without a GPU, less the 6
+      # 174 = the historical 180-test floor on Linux without a GPU, less the 6
       # that need the Linux native launcher (native-build, native-run,
       # native-container, native-policy, native-install, native-c-import).
       - name: Require every test to have run
@@ -139,20 +149,24 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-  # The tests are split into two shards by CTest number, each built and run
-  # by its own job: run as one job they no longer fit its time limit.
+  # The tests are split into six shards by CTest number, each built and run
+  # by its own job: in two shards the 0.3.0 suite no longer fit the time
+  # limits.
   sanitizers:
-    name: Address and undefined-behavior sanitizers (Linux x86-64, shard ${{ matrix.shard }} of 2)
+    name: Address and undefined-behavior sanitizers (Linux x86-64, shard ${{ matrix.shard }} of 6)
     runs-on: ubuntu-24.04
-    timeout-minutes: 330
+    timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3, 4, 5, 6]
     env:
       CC: gcc-14
       CXX: g++-14
       NEURA_LIBCLANG_REQUIRED: "1"
+      # Tells the suites with a latency limit of their own that the build is
+      # sanitized (tests/server/server_host_test.py).
+      NEURA_TEST_SANITIZERS: "1"
       ASAN_OPTIONS: detect_leaks=1:strict_string_checks=1:abort_on_error=0
       UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
     steps:
@@ -169,17 +183,21 @@ jobs:
             gcc-14 g++-14 libffi-dev libclang1-19 libclang-common-19-dev
 
       # A static executable cannot carry the sanitizer runtime, so the static
-      # launcher is left out of this configuration. backend-reference and
-      # decompiler-behavior each ran for more than their usual limit of an hour
-      # here without a sanitizer report, so each gets three hours. program-fuzz
-      # gets two hours instead of ten minutes, for the same reason.
+      # launcher and the static dispatcher are left out of this configuration.
+      # Every time limit is multiplied by 6: at the usual limits 28 tests of
+      # the 0.3.0 suite ran out of time here without a sanitizer report. With
+      # the scale, backend-reference gets 5.5 hours (it ran for more than 3),
+      # decompiler-behavior 3 hours (it took 2.6) and program-fuzz 2 hours
+      # (it took 1).
       - name: Configure
         run: >
           cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
           -DNEURA_STATIC_LAUNCHER=OFF
-          -DNEURA_REFERENCE_TEST_TIMEOUT=10800
-          -DNEURA_DECOMPILER_BEHAVIOR_TEST_TIMEOUT=10800
-          -DNEURA_PROGRAM_FUZZ_TEST_TIMEOUT=7200
+          -DNEURA_STATIC_DISPATCHER=OFF
+          -DNEURA_TEST_TIMEOUT_SCALE=6
+          -DNEURA_REFERENCE_TEST_TIMEOUT=3300
+          -DNEURA_DECOMPILER_BEHAVIOR_TEST_TIMEOUT=1800
+          -DNEURA_PROGRAM_FUZZ_TEST_TIMEOUT=1200
           "-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
           "-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
           "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined"
@@ -203,16 +221,15 @@ jobs:
       # Under AddressSanitizer the NVM heap takes every entry from operator
       # new, which makes the tests that run many programs several times slower
       # than in a Release build: backend-placement and decompiler-lift each ran
-      # for more than an hour. A test without a limit of its own gets three
-      # hours.
+      # for more than an hour.
       #
-      # -I takes every second test, starting at the shard's number.
+      # -I takes every sixth test, starting at the shard's number.
       - name: Test
         run: |
           ulimit -s 1048576
           ctest --test-dir build --parallel "$(nproc)" --no-tests=error \
-            --output-on-failure --output-junit ctest-junit.xml --timeout 10800 \
-            -I "${{ matrix.shard }},,2" -E "^(native-install|native-container)$"
+            --output-on-failure --output-junit ctest-junit.xml \
+            -I "${{ matrix.shard }},,6" -E "^(native-install|native-container)$"
 
       - name: Upload the build log and the test report
         if: ${{ !cancelled() }}
@@ -223,5 +240,56 @@ jobs:
             build/build.log
             build/ctest-junit.xml
             build/Testing/Temporary/LastTest.log
+          if-no-files-found: warn
+          retention-days: 30
+
+  windows:
+    name: Build and test (Windows ${{ matrix.preset }})
+    runs-on: windows-2022
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [windows-msvc, windows-clang-cl]
+    steps:
+      - name: Keep LF line endings before checkout
+        shell: pwsh
+        run: git config --global core.autocrlf false
+      - name: Check out the repository and its submodule
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+      - name: Select the Windows build environment
+        uses: ./.github/actions/windows
+      - name: Configure
+        run: cmake --preset '${{ matrix.preset }}' -DNEURA_TEST_TIMEOUT_SCALE=12
+      - name: Build
+        run: cmake --build --preset '${{ matrix.preset }}' --parallel 4 2>&1 | tee build-${{ matrix.preset }}/build.log
+      - name: Require an MSVC build without Neura compiler warnings
+        if: ${{ matrix.preset == 'windows-msvc' }}
+        shell: pwsh
+        run: ./.github/scripts/check-msvc-warnings.ps1 build-windows-msvc/build.log
+      - name: Check the PE layout and execution-core closure
+        run: |
+          python scripts/check-windows-binaries.py build-${{ matrix.preset }}
+          python scripts/check-core-closure.py build-${{ matrix.preset }}
+          sh scripts/check-kernels.sh build-${{ matrix.preset }}
+      - name: Test
+        run: >
+          ctest --test-dir build-${{ matrix.preset }} --parallel 6 --no-tests=error
+          --output-on-failure --output-junit ctest-junit.xml
+      - name: Require every registered test to have run
+        if: ${{ !cancelled() }}
+        run: python scripts/check-test-report.py build-${{ matrix.preset }}/ctest-junit.xml --minimum 328
+      - name: Upload the build and test evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tier2-${{ matrix.preset }}
+          path: |
+            build-${{ matrix.preset }}/build.log
+            build-${{ matrix.preset }}/ctest-junit.xml
+            build-${{ matrix.preset }}/Testing/Temporary/LastTest.log
           if-no-files-found: warn
           retention-days: 30

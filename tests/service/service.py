@@ -1631,6 +1631,10 @@ SUITES = {
 
 
 def main() -> int:
+    if sys.platform == "win32":
+        # The Windows form of the service (docs/design/Windows030.md, W29).
+        import windows
+        return windows.main()
     if len(sys.argv) < 3 or sys.argv[1] not in SUITES:
         print(__doc__)
         return 2

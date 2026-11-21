@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -962,7 +963,7 @@ private:
             if (total > n) return false;
             auto taken = clobbers;
             for (const auto r : fixed_regs) taken |= bit(r);
-            if (temps > n - static_cast<std::uint32_t>(__builtin_popcountll(taken))) return false;
+            if (temps > n - static_cast<std::uint32_t>(std::popcount(taken))) return false;
         }
         return true;
     }

@@ -2,6 +2,7 @@
 // (docs/design/Service030.md, "Launch envelope").
 
 #include "service.hpp"
+#include "platform/text.hpp"
 
 #include "util/sha256.hpp"
 
@@ -9,8 +10,12 @@
 #include <cerrno>
 #include <cstring>
 
+#ifdef _WIN32
+#include "platform/windows.hpp"
+#else
 #include <sys/resource.h>
 #include <unistd.h>
+#endif
 
 namespace neura::service {
 
@@ -75,9 +80,13 @@ Envelope make_envelope(const cli::Options& options, std::span<const std::uint8_t
     digest.update(bytes);
     envelope.digest = digest.finish();
     envelope.image_size = bytes.size();
+#ifdef _WIN32
+    envelope.image_path = platform::utf8_path(options.files.front());
+#else
     envelope.image_path = options.files.front().string();
+#endif
     envelope.arguments = options.arguments;
-    for (char** entry = process_environment(); entry && *entry; ++entry) envelope.environment.emplace_back(*entry);
+    envelope.environment = environment_entries();
     for (const auto name : mode_variables) {
         for (const auto& entry : envelope.environment) {
             if (entry.size() > name.size() && entry.compare(0, name.size(), name) == 0 && entry[name.size()] == '=') {
@@ -115,7 +124,7 @@ Envelope make_envelope(const cli::Options& options, std::span<const std::uint8_t
     if (options.trace_wall_time) envelope.flags.emplace_back("trace-wall-time");
     if (options.virtual_time) envelope.flags.emplace_back("virtual-time");
     envelope.task_dump = !options.task_dump ? 0 : *options.task_dump == nvm::TaskDumpFormat::Text ? 1 : 2;
-    if (options.trace_events) envelope.trace_events = options.trace_events->string();
+    if (options.trace_events) envelope.trace_events = platform::utf8_path(*options.trace_events);
     capture_process_settings(envelope);
     envelope.lifetime = lifetime;
     envelope.client_clock = clock_ns(client_start);
@@ -125,7 +134,7 @@ Envelope make_envelope(const cli::Options& options, std::span<const std::uint8_t
 cli::Options options_of(const Envelope& envelope) {
     cli::Options options;
     options.command = cli::Command::Run;
-    options.files = {fs::path(envelope.image_path)};
+    options.files = {platform::path_from_utf8(envelope.image_path)};
     options.arguments = envelope.arguments;
     auto& policy = options.capabilities;
     policy.fs = envelope.fs;
@@ -161,13 +170,29 @@ cli::Options options_of(const Envelope& envelope) {
     options.virtual_time = envelope.flag("virtual-time");
     if (envelope.task_dump == 1) options.task_dump = nvm::TaskDumpFormat::Text;
     if (envelope.task_dump == 2) options.task_dump = nvm::TaskDumpFormat::Json;
-    if (envelope.trace_events) options.trace_events = fs::path(*envelope.trace_events);
+    if (envelope.trace_events) options.trace_events = platform::path_from_utf8(*envelope.trace_events);
     // The service runs no graph device (unsupported_option).
     options.gpu = {};
     options.gpu.mode = cli::GpuMode::Off;
     return options;
 }
 
+#ifdef _WIN32
+Reuse reuse(const Envelope& envelope, const std::vector<std::string>& worker_environment) {
+    Reuse result;
+    result.warm = loader_variables(envelope.environment) == loader_variables(worker_environment);
+    if (!result.warm) result.reason = "the loader or allocator variables differ";
+    // The priority class stands in for the nice value (W29): a worker sets
+    // the caller's class on itself, but the realtime class needs a privilege
+    // that the service may not hold.
+    const auto own = ::GetPriorityClass(::GetCurrentProcess());
+    if (envelope.nice == REALTIME_PRIORITY_CLASS && own != REALTIME_PRIORITY_CLASS) {
+        result.fresh_possible = false;
+        result.reason = "the caller's priority class (realtime) is above the service's";
+    }
+    return result;
+}
+#else
 Reuse reuse(const Envelope& envelope, const std::vector<std::string>& worker_environment) {
     Reuse result;
     result.warm = loader_variables(envelope.environment) == loader_variables(worker_environment);
@@ -198,5 +223,6 @@ Reuse reuse(const Envelope& envelope, const std::vector<std::string>& worker_env
     }
     return result;
 }
+#endif
 
 } // namespace neura::service

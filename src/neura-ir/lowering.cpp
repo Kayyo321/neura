@@ -1422,18 +1422,22 @@ Substitution Lowering::type_arguments(const std::vector<SymbolId>& params,
         result.emplace(params[i], std::move(actual));
     }
     for (std::size_t i = 0; i < args.size(); ++i) {
-        const auto& parameter = symbol(params[i]);
+        // Copies, not references into program_.symbols: checking a bound by
+        // conformance can add symbols, which reallocates the table.
+        const auto name = symbol(params[i]).name;
+        const auto declared_bound = symbol(params[i]).bound;
+        const auto additional_bounds = symbol(params[i]).additional_bounds;
         const auto check = [&](const IrType& declared) {
             const auto bound = substitute(declared, result);
             const auto& actual = result.at(params[i]);
             if (!assignable(actual, bound) && !satisfies_by_conformance(actual, bound, args[i].span, context)) {
                 throw Diagnostic(args[i].span, "type argument " + describe(actual) + " does not satisfy the bound " +
-                                               describe(bound) + " of type parameter '" + parameter.name + "'")
+                                               describe(bound) + " of type parameter '" + name + "'")
                     .with_code("E0418");
             }
         };
-        if (parameter.bound) check(*parameter.bound);
-        for (const auto& bound : parameter.additional_bounds) check(bound);
+        if (declared_bound) check(*declared_bound);
+        for (const auto& bound : additional_bounds) check(bound);
     }
     return result;
 }

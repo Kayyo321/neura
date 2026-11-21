@@ -18,6 +18,10 @@
 
 namespace neura::app {
 
+#ifdef _WIN32
+inline constexpr char windows_desktop_unavailable[] = "the desktop host is unavailable on Windows in Neura 0.3.0";
+#endif
+
 namespace fs = std::filesystem;
 
 struct Project {
@@ -82,7 +86,17 @@ fs::path tool_directory();
 
 void print_diagnostic(std::ostream& err, const Diagnostic& diagnostic);
 
-// Runs a program and waits for it. Returns its exit status, 128 + signal.
+// A path as an argument for another process: UTF-8 in the native form of
+// this system.
+std::string argument_path(const fs::path& path);
+
+// A path as the tools show it in a message: path.string() on POSIX, so the
+// text is the one given, and UTF-8 in generic form ('/') on Windows (W09).
+std::string display_path(const fs::path& path);
+
+// Runs a program and waits for it, in `directory` when given. Returns its
+// exit status, 128 + signal (on Windows the exit code, or the NTSTATUS of a
+// crash; the child runs in a job that ends with this process).
 int spawn_and_wait(const std::vector<std::string>& arguments, const std::optional<fs::path>& directory = std::nullopt);
 
 // `neura run <bundle directory> [-- arguments]`: validate, then run a server

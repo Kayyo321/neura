@@ -79,7 +79,7 @@ export let Native = module (
         }
     };
 
-    /// @brief The runner's target triple, such as `x86_64-linux-gnu`.
+    /// @brief The runner's target triple, such as `x86_64-linux-gnu` or `x86_64-windows-msvc`.
     export let triple = func -> string {
         load_abi();
         return abi_triple;

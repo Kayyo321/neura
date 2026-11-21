@@ -20,9 +20,13 @@ A `v*` tag cannot be moved or deleted ([repository settings](RepositorySettings.
 | Job | What it does |
 | --- | --- |
 | Check the tag | The tag has one of the two forms above, names the version in `VERSION`, and points at a commit on `main`. A final tag also needs a dated `## [<VERSION>]` section in `CHANGELOG.md`. |
-| Build and test, once for each target | Builds the server components (OpenSSL, nghttp2 and libpq) with [`packaging/build-server-components.sh`](../packaging/build-server-components.sh) from the sources [the server component lock](../packaging/server-components.lock.toml) pins, each checked against its SHA-256, and builds from the tagged commit with `NEURA_PORTABLE_RELEASE=ON`, TLS, HTTP/2 and the PostgreSQL provider ([server host](runtime/ServerHost.md#release-archives)). Fails when the build links an OpenSSL or nghttp2 other than those, when a tool or library exports a function of the server components, on a compiler warning in Neura's sources, on a failed, skipped, or missing test, on a file in `bin/`, a library in `lib/neura` or a launcher that needs a library other than the C library and the tools' own `libneura-core` and `libneura-sdk`, or a glibc newer than 2.39, or when `neura --version` does not report the tag's version, target, and commit. The dependency checks cover every executable of the three archives, the service component's included. Installs each install component (`core`, `sdk`, `service`) into its own prefix and packs the three archives of the target ([Install](Install.md#install-from-a-release-archive)): `neura-sdk-<version>-<target>.tar.gz`, `neura-runtime-<version>-<target>.tar.gz`, and the legacy `neura-<version>-<target>.tar.gz`, each with its component manifests, and reports the stripped size of every executable and library. |
-| Qualify the archives, once for each target | On a new runner that has built nothing, downloads the archives of the previous release and the published `v0.2.1-rc.3` and `v0.2.0` archives (checked against their `SHA256SUMS`), and runs [`packaging/qualify.sh`](../packaging/qualify.sh) on the three archives with an empty environment and new home directories. |
-| Publish | Runs in the protected `release` environment after a maintainer approves it. Writes `SHA256SUMS`, `neura-release.txt` (schema 1, the legacy archives, for 0.2 clients) and `neura-components.txt` (the SDK and runtime archives), attests the build provenance of each file, creates the release, then downloads the release's files again and checks them against the checksums, the built files, and the attestations. For a release candidate it then runs the documented [one-line install command](Install.md#install-with-one-command) against the published candidate and checks that the installed `neura` reports the tagged version and commit. |
+| Build and test (Linux and macOS) | Builds the pinned server components with [`packaging/build-server-components.sh`](../packaging/build-server-components.sh), configures with `NEURA_PORTABLE_RELEASE=ON`, TLS, HTTP/2 and PostgreSQL, and checks warnings, tests, runtime dependencies, and the version, target and commit. It installs `core`, `sdk` and `service` into separate prefixes, packs the [three archives](Install.md#install-from-a-release-archive), and reports stripped tool and library sizes. |
+| Build and test (Windows x86-64) | Uses `windows-release` on `windows-2022`. Checks Neura's compiler warnings, CTest results, DLL exports and dependencies, static CRT linkage and the version, target and commit. Packages `neura-sdk-<version>-x86_64-windows-msvc.tar.gz` and `neura-runtime-<version>-x86_64-windows-msvc.tar.gz`, with component manifests and PowerShell and Command Prompt installers. |
+| Qualify the archives (Linux and macOS) | A fresh runner verifies earlier archives against `SHA256SUMS` and runs [`packaging/qualify.sh`](../packaging/qualify.sh) with an empty environment and new home directories. |
+| Qualify the archives (Windows x86-64) | A fresh `windows-2022` runner runs [`packaging/qualify.py`](../packaging/qualify.py) on the two Windows archives. It checks the native installer, junction layout, installed SDK and runtime, and Windows archive sizes against the corresponding x86-64 Linux archives from the same build. |
+| Cross-host image identity | Compares SHA-256 across the x86-64 Linux and Windows archives for three example programs built with `--no-source-map`. |
+| Publish | Runs in the protected `release` environment after a maintainer approves it. Writes `SHA256SUMS`, `neura-release.txt` (schema 1, legacy archives for 0.2 clients) and `neura-components.txt` (SDK and runtime archives, including Windows). It attests the archives, `install.sh`, and `install.ps1`, creates the release, and checks its downloads. For a candidate it runs the [one-line shell install](Install.md#install-with-one-command) on Linux and checks the installed version and commit. |
+| Install the published candidate (Windows) | After candidate publication, runs the [PowerShell installer](Install.md#windows-installation) on `windows-2022` with `-NoPathUpdate` and checks the attestation, exact version and commit, and `neura doctor`. |
 
 The qualification script runs fifteen checks and prints `PASS`, `FAIL`, or `NOT RUN` for each:
 
@@ -42,6 +46,8 @@ The qualification script runs fifteen checks and prints `PASS`, `FAIL`, or `NOT 
 14. The size report, and the budget of [the 0.3.0 baseline](design/Release030.md): the SDK and legacy archives are at most a per-target percentage larger than rc.3's archive of the target (165% on x86-64 Linux, 200% on arm64 Linux, 295% on arm64 macOS, 265% on x86-64 macOS; the statically linked TLS, HTTP/2 and PostgreSQL libraries are most of the growth), and the runtime archive is smaller than the SDK archive. A target without a budget fails the check.
 15. The installed `neura-server-host` serves the example `examples/server/hello-server.nra` over HTTPS with HTTP/2 chosen by ALPN and over h2c with prior knowledge, checked with `curl`, and refuses a `postgresql://` pool on a closed port for its connection rather than for a missing provider.
 
+Windows uses `install.ps1` or `install.cmd` and the `current` junction for the lifecycle checks. Windows qualification requires the `--native` refusal in check 7 and reports native launcher execution as `NOT RUN`. Check 9 is `NOT RUN` when there is no previous Windows archive. Check 13 is `NOT RUN` because there was no Windows 0.2 client. Check 14 caps each Windows archive at 125% of the same build's x86-64 Linux archive for the same product. The TLS, HTTP/2 and PostgreSQL probes in check 15 are `NOT RUN` on Windows because 0.3.0 defers those components.
+
 Started by hand (`gh workflow run release.yml --ref <branch>`), the workflow builds and qualifies that branch as a `-dev` version and publishes nothing. Use this to try a change to the workflow before spending a tag on it.
 
 ## Before the first candidate
@@ -58,11 +64,11 @@ git switch main && git pull
 git tag v0.1.0-rc.1 && git push origin v0.1.0-rc.1
 ```
 
-Approve the **Publish** job when the build and qualification jobs have passed. Then tag the next candidate from the then-current `main`, so that check 9 exercises an update between two published builds. A release needs at least two candidates for that reason: the second candidate's check 9 is the evidence that `neura update` works against real published files. For 0.3.0 the owner made an exception on 2026-11-18: one candidate, then the final, whose check 9 from the published candidate is that evidence ([0.3.0 candidates](design/Release030.md#candidates)). The first 0.3 candidate's check 9 starts from `v0.2.1-rc.3`, the newest published release, and is the bridge; every candidate and the final release also run the bridge from `v0.2.1-rc.3` and `v0.2.0` in check 13.
+Approve the **Publish** job when the build and qualification jobs have passed. Then tag the next candidate from the then-current `main`, so that check 9 exercises an update between two published builds. A release needs at least two candidates to establish that `neura update` works against published files. For 0.3.0 the owner made an exception on 2026-11-18. The final run's check 9 from the published candidate supplies that evidence. The first 0.3 candidate's POSIX check 9 starts from `v0.2.1-rc.3`, and check 13 covers the bridge from `v0.2.1-rc.3` and `v0.2.0`. See the [0.3.0 candidate decision](design/Release030.md#candidates).
 
 ## Manual verification
 
-The workflow covers what a hosted Linux runner can show. A maintainer checks the rest on real machines before the final release and records the result in the release's pull request or issue.
+A maintainer checks the candidate on real machines before the final release and records the result in the release's pull request or issue.
 
 On Windows with WSL 2 (Ubuntu 24.04), on a Mac, and on any Linux machine that is not a GitHub runner, install the candidate with the one-line command from its release notes, or by hand (on a Mac, use the `apple-darwin` archive for its processor and `shasum -a 256 --check` in place of `sha256sum`):
 
@@ -88,15 +94,29 @@ Then, with the repository's `examples` directory at hand:
 | `neura uninstall`, answer `y` | The prompt names the version and the directory; afterwards `~/.local/share/neura` and every tool's link in `~/.local/bin` are gone. |
 | On a machine with a 0.2 installation: `neura update --nightly`, then `neura update --migrate-install` | The first installs the candidate with the 0.2 client and leaves only `neura` on `PATH`; the second links every tool, and `neura doctor` reports no failure. |
 | The one-line command with `--components runtime`, then `--components sdk,service` in another home | Neura-runtime alone, then both products as one generation; login registration of the service is checked with the real service manager (`systemd --user`, `launchd`), or, where a platform has none, on-demand start. |
-| In WSL 2: run `neura.exe` or `neura` from PowerShell | Not found. Neura runs inside the distribution only. |
 
-These steps are the ones no test covers: a download over HTTPS, `gh attestation verify` against the published attestation, the update notice in a terminal, and the interactive uninstall prompt.
+Manual verification also covers the update notice in a terminal and the interactive uninstall prompt. Verify the candidate's published files and attestation before installing.
+
+### Native Windows
+
+On x86-64 Windows 10 (version 2004 or later) and Windows 11, use a fresh install root on NTFS. Download the candidate's Windows archive and `SHA256SUMS`. Compare `Get-FileHash -Algorithm SHA256 <archive>` with the published digest and run `gh attestation verify <archive> --repo Kayyo321/neura`. Install using the [PowerShell command for that candidate](Install.md#windows-installation), then open a new PowerShell and run:
+
+```powershell
+neura --version
+neura doctor
+neura build examples/hello-world/hello-world.nra -o hello.nvr
+neura run hello.nvr
+neura build --native examples/hello-world/hello-world.nra -o hello.exe
+neura update --check
+```
+
+Check that `--version` names the candidate, `x86_64-windows-msvc` and its commit, `doctor` has no failures, the image prints `Hello, World!`, and `--native` reports that Windows has no native launcher in 0.3.0. Install the runtime with `-Components runtime` and verify `neura run --runtime=required hello.nvr`. After interactive `neura uninstall`, check in a new PowerShell that the installation and its user `Path` entry are gone. Record SmartScreen prompts and any Smart App Control block with the Windows version and candidate. A policy block leaves the manual check incomplete.
 
 ## Go or no-go
 
 Publish the final version only when all of these hold. Otherwise fix the problem and tag another candidate.
 
-- The latest candidate's workflow run succeeded, and its check 9 ran.
+- The latest candidate's workflow run succeeded. Check 9 ran on targets with a previous archive, and check 13 passed on Linux and macOS. For the first native Windows candidate, accept `NOT RUN` for check 9 when no previous Windows archive exists and for check 13 because there was no Windows 0.2 client. If the final Windows release has a previous Windows candidate, its qualification must exercise that update in check 9.
 - The manual verification of that candidate found no failure.
 - No open issue is labeled as blocking the release.
 - `main` has no change since that candidate other than `CHANGELOG.md`'s dated section.

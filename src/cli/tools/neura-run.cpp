@@ -6,7 +6,7 @@
 #include "cli/driver.hpp"
 #include "cli/serve.hpp"
 #include "cli/tool.hpp"
-#ifndef _WIN32
+#if !defined(_WIN32) || defined(NEURA_HAS_SERVICE)
 #include "service/service.hpp"
 #endif
 
@@ -25,7 +25,7 @@ int command(const Options& options) {
     }
 }
 
-#ifndef _WIN32
+#if !defined(_WIN32) || defined(NEURA_HAS_SERVICE)
 // `neura runtime ...` (docs/design/Service030.md): the service's commands.
 int runtime(const std::vector<std::string>& arguments, const std::filesystem::path& self) {
     try {
@@ -42,7 +42,7 @@ int runtime(const std::vector<std::string>& arguments, const std::filesystem::pa
 int main(int argc, char** argv) {
     auto start = neura::tool::start(*neura::tool::find_tool("neura-run"), argc, argv);
     if (start.status) return *start.status;
-#ifndef _WIN32
+#if !defined(_WIN32) || defined(NEURA_HAS_SERVICE)
     if (start.arguments.size() > 1 && start.arguments[1] == "runtime") {
         return core_protocol_main(start.arguments, runtime);
     }

@@ -1387,7 +1387,7 @@ def generate(args):
     out.mkdir(parents=True, exist_ok=True)
     for seed in parse_seeds(args.seed):
         source, _, _ = build_program(seed, any_values=not args.without_any_values)
-        (out / f"program-{seed}.nra").write_text(source)
+        (out / f"program-{seed}.nra").write_text(source, encoding="utf-8", newline="\n")
     return 0
 
 
@@ -1582,7 +1582,7 @@ def check_seed(seed, coarse, runner, work, modes, any_values=True):
     source, arguments, program = build_program(seed, any_values=any_values)
     program_path = work / f"program-{seed}.nra"
     image = work / f"program-{seed}.nvr"
-    program_path.write_text(source)
+    program_path.write_text(source, encoding="utf-8", newline="\n")
     build = subprocess.run([runner.neura, "build", str(program_path), "-o", str(image)], capture_output=True,
                            stdin=subprocess.DEVNULL)
     if build.returncode != 0 or build.stderr or build.stdout:
@@ -1694,9 +1694,9 @@ def write_failure(report, failure, neura, script, any_values=True):
     directory = report / name
     directory.mkdir(parents=True, exist_ok=True)
     source, arguments, _ = build_program(failure.seed, any_values=any_values)
-    (directory / f"program-{failure.seed}.nra").write_text(source)
-    (directory / "reference.txt").write_text(failure.reference.text())
-    (directory / "actual.txt").write_text(failure.actual.text())
+    (directory / f"program-{failure.seed}.nra").write_text(source, encoding="utf-8", newline="\n")
+    (directory / "reference.txt").write_text(failure.reference.text(), encoding="utf-8", newline="\n")
+    (directory / "actual.txt").write_text(failure.actual.text(), encoding="utf-8", newline="\n")
     extra = " ".join(limit_options(failure.kind, failure.limit))
     options, environment = {mode[0]: (mode[1], mode[2]) for mode in MODES}.get(failure.mode, ([], {}))
     given = " ".join(shlex.quote(argument) for argument in arguments)
@@ -1725,7 +1725,7 @@ def write_failure(report, failure, neura, script, any_values=True):
             "for part in status out err; do diff reference.$part actual.$part || different=1; done",
             "exit $different",
         ]
-    (directory / "reproduce.sh").write_text("\n".join(lines) + "\n")
+    (directory / "reproduce.sh").write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     os.chmod(directory / "reproduce.sh", 0o755)
     return directory
 
@@ -1744,7 +1744,7 @@ def can_run_native_code(neura):
     """Whether this binary can run regions as native code here (`--jit=on` does not fail)."""
     with tempfile.TemporaryDirectory() as directory:
         source = Path(directory) / "probe.nra"
-        source.write_text(PROBE)
+        source.write_text(PROBE, encoding="utf-8", newline="\n")
         image = Path(directory) / "probe.nvr"
         built = subprocess.run([neura, "build", str(source), "-o", str(image)], capture_output=True)
         if built.returncode != 0:
@@ -1808,7 +1808,7 @@ def compile_command(args):
     with tempfile.TemporaryDirectory() as directory:
         def one(seed):
             path = Path(directory) / f"program-{seed}.nra"
-            path.write_text(build_program(seed, any_values=not args.without_any_values)[0])
+            path.write_text(build_program(seed, any_values=not args.without_any_values)[0], encoding="utf-8", newline="\n")
             return seed, subprocess.run([neura, "check", str(path)], capture_output=True, stdin=subprocess.DEVNULL)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:

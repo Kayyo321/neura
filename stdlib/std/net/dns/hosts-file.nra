@@ -6,7 +6,7 @@ let paths = import:Std.Fs.Path;
 let.promote _ = import:Std.Core.Result;
 let strings = import:Std.Text.Strings;
 
-/// @brief The static host table `/etc/hosts`: parsing, forward lookup and reverse lookup.
+/// @brief The static host table (`/etc/hosts` on Linux and macOS): parsing, forward lookup and reverse lookup.
 ///
 /// The format follows hosts(5) as installed on the development machine (`man 5 hosts`, read 2026-11-17):
 /// one line per address, `IP_address canonical_hostname [aliases...]`, fields separated by any number of
@@ -17,11 +17,15 @@ let strings = import:Std.Text.Strings;
 /// hosts(5) asks a name to begin with a letter; this parser also accepts a leading digit, as RFC 1123
 /// section 2.1 allows. A line with an invalid address, with no name, or with an invalid name is skipped as a
 /// whole and reported as a `HostsProblem`; parsing never fails. Lookups compare names ASCII
-/// case-insensitively and answer in file order, both families together.
+/// case-insensitively and answer in file order, both families together. A carriage return before the line feed
+/// is ignored, so a table written with CRLF line ends, as Windows writes its own, parses the same.
 /// @see [Std.Net.Dns.HostsFile](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-HostsFile)
 #Since("0.3.0")
 export let HostsFile = module (
-    /// @brief The usual location of the host table.
+    /// @brief The usual location of the host table on Linux and macOS. Windows keeps its table at
+    /// `%SystemRoot%/System32/drivers/etc/hosts` (usually `C:/Windows/System32/drivers/etc/hosts`), and a Windows
+    /// program passes that path to `read`. On Windows this constant names `/etc/hosts` on the current drive, which
+    /// normally does not exist, so reading it fails with NotFound.
     export const DefaultPath = "/etc/hosts";
 
     /// @brief One accepted line: an address and its names, the canonical name first.
@@ -271,8 +275,8 @@ export let HostsFile = module (
         return new HostsFile(accepted, rejected);
     };
 
-    /// @brief Reads and parses the file at `path` (usually `DefaultPath`). Fails only when the file cannot be
-    /// read as UTF-8 text.
+    /// @brief Reads and parses the file at `path` (usually `DefaultPath`, or the Windows location it names).
+    /// Fails only when the file cannot be read as UTF-8 text.
     #NoDiscard
     export let read = func(path: string) -> Result<HostsFile> {
         last text = filesystem.read_text(new paths.Path(path))?;

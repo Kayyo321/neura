@@ -89,6 +89,8 @@ namespace {
 const char* not_default_reason() {
 #if defined(__x86_64__) && defined(__linux__)
     return nullptr;
+#elif defined(_WIN32)
+    return "Windows has no JIT in 0.3.0";
 #elif defined(__aarch64__) && defined(__linux__)
     return "not enabled by default on aarch64 Linux (use --jit=on)";
 #elif defined(__aarch64__) && defined(__APPLE__)
@@ -182,7 +184,11 @@ Availability availability(Mode mode) {
         return result;
     }
     if (!host_has_backend()) {
+        #ifdef _WIN32
+        result.error = "--jit=on: Windows has no JIT in 0.3.0";
+#else
         result.error = "--jit=on: there is no native code generator for this platform";
+#endif
         return result;
     }
     const auto& checked = process_probe();

@@ -7,6 +7,7 @@ fails under the same limit. Its image repeats into one region fewer.
 
 Usage: range-loop-stack.py <neura>
 """
+import os
 import pathlib
 import subprocess
 import sys
@@ -32,8 +33,12 @@ export let Main = module : program.Entry (
 """
 
 
+# NEURA_TEST_TIMEOUT_SCALE comes from CMake (docs/ContinuousIntegration.md).
+TIMEOUT = 120 * int(os.environ.get('NEURA_TEST_TIMEOUT_SCALE', '1'))
+
+
 def run(*arguments):
-    return subprocess.run([str(NEURA), *arguments], capture_output=True, text=True, timeout=120,
+    return subprocess.run([str(NEURA), *arguments], capture_output=True, text=True, timeout=TIMEOUT,
                           env={'NEURA_GPU': 'off', 'PATH': '/usr/bin:/bin'})
 
 

@@ -461,6 +461,66 @@ if(UNIX)
     endif()
     # An image without tasks answers at its next host request.
     must("hello" run hello.nvr)
+elseif(WIN32)
+    # Ctrl+Break, the counterpart of SIGQUIT's Ctrl+\ (W10). The run is
+    # started in a process group of its own, which receives CTRL_BREAK_EVENT
+    # from the helper through the console they share.
+    find_program(break_python NAMES python python3 NO_CACHE)
+    if(break_python)
+        # Not the Microsoft Store's alias, which only offers to install it.
+        execute_process(COMMAND "${break_python}" -I -c "import sys; print(sys.version_info[0])"
+            RESULT_VARIABLE python_status OUTPUT_VARIABLE python_major ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
+    endif()
+    if(NOT break_python OR NOT python_status STREQUAL "0" OR NOT python_major STREQUAL "3")
+        message(FATAL_ERROR "spin: the Ctrl+Break case needs CPython 3 on PATH")
+    endif()
+    file(WRITE "${TEST_DIR}/ctrl-break.py" [=[
+import ctypes
+import signal
+import subprocess
+import sys
+import time
+
+neura, image, errors = sys.argv[1:4]
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+kernel32.GetConsoleWindow.restype = ctypes.c_void_p
+user32 = ctypes.WinDLL("user32")
+user32.ShowWindow.argtypes = [ctypes.c_void_p, ctypes.c_int]
+# A console event reaches only processes on the same console: a test runner
+# started without one gives the helper and the run a new, hidden one.
+if not kernel32.GetConsoleWindow():
+    kernel32.AllocConsole()
+    window = kernel32.GetConsoleWindow()
+    if window:
+        user32.ShowWindow(window, 0)
+with open(errors, "wb") as stream:
+    child = subprocess.Popen([neura, "run", "--tier=0", "--max-steps", "30000000", image],
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=stream,
+                             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+    for _ in range(2):
+        time.sleep(1)
+        child.send_signal(signal.CTRL_BREAK_EVENT)
+    print(child.wait())
+]=])
+    must("spin" build "${SOURCE_DIR}/tests/concurrency/spin.nra" -o spin.nvr)
+    execute_process(
+        COMMAND "${break_python}" -I ctrl-break.py "${NEURA}" spin.nvr spin.err
+        WORKING_DIRECTORY "${TEST_DIR}"
+        RESULT_VARIABLE helper_status
+        OUTPUT_VARIABLE spin_status
+        ERROR_VARIABLE helper_stderr)
+    file(READ "${TEST_DIR}/spin.err" spin_err)
+    string(STRIP "${spin_status}" spin_status)
+    string(REGEX MATCHALL "task 0  root  parked: join of task 1\n" dumps "${spin_err}")
+    list(LENGTH dumps dump_count)
+    if(NOT helper_status STREQUAL "0" OR NOT spin_status STREQUAL "152" OR NOT dump_count EQUAL 2 OR
+       NOT spin_err MATCHES "\n  task 1  spawned at spin.nra:15:27  running\n      spin at spin.nra:[0-9:]+\n" OR
+       NOT spin_err MATCHES "trap: step limit exceeded")
+        message(FATAL_ERROR "spin: expected two Ctrl+Break dumps and then the step limit (status ${spin_status})\n"
+                            "${spin_err}\n${helper_stderr}")
+    endif()
+    # An image without tasks answers at its next host request.
+    must("hello" run hello.nvr)
 endif()
 
 # The event trace is opened in place, so a symbolic link at its path is refused and its target stays as it was.
@@ -472,6 +532,34 @@ if(UNIX)
     if(linked_status STREQUAL "0" OR NOT linked_stderr MATCHES "cannot write link.events: it is a symbolic link" OR
        NOT victim STREQUAL "untouched\n")
         message(FATAL_ERROR "--trace-events followed a symbolic link (status ${linked_status})\n${linked_stderr}\n${victim}")
+    endif()
+elseif(WIN32)
+    # Every reparse point is refused. A symbolic link needs Developer Mode or
+    # a privilege; without them the case uses a junction, which needs neither.
+    file(WRITE "${TEST_DIR}/victim.txt" "untouched\n")
+    file(READ "${TEST_DIR}/victim.txt" victim_before)
+    file(MAKE_DIRECTORY "${TEST_DIR}/victim-dir")
+    file(CREATE_LINK "${TEST_DIR}/victim.txt" "${TEST_DIR}/link.events" SYMBOLIC RESULT link_result)
+    if(NOT link_result STREQUAL "0")
+        execute_process(COMMAND cmd /d /c mklink /J link.events victim-dir
+            WORKING_DIRECTORY "${TEST_DIR}"
+            RESULT_VARIABLE junction_status
+            OUTPUT_QUIET
+            ERROR_VARIABLE junction_error)
+        if(NOT junction_status STREQUAL "0")
+            message(FATAL_ERROR "--trace-events: cannot create a symbolic link (${link_result}) or a junction\n"
+                                "${junction_error}")
+        endif()
+    endif()
+    neura(linked run --trace-events link.events fan-out.nvr)
+    file(READ "${TEST_DIR}/victim.txt" victim)
+    file(GLOB victim_dir_entries "${TEST_DIR}/victim-dir/*")
+    # The link itself, never its target.
+    execute_process(COMMAND cmd /d /c rmdir link.events WORKING_DIRECTORY "${TEST_DIR}" OUTPUT_QUIET ERROR_QUIET)
+    file(REMOVE "${TEST_DIR}/link.events")
+    if(linked_status STREQUAL "0" OR NOT linked_stderr MATCHES "cannot write link.events: it is a symbolic link" OR
+       NOT victim STREQUAL victim_before OR victim_dir_entries)
+        message(FATAL_ERROR "--trace-events followed a link (status ${linked_status})\n${linked_stderr}\n${victim}")
     endif()
 endif()
 

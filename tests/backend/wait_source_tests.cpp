@@ -1,6 +1,7 @@
 #include "nvm/driver.hpp"
 #include "nvm/providers.hpp"
 
+#include <array>
 #include <chrono>
 #include <cstdlib>
 #include <string>
@@ -10,10 +11,7 @@
 #include <thread>
 
 #ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
+#include "platform/windows.hpp"
 #else
 #include <fcntl.h>
 #include <unistd.h>
@@ -192,6 +190,243 @@ void native_events() {
     check(pending.poll().empty(), "Win32 operation delivered twice");
 }
 
+std::vector<PendingRequests::Done> wait_for_some(PendingRequests& pending) {
+    for (;;) {
+        auto done = pending.wait(std::nullopt);
+        if (!done.empty()) return done;
+    }
+}
+
+// More handles than one WaitForMultipleObjects takes: a blocking wait still
+// wakes for a handle beyond the first set, and a deadline still ends it.
+void many_handles() {
+    LiveClock clock;
+    PendingRequests pending(clock);
+    std::array<ManualEvent, MAXIMUM_WAIT_OBJECTS + 6> events;
+    for (std::size_t index = 0; index < events.size(); ++index) {
+        auto operation = with_source(WindowsWait{events[index].handle});
+        operation.attempt = [index](bool) { return value(index); };
+        pending.add(index, std::move(operation), false);
+    }
+    {
+        std::jthread setter([&] {
+            std::this_thread::sleep_for(5ms);
+            ::SetEvent(events[MAXIMUM_WAIT_OBJECTS + 3].handle);
+        });
+        completed(wait_for_some(pending), MAXIMUM_WAIT_OBJECTS + 3, MAXIMUM_WAIT_OBJECTS + 3);
+    }
+    auto timeout = with_source(WindowsWait{events[MAXIMUM_WAIT_OBJECTS + 4].handle});
+    const auto deadline = clock.now() + 3'000'000;
+    timeout.deadline = deadline;
+    timeout.attempt = [&](bool) -> std::optional<HostCompletion> {
+        check(clock.now() >= deadline, "Win32 attempt ran before readiness or deadline");
+        return std::nullopt;
+    };
+    timeout.expire = [] { return value(1000); };
+    pending.add(1000, std::move(timeout), false);
+    completed(wait_for_some(pending), 1000, 1000);
+}
+
+class Winsock {
+public:
+    Winsock() {
+        WSADATA data{};
+        check(::WSAStartup(MAKEWORD(2, 2), &data) == 0, "WSAStartup failed");
+    }
+    ~Winsock() { ::WSACleanup(); }
+    Winsock(const Winsock&) = delete;
+    Winsock& operator=(const Winsock&) = delete;
+};
+
+// A connected pair of loopback TCP sockets.
+class SocketPair {
+public:
+    SocketPair() {
+        const SOCKET listener = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        check(listener != INVALID_SOCKET, "socket failed");
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        int length = sizeof address;
+        const bool listening = ::bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof address) == 0 &&
+                               ::listen(listener, 1) == 0 &&
+                               ::getsockname(listener, reinterpret_cast<sockaddr*>(&address), &length) == 0;
+        writer_ = listening ? ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP) : INVALID_SOCKET;
+        const bool connected =
+            writer_ != INVALID_SOCKET && ::connect(writer_, reinterpret_cast<sockaddr*>(&address), sizeof address) == 0;
+        reader_ = connected ? ::accept(listener, nullptr, nullptr) : INVALID_SOCKET;
+        ::closesocket(listener);
+        if (reader_ == INVALID_SOCKET) {
+            if (writer_ != INVALID_SOCKET) ::closesocket(writer_);
+            throw std::runtime_error("loopback socket pair failed");
+        }
+    }
+    ~SocketPair() {
+        ::closesocket(reader_);
+        ::closesocket(writer_);
+    }
+    SocketPair(const SocketPair&) = delete;
+    SocketPair& operator=(const SocketPair&) = delete;
+
+    std::intptr_t reader() const { return static_cast<std::intptr_t>(reader_); }
+    std::intptr_t writer() const { return static_cast<std::intptr_t>(writer_); }
+    void send(char byte) const { check(::send(writer_, &byte, 1, 0) == 1, "socket send failed"); }
+    void await_readable() const {
+        WSAPOLLFD entry{reader_, POLLRDNORM, 0};
+        check(::WSAPoll(&entry, 1, 5000) == 1, "sent byte did not arrive");
+    }
+    void receive(char expected) const {
+        char byte = 0;
+        check(::recv(reader_, &byte, 1, 0) == 1 && byte == expected, "socket not readable or wrong byte");
+    }
+
+private:
+    SOCKET reader_ = INVALID_SOCKET;
+    SOCKET writer_ = INVALID_SOCKET;
+};
+
+// A PosixWait names a SOCKET on Windows and is waited for with WSAPoll, alone
+// or together with handles.
+void native_sockets() {
+    const Winsock winsock;
+    LiveClock clock;
+    PendingRequests pending(clock);
+    SocketPair first, second;
+    const auto reader = [&](const SocketPair& pair, char byte) {
+        auto operation = with_source(PosixWait{{pair.reader(), PosixWait::Events::Read}});
+        operation.attempt = [&pair, byte](bool) { pair.receive(byte); return value(static_cast<unsigned char>(byte)); };
+        return operation;
+    };
+    pending.add(20, reader(first, 'a'), false);
+    pending.add(10, reader(second, 'b'), false);
+    check(pending.poll().empty(), "unsignaled socket read ran");
+    first.send('a');
+    second.send('b');
+    // Loopback delivery is not synchronous with send(): both bytes are there
+    // before the check, which then finds both sockets ready together.
+    first.await_readable();
+    second.await_readable();
+    const auto done = pending.poll();
+    check(done.size() == 2 && done[0].sequence == 10 && done[0].completion.value.bits == 'b' &&
+              done[1].sequence == 20 && done[1].completion.value.bits == 'a',
+          "joint socket readiness was not delivered in order");
+
+    // A writable socket is ready at once; the interest can switch sockets.
+    bool reading = true;
+    auto switching = with_source(PosixWait{{}, [&] {
+        return reading ? PosixWait::Interest{first.reader(), PosixWait::Events::Read}
+                       : PosixWait::Interest{second.writer(), PosixWait::Events::ReadWrite};
+    }});
+    switching.attempt = [&](bool) -> std::optional<HostCompletion> {
+        if (!reading) return value(3);
+        first.receive('c');
+        reading = false;
+        return std::nullopt;
+    };
+    pending.add(3, std::move(switching), false);
+    first.send('c');
+    const auto switched = wait_for_some(pending);
+    check(!reading, "dynamic socket wait did not switch interest");
+    completed(switched, 3, 3);
+
+    auto timeout = with_source(PosixWait{{first.reader(), PosixWait::Events::Read}});
+    const auto deadline = clock.now() + 3'000'000;
+    timeout.deadline = deadline;
+    timeout.attempt = [&](bool) -> std::optional<HostCompletion> {
+        check(clock.now() >= deadline, "socket attempt ran before readiness or deadline");
+        return std::nullopt;
+    };
+    timeout.expire = [] { return value(4); };
+    pending.add(4, std::move(timeout), false);
+    completed(wait_for_some(pending), 4, 4);
+
+    {
+        pending.add(5, reader(second, 'd'), false);
+        std::jthread writer([&] {
+            std::this_thread::sleep_for(5ms);
+            second.send('d');
+        });
+        completed(wait_for_some(pending), 5, 'd');
+    }
+
+    // Sockets and handles in one wait: each wakes it, and neither is taken
+    // for the other. Past one wait set of handles too.
+    std::array<ManualEvent, MAXIMUM_WAIT_OBJECTS + 1> events;
+    for (std::size_t index = 0; index < events.size(); ++index) {
+        auto operation = with_source(WindowsWait{events[index].handle});
+        operation.attempt = [index](bool) { return value(100 + index); };
+        pending.add(100 + index, std::move(operation), false);
+    }
+    pending.add(6, reader(first, 'e'), false);
+    {
+        std::jthread setter([&] {
+            std::this_thread::sleep_for(5ms);
+            ::SetEvent(events.back().handle);
+        });
+        completed(wait_for_some(pending), 100 + events.size() - 1, 100 + events.size() - 1);
+    }
+    {
+        std::jthread writer([&] {
+            std::this_thread::sleep_for(5ms);
+            first.send('e');
+        });
+        completed(wait_for_some(pending), 6, 'e');
+    }
+    check(pending.poll().empty(), "a socket or handle wait delivered twice");
+}
+
+// A socket that is not open is ready at once, as POLLNVAL makes it after
+// poll(2): alone (WSAPoll fails the call), next to an open socket (WSAPoll
+// neither counts it nor ends its wait) and next to a handle.
+void closed_sockets() {
+    const Winsock winsock;
+    LiveClock clock;
+    PendingRequests pending(clock);
+    SocketPair open;
+    // Created after the pair, so no socket of the test gets its value.
+    const SOCKET doomed = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    check(doomed != INVALID_SOCKET, "socket failed");
+    check(::closesocket(doomed) == 0, "closesocket failed");
+    const auto closed = static_cast<std::intptr_t>(doomed);
+    // A deadline instead of a wait without end if the closed socket is
+    // missed; the attempt must come long before it.
+    const auto closed_wait = [&](std::uint64_t sequence) {
+        auto operation = with_source(PosixWait{{closed, PosixWait::Events::Read}});
+        const auto added = clock.now();
+        operation.deadline = added + 3'000'000'000;
+        operation.attempt = [&clock, added, sequence](bool) {
+            check(clock.now() - added < 1'000'000'000, "a closed socket was not ready at once");
+            return value(sequence);
+        };
+        operation.expire = [] { return value(0); };
+        return operation;
+    };
+
+    pending.add(1, closed_wait(1), false);
+    completed(wait_for_some(pending), 1, 1);
+
+    auto waiting = with_source(PosixWait{{open.reader(), PosixWait::Events::Read}});
+    waiting.attempt = [&open](bool) { open.receive('x'); return value('x'); };
+    pending.add(2, std::move(waiting), false);
+    pending.add(3, closed_wait(3), false);
+    completed(wait_for_some(pending), 3, 3);
+    check(pending.poll().empty(), "an open socket was taken as ready next to a closed one");
+
+    const ManualEvent event;
+    auto handle = with_source(WindowsWait{event.handle});
+    handle.attempt = [](bool) { return value(5); };
+    pending.add(5, std::move(handle), false);
+    pending.add(4, closed_wait(4), false);
+    completed(wait_for_some(pending), 4, 4);
+    check(pending.poll().empty(), "a handle or open socket was taken as ready next to a closed socket");
+
+    open.send('x');
+    open.await_readable();
+    completed(wait_for_some(pending), 2, 'x');
+    check(::SetEvent(event.handle) != 0, "SetEvent failed");
+    completed(wait_for_some(pending), 5, 5);
+}
+
 #else
 
 class Pipe {
@@ -291,6 +526,15 @@ int main() {
         // test poll(2) twice.
         const auto backend = neura::nvm::io_backend();
         std::cout << "driver backend: " << neura::nvm::io_backend_name(backend) << '\n';
+#ifdef _WIN32
+        // Windows ignores NEURA_IO_BACKEND (W14).
+        polled_and_external();
+        external_cancel_and_deadline();
+        native_events();
+        many_handles();
+        native_sockets();
+        closed_sockets();
+#else
         if (const char* wanted = std::getenv("NEURA_IO_BACKEND");
             wanted && std::string_view(wanted) != neura::nvm::io_backend_name(backend)) {
             // A container may forbid io_uring (kernel.io_uring_disabled, or
@@ -304,6 +548,7 @@ int main() {
         polled_and_external();
         external_cancel_and_deadline();
         native_events();
+#endif
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

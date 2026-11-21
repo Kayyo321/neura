@@ -81,6 +81,8 @@ The result is a `ForeignValue`. A pointer result is an `Address` segment of size
 
 `import:c("header.h", "library.a", ...)` imports the declarations of a C header as a module. Any further strings name static libraries (`.a`, `.lib`) or object files (`.o`, `.obj`) to link into the image. A header-only import such as `import:c("stdlib.h")` calls functions that the C library already provides.
 
+Windows 0.3.0 reads headers through libclang. A build that needs to link C imports fails with `linking C imports is not supported on Windows in this release`. Use `Std.DynamicForeign` to load an existing DLL.
+
 <!-- example: fragment: imports mathops.h and libmathops.a, which the page does not provide -->
 ```neura
 let mathops = import:c("mathops.h", "libmathops.a");

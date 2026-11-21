@@ -33,14 +33,14 @@ let Examples = module (
         let value = choose(true);
     };
 );
-''', encoding="utf-8")
+''', encoding="utf-8", newline="\n")
 
     def tearDown(self):
         self.temp.cleanup()
 
     def invoke(self, *args, expected=0):
         result = subprocess.run([str(NEURA), *map(str, args)], cwd=self.directory,
-                                capture_output=True, text=True, timeout=90)
+                                capture_output=True, encoding="utf-8", timeout=90)
         self.assertEqual(result.returncode, expected, result.stdout + "\n" + result.stderr)
         return result
 
@@ -52,7 +52,8 @@ let Examples = module (
         self.assertEqual(pathlib.Path(event["path"]), output)
         self.assertEqual(event["granularity"], "mapped-block-line")
         self.assertEqual(events[-1]["event"], "summary")
-        value = json.loads(output.read_text(encoding="utf-8"))
+        with output.open(encoding="utf-8", newline=None) as stream:
+            value = json.load(stream)
         self.assertEqual(value["version"], 1)
         self.assertEqual(value["granularity"], "mapped-block-line")
         self.assertEqual(value["measurement"], "blockEntries")

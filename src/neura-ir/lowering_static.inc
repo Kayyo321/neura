@@ -49,7 +49,8 @@ void Lowering::check_static_requirement_syntax(const Declaration& decl) const {
 // static.implements.
 void Lowering::check_static_requirements(SymbolId id) {
     if (symbol(id).kind != SymbolKind::Class) return;
-    const auto& class_name = symbol(id).name;
+    // Resolving a requirement may grow program_.symbols.
+    const auto class_name = symbol(id).name;
     std::set<std::pair<SymbolId, SymbolId>> attached;
     const auto listed = symbol(id).interfaces;
     for (const auto& interface : listed) {

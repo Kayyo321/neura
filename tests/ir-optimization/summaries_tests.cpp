@@ -24,7 +24,12 @@
 #include <map>
 #include <optional>
 #include <set>
+
+#ifdef _WIN32
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
 
 namespace neura::testing {
 namespace {
@@ -34,6 +39,15 @@ using Retention = PurityAnalysis::Retention;
 using Ownership = PurityAnalysis::Ownership;
 using Fact = PurityAnalysis::Fact;
 using Summary = PurityAnalysis::Summary;
+
+// This process's id, which keeps the library copies of concurrent runs apart.
+auto process_id() {
+#ifdef _WIN32
+    return _getpid();
+#else
+    return ::getpid();
+#endif
+}
 
 fs::path summaries(const Environment& environment) { return environment.source_dir / "tests" / "ir-optimization" / "summaries"; }
 
@@ -647,18 +661,18 @@ NEURA_TEST(verifier, rejects_a_host_contract_that_breaks_its_schema) {
 // the tag into the attribute and the summary reads it. The library is copied
 // so that one binding can carry the tag.
 NEURA_TEST(structure, host_effects_tag_becomes_the_contract_attribute) {
-    const auto copy = fs::temp_directory_path() / ("neura-summaries-" + std::to_string(::getpid()));
+    const auto copy = fs::temp_directory_path() / ("neura-summaries-" + std::to_string(process_id()));
     fs::remove_all(copy);
     fs::copy(environment.source_dir / "stdlib", copy, fs::copy_options::recursive);
     {
         const auto path = copy / "std" / "io" / "console.nra";
-        std::ifstream in(path);
+        std::ifstream in(path, std::ios::binary);
         std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
         const std::string anchor = "    let write_line = func(text: string) -> WriteOutcome host(";
         const auto at = text.find(anchor);
         check(at != std::string::npos, "the console declares write_line");
         text.insert(at, "    #HostEffects(allocates: false, retains: false)\n");
-        std::ofstream(path) << text;
+        std::ofstream(path, std::ios::binary) << text;
     }
     const auto saved = library_root();
     library_root() = copy;

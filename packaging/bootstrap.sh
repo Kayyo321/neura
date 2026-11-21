@@ -92,7 +92,12 @@ main() {
             fi
             ;;
         Darwin) triple=$architecture-apple-darwin ;;
-        *) die "Neura has no release for $system. On Windows, run this command inside a WSL 2 distribution" ;;
+        MINGW* | MSYS* | CYGWIN*)
+            # Git Bash, MSYS2 and Cygwin on Windows: the Windows release
+            # installs from PowerShell (docs/design/Windows030.md, W24).
+            die "on Windows, install Neura from PowerShell: irm https://github.com/$repository/releases/latest/download/install.ps1 | iex"
+            ;;
+        *) die "Neura has no release for $system" ;;
     esac
 
     need() { command -v "$1" > /dev/null 2>&1 || die "$1 is required and was not found"; }

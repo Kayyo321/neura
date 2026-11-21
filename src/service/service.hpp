@@ -9,6 +9,10 @@
 #include "protocol.hpp"
 #include "system.hpp"
 
+#ifdef _WIN32
+#include "platform/process.hpp"
+#endif
+
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -41,6 +45,12 @@ struct WorkerProcess {
     UniqueFd channel;
     Clock::time_point spawned{};
     bool ready = false;
+#ifdef _WIN32
+    // The process, in a kill-on-close job of its own that only the
+    // supervisor holds: the worker's application group, which ends with the
+    // supervisor (W29).
+    platform::Process process;
+#endif
 };
 
 // Starts `neurad --worker` with this environment (NAME=VALUE entries, or
@@ -107,7 +117,15 @@ void install_lifecycle_hooks();
 
 // `neura runtime enable` and `disable`, and the file they write.
 int login_command(const Installation& installation, bool enable, const std::vector<std::string>& arguments);
+#ifdef _WIN32
+// Login start is the value neurad-<id> of the user's Run key, not a file:
+// HKCU\Software\Microsoft\Windows\CurrentVersion\Run\neurad-<id>.
+std::string login_location(const Installation& installation);
+#else
 fs::path login_unit_path(const Installation& installation);
+#endif
+// Whether login start is registered for this installation.
+bool login_registered(const Installation& installation);
 
 // Writes the --runtime-report object.
 struct Report {

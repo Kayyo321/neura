@@ -1,6 +1,7 @@
 let.promote _ = import:Std.Net.Connector;
 let host = import:Std.Net.Socket.Internal.HostCalls;
 let host_error = import:Std.Core.Internal.HostError;
+let.promote _ = import:Std.Core.Error;
 let.promote _ = import:Std.Core.Optional;
 let.promote _ = import:Std.Core.Result;
 let socket = import:Std.Net.Internal.Socket;
@@ -56,7 +57,9 @@ export let TlsConnector = module (
                 config.ca_file);
             return match (outcome) {
                 host.TlsOutcome.Ok(opened) => Result<TlsStream>.Ok(stream_of(opened, target)),
-                host.TlsOutcome.Error(code) => Result<TlsStream>.Err(host_error.io(code, "TLS connect failed", text)),
+                host.TlsOutcome.Error(code) => Result<TlsStream>.Err(host_error.io(code, host_error.kind_of(code) == IoErrorKind.Unsupported
+                    ? "TLS operation is unavailable in this runtime"
+                    : "TLS connect failed", text)),
             };
         };
 
