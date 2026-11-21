@@ -2782,8 +2782,12 @@ def windows_suite_neurad(kit: WindowsKit) -> None:
     if not check(built.returncode == 0, f"echo image: {built.stdout}{built.stderr}"):
         return
 
+    # The AF_UNIX fallback must fit within 107 bytes even on a long build path.
+    temporary = tempfile.TemporaryDirectory(prefix="nra-")
+    endpoint_env = {"TEMP": temporary.name, "TMP": temporary.name}
+
     def running() -> bool:
-        result = home.tool(first, "neura-run", "runtime", "ps", "--json")
+        result = home.tool(first, "neura-run", "runtime", "ps", "--json", env=endpoint_env)
         if result.returncode != 0:
             return False
         return any(item["id"].startswith(first + ".") and item["state"] == "running"
@@ -2791,15 +2795,17 @@ def windows_suite_neurad(kit: WindowsKit) -> None:
 
     command = [home.bin / "neura.exe", "run", "--runtime=required", image]
     application = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                   cwd=home.path, env=home.env())
+                                   cwd=home.path, env=home.env(endpoint_env))
     try:
-        if not check(wait_for(running, 30), "the installed supervisor lists the running echo application"):
+        ready = wait_for(lambda: application.poll() is not None or running(), 30)
+        failure = application.communicate()[1] if application.poll() is not None else b""
+        if not check(ready and application.poll() is None, f"the installed supervisor lists the running echo application: {failure!r}"):
             return
         check(windows_lease_held(home, first), "the running service holds the generation lease")
-        refusal = home.neura("uninstall", "--yes")
+        refusal = home.neura("uninstall", "--yes", env=endpoint_env)
         check(refusal.returncode != 0 and "applications of this installation are running" in refusal.stderr,
               f"uninstall refuses a running application: {refusal.stdout}{refusal.stderr}")
-        changed = home.neura("update", "--source", release)
+        changed = home.neura("update", "--source", release, env=endpoint_env)
         if not check(changed.returncode == 0 and home.current() != first,
                      f"update switches generation while the application runs: {changed.stdout}{changed.stderr}"):
             return
@@ -2812,7 +2818,8 @@ def windows_suite_neurad(kit: WindowsKit) -> None:
         if application.poll() is None:
             application.kill()
             application.communicate(timeout=30)
-        home.neura("runtime", "shutdown", "--terminate")
+        home.neura("runtime", "shutdown", "--terminate", env=endpoint_env)
+        temporary.cleanup()
 
 
 WINDOWS_SUITES = {
