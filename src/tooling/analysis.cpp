@@ -28,6 +28,31 @@ constexpr std::size_t none = static_cast<std::size_t>(-1);
 bool contains(const Span &span, std::size_t offset) {
     return offset >= span.offset && offset <= span.offset + span.length;
 }
+Span initializer_scope(const Statement &statement, const Span &enclosing) {
+    if (statement.kind != Statement::Kind::If || statement.initializer.empty())
+        return enclosing;
+    // The names are visible from the condition through the end of the
+    // else chain. The initializer still reads the enclosing bindings.
+    const auto &init = statement.initializer.front().span;
+    const auto start = init.offset + init.length;
+    auto scope = statement.span;
+    scope.length -= start - scope.offset;
+    scope.offset = start;
+    return scope;
+}
+Span initialized_branch_scope(const Statement &statement, const std::vector<Statement> &branch,
+                              const std::vector<Token> &tokens, const Span &enclosing) {
+    if (statement.kind != Statement::Kind::If || statement.initializer.empty() || branch.empty())
+        return enclosing;
+    auto scope = branch.front().span;
+    auto end = branch.back().span.offset + branch.back().span.length;
+    const auto after = std::lower_bound(tokens.begin(), tokens.end(), end,
+        [](const Token &token, std::size_t offset) { return token.span.offset < offset; });
+    if (after != tokens.end() && after->text == "}")
+        end = std::min(after->span.offset, statement.span.offset + statement.span.length);
+    scope.length = end - scope.offset;
+    return scope;
+}
 unsigned modifier(std::string_view name) {
     const auto found = std::find(semantic_modifiers.begin(), semantic_modifiers.end(), name);
     return found == semantic_modifiers.end() ? 0u : 1u << static_cast<unsigned>(found - semantic_modifiers.begin());
@@ -808,9 +833,16 @@ void AnalysisSession::index_syntax(EditorDocument &doc) {
                 s.constant_bindings ? modifier("readonly") : 0);
         for (const auto &e : s.expressions)
             expression(e, parent, next_scope);
-        for (const auto *body : {&s.body, &s.alternative, &s.initializer, &s.step})
-            for (const auto &child : *body)
-                statement(child, parent, next_scope);
+        const auto init_scope = initializer_scope(s, next_scope);
+        for (const auto &child : s.initializer)
+            statement(child, parent, init_scope);
+        for (const auto *branch : {&s.body, &s.alternative}) {
+            const auto branch_scope = initialized_branch_scope(s, *branch, doc.tokens, next_scope);
+            for (const auto &child : *branch)
+                statement(child, parent, branch_scope);
+        }
+        for (const auto &child : s.step)
+            statement(child, parent, next_scope);
         for (const auto &arm : s.arms) {
             for (const auto &token : arm.bindings)
                 add(token.text, token.span, token.span, arm.span, parent, 13, 7, modifier("readonly"));
@@ -1894,8 +1926,11 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
                     for (const auto &condition : statement.expressions) narrowings(condition, statement.span);
                 if (statement.declaration) declaration(*statement.declaration, scope);
                 const auto nested = statement.kind == Statement::Kind::Block ? statement.span : scope;
-                statements(statement.body, nested);
-                statements(statement.alternative, nested);
+                if (statement.kind == Statement::Kind::If)
+                    statements(statement.initializer, initializer_scope(statement, nested));
+                statements(statement.body, initialized_branch_scope(statement, statement.body, context.tokens, nested));
+                statements(statement.alternative,
+                           initialized_branch_scope(statement, statement.alternative, context.tokens, nested));
             }
         };
         statements(context.syntax.statements, Span{context.path, 1, 1, 0, context.source.size()});

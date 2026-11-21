@@ -238,6 +238,7 @@ struct Statement {
     std::vector<Expr> expressions;
     std::vector<Statement> body;
     std::vector<Statement> alternative;
+    // The header binding of an `if`, or the initializer of a three-part `for`.
     std::vector<Statement> initializer;
     std::vector<Statement> step;
     std::vector<Token> bindings;

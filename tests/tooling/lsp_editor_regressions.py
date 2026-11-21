@@ -53,6 +53,46 @@ class EditorRegressionTests(unittest.TestCase):
         self.assertEqual(self.labels('let io = import:Std.Io.Con<cursor>'), {'Console'})
         self.assertNotIn('Internal', self.labels('let io = import:Std.Core.<cursor>'))
 
+    def test_if_initializer_completion_obeys_scope_in_an_incomplete_program(self):
+        source = """let run = func -> int32 {
+    if (let only_outer = true; only_outer) {
+        let first = only_outer;
+    } else if (let only_nested = false; only_outer || only_nested) {
+        let second = only_nested;
+    }
+    return only_outer;
+};
+"""
+        for anchor, expected in (
+            ('true; only_', {'only_outer'}),
+            ('first = only_', {'only_outer'}),
+            ('false; only_', {'only_outer', 'only_nested'}),
+            ('second = only_', {'only_outer', 'only_nested'}),
+            ('return only_', set()),
+        ):
+            with self.subTest(anchor=anchor):
+                marked = source.replace(anchor, anchor + '<cursor>')
+                self.assertEqual(self.labels(marked) & {'only_outer', 'only_nested'}, expected)
+
+    def test_if_initializer_shadowing_stays_in_its_branch(self):
+        path = self.root / 'if-shadow.nra'
+        source = """let run = func -> int32 {
+    if (let current = true; current) {
+        let current = 1;
+        let inner = current;
+    } else {
+        let outer = current;
+    }
+    return current;
+};
+"""
+        self.client.open(path, source)
+        for use, declaration in ((3, 2), (5, 1)):
+            with self.subTest(use=use):
+                column = source.splitlines()[use].index('current')
+                location = self.client.request('textDocument/definition', params(path, use, column))
+                self.assertEqual(location['range']['start']['line'], declaration)
+
     def test_unsaved_project_module_import_completion(self):
         self.client.open(self.root / 'tools.nra', 'export let Tools = module ();')
         self.assertIn('Tools', self.labels('let tools = import:Too<cursor>'))

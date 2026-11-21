@@ -507,6 +507,9 @@ void collect_imports(const Declaration& declaration, SourceDependencies& depende
 }
 
 void collect_imports(const Statement& statement, SourceDependencies& dependencies) {
+    if (statement.kind == Statement::Kind::If) {
+        for (const auto& init : statement.initializer) collect_imports(init, dependencies);
+    }
     if (statement.declaration) {
         collect_imports(*statement.declaration, dependencies);
     }
