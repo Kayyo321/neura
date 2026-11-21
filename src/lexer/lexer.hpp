@@ -13,6 +13,12 @@ namespace neura {
 
 enum class TokenKind { Identifier, Integer, Float, String, Keyword, Symbol, End, HtmlIsland, CssIsland };
 
+struct NumericSuffix {
+    std::string_view spelling;
+    std::string_view type;
+    TokenKind kind;
+};
+
 struct DocComment {
     Span span;
     std::string text;
@@ -31,6 +37,8 @@ struct Token {
     // String token whose text is the whole literal as written; its parts
     // are its text and its holes, which carry their own spans and tokens.
     std::shared_ptr<const std::vector<InterpolationPart>> parts{};
+    // For a suffixed number, points to the lexer's static suffix table.
+    const NumericSuffix* numeric_suffix{};
 };
 
 // One part of an interpolated string: decoded text, or a hole with the
@@ -65,5 +73,7 @@ inline bool is_character_literal(const Token& token) {
 }
 // The byte of a character literal that has already passed lexical validation.
 std::uint8_t decode_character_literal(std::string_view literal);
+// Read a validated decimal number without its suffix or digit separators.
+std::string numeric_literal_text(const Token& token);
 
 } // namespace neura

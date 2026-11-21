@@ -185,6 +185,8 @@ struct Expr {
     // operand, and a range written in braces, `{a .. b}`.
     bool grouped{};
     bool braced{};
+    // A numeric suffix fixes this literal's primitive type.
+    std::string_view literal_type{};
 };
 
 // The pattern and holes of an interpolated string. The pattern is the

@@ -57,12 +57,15 @@ NEURA_KEYWORDS = {
     "while", "do", "for", "in", "break", "continue", "return", "true", "false", "as", "is", "nil", "enum",
     "match", "and", "or", "interface", "implements", "promote", "static", "singleton", "not", "typeof",
 }
+NEURA_DIGITS = r"[0-9]+(?:'[0-9]+)*"
+NEURA_SUFFIX = r"(?:[su](?:8|16|32|64)|bf16|f(?:16|32|64))"
+NEURA_NUMBER = rf"\b{NEURA_DIGITS}(?:\.{NEURA_DIGITS})?(?:[eE][+-]?{NEURA_DIGITS})?{NEURA_SUFFIX}?\b"
 # A tag before a declaration (docs/lang/Tags.md), `#Name` or the opening of a
 # group `#[Name`, is marked like a keyword.
 NEURA_TOKEN = re.compile(
     r'(?P<c>//[^\n]*|/\*.*?\*/)|(?P<s>"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\')'
     r"|(?P<t>#(?:\[\s*)?[A-Za-z_][A-Za-z0-9_]*)"
-    r"|(?P<n>\b\d[\d_]*(?:\.\d+)?\b)|(?P<w>\b[A-Za-z_][A-Za-z0-9_]*\b)",
+    rf"|(?P<n>{NEURA_NUMBER})|(?P<w>\b[A-Za-z_][A-Za-z0-9_]*\b)",
     re.DOTALL,
 )
 # The word of an accessor clause (Types.md, Accessors), followed by its colon.

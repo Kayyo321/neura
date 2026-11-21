@@ -25,6 +25,8 @@ NEURA_DIAGNOSTIC(E0102, "invalid UTF-8")
 NEURA_DIAGNOSTIC(E0103, "unterminated string literal")
 NEURA_DIAGNOSTIC(E0104, "invalid escape or character in a string literal")
 NEURA_DIAGNOSTIC(E0105, "malformed numeric literal")
+NEURA_DIAGNOSTIC(E0106, "misplaced digit separator")
+NEURA_DIAGNOSTIC(E0107, "integer suffix on a floating-point literal")
 
 // Parser
 NEURA_DIAGNOSTIC(E0201, "expected a semicolon")
