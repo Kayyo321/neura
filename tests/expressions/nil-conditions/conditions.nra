@@ -1,0 +1,93 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Readable = interface (
+    export let read = func() -> int;
+);
+
+let Item = class implements Readable (
+    export last value: int = 7;
+    export let.override read = func() -> int => value;
+);
+
+let guard_return = func(item: Item) -> int {
+    if (not item) {
+        return 0;
+    }
+    return item.value;
+};
+
+let guard_trap = func(item: Item) -> int {
+    if (!item) {
+        trap_with_message("missing item");
+    }
+    return item.value;
+};
+
+let Entry = module:program.Entry (
+    let calls: int = 0;
+
+    let read_once = func(value: Readable) -> Readable {
+        calls += 1;
+        return value;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last live: Item = new Item();
+        let missing: Item = nil;
+        let iface: Readable = live;
+        let total = 0;
+
+        if (live) {
+            total += live.value;
+        }
+        if (!iface) {
+            trap_with_message("missing interface");
+        } else {
+            total += iface.read();
+        }
+
+        let both = !missing && not missing;
+        let either = not live || !missing;
+        if (both && either && !nil) {
+            total += guard_return(missing) + guard_return(live) + guard_trap(live);
+        }
+
+        while (read_once(iface)) {
+            iface = nil;
+        }
+        for (let index = 0; live; index += 1) {
+            if (not iface) {
+                iface = live;
+                continue;
+            }
+            total += iface.read() + index;
+            break;
+        }
+        do {
+            iface = nil;
+        } while (iface);
+
+        for (let index = 0; index < 2; index += 1) {
+            let item = index == 0 ? missing : live;
+            if (not item) {
+                continue;
+            }
+            total += item.value;
+        }
+        while (true) {
+            if (!missing) {
+                break;
+            }
+            total += missing.value;
+        }
+
+        if (let item = read_once(live); item) {
+            total += item.read();
+        }
+        let score = live ? total : 0;
+        console.print_line(score.to_string());
+        console.print_line(calls.to_string());
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,4 +1,3 @@
-// Edge case 2 of docs/design/Expressions030.md: `not` on a value that is not
-// a bool is the error of `!`, which names `not`.
+// An integer is neither a bool nor a class or interface reference.
 let count = 3;
 let negated = not count;

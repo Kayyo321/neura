@@ -507,7 +507,7 @@ void Lowering::is_exhaustive(const Statement& stmt, const IrType& subject, const
 }
 
 IrNode Lowering::general_match(const Statement& stmt, Context& context, bool produces_value, const IrType* expected,
-                               bool call_argument, std::optional<IrNode> lowered_subject) {
+                               bool call_argument, ValueUse use, std::optional<IrNode> lowered_subject) {
     // A collection literal matched by tuple patterns is a tuple, as it is
     // where a tuple is expected.
     const auto& written = stmt.expressions.front();
@@ -635,14 +635,15 @@ IrNode Lowering::general_match(const Statement& stmt, Context& context, bool pro
 
     // Phase two: the selected arm's result.
     std::optional<IrType> match_type;
-    if (expected) match_type = *expected;
+    if (expected && use == ValueUse::Ordinary) match_type = *expected;
     std::vector<IrNode> regions;
     for (std::size_t index = 0; index < stmt.arms.size(); ++index) {
         const auto& arm = stmt.arms[index];
         auto region = node(produces_value ? IrOp::ScopedValue : IrOp::Block, arm.span);
         context.scopes.push_back(std::move(arm_scopes[index]));
         if (produces_value) {
-            auto returned = value(*arm.value, context, match_type ? &*match_type : nullptr, call_argument && expected);
+            auto returned = value(*arm.value, context, match_type ? &*match_type : expected,
+                                  call_argument && expected, match_type ? ValueUse::Ordinary : use);
             if (!match_type) match_type = returned.type;
             region.type = *match_type;
             region.body.push_back(std::move(returned));
