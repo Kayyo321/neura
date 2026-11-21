@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <charconv>
 #include <cstdio>
+#include <fstream>
 #include <set>
 #include <tuple>
 
@@ -72,6 +73,31 @@ bool is_asset_file_name(std::string_view text) {
     return std::ranges::all_of(text, [](char c) {
         return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || c == '.' || c == '-' || c == '+';
     });
+}
+
+// An absolute path as the marker and the journal hold it. On Windows the
+// lifecycle writes generic paths, so a drive path reads "C:/..." and a UNC
+// path "//server/share/..."; a path with a single leading '/' names a
+// directory on whichever drive is current, so it is not absolute there.
+bool is_absolute_text(std::string_view text) {
+#ifdef _WIN32
+    const bool drive = text.size() >= 3 && ((text[0] >= 'A' && text[0] <= 'Z') || (text[0] >= 'a' && text[0] <= 'z')) &&
+                       text[1] == ':' && text[2] == '/';
+    return drive || text.starts_with("//");
+#else
+    return text.starts_with('/');
+#endif
+}
+
+// A path as a message shows it: UTF-8 on Windows, where path::string()
+// converts through the active code page.
+std::string path_text(const fs::path& path) {
+#ifdef _WIN32
+    const auto text = path.generic_u8string();
+    return std::string(text.begin(), text.end());
+#else
+    return path.string();
+#endif
 }
 
 bool is_method_name(std::string_view text) {
@@ -232,7 +258,7 @@ std::optional<Marker> parse_marker_2(const std::vector<std::string_view>& lines,
     if (!method || !is_method_name(*method)) return fail(1, "expected \"method <name>\"");
     marker.method = *method;
     const auto bin = rest_value(lines[2], "bin");
-    if (!bin || !bin->starts_with('/')) return fail(2, "expected \"bin <absolute path>\"");
+    if (!bin || !is_absolute_text(*bin)) return fail(2, "expected \"bin <absolute path>\"");
     marker.bin = *bin;
     {
         std::vector<std::string_view> fields;
@@ -506,11 +532,11 @@ std::optional<Journal> parse_journal(std::string_view text, std::string& error) 
     if (lines[4] == "placed yes") journal.placed = true;
     else if (lines[4] != "placed no") return fail(4, "expected \"placed yes\" or \"placed no\"");
     for (std::size_t i = 5; i < lines.size(); ++i) {
-        if (auto aside = rest_value(lines[i], "aside"); aside && aside->starts_with('/') && journal.aside.empty()) {
+        if (auto aside = rest_value(lines[i], "aside"); aside && is_absolute_text(*aside) && journal.aside.empty()) {
             journal.aside = *aside;
-        } else if (auto path = rest_value(lines[i], "remove"); path && path->starts_with('/')) {
+        } else if (auto path = rest_value(lines[i], "remove"); path && is_absolute_text(*path)) {
             journal.remove.push_back(*path);
-        } else if (auto added = rest_value(lines[i], "add"); added && added->starts_with('/')) {
+        } else if (auto added = rest_value(lines[i], "add"); added && is_absolute_text(*added)) {
             journal.add.push_back(*added);
         } else if (lines[i].starts_with("old-marker ")) {
             journal.old_marker += std::string(lines[i].substr(11)) + "\n";
@@ -659,7 +685,7 @@ Detection detect_install(const fs::path& executable) {
         return detection;
     }
     const auto root = versions.parent_path();
-    const auto name = version_dir.filename().string();
+    const auto name = path_text(version_dir.filename());
     if (!parse_generation_name(name)) return detection;
     std::error_code error;
     const auto marker_path = root / marker_name;
@@ -668,16 +694,17 @@ Detection detect_install(const fs::path& executable) {
     detection.running_generation = name;
     std::string text;
     {
-        std::FILE* file = std::fopen(marker_path.c_str(), "rb");
-        if (file == nullptr) {
+        // A stream opens the path in its native form (wide on Windows).
+        std::ifstream file(marker_path, std::ios::binary);
+        if (!file) {
             detection.kind = Detection::Kind::Broken;
-            detection.problem = "cannot read " + marker_path.string();
+            detection.problem = "cannot read " + path_text(marker_path);
             return detection;
         }
         char buffer[4096];
-        std::size_t count;
-        while ((count = std::fread(buffer, 1, sizeof buffer, file)) > 0 && text.size() < (1u << 20)) text.append(buffer, count);
-        std::fclose(file);
+        while (text.size() < (1u << 20) && file.read(buffer, sizeof buffer).gcount() > 0) {
+            text.append(buffer, static_cast<std::size_t>(file.gcount()));
+        }
     }
     std::string problem;
     if (auto marker = parse_marker(text, problem)) {
@@ -685,7 +712,7 @@ Detection detect_install(const fs::path& executable) {
         detection.marker = std::move(*marker);
     } else {
         detection.kind = Detection::Kind::Broken;
-        detection.problem = marker_path.string() + ": " + problem;
+        detection.problem = path_text(marker_path) + ": " + problem;
     }
     return detection;
 }

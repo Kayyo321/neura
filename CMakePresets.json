@@ -11,9 +11,78 @@
         "CMAKE_BUILD_TYPE": "Release",
         "NEURA_WASM_RUNTIME": "ON"
       }
+    },
+    {
+      "name": "windows-base",
+      "hidden": true,
+      "description": "Windows hosts only: native Windows with Ninja from a Developer PowerShell for VS 2022; libraries from vcpkg (VCPKG_ROOT); the build directory sits beside stdlib/, where build-tree tools look for the standard library",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-${presetName}",
+      "architecture": { "value": "x64", "strategy": "external" },
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_TARGET_TRIPLET": "x64-windows-static",
+        "CMAKE_C_COMPILER": "cl",
+        "CMAKE_CXX_COMPILER": "cl",
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "windows-msvc",
+      "displayName": "Windows x86-64, MSVC, Release",
+      "inherits": "windows-base"
+    },
+    {
+      "name": "windows-msvc-debug",
+      "displayName": "Windows x86-64, MSVC, Debug",
+      "inherits": "windows-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "windows-clang-cl",
+      "displayName": "Windows x86-64, clang-cl, Release",
+      "inherits": "windows-base",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang-cl",
+        "CMAKE_CXX_COMPILER": "clang-cl"
+      }
+    },
+    {
+      "name": "windows-release",
+      "displayName": "Windows x86-64 release archives",
+      "description": "NEURA_PORTABLE_RELEASE with the server components that packaging builds into NEURA_SERVER_COMPONENTS",
+      "inherits": "windows-msvc",
+      "cacheVariables": {
+        "NEURA_PORTABLE_RELEASE": "ON",
+        "NEURA_ENABLE_SERVER_TLS": "ON",
+        "OPENSSL_ROOT_DIR": "$env{NEURA_SERVER_COMPONENTS}/openssl",
+        "OPENSSL_INCLUDE_DIR": "$env{NEURA_SERVER_COMPONENTS}/openssl/include",
+        "NEURA_ENABLE_SERVER_HTTP2": "ON",
+        "NEURA_NGHTTP2_ROOT": "$env{NEURA_SERVER_COMPONENTS}/nghttp2",
+        "NEURA_ENABLE_POSTGRES": "ON",
+        "NEURA_LIBPQ_SOURCE": "$env{NEURA_SERVER_COMPONENTS}/postgresql",
+        "NEURA_LIBPQ_BUILD": "$env{NEURA_SERVER_COMPONENTS}/postgresql",
+        "NEURA_COMPONENT_LICENSES": "$env{NEURA_SERVER_COMPONENTS}/licenses"
+      }
     }
   ],
   "buildPresets": [
-    { "name": "wasm-runtime", "configurePreset": "wasm-runtime" }
+    { "name": "wasm-runtime", "configurePreset": "wasm-runtime" },
+    { "name": "windows-msvc", "configurePreset": "windows-msvc" },
+    { "name": "windows-msvc-debug", "configurePreset": "windows-msvc-debug" },
+    { "name": "windows-clang-cl", "configurePreset": "windows-clang-cl" },
+    { "name": "windows-release", "configurePreset": "windows-release" }
+  ],
+  "testPresets": [
+    {
+      "name": "windows-base",
+      "hidden": true,
+      "output": { "outputOnFailure": true },
+      "environment": { "NEURA_GPU": "off" }
+    },
+    { "name": "windows-msvc", "inherits": "windows-base", "configurePreset": "windows-msvc" },
+    { "name": "windows-msvc-debug", "inherits": "windows-base", "configurePreset": "windows-msvc-debug" },
+    { "name": "windows-clang-cl", "inherits": "windows-base", "configurePreset": "windows-clang-cl" },
+    { "name": "windows-release", "inherits": "windows-base", "configurePreset": "windows-release" }
   ]
 }

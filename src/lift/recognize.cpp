@@ -274,7 +274,7 @@ double float_decode(std::uint64_t bits, FloatFormat format) {
     const int bias = static_cast<int>(format.bias());
     double magnitude;
     if (exponent == (1 << format.exponent_bits) - 1) {
-        magnitude = fraction == 0 ? INFINITY : NAN;
+        magnitude = fraction == 0 ? std::numeric_limits<double>::infinity() : std::numeric_limits<double>::quiet_NaN();
     } else if (exponent == 0) {
         magnitude = std::ldexp(static_cast<double>(fraction), 1 - bias - static_cast<int>(f));
     } else {

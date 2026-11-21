@@ -4,6 +4,7 @@
 // until bundles exist: it adds no host behavior of its own.
 
 #include "serve.hpp"
+#include "tool.hpp"
 
 #include <cerrno>
 #include <cstdlib>
@@ -15,7 +16,14 @@
 #include <string_view>
 #include <vector>
 
-#ifndef _WIN32
+#ifdef _WIN32
+#include "platform/console.hpp"
+#include "platform/environment.hpp"
+#include "platform/error.hpp"
+#include "platform/process.hpp"
+#include "platform/self.hpp"
+#include "platform/text.hpp"
+#else
 #include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -25,7 +33,9 @@
 #include <mach-o/dyld.h>
 #endif
 
+#ifndef _WIN32
 extern char** environ;
+#endif
 
 namespace neura::cli {
 namespace {
@@ -39,6 +49,77 @@ constexpr std::string_view serve_usage =
     "foreground. Without --listen or --tls-listen it listens on 127.0.0.1:8080. Every other option is\n"
     "the host's: neura-server-host --help lists them.\n";
 
+// A path as messages and child arguments hold it, and back: UTF-8 on
+// Windows, where path::string() uses the ANSI code page.
+std::string path_text(const fs::path& path) {
+#ifdef _WIN32
+    return platform::native_utf8_path(path);
+#else
+    return path.string();
+#endif
+}
+
+fs::path path_of(const std::string& text) {
+#ifdef _WIN32
+    return platform::path_from_utf8(text);
+#else
+    return fs::path(text);
+#endif
+}
+
+#ifdef _WIN32
+fs::path own_executable(const char* argv0) {
+    return tool::executable_path(argv0 ? argv0 : "");
+}
+
+// neura-server-host.exe beside this executable, then on PATH.
+std::optional<fs::path> find_host(const fs::path& self) {
+    const auto file = tool::executable_file("neura-server-host");
+    std::error_code error;
+    if (const auto beside = self.parent_path() / file; fs::is_regular_file(beside, error)) return beside;
+    const auto path = platform::get_env("PATH", error);
+    if (!path) return std::nullopt;
+    std::string_view rest(*path);
+    while (!rest.empty()) {
+        const auto semicolon = rest.find(';');
+        auto entry = rest.substr(0, semicolon);
+        // PATH entries may be quoted to hold a ';'.
+        if (entry.size() >= 2 && entry.front() == '"' && entry.back() == '"') entry = entry.substr(1, entry.size() - 2);
+        if (!entry.empty()) {
+            if (const auto directory = platform::try_to_utf16(entry)) {
+                const auto candidate = fs::path(*directory) / file;
+                if (fs::is_regular_file(candidate, error)) return candidate;
+            }
+        }
+        if (semicolon == std::string_view::npos) break;
+        rest.remove_prefix(semicolon + 1);
+    }
+    return std::nullopt;
+}
+
+// Runs a child with this process's streams in a job that ends with this
+// process, and returns the status a POSIX shell reports for it. Console
+// events reach the child, which decides; this process ignores them (W10).
+int spawn_and_wait(const std::vector<std::string>& arguments) {
+    platform::Spawn spawn;
+    spawn.program = path_of(arguments.front());
+    spawn.arguments = arguments;
+    spawn.job = platform::JobMode::kill_on_close;
+    platform::ignore_console_events();
+    std::error_code error;
+    auto child = platform::Process::start(spawn, error);
+    if (!child) {
+        std::cerr << "neura serve: cannot start " << arguments.front() << ": " << platform::error_message(error) << '\n';
+        return 1;
+    }
+    const auto status = child.wait(std::nullopt, error);
+    if (!status) {
+        std::cerr << "neura serve: cannot wait for " << arguments.front() << ": " << platform::error_message(error) << '\n';
+        return 1;
+    }
+    return status->shell_status();
+}
+#else
 fs::path own_executable(const char* argv0) {
 #ifdef __linux__
     std::error_code error;
@@ -94,16 +175,11 @@ int spawn_and_wait(const std::vector<std::string>& arguments) {
     }
     return wait_for(pid);
 }
+#endif
 
 } // namespace
 
 int run_serve(int argc, char** argv) {
-#ifdef _WIN32
-    (void)argc;
-    (void)argv;
-    std::cerr << "neura serve: the server host runs on POSIX systems only\n";
-    return 1;
-#else
     std::vector<std::string> sources;
     std::vector<std::string> roots;
     std::optional<std::string> image;
@@ -154,16 +230,16 @@ int run_serve(int argc, char** argv) {
     const auto self = own_executable(argv[0]);
     const auto host = find_host(self);
     if (!host) {
-        std::cerr << "neura serve: neura-server-host was found neither beside " << self.string()
+        std::cerr << "neura serve: neura-server-host was found neither beside " << path_text(self)
                   << " nor on PATH\n";
         return 1;
     }
     std::string built;
     if (!sources.empty()) {
         // The image goes beside the first source, as `neura build` would name it.
-        built = (fs::path(sources.front()).replace_extension(".nvr")).string();
+        built = path_text(path_of(sources.front()).replace_extension(".nvr"));
         // This code runs in neura-run; the `neura` beside it starts neurac.
-        std::vector<std::string> build{(self.parent_path() / "neura").string(), "build"};
+        std::vector<std::string> build{path_text(self.parent_path() / tool::executable_file("neura")), "build"};
         for (const auto& root : roots) {
             build.emplace_back("-I");
             build.push_back(root);
@@ -174,13 +250,18 @@ int run_serve(int argc, char** argv) {
         if (const int status = spawn_and_wait(build); status != 0) return status;
         image = built;
     }
-    std::vector<std::string> arguments{host->string()};
+    std::vector<std::string> arguments{path_text(*host)};
     if (!listens) {
         arguments.emplace_back("--listen");
         arguments.emplace_back("127.0.0.1:8080");
     }
     arguments.insert(arguments.end(), host_options.begin(), host_options.end());
     arguments.push_back(*image);
+#ifdef _WIN32
+    // Windows has no exec: the host runs as a child in this process's job
+    // and its status is this command's.
+    return spawn_and_wait(arguments);
+#else
     std::vector<char*> host_argv;
     for (auto& argument : arguments) host_argv.push_back(argument.data());
     host_argv.push_back(nullptr);

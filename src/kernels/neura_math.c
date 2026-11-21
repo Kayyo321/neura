@@ -1062,7 +1062,7 @@ static double fd_atan2(double y, double x) {
     lx = LO(x);
     hy = HI(y); iy = hy & 0x7fffffff;
     ly = LO(y);
-    if ((((unsigned)ix | ((lx | -lx) >> 31)) > 0x7ff00000u) || (((unsigned)iy | ((ly | -ly) >> 31)) > 0x7ff00000u))
+    if ((((unsigned)ix | ((lx | (0u - lx)) >> 31)) > 0x7ff00000u) || (((unsigned)iy | ((ly | (0u - ly)) >> 31)) > 0x7ff00000u))
         return x + y;
     if ((((unsigned)hx - 0x3ff00000u) | lx) == 0) return fd_atan(y);
     m = ((hy >> 31) & 1) | ((hx >> 30) & 2);

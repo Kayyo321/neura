@@ -34,6 +34,11 @@ else()
 endif()
 
 project(Neura VERSION ${NEURA_VERSION_CORE} LANGUAGES CXX C)
+if(WIN32)
+    # The native Windows build: toolchain, settings, product layout and the
+    # hook points of the gated areas (docs/design/Windows030.md).
+    include(cmake/NeuraWindows.cmake)
+endif()
 
 option(NEURA_WASM_RUNTIME "Build only the browser's wasm32 runtime" OFF)
 if(NEURA_WASM_RUNTIME)
@@ -96,7 +101,7 @@ option(NEURA_SDK "Build the SDK tools as well as the execution core" ON)
 # loaded at program start, never with dlopen. The browser runtime (Emscripten)
 # links statically and takes neither.
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-if(NOT EMSCRIPTEN AND (CMAKE_C_COMPILER_ID STREQUAL "GNU" OR (CMAKE_C_COMPILER_ID MATCHES "Clang" AND NOT APPLE)))
+if(NOT EMSCRIPTEN AND NOT MSVC AND (CMAKE_C_COMPILER_ID STREQUAL "GNU" OR (CMAKE_C_COMPILER_ID MATCHES "Clang" AND NOT APPLE)))
     add_compile_options(-fno-semantic-interposition -ftls-model=initial-exec)
 endif()
 # The server host and its tests use std::jthread and std::stop_token, which
@@ -118,9 +123,13 @@ function(neura_target_defaults target)
     target_compile_features(${target} PUBLIC cxx_std_20)
     set_target_properties(${target} PROPERTIES CXX_EXTENSIONS OFF)
     if(MSVC)
-        target_compile_options(${target} PRIVATE /W4)
+        # Not for the resource compiler, which takes no such options.
+        target_compile_options(${target} PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX>:${NEURA_WINDOWS_WARNINGS}>")
     else()
         target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    if(WIN32)
+        neura_windows_embed_resources(${target})
     endif()
 endfunction()
 
@@ -197,6 +206,9 @@ add_library(neura_lift STATIC
 target_link_libraries(neura_lift PUBLIC neura_circuit)
 if(NOT MSVC)
     target_compile_options(neura_lift PRIVATE -ffp-contract=off)
+else()
+    # cl does not contract under /fp:precise; clang-cl does unless told not to.
+    target_compile_options(neura_lift PRIVATE /fp:precise $<$<CXX_COMPILER_ID:Clang>:/clang:-ffp-contract=off>)
 endif()
 neura_target_defaults(neura_lift)
 
@@ -243,6 +255,21 @@ if(NEURA_WASM_RUNTIME)
     endif()
     return()
 endif()
+
+# The platform layer (src/platform, namespace neura::platform): text and path
+# conversion, processes, files, consoles, sockets, dynamic libraries, the
+# environment and well-known directories, with a POSIX and a Windows
+# implementation behind one interface. The runtime, the runner, every tool's
+# start and the dispatcher use it.
+file(GLOB neura_platform_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/platform/*.cpp")
+add_library(neura_platform STATIC ${neura_platform_sources})
+target_include_directories(neura_platform PUBLIC src)
+if(WIN32)
+    target_link_libraries(neura_platform PUBLIC ws2_32 mswsock bcrypt advapi32 shell32 ole32 wer psapi)
+else()
+    target_link_libraries(neura_platform PUBLIC ${CMAKE_DL_LIBS})
+endif()
+neura_target_defaults(neura_platform)
 
 # The Neura Virtual Machine. It depends only on the image format, so a
 # runtime-only distribution needs no compiler code.
@@ -292,7 +319,12 @@ set(neura_nvm_sources
     src/jit/x86_64.cpp
 )
 add_library(neura_nvm STATIC ${neura_nvm_sources})
-target_link_libraries(neura_nvm PUBLIC neura_nvr neura_lift)
+target_link_libraries(neura_nvm PUBLIC neura_nvr neura_lift neura_platform)
+if(MSVC)
+    # Float semantics stated, as for neura_lift: tier 3 folds and evaluates
+    # floats, and its results must match the other tiers bit for bit.
+    target_compile_options(neura_nvm PRIVATE /fp:precise $<$<CXX_COMPILER_ID:Clang>:/clang:-ffp-contract=off>)
+endif()
 # Std.DynamicForeign calls native functions through libffi and loads
 # libraries with the platform loader.
 #
@@ -302,10 +334,12 @@ target_link_libraries(neura_nvm PUBLIC neura_nvr neura_lift)
 # as the default launcher always does. They then need only the C library and
 # the loader from their host.
 option(NEURA_PORTABLE_RELEASE "Link libffi and the C++ runtime into neura statically, for release archives" OFF)
-if(NEURA_PORTABLE_RELEASE AND WIN32)
-    message(FATAL_ERROR "NEURA_PORTABLE_RELEASE is not supported on Windows")
-endif()
-if(NOT WIN32)
+# On Windows every binary has the static C runtime in any build (W05); a
+# release build also refuses a libffi DLL and is reproducible
+# (cmake/NeuraWindows.cmake).
+if(WIN32)
+    neura_windows_link_libffi(neura_nvm)
+else()
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(LIBFFI REQUIRED IMPORTED_TARGET libffi)
     if(NEURA_PORTABLE_RELEASE)
@@ -324,7 +358,7 @@ endif()
 
 set(neura_runner_sources src/runner/runner.cpp src/launcher/container.cpp)
 add_library(neura_runner STATIC ${neura_runner_sources})
-target_link_libraries(neura_runner PUBLIC neura_nvm)
+target_link_libraries(neura_runner PUBLIC neura_nvm neura_platform)
 neura_target_defaults(neura_runner)
 
 set(NEURA_STATIC_LAUNCHER "AUTO" CACHE STRING "Fully static Neura launcher: AUTO, ON, or OFF")
@@ -359,7 +393,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         if(NEURA_STATIC_LIBC)
             set(NEURA_HAS_STATIC_LAUNCHER ON)
             add_library(neura_nvm_static STATIC ${neura_nvm_sources})
-            target_link_libraries(neura_nvm_static PUBLIC neura_nvr neura_lift)
+            target_link_libraries(neura_nvm_static PUBLIC neura_nvr neura_lift neura_platform)
             # A static program cannot use the C library's resolver portably,
             # so this launcher takes numeric addresses and "localhost" only.
             target_compile_definitions(neura_nvm_static PRIVATE NEURA_NO_NATIVE_INTEROP NEURA_NUMERIC_ADDRESSES_ONLY)
@@ -376,6 +410,9 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             message(FATAL_ERROR "NEURA_STATIC_LAUNCHER needs a static C library")
         endif()
     endif()
+elseif(WIN32 AND COMMAND neura_windows_launchers)
+    # The PE launcher (cmake/windows/launchers.cmake).
+    neura_windows_launchers()
 elseif(NEURA_STATIC_LAUNCHER STREQUAL "ON")
     message(FATAL_ERROR "NEURA_STATIC_LAUNCHER requires Linux")
 endif()
@@ -389,8 +426,15 @@ set(NEURA_HAS_GPU OFF)
 if(NEURA_GPU STREQUAL "AUTO" AND APPLE)
     message(STATUS "GPU graph execution disabled: Apple platforms are outside the Vulkan backend")
 elseif(NOT NEURA_GPU STREQUAL "OFF")
-    find_path(NEURA_VULKAN_INCLUDE_DIR vulkan/vulkan.h)
-    find_program(NEURA_GLSLANG glslangValidator)
+    if(WIN32)
+        # The Vulkan SDK's installer sets VULKAN_SDK; vcpkg's vulkan-headers
+        # and glslang (the gpu feature of vcpkg.json) are on its search paths.
+        find_path(NEURA_VULKAN_INCLUDE_DIR vulkan/vulkan.h HINTS "$ENV{VULKAN_SDK}/Include")
+        find_program(NEURA_GLSLANG glslangValidator HINTS "$ENV{VULKAN_SDK}/Bin")
+    else()
+        find_path(NEURA_VULKAN_INCLUDE_DIR vulkan/vulkan.h)
+        find_program(NEURA_GLSLANG glslangValidator)
+    endif()
     if(NEURA_VULKAN_INCLUDE_DIR AND NEURA_GLSLANG)
         set(NEURA_HAS_GPU ON)
     else()
@@ -552,10 +596,14 @@ if(UNIX AND NOT EMSCRIPTEN)
     target_include_directories(neura_server_listeners PUBLIC src)
     target_link_libraries(neura_server_listeners PRIVATE neura_server_http)
     neura_target_defaults(neura_server_listeners)
+elseif(WIN32)
+    neura_windows_hook(server_libraries)
 endif()
 
 option(NEURA_ENABLE_SERVER_TLS "Build the OpenSSL 3.5 server TLS transport" OFF)
-if(NEURA_ENABLE_SERVER_TLS)
+if(NEURA_ENABLE_SERVER_TLS AND WIN32)
+    neura_windows_required_hook(server_tls server-components.cmake)
+elseif(NEURA_ENABLE_SERVER_TLS)
     if(NOT UNIX OR EMSCRIPTEN)
         message(FATAL_ERROR "The Neura server TLS transport requires POSIX sockets")
     endif()
@@ -651,10 +699,9 @@ if(NEURA_ENABLE_SQL AND NOT EMSCRIPTEN)
     target_link_libraries(neura_sql PUBLIC neura_nvm neura_lifecycle PRIVATE neura_sqlite3)
     target_compile_definitions(neura_sql PUBLIC NEURA_HAS_SQL)
     neura_target_defaults(neura_sql)
-    if(NEURA_ENABLE_POSTGRES)
-        if(WIN32)
-            message(FATAL_ERROR "The PostgreSQL provider needs POSIX sockets")
-        endif()
+    if(NEURA_ENABLE_POSTGRES AND WIN32)
+        neura_windows_required_hook(postgres server-components.cmake)
+    elseif(NEURA_ENABLE_POSTGRES)
         if(NOT NEURA_ENABLE_SERVER_TLS)
             message(FATAL_ERROR "NEURA_ENABLE_POSTGRES needs NEURA_ENABLE_SERVER_TLS for the static OpenSSL 3.5")
         endif()
@@ -683,7 +730,9 @@ endif()
 option(NEURA_ENABLE_SERVER_HTTP2 "Build HTTP/2 into the server host with the pinned nghttp2" OFF)
 set(NEURA_NGHTTP2_ROOT "" CACHE PATH "Install prefix of the pinned static nghttp2")
 option(NEURA_NGHTTP2_ALLOW_UNPINNED "Accept an nghttp2 other than the locked version (never for release)" OFF)
-if(NEURA_ENABLE_SERVER_HTTP2)
+if(NEURA_ENABLE_SERVER_HTTP2 AND WIN32)
+    neura_windows_required_hook(server_http2 server-components.cmake)
+elseif(NEURA_ENABLE_SERVER_HTTP2)
     if(NOT UNIX OR EMSCRIPTEN)
         message(FATAL_ERROR "The Neura server HTTP/2 transport requires POSIX sockets")
     endif()
@@ -747,7 +796,7 @@ neura_target_defaults(neura_cli_registry)
 
 # A tool's start: the dispatch token, --help, --version, the real path.
 add_library(neura_cli_tool STATIC src/cli/tool.cpp)
-target_link_libraries(neura_cli_tool PUBLIC neura_cli_registry)
+target_link_libraries(neura_cli_tool PUBLIC neura_cli_registry neura_platform)
 neura_target_defaults(neura_cli_tool)
 
 # The protocol of the runtime service (docs/design/Service030.md): pure
@@ -785,6 +834,9 @@ if(NOT WIN32)
         src/service/worker.cpp
     )
     target_link_libraries(neura_cli_core PUBLIC neura_service_protocol ${CMAKE_DL_LIBS})
+    target_compile_definitions(neura_cli_core PUBLIC NEURA_HAS_SERVICE=1)
+elseif(NEURA_WINDOWS_SERVICE)
+    neura_windows_hook(service_sources)
 endif()
 target_include_directories(neura_cli_core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(neura_cli_core PUBLIC neura_cli_tool neura_runner neura_lifecycle)
@@ -848,6 +900,12 @@ endif()
 # ahead of them, so that the new library takes every symbol <first> defines
 # from it instead of from the archives.
 function(neura_add_shared target name component first)
+    if(WIN32)
+        # A self-contained DLL in bin/ (W04): no process loads two Neura
+        # DLLs, so <first> is not linked.
+        neura_windows_add_shared(${target} ${name} ${component} ${ARGN})
+        return()
+    endif()
     add_library(${target} SHARED src/cli/shared_library.cpp)
     if(first STREQUAL "none")
         set(first)
@@ -894,15 +952,20 @@ function(neura_add_shared target name component first)
 endfunction()
 
 set(neura_core_archives neura_cli_core neura_cli_tool neura_cli_registry neura_runner neura_nvm neura_lift neura_circuit
-    neura_nvr neura_kernels neura_lifecycle neura_service_protocol)
+    neura_nvr neura_kernels neura_lifecycle neura_service_protocol neura_platform)
 if(NEURA_HAS_GPU)
     list(APPEND neura_core_archives neura_gpu)
 endif()
 if(TARGET neura_sql)
     list(APPEND neura_core_archives neura_sql)
 endif()
+if(WIN32)
+    # neura-run's project layer (defined below): every tool of the core is in
+    # the core DLL.
+    list(APPEND neura_core_archives neura_app neura_project)
+endif()
 neura_add_shared(neura_core_library neura-core core none ${neura_core_archives})
-if(NEURA_ENABLE_SERVER_TLS AND NOT APPLE)
+if(NEURA_ENABLE_SERVER_TLS AND NOT APPLE AND NOT WIN32)
     # The static OpenSSL of the TLS streams stays private to the library, so
     # the server host's own copy (src/server/http_tls.cpp) cannot interpose.
     target_link_options(neura_core_library PRIVATE "-Wl,--exclude-libs,libssl.a:libcrypto.a")
@@ -940,6 +1003,15 @@ set(NEURA_TOOL_TARGETS)
 # neura_add_tool(<name> <component> <source> <shared libraries>...): one
 # executable in bin/, named <name> in the build tree and the install.
 function(neura_add_tool name component source)
+    if(WIN32)
+        # The tool's code goes into its product DLL and ${name}.exe is a stub.
+        neura_windows_add_tool(${name} ${source} ${ARGN})
+        if(NOT component STREQUAL "service")
+            install(TARGETS ${name} RUNTIME DESTINATION bin COMPONENT ${component})
+        endif()
+        set(NEURA_TOOL_TARGETS ${NEURA_TOOL_TARGETS} ${name} PARENT_SCOPE)
+        return()
+    endif()
     add_executable(${name} ${source})
     target_link_libraries(${name} PRIVATE ${ARGN})
     target_include_directories(${name} PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/generated")
@@ -957,12 +1029,40 @@ function(neura_add_tool name component source)
     set(NEURA_TOOL_TARGETS ${NEURA_TOOL_TARGETS} ${name} PARENT_SCOPE)
 endfunction()
 
+# What a tool's own code needs beyond neura_add_tool: on Windows that code is
+# in its product DLL, elsewhere in the tool's executable.
+# neura_tool_link_libraries(<tool> <items>...) links the items privately.
+function(neura_tool_link_libraries tool)
+    if(WIN32)
+        get_target_property(tool ${tool} NEURA_TOOL_LIBRARY)
+    endif()
+    target_link_libraries(${tool} PRIVATE ${ARGN})
+endfunction()
+# neura_tool_add_dependencies(<tool> <targets>...): builds the targets before
+# the tool's code is linked.
+function(neura_tool_add_dependencies tool)
+    if(WIN32)
+        get_target_property(tool ${tool} NEURA_TOOL_LIBRARY)
+    endif()
+    add_dependencies(${tool} ${ARGN})
+endfunction()
+# neura_tool_compile_definitions(<tool> <definitions>...): private definitions
+# of the tool's source only.
+function(neura_tool_compile_definitions tool)
+    if(WIN32)
+        get_target_property(entry ${tool} NEURA_TOOL_ENTRY_SOURCE)
+        set_property(SOURCE "${entry}" APPEND PROPERTY COMPILE_DEFINITIONS ${ARGN})
+    else()
+        target_compile_definitions(${tool} PRIVATE ${ARGN})
+    endif()
+endfunction()
+
 neura_add_tool(neura-run core src/cli/tools/neura-run.cpp neura_core_library)
 neura_add_tool(neura-inspect core src/cli/tools/neura-inspect.cpp neura_core_library)
 neura_add_tool(neura-doctor core src/cli/tools/neura-doctor.cpp neura_core_library)
 neura_add_tool(neura-update core src/cli/tools/neura-update.cpp neura_core_library)
 neura_add_tool(neura-uninstall core src/cli/tools/neura-uninstall.cpp neura_core_library)
-if(NOT WIN32)
+if(NOT WIN32 OR NEURA_WINDOWS_SERVICE)
     # The service component. `cmake --install` of every component leaves it
     # out, so the SDK's prefix is unchanged; `--component service` adds it.
     neura_add_tool(neurad service src/cli/tools/neurad.cpp neura_core_library)
@@ -976,15 +1076,15 @@ if(NEURA_SDK)
     # The doctor reports libclang through the C import stage's probe, which
     # loads libclang only when it runs. It takes that one object from the
     # static compiler library, so it does not load libneura-sdk.
-    target_link_libraries(neura-doctor PRIVATE "$<TARGET_FILE:neura_compiler>"
+    neura_tool_link_libraries(neura-doctor "$<TARGET_FILE:neura_compiler>"
         "$<TARGET_FILE:neura_libclang>" ${CMAKE_DL_LIBS})
-    add_dependencies(neura-doctor neura_compiler neura_libclang)
-    target_compile_definitions(neura-doctor PRIVATE NEURA_DOCTOR_PROBES_LIBCLANG=1)
+    neura_tool_add_dependencies(neura-doctor neura_compiler neura_libclang)
+    neura_tool_compile_definitions(neura-doctor NEURA_DOCTOR_PROBES_LIBCLANG=1)
 endif()
 
 # The dispatcher links the registry only.
 add_executable(neura src/cli/main.cpp)
-target_link_libraries(neura PRIVATE neura_cli_registry)
+target_link_libraries(neura PRIVATE neura_cli_registry neura_platform)
 if(WIN32)
     target_link_libraries(neura PRIVATE neura_cli_tool)
 endif()
@@ -1099,6 +1199,24 @@ if(BUILD_TESTING)
         add_test(NAME kernels-${suite}
             COMMAND neura_kernel_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()
+
+    # The platform layer, one entry per module, on every host.
+    add_executable(neura_platform_tests tests/platform/platform_tests.cpp)
+    target_link_libraries(neura_platform_tests PRIVATE neura_platform)
+    neura_target_defaults(neura_platform_tests)
+    foreach(suite IN ITEMS text process file console socket dynlib environment dirs)
+        add_test(NAME platform-${suite} COMMAND neura_platform_tests ${suite})
+        set_tests_properties(platform-${suite} PROPERTIES TIMEOUT 120)
+    endforeach()
+
+    # The portable helpers in src/util. Int128 is a struct only with MSVC and
+    # clang-cl; elsewhere the same expected values check __int128.
+    add_executable(neura_util_tests tests/platform/util_tests.cpp)
+    target_include_directories(neura_util_tests PRIVATE src)
+    neura_target_defaults(neura_util_tests)
+    foreach(suite IN ITEMS int128 line-endings)
+        add_test(NAME util-${suite} COMMAND neura_util_tests ${suite})
+    endforeach()
 endif()
 
 add_library(neura_project STATIC EXCLUDE_FROM_ALL
@@ -1128,7 +1246,7 @@ endif()
 neura_target_defaults(neura_app)
 # neura-run belongs to the core (docs/design/Products030.md) and links the layer statically; neurac and the
 # project tools take it from libneura-sdk.
-target_link_libraries(neura-run PRIVATE neura_app)
+neura_tool_link_libraries(neura-run neura_app)
 if(NEURA_SDK)
     # `neura new` (src/app/new.cpp) and the project templates it copies.
     neura_add_tool(neura-new sdk src/app/new.cpp neura_core_library neura_sdk_library)
@@ -1139,8 +1257,11 @@ if(NEURA_SDK)
     neura_add_tool(neura-package sdk src/app/package.cpp neura_core_library neura_sdk_library)
     add_dependencies(neura neura-package)
     # `neura dev` (src/app/dev.cpp): build, run and rebuild in the foreground.
-    neura_add_tool(neura-dev sdk src/app/dev.cpp neura_core_library neura_sdk_library)
-    add_dependencies(neura neura-dev)
+    # On Windows it needs the job-based host control of cmake/windows/project-tools.cmake.
+    if(NOT WIN32 OR NEURA_WINDOWS_DEV)
+        neura_add_tool(neura-dev sdk src/app/dev.cpp neura_core_library neura_sdk_library)
+        add_dependencies(neura neura-dev)
+    endif()
     install(FILES scripts/package-desktop.py DESTINATION share/neura/scripts COMPONENT sdk)
     install(FILES hosts/desktop/main.js hosts/desktop/preload.js DESTINATION share/neura/hosts/desktop COMPONENT sdk)
     install(FILES LICENSE DESTINATION share/neura COMPONENT sdk)
@@ -1164,6 +1285,8 @@ if(UNIX AND NOT EMSCRIPTEN)
     neura_add_tool(neura-server-host core src/server/server_host.cpp neura_server_worker neura_server_listeners
         neura_server_http neura_core_library Threads::Threads)
     add_dependencies(neura neura-server-host)
+elseif(WIN32)
+    neura_windows_hook(server_tools)
 endif()
 
 if(BUILD_TESTING AND NEURA_SDK)
@@ -1206,7 +1329,9 @@ if(BUILD_TESTING AND NEURA_SDK)
     neura_target_defaults(neura_http_wire_tests)
     add_test(NAME server-http-wire COMMAND neura_http_wire_tests)
 
-    if(UNIX AND NOT EMSCRIPTEN)
+    # The server libraries' tests, wherever their targets are defined (on
+    # Windows by cmake/windows/server.cmake).
+    if(TARGET neura_server_http)
         find_package(Threads REQUIRED)
         add_executable(neura_http_connection_tests tests/server/http_connection_tests.cpp)
         target_link_libraries(neura_http_connection_tests PRIVATE neura_server_http Threads::Threads)
@@ -1272,9 +1397,12 @@ if(BUILD_TESTING AND NEURA_SDK)
         "$<TARGET_FILE:neura>" "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/project-new-tests")
     set_tests_properties(project-new PROPERTIES TIMEOUT 900)
     # `neura dev` (tests/project/dev.py): reloads, stylesheet swaps, restarts and process-tree checks.
-    add_test(NAME project-dev COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/project/dev.py"
-        "$<TARGET_FILE:neura>" "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/project-dev-tests")
-    set_tests_properties(project-dev PROPERTIES TIMEOUT 600)
+    # Registered only where neura-dev is built (see the neura-dev tool above).
+    if(NOT WIN32 OR NEURA_WINDOWS_DEV)
+        add_test(NAME project-dev COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/project/dev.py"
+            "$<TARGET_FILE:neura>" "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/project-dev-tests")
+        set_tests_properties(project-dev PROPERTIES TIMEOUT 600)
+    endif()
     # `neura package` (tests/project/package.py); the desktop package only with the pinned engine.
     add_test(NAME project-package COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/project/package.py"
         "$<TARGET_FILE:neura>" "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/project-package-tests")
@@ -1283,7 +1411,7 @@ if(BUILD_TESTING AND NEURA_SDK)
         set_tests_properties(project-package PROPERTIES ENVIRONMENT "NEURA_DESKTOP_ENGINE=${NEURA_DESKTOP_ENGINE}")
     endif()
 
-    if(TARGET neura_launcher)
+    if(TARGET neura_launcher AND NOT WIN32)
         add_executable(neura_native_container_tests tests/native/container_cases.cpp)
         neura_target_defaults(neura_native_container_tests)
         foreach(suite IN ITEMS build run container)
@@ -1445,8 +1573,11 @@ if(BUILD_TESTING AND NEURA_SDK)
     # directly and through neura, missing and mixed components, and the
     # build tree against an install on PATH. The mixed dispatcher claims
     # another build in its dispatch token.
-    add_executable(neura_test_mixed_dispatcher src/cli/main.cpp src/cli/tool_registry.cpp)
+    # The Windows dispatcher starts tools through tool.cpp (tool::argv_of).
+    add_executable(neura_test_mixed_dispatcher src/cli/main.cpp src/cli/tool_registry.cpp
+        $<$<PLATFORM_ID:Windows>:src/cli/tool.cpp>)
     target_include_directories(neura_test_mixed_dispatcher PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/generated")
+    target_link_libraries(neura_test_mixed_dispatcher PRIVATE neura_platform)
     target_compile_definitions(neura_test_mixed_dispatcher PRIVATE
         "NEURA_DISPATCH_VERSION_OVERRIDE=\"neura 0.0.0-mixed (test, commit test)\"")
     set_target_properties(neura_test_mixed_dispatcher PROPERTIES
@@ -1848,6 +1979,8 @@ if(BUILD_TESTING AND NEURA_SDK)
         "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
         "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/install-tests"
         "-DCONFIG=$<CONFIG>"
+        # Script mode has no CMAKE_EXECUTABLE_SUFFIX of its own (neura.exe on Windows).
+        "-DCMAKE_EXECUTABLE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/backend/install.cmake"
     )
 
@@ -1869,6 +2002,17 @@ if(BUILD_TESTING AND NEURA_SDK)
     # suffix, so on macOS the Mach-O dynamic library keeps that name instead of
     # CMake's libmathops.dylib.
     set_target_properties(neura_test_mathops_shared PROPERTIES SUFFIX ".so")
+    if(WIN32)
+        # The same names on Windows, which the tests and their '// args:'
+        # lines use: libmathops.so is the DLL, which exports every function of
+        # mathops.c, and libmathops.a the static COFF archive. The DLL's
+        # import library takes another name, mathops-import.lib.
+        set_target_properties(neura_test_mathops_shared PROPERTIES
+            PREFIX "lib"
+            WINDOWS_EXPORT_ALL_SYMBOLS ON
+            ARCHIVE_OUTPUT_NAME mathops-import)
+        set_target_properties(neura_test_mathops_static PROPERTIES PREFIX "lib" SUFFIX ".a")
+    endif()
     set(neura_native_test_dir "${CMAKE_CURRENT_BINARY_DIR}/native-tests")
     add_test(NAME backend-capabilities COMMAND ${CMAKE_COMMAND}
         "-DNEURA=$<TARGET_FILE:neura>"
@@ -1876,7 +2020,7 @@ if(BUILD_TESTING AND NEURA_SDK)
         "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/backend-capabilities-tests"
         "-DMATHOPS=$<TARGET_FILE:neura_test_mathops_shared>"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/backend/capabilities.cmake")
-    if(TARGET neura_launcher)
+    if(TARGET neura_launcher AND NOT WIN32)
         add_test(NAME native-policy COMMAND ${CMAKE_COMMAND}
             "-DNEURA=$<TARGET_FILE:neura>"
             "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
@@ -1897,6 +2041,9 @@ if(BUILD_TESTING AND NEURA_SDK)
             "-DMATHOPS=$<TARGET_FILE:neura_test_mathops_static>" "-DTRIPLE=${neura_launcher_triple}"
             "-DHAS_STATIC=${NEURA_HAS_STATIC_LAUNCHER}"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/c-import-executable.cmake")
+    elseif(TARGET neura_launcher)
+        # The PE launcher's tests (cmake/windows/launchers.cmake).
+        neura_windows_hook(launcher_tests)
     else()
         message(STATUS "No Neura launcher for ${CMAKE_SYSTEM_NAME}: native executable tests are not registered "
             "(native-build, native-run, native-container, native-policy, native-install, native-c-import); "
@@ -1911,6 +2058,8 @@ if(BUILD_TESTING AND NEURA_SDK)
         "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
         "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/stdlib-install"
         "-DCONFIG=$<CONFIG>"
+        # Script mode has no CMAKE_EXECUTABLE_SUFFIX of its own (neura.exe on Windows).
+        "-DCMAKE_EXECUTABLE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/install.cmake"
     )
     set_tests_properties(stdlib-install PROPERTIES FIXTURES_SETUP stdlib)
@@ -1969,7 +2118,10 @@ if(BUILD_TESTING AND NEURA_SDK)
             message(FATAL_ERROR "NEURA_DESKTOP_ENGINE names no file: ${NEURA_DESKTOP_ENGINE}")
         endif()
         find_program(NEURA_DESKTOP_NODE node REQUIRED)
-        find_program(NEURA_DESKTOP_XVFB_RUN xvfb-run REQUIRED)
+        if(NOT WIN32)
+            # Windows has a desktop session of its own; X servers are for POSIX.
+            find_program(NEURA_DESKTOP_XVFB_RUN xvfb-run REQUIRED)
+        endif()
         set(neura_desktop_tests "${CMAKE_CURRENT_SOURCE_DIR}/tests/desktop")
         add_test(NAME desktop-native-child COMMAND "${NEURA_DESKTOP_NODE}" --test
             "${neura_desktop_tests}/native_child_test.js")
@@ -2034,7 +2186,7 @@ if(BUILD_TESTING AND NEURA_SDK)
     target_link_libraries(neura_service_protocol_tests PRIVATE neura_service_protocol)
     neura_target_defaults(neura_service_protocol_tests)
     add_test(NAME service-unit-protocol COMMAND neura_service_protocol_tests)
-    if(NOT WIN32)
+    if(NOT WIN32 OR NEURA_WINDOWS_SERVICE)
         # The cached environment readers abort while the environment is held.
         add_executable(neura_service_environment_tests tests/service/environment_tests.cpp)
         target_link_libraries(neura_service_environment_tests PRIVATE neura_nvm)
@@ -2063,15 +2215,17 @@ if(BUILD_TESTING AND NEURA_SDK)
                 set_tests_properties(service-${suite} PROPERTIES ENVIRONMENT "NEURA_TEST_GPU_BUILD=1")
             endif()
         endforeach()
+    elseif(WIN32 AND NEURA_WINDOWS_SERVICE)
+        neura_windows_hook(service_tests)
     endif()
 
     # The install lifecycle (docs/Install.md): version source, the data
     # formats, and the commands against an install made from a release
     # archive. None needs the network, root, or a terminal.
     add_executable(neura_lifecycle_tests tests/lifecycle/unit_tests.cpp)
-    target_link_libraries(neura_lifecycle_tests PRIVATE neura_lifecycle)
+    target_link_libraries(neura_lifecycle_tests PRIVATE neura_lifecycle neura_cli_registry)
     neura_target_defaults(neura_lifecycle_tests)
-    foreach(suite IN ITEMS sha256 semver release-metadata marker manifest journal generation)
+    foreach(suite IN ITEMS sha256 semver release-metadata marker manifest journal generation lease)
         add_test(NAME lifecycle-unit-${suite} COMMAND neura_lifecycle_tests ${suite})
     endforeach()
     add_test(NAME version-consistency COMMAND ${CMAKE_COMMAND}

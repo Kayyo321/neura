@@ -3,12 +3,14 @@
 // update-check state. The commands that use them are tested through the
 // installed tool by the lifecycle-* CMake scripts.
 //
-// Usage: neura_lifecycle_tests <sha256|semver|release-metadata|marker|manifest|journal|generation>
+// Usage: neura_lifecycle_tests <sha256|semver|release-metadata|marker|manifest|journal|generation|lease>
 
 #include "cli/install_layout.hpp"
 #include "cli/release_channel.hpp"
+#include "cli/tool.hpp"
 #include "util/sha256.hpp"
 
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -16,10 +18,28 @@
 #include <iterator>
 #include <initializer_list>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
+#ifdef _WIN32
+#include "platform/windows.hpp"
+
+#include <process.h>
+#else
+#include <fcntl.h>
+#include <sys/file.h>
 #include <unistd.h>
+#endif
+
+// Prefixes an absolute POSIX path in a marker or journal literal so that it
+// is absolute on the host too: on Windows, where the lifecycle writes drive
+// paths, a path with one leading '/' is not absolute.
+#ifdef _WIN32
+#define HOST_ROOT "C:"
+#else
+#define HOST_ROOT ""
+#endif
 
 namespace {
 
@@ -27,6 +47,20 @@ namespace fs = std::filesystem;
 using namespace neura::lifecycle;
 
 int failures = 0;
+
+// Names this run's temporary files apart from a parallel run's.
+std::string process_tag() {
+#ifdef _WIN32
+    return std::to_string(::_getpid());
+#else
+    return std::to_string(::getpid());
+#endif
+}
+
+// The marker as the lifecycle writes it: bytes, with no CR added on Windows.
+void write_marker(const fs::path& path, const std::string& text) {
+    std::ofstream(path, std::ios::binary) << text;
+}
 int components_metadata_cases();
 
 void check(bool condition, const std::string& what, int line) {
@@ -80,7 +114,7 @@ int sha256_suite() {
     CHECK(sha256_hex(std::string(56, 'a')) == "b35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a");
     CHECK(sha256_hex(std::string(64, 'a')) == "ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb");
     {
-        const auto path = fs::temp_directory_path() / ("neura-sha256-test-" + std::to_string(::getpid()));
+        const auto path = fs::temp_directory_path() / ("neura-sha256-test-" + process_tag());
         {
             std::ofstream out(path, std::ios::binary);
             out << "abc";
@@ -261,18 +295,18 @@ int marker_suite() {
     // Schema 2 round trip.
     Marker marker;
     marker.method = "archive";
-    marker.bin = "/home/u/my bin";
+    marker.bin = HOST_ROOT "/home/u/my bin";
     marker.components = {"sdk", "core"};
     marker.generations = {"0.3.0+1a2b3c4d5e6f", "0.2.1-rc.3"};
     marker.links = {"neurac", "neura", "neura-doctor"};
     const auto text = format_marker(marker);
-    CHECK(text == "neura-install 2\nmethod archive\nbin /home/u/my bin\ncomponents core sdk\ngeneration 0.2.1-rc.3\n"
+    CHECK(text == "neura-install 2\nmethod archive\nbin " HOST_ROOT "/home/u/my bin\ncomponents core sdk\ngeneration 0.2.1-rc.3\n"
                   "generation 0.3.0+1a2b3c4d5e6f\nlink neura\nlink neura-doctor\nlink neurac\n");
     const auto parsed = parse_marker(text, error);
-    CHECK(parsed && parsed->schema == 2 && parsed->method == "archive" && parsed->bin == "/home/u/my bin" &&
+    CHECK(parsed && parsed->schema == 2 && parsed->method == "archive" && parsed->bin == HOST_ROOT "/home/u/my bin" &&
           parsed->components == std::vector<std::string>({"core", "sdk"}) && parsed->generations.size() == 2 && parsed->links.size() == 3);
     CHECK(parsed && format_marker(*parsed) == text);
-    CHECK(parse_marker("neura-install 2\nmethod archive\nbin /b\ncomponents core service\n", error).has_value());
+    CHECK(parse_marker("neura-install 2\nmethod archive\nbin " HOST_ROOT "/b\ncomponents core service\n", error).has_value());
 
     // Schema 1, which 0.2 wrote, reads as one link named by its path.
     const std::string legacy = "neura-install 1\nmethod archive\nlink /home/u/.local/bin/neura\nversion 0.1.0\nversion 0.2.0-rc.1\n";
@@ -289,7 +323,7 @@ int marker_suite() {
         {"schema 1, no lines", "neura-install 1\n"},
         {"schema 1, no version", "neura-install 1\nmethod archive\nlink /b/neura\n"},
         {"schema 1 lines under schema 2", "neura-install 2\nmethod archive\nlink /b/neura\nversion 1.0.0\n"},
-        {"schema 3", "neura-install 3\nmethod archive\nbin /b\ncomponents core sdk\n"},
+        {"schema 3", "neura-install 3\nmethod archive\nbin " HOST_ROOT "/b\ncomponents core sdk\n"},
         {"schema 1 out of order", "neura-install 1\nversion 1.0.0\nmethod archive\nlink /b/neura\n"},
         {"schema 1 relative link", "neura-install 1\nmethod archive\nlink b/neura\nversion 1.0.0\n"},
         {"schema 1 no final newline", "neura-install 1\nmethod archive\nlink /b/neura\nversion 1.0.0"},
@@ -303,18 +337,18 @@ int marker_suite() {
         {"carriage returns", "neura-install 1\r\nmethod archive\r\nlink /b/neura\r\nversion 1.0.0\r\n"},
         {"trailing space", "neura-install 1\nmethod archive\nlink /b/neura\nversion 1.0.0 \n"},
         {"tab in link", "neura-install 1\nmethod archive\nlink /b\tx\nversion 1.0.0\n"},
-        {"schema 2 no components", "neura-install 2\nmethod archive\nbin /b\ncomponents\n"},
+        {"schema 2 no components", "neura-install 2\nmethod archive\nbin " HOST_ROOT "/b\ncomponents\n"},
         {"schema 2 relative bin", "neura-install 2\nmethod archive\nbin b\ncomponents core sdk\n"},
-        {"schema 2 components out of order", "neura-install 2\nmethod archive\nbin /b\ncomponents sdk core\n"},
-        {"schema 2 repeated component", "neura-install 2\nmethod archive\nbin /b\ncomponents core core\n"},
-        {"schema 2 bad generation", "neura-install 2\nmethod archive\nbin /b\ncomponents core sdk\ngeneration 0.3.0+xyz\n"},
+        {"schema 2 components out of order", "neura-install 2\nmethod archive\nbin " HOST_ROOT "/b\ncomponents sdk core\n"},
+        {"schema 2 repeated component", "neura-install 2\nmethod archive\nbin " HOST_ROOT "/b\ncomponents core core\n"},
+        {"schema 2 bad generation", "neura-install 2\nmethod archive\nbin " HOST_ROOT "/b\ncomponents core sdk\ngeneration 0.3.0+xyz\n"},
         {"schema 2 generations unsorted",
-         "neura-install 2\nmethod archive\nbin /b\ncomponents core sdk\ngeneration 0.3.0\ngeneration 0.2.0\n"},
+         "neura-install 2\nmethod archive\nbin " HOST_ROOT "/b\ncomponents core sdk\ngeneration 0.3.0\ngeneration 0.2.0\n"},
         {"schema 2 link before generation",
-         "neura-install 2\nmethod archive\nbin /b\ncomponents core sdk\nlink neura\ngeneration 0.3.0\n"},
-        {"schema 2 repeated link", "neura-install 2\nmethod archive\nbin /b\ncomponents core sdk\nlink neura\nlink neura\n"},
-        {"schema 2 link with a slash", "neura-install 2\nmethod archive\nbin /b\ncomponents core sdk\nlink ../neura\n"},
-        {"schema 2 unknown line", "neura-install 2\nmethod archive\nbin /b\ncomponents core sdk\nversion 1.0.0\n"},
+         "neura-install 2\nmethod archive\nbin " HOST_ROOT "/b\ncomponents core sdk\nlink neura\ngeneration 0.3.0\n"},
+        {"schema 2 repeated link", "neura-install 2\nmethod archive\nbin " HOST_ROOT "/b\ncomponents core sdk\nlink neura\nlink neura\n"},
+        {"schema 2 link with a slash", "neura-install 2\nmethod archive\nbin " HOST_ROOT "/b\ncomponents core sdk\nlink ../neura\n"},
+        {"schema 2 unknown line", "neura-install 2\nmethod archive\nbin " HOST_ROOT "/b\ncomponents core sdk\nversion 1.0.0\n"},
         {"schema 2 version line", "neura-install 2\nmethod archive\nlink /b/neura\ncomponents core sdk\n"},
     });
 
@@ -338,19 +372,37 @@ int marker_suite() {
     CHECK(update_check_due(state, state.checked + 7 * day));
     CHECK(update_check_due(state, state.checked - 1));
 
+    // A drive path is absolute on Windows only, in the generic form that the
+    // lifecycle writes there; elsewhere it is a relative path.
+    const std::string drive_marker = "neura-install 2\nmethod archive\nbin C:/Users/u/AppData/Local/Neura/bin\ncomponents core sdk\n";
+#ifdef _WIN32
+    const auto drive = parse_marker(drive_marker, error);
+    CHECK(drive && drive->bin == "C:/Users/u/AppData/Local/Neura/bin" && format_marker(*drive) == drive_marker);
+    CHECK(parse_marker("neura-install 2\nmethod archive\nbin d:/b\ncomponents core sdk\n", error).has_value());
+    CHECK(parse_marker("neura-install 2\nmethod archive\nbin //server/share/b\ncomponents core sdk\n", error).has_value());
+    expect_rejected("marker", parse_marker, {
+        {"drive-relative bin", "neura-install 2\nmethod archive\nbin C:b\ncomponents core sdk\n"},
+        {"bare drive bin", "neura-install 2\nmethod archive\nbin C:\ncomponents core sdk\n"},
+        {"backslash bin", "neura-install 2\nmethod archive\nbin C:\\b\ncomponents core sdk\n"},
+        {"digit as drive", "neura-install 2\nmethod archive\nbin 1:/b\ncomponents core sdk\n"},
+        {"root-relative bin", "neura-install 2\nmethod archive\nbin /b\ncomponents core sdk\n"},
+    });
+#else
+    expect_rejected("marker", parse_marker, {{"drive path bin", drive_marker}});
+#endif
+
     // Finding the install root from an executable path.
-    const auto root = fs::temp_directory_path() / ("neura-marker-test-" + std::to_string(::getpid()));
+    const auto root = fs::temp_directory_path() / ("neura-marker-test-" + process_tag());
     fs::remove_all(root);
     fs::create_directories(root / "versions/0.1.0/bin");
     const auto executable = root / "versions/0.1.0/bin/neura";
     CHECK(detect_install(executable).kind == Detection::Kind::Unmanaged);
-    {
-        std::ofstream(root / "neura-install.txt") << "garbage\n";
-    }
+    write_marker(root / "neura-install.txt", "garbage\n");
     CHECK(detect_install(executable).kind == Detection::Kind::Broken);
-    {
-        std::ofstream(root / "neura-install.txt") << legacy;
-    }
+    // A marker that an editor saved with CRLF is not one.
+    write_marker(root / "neura-install.txt", "neura-install 2\r\nmethod archive\r\nbin " HOST_ROOT "/b\r\ncomponents core sdk\r\n");
+    CHECK(detect_install(executable).kind == Detection::Kind::Broken);
+    write_marker(root / "neura-install.txt", legacy);
     const auto detected = detect_install(executable);
     CHECK(detected.archive() && detected.root == root && detected.running_generation == "0.1.0");
     CHECK(detect_install(root / "versions/0.1.0/neura").kind == Detection::Kind::Unmanaged);
@@ -358,20 +410,30 @@ int marker_suite() {
     CHECK(detect_install(root / "bin/neura").kind == Detection::Kind::Unmanaged);
     CHECK(detect_install("/").kind == Detection::Kind::Unmanaged);
     CHECK(detect_install("").kind == Detection::Kind::Unmanaged);
-    {
-        std::ofstream(root / "neura-install.txt") << "neura-install 1\nmethod deb\nlink /usr/bin/neura\nversion 0.1.0\n";
-    }
+    write_marker(root / "neura-install.txt", "neura-install 1\nmethod deb\nlink /usr/bin/neura\nversion 0.1.0\n");
     const auto managed = detect_install(executable);
     CHECK(managed.kind == Detection::Kind::Installed && !managed.archive() && managed.marker.method == "deb");
     // A 0.3 generation name and a schema 2 marker.
     fs::create_directories(root / "versions/0.3.0+0123456789ab/bin");
-    {
-        std::ofstream(root / "neura-install.txt") << text;
-    }
+    write_marker(root / "neura-install.txt", text);
     const auto generation = detect_install(root / "versions/0.3.0+0123456789ab/bin/neurac");
     CHECK(generation.archive() && generation.running_generation == "0.3.0+0123456789ab" && generation.marker.schema == 2);
     CHECK(detect_install(root / "versions/0.3.0+0123456789AB/bin/neura").kind == Detection::Kind::Unmanaged);
     CHECK(detect_install(root / "versions/0.3.0+0123/bin/neura").kind == Detection::Kind::Unmanaged);
+#ifdef _WIN32
+    // Executables are neura.exe and the like; a root reads with either
+    // separator, and a marker holds a drive path.
+    write_marker(root / "neura-install.txt", drive_marker);
+    const auto windows = detect_install(root / "versions/0.3.0+0123456789ab/bin/neura.exe");
+    CHECK(windows.archive() && windows.root == root && windows.running_generation == "0.3.0+0123456789ab" &&
+          windows.marker.bin == "C:/Users/u/AppData/Local/Neura/bin");
+    const auto backslashes = detect_install(fs::path(root.wstring() + L"\\versions\\0.3.0+0123456789ab\\bin\\neura-run.exe"));
+    CHECK(backslashes.archive() && backslashes.root == root);
+    CHECK(detect_install(root / "versions/0.3.0+0123456789ab/neura.exe").kind == Detection::Kind::Unmanaged);
+    CHECK(detect_install("C:/").kind == Detection::Kind::Unmanaged);
+    CHECK(detect_install("C:").kind == Detection::Kind::Unmanaged);
+    CHECK(detect_install("C:/neura.exe").kind == Detection::Kind::Unmanaged);
+#endif
     fs::remove_all(root);
     return failures;
 }
@@ -487,11 +549,11 @@ int journal_suite() {
     journal.old_generation = "0.2.1-rc.3";
     journal.new_generation = "0.3.0+0123456789ab";
     journal.placed = true;
-    journal.aside = "/home/u/.local/share/neura/.damaged-0.3.0+0123456789ab-17";
-    journal.remove = {"/home/u/my bin/neura-old"};
-    journal.add = {"/home/u/my bin/neurac", "/home/u/my bin/neura-test"};
+    journal.aside = HOST_ROOT "/home/u/.local/share/neura/.damaged-0.3.0+0123456789ab-17";
+    journal.remove = {HOST_ROOT "/home/u/my bin/neura-old"};
+    journal.add = {HOST_ROOT "/home/u/my bin/neurac", HOST_ROOT "/home/u/my bin/neura-test"};
     journal.old_marker = "neura-install 1\nmethod archive\nlink /home/u/my bin/neura\nversion 0.2.1-rc.3\n";
-    journal.new_marker = "neura-install 2\nmethod archive\nbin /home/u/my bin\ncomponents core sdk\n";
+    journal.new_marker = "neura-install 2\nmethod archive\nbin " HOST_ROOT "/home/u/my bin\ncomponents core sdk\n";
     const auto text = format_journal(journal);
     const auto parsed = parse_journal(text, error);
     CHECK(parsed.has_value());
@@ -509,6 +571,21 @@ int journal_suite() {
     first.new_marker = journal.new_marker;
     const auto reread = parse_journal(format_journal(first), error);
     CHECK(reread && reread->old_generation.empty() && reread->old_marker.empty() && !reread->placed);
+    const std::string drive_links = "neura-journal 1\noperation update\nold -\nnew 0.3.0\nplaced no\naside C:/n/.damaged-0.3.0-1\n"
+                                    "remove C:/n/bin/neura-old.exe\nadd D:/b/neurac.exe\nnew-marker x\n";
+#ifdef _WIN32
+    const auto drive = parse_journal(drive_links, error);
+    CHECK(drive && drive->aside == "C:/n/.damaged-0.3.0-1" && drive->remove == std::vector<std::string>{"C:/n/bin/neura-old.exe"} &&
+          drive->add == std::vector<std::string>{"D:/b/neurac.exe"});
+    CHECK(drive && format_journal(*drive) == drive_links);
+    expect_rejected("journal", parse_journal, {
+        {"drive-relative link", "neura-journal 1\noperation update\nold -\nnew 0.3.0\nplaced no\nadd C:b\\neurac.exe\nnew-marker x\n"},
+        {"root-relative link", "neura-journal 1\noperation update\nold -\nnew 0.3.0\nplaced no\nadd /b/neurac.exe\nnew-marker x\n"},
+        {"root-relative aside", "neura-journal 1\noperation update\nold -\nnew 0.3.0\nplaced no\naside /n/.damaged-0.3.0-1\nnew-marker x\n"},
+    });
+#else
+    expect_rejected("journal", parse_journal, {{"drive path link", drive_links}});
+#endif
     expect_rejected("journal", parse_journal, {
         {"empty", ""},
         {"wrong magic", "neura-journal 2\noperation update\nold -\nnew 0.3.0\nplaced no\nnew-marker x\n"},
@@ -577,11 +654,139 @@ int components_metadata_cases() {
     return failures;
 }
 
+// A lock on the whole lease file, taken the way the lifecycle takes one:
+// LockFileEx on a handle that shares delete on Windows, flock elsewhere.
+class LeaseLock {
+public:
+    LeaseLock(const fs::path& path, bool exclusive, bool wait) {
+#ifdef _WIN32
+        file_ = ::CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file_ == INVALID_HANDLE_VALUE) return;
+        OVERLAPPED whole{};
+        const DWORD flags = (exclusive ? LOCKFILE_EXCLUSIVE_LOCK : 0) | (wait ? 0 : LOCKFILE_FAIL_IMMEDIATELY);
+        held_ = ::LockFileEx(file_, flags, 0, MAXDWORD, MAXDWORD, &whole) != 0;
+#else
+        file_ = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+        if (file_ < 0) return;
+        held_ = ::flock(file_, (exclusive ? LOCK_EX : LOCK_SH) | (wait ? 0 : LOCK_NB)) == 0;
+#endif
+    }
+    LeaseLock(const LeaseLock&) = delete;
+    LeaseLock& operator=(const LeaseLock&) = delete;
+    ~LeaseLock() { release(); }
+
+    bool held() const { return held_; }
+
+    void release() {
+#ifdef _WIN32
+        if (file_ != INVALID_HANDLE_VALUE) ::CloseHandle(file_);
+        file_ = INVALID_HANDLE_VALUE;
+#else
+        if (file_ >= 0) ::close(file_);
+        file_ = -1;
+#endif
+        held_ = false;
+    }
+
+private:
+#ifdef _WIN32
+    HANDLE file_ = INVALID_HANDLE_VALUE;
+#else
+    int file_ = -1;
+#endif
+    bool held_ = false;
+};
+
+void close_lease(neura::tool::LeaseHandle lease) {
+    if (lease == neura::tool::no_lease) return;
+#ifdef _WIN32
+    ::CloseHandle(reinterpret_cast<HANDLE>(lease));
+#else
+    ::close(lease);
+#endif
+}
+
+// The lease a tool takes on its generation (src/cli/tool_registry.cpp).
+int lease_suite() {
+    using neura::tool::no_lease;
+    using neura::tool::take_lease;
+    const auto root = fs::temp_directory_path() / ("neura-lease-test-" + process_tag());
+    fs::remove_all(root);
+    const std::string generation = "0.3.0+0123456789ab";
+    fs::create_directories(root / "versions" / generation / "bin");
+    fs::create_directories(root / "leases");
+    const auto tool = root / "versions" / generation / "bin" / neura::tool::executable_file("neurac");
+    const auto lease_file = root / "leases" / generation;
+    write_marker(root / "neura-install.txt", "neura-install 2\nmethod archive\nbin " HOST_ROOT "/b\ncomponents core sdk\n");
+    write_marker(lease_file, "");
+
+    // An installed generation: a shared lease that an exclusive lock waits for.
+    bool removed = true;
+    auto lease = take_lease(tool, removed);
+    CHECK(lease != no_lease && !removed);
+    {
+        LeaseLock probe(lease_file, true, false);
+        CHECK(!probe.held());
+    }
+    {
+        LeaseLock reader(lease_file, false, false);
+        CHECK(reader.held());
+    }
+    close_lease(lease);
+    {
+        LeaseLock probe(lease_file, true, false);
+        CHECK(probe.held());
+    }
+
+    // Not under versions/<generation>/bin: no lease, and nothing removed.
+    for (const auto& outside : {root / "bin" / "neurac", root / "versions" / generation / "neurac",
+                                root / "other" / generation / "bin" / "neurac"}) {
+        removed = true;
+        lease = take_lease(outside, removed);
+        CHECK(lease == no_lease && !removed);
+        close_lease(lease);
+    }
+
+    // The lease file deleted while a remover holds it exclusively: the tool
+    // waits for the lock and then sees the generation is gone.
+    {
+        LeaseLock remover(lease_file, true, true);
+        CHECK(remover.held());
+        bool waited_removed = false;
+        auto waited = no_lease;
+        std::thread waiter([&] { waited = take_lease(tool, waited_removed); });
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        std::error_code error;
+        fs::remove(lease_file, error);
+        CHECK(!error);
+        remover.release();
+        waiter.join();
+        CHECK(waited == no_lease && waited_removed);
+        close_lease(waited);
+    }
+
+    // No lease file under a schema 2 marker: the generation was removed.
+    removed = false;
+    lease = take_lease(tool, removed);
+    CHECK(lease == no_lease && removed);
+    close_lease(lease);
+    // Under a 0.2 (schema 1) marker the tool runs without a lease.
+    write_marker(root / "neura-install.txt", "neura-install 1\nmethod archive\nlink /b/neura\nversion 0.1.0\n");
+    removed = true;
+    lease = take_lease(tool, removed);
+    CHECK(lease == no_lease && !removed);
+    close_lease(lease);
+
+    fs::remove_all(root);
+    return failures;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
     if (argc != 2) {
-        std::cerr << "usage: neura_lifecycle_tests <sha256|semver|release-metadata|marker|manifest|journal|generation>\n";
+        std::cerr << "usage: neura_lifecycle_tests <sha256|semver|release-metadata|marker|manifest|journal|generation|lease>\n";
         return 2;
     }
     const std::string suite = argv[1];
@@ -593,6 +798,7 @@ int main(int argc, char** argv) {
     else if (suite == "manifest") result = manifest_suite();
     else if (suite == "journal") result = journal_suite();
     else if (suite == "generation") result = generation_suite();
+    else if (suite == "lease") result = lease_suite();
     else {
         std::cerr << "unknown suite " << suite << '\n';
         return 2;
