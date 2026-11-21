@@ -98,6 +98,32 @@ if (val) {
 
 `val` is `nil`, so `!val` is true, the first body prints `nil`, and the second body does not run. After `val` is assigned an instance, `if (val)` runs and `if (!val)` does not. A comparison such as `val == nil` remains an ordinary `bool`. A number, a string, an enum, and a `bool` keep the condition rules they already have.
 
+## Dot tags
+
+A tag may be introduced with `.` instead of `#`. The two spellings mean the same thing in every position a tag is allowed ([Tags](Tags.md#syntax)): before a declaration, before an enum variant's name, and before a parameter's name.
+
+```text
+tags  := ( sigil tag | sigil '[' tag (',' tag)* [','] ']' )+
+sigil := '#' | '.'
+```
+
+<!-- example: fragment: specified for 0.3.1 and not yet implemented -->
+```neura
+.Pure
+export let area = func(width: int32, height: int32) -> int32 => width * height;
+
+.[Deprecated(as_of: "0.3.1", reason: "use area"), NoDiscard]
+export let size = func(width: int32, height: int32) -> int32 => width * height;
+```
+
+`.Pure` is `#Pure`, and `.[A, B(...)]` is `#[A, B(...)]`. Everything after the sigil is unchanged: tag names, arguments, groups, stacking, documentation comments among tags, and every rule about which declaration a tag may sit on. The two spellings may be mixed in one file and in one stack of tags. A tag written either way is the same tag to the compiler, so the checks, the diagnostics, NeuraIR, `neura docs` output, and the emitted image do not depend on the spelling.
+
+No expression or statement starts with `.`, so a `.` where a declaration, a variant, or a parameter may begin always opens a tag. A `.` after an operand is still member access, and a member access continued on the next line (`value` on one line, `.name()` on the next) is unchanged.
+
+Whatever is an error with `#` is the same error with `.`: a dot tag before a statement that takes no tags is `E0909`, and an unknown or misspelled tag name is reported as it is for `#`. A `.` at the start of a declaration that is followed by neither a tag name nor `[` is a syntax error at the `.`.
+
+`neura fmt` keeps the sigil the author wrote. `neura fmt --tag-style=dot` rewrites every tag to `.`, `--tag-style=hash` rewrites every tag to `#`, and the default, `--tag-style=keep`, changes neither. The standard library, the tests, and the examples are written with `.`. Diagnostics and generated documentation that print a tag keep printing it as `#Name` in 0.3.1.
+
 ## Windows native build
 
 From 0.3.1 on, Windows is a supported platform in its own right, not only through WSL 2. Every release publishes a native Windows archive. Every later release must keep it building, tested, and published, with the same gates as the Linux and macOS archives.
