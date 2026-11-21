@@ -1,19 +1,26 @@
 // Tests of the worker channel (src/server/worker_messages.cpp) over a real
 // socket pair: the channel never blocks in send(2) or recv(2), so a host and
 // a worker that both send at once finish, and a send to a peer that never
-// reads ends at its deadline.
+// reads ends at its deadline. On Windows the pair is platform::socket_pair's
+// AF_UNIX pair, which the host makes for each worker there (W27).
 
 #include "server/worker_messages.hpp"
 
 #include <chrono>
-#include <fcntl.h>
+#include <future>
 #include <iostream>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <sys/socket.h>
 #include <thread>
 #include <vector>
+#ifdef _WIN32
+#include "platform/windows.hpp"
+#else
+#include <fcntl.h>
+#include <sys/socket.h>
+#endif
 
 namespace {
 
@@ -27,6 +34,19 @@ void check(bool condition, std::string_view message) {
 // A blocking socket pair, like the one the host makes for each worker.
 // Its buffers are made small, as macOS's are (8 KiB), so every large frame
 // fills them.
+#ifdef _WIN32
+std::pair<neura::platform::native_socket, neura::platform::native_socket> socket_pair() {
+    std::error_code error;
+    const auto pair = neura::platform::socket_pair(error);
+    check(!error, "socket_pair failed");
+    for (const auto socket : pair) {
+        const int size = 8 * 1024;
+        (void)::setsockopt(socket, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<const char*>(&size), sizeof size);
+        (void)::setsockopt(socket, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<const char*>(&size), sizeof size);
+    }
+    return {pair[0], pair[1]};
+}
+#else
 std::pair<int, int> socket_pair() {
     int pair[2];
     check(::socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0, "socketpair failed");
@@ -37,6 +57,7 @@ std::pair<int, int> socket_pair() {
     }
     return {pair[0], pair[1]};
 }
+#endif
 
 WorkerIdentity identity() { return server_identity(ImageDigest{}); }
 
@@ -49,6 +70,30 @@ Hello hello(PeerRole role) {
 
 // macOS ignores MSG_DONTWAIT on send(2) (it honours only a nonblocking
 // socket there), so the channel must make its descriptor nonblocking.
+#ifdef _WIN32
+// Windows has neither MSG_DONTWAIT nor a way to read a socket's FIONBIO
+// mode: a recv on an empty channel must fail with WSAEWOULDBLOCK at once. A
+// channel that blocked would wait until its peer closes, after 5 s.
+void descriptor_is_nonblocking() {
+    const auto [host_end, worker_end] = socket_pair();
+    const auto host = std::make_unique<Channel>(host_end, PeerRole::Host, identity());
+    auto worker = std::make_unique<Channel>(worker_end, PeerRole::Worker, identity());
+    const auto empty_recv = [](neura::platform::native_socket socket) {
+        return std::async(std::launch::async, [socket] {
+            char byte = 0;
+            const int got = ::recv(socket, &byte, 1, 0);
+            return got < 0 && ::WSAGetLastError() == WSAEWOULDBLOCK;
+        });
+    };
+    auto host_read = empty_recv(host_end);
+    auto worker_read = empty_recv(worker_end);
+    const bool host_returned = host_read.wait_for(5s) == std::future_status::ready;
+    const bool worker_returned = worker_read.wait_for(5s) == std::future_status::ready;
+    worker.reset(); // Ends a recv of the host's that blocked.
+    check(host_returned && host_read.get(), "the host's channel descriptor blocks");
+    check(worker_returned && worker_read.get(), "the worker's channel descriptor blocks");
+}
+#else
 void descriptor_is_nonblocking() {
     const auto [host_end, worker_end] = socket_pair();
     check(!(::fcntl(host_end, F_GETFL) & O_NONBLOCK), "the socket pair started nonblocking");
@@ -57,6 +102,7 @@ void descriptor_is_nonblocking() {
     check(::fcntl(host_end, F_GETFL) & O_NONBLOCK, "the host's channel descriptor blocks");
     check(::fcntl(worker_end, F_GETFL) & O_NONBLOCK, "the worker's channel descriptor blocks");
 }
+#endif
 
 // The worker streams 4 MB of response before it reads the 4 MB body the
 // host sends, and the host reads the response only after the body

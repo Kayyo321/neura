@@ -7,7 +7,8 @@
 // stream state below under one mutex: the connection thread wakes a responder
 // through its condition variable (and, while the responder also waits on a
 // descriptor, a pipe), and a responder wakes the connection thread through
-// the connection's pipe, which the connection's read also waits on.
+// the connection's pipe, which the connection's read also waits on. On
+// Windows each pipe is a socket pair, since WSAPoll waits on sockets only.
 
 #include "server/http2_connection.hpp"
 #include "server/http_socket.hpp"
@@ -19,15 +20,17 @@
 #include <climits>
 #include <condition_variable>
 #include <cstring>
-#include <fcntl.h>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <poll.h>
 #include <thread>
-#include <unistd.h>
 #include <vector>
+#ifndef _WIN32
+#include <fcntl.h>
+#include <poll.h>
+#include <unistd.h>
+#endif
 
 namespace neura::server::http {
 namespace {
@@ -49,6 +52,43 @@ constexpr std::uint32_t header_table_bytes = 4096;
 // The initial stream window the host advertises (the protocol default).
 constexpr std::int64_t stream_window = 65535;
 
+#ifdef _WIN32
+// A non-blocking socket pair whose first end a poll can wait on: WSAPoll
+// waits on sockets only (W27).
+class WakePipe {
+public:
+    WakePipe() {
+        std::error_code error;
+        const auto ends = platform::socket_pair(error);
+        if (error) return;
+        for (const auto end : ends) (void)platform::set_nonblocking(end);
+        read_ = ends[0];
+        write_ = ends[1];
+    }
+    WakePipe(const WakePipe&) = delete;
+    WakePipe& operator=(const WakePipe&) = delete;
+    ~WakePipe() {
+        if (read_ != platform::invalid_socket) (void)platform::close_socket(read_);
+        if (write_ != platform::invalid_socket) (void)platform::close_socket(write_);
+    }
+
+    bool valid() const { return read_ != platform::invalid_socket; }
+    platform::native_socket descriptor() const { return read_; }
+    // A full socket is already readable, so a failed send loses nothing.
+    void signal() const {
+        const char byte = 1;
+        if (write_ != platform::invalid_socket) (void)::send(write_, &byte, 1, 0);
+    }
+    void drain() const {
+        std::array<char, 64> bytes;
+        while (read_ != platform::invalid_socket && ::recv(read_, bytes.data(), static_cast<int>(bytes.size()), 0) > 0) {}
+    }
+
+private:
+    platform::native_socket read_ = platform::invalid_socket;
+    platform::native_socket write_ = platform::invalid_socket;
+};
+#else
 // A non-blocking pipe whose read end a poll can wait on.
 class WakePipe {
 public:
@@ -89,6 +129,7 @@ private:
     int read_ = -1;
     int write_ = -1;
 };
+#endif
 
 char ascii_lower(char c) { return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c; }
 
@@ -675,7 +716,7 @@ public:
             }
             if (stream_.inbound_end) return end({Status::End});
             if (Clock::now() >= stream_.deadline) return end({Status::TimedOut});
-            if (wake_ < 0) {
+            if (wake_ == no_wake) {
                 stream_.changed.wait_until(lock, stream_.deadline);
                 continue;
             }
@@ -690,7 +731,7 @@ public:
         }
     }
 
-    void wake_on(int descriptor) override { wake_ = descriptor; }
+    void wake_on(WakeDescriptor descriptor) override { wake_ = descriptor; }
     bool ended() const { return ended_; }
     Status outcome() const { return last_.status; }
     int rejection() const { return last_.status_code; }
@@ -705,7 +746,7 @@ private:
     Connection& connection_;
     Stream& stream_;
     std::string current_;
-    int wake_ = -1;
+    WakeDescriptor wake_ = no_wake;
     bool ended_ = false;
     Piece last_{Status::End};
 };
@@ -879,8 +920,8 @@ class ReplayStream final : public ConnectionStream {
 public:
     ReplayStream(ConnectionStream& inner, std::string replay) : inner_(inner), replay_(std::move(replay)) {}
 
-    StreamRead read(std::span<char> output, Deadline deadline) override { return read(output, deadline, -1); }
-    StreamRead read(std::span<char> output, Deadline deadline, int wake) override {
+    StreamRead read(std::span<char> output, Deadline deadline) override { return read(output, deadline, no_wake); }
+    StreamRead read(std::span<char> output, Deadline deadline, WakeDescriptor wake) override {
         if (offset_ < replay_.size()) {
             const auto count = std::min(output.size(), replay_.size() - offset_);
             std::memcpy(output.data(), replay_.data() + offset_, count);

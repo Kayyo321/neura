@@ -1,5 +1,42 @@
 #include "server/worker_zygote.hpp"
 
+#ifdef _WIN32
+#include <iostream>
+
+namespace neura::server {
+
+// Windows has no fork, and cloning a process that uses the C runtime and
+// Winsock is unsupported: workers start with exec (W27).
+bool zygote_supported() { return false; }
+
+int run_worker_zygote(const WorkerOptions& options) {
+    (void)options;
+    std::cerr << "neura-server-host: the worker zygote needs Linux\n";
+    return 70;
+}
+
+std::unique_ptr<ZygoteClient> ZygoteClient::start(const std::filesystem::path& executable,
+                                                  const std::vector<std::string>& arguments, std::string& problem) {
+    (void)executable;
+    (void)arguments;
+    problem = "the worker zygote needs Linux";
+    return nullptr;
+}
+
+ZygoteClient::~ZygoteClient() { stop(); }
+
+// No ZygoteClient exists on Windows; 0 names no worker.
+worker_pid ZygoteClient::fork_worker(int channel, unsigned char flags) {
+    (void)channel;
+    (void)flags;
+    failed_ = true;
+    return 0;
+}
+
+void ZygoteClient::stop() { control_ = -1; }
+
+} // namespace neura::server
+#else
 #include <cerrno>
 #include <csignal>
 #include <cstdio>
@@ -231,3 +268,4 @@ void ZygoteClient::stop() {
 }
 
 } // namespace neura::server
+#endif

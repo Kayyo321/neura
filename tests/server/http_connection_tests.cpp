@@ -4,13 +4,18 @@
 #include <cerrno>
 #include <future>
 #include <iostream>
-#include <netinet/in.h>
 #include <stdexcept>
-#include <sys/socket.h>
 #include <thread>
-#include <unistd.h>
 #include <utility>
 #include <vector>
+#ifdef _WIN32
+#include "platform/socket.hpp"
+#include "platform/windows.hpp"
+#else
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
 
 namespace {
 
@@ -26,31 +31,82 @@ void check(bool condition, string_view message) {
     if (!condition) throw std::runtime_error(string(message));
 }
 
+// The calls that differ on Winsock: a SOCKET closed with closesocket, char
+// option values, int lengths, DWORD timeouts and WSAGetLastError.
+#ifdef _WIN32
+using native_socket = neura::platform::native_socket;
+constexpr native_socket no_socket = neura::platform::invalid_socket;
+void close_socket(native_socket socket) { ::closesocket(socket); }
+bool interrupted() { return ::WSAGetLastError() == WSAEINTR; }
+int set_int_option(native_socket socket, int level, int name, int value) {
+    return ::setsockopt(socket, level, name, reinterpret_cast<const char*>(&value), sizeof value);
+}
+int set_timeout(native_socket socket, int name, std::chrono::milliseconds timeout) {
+    const DWORD value = static_cast<DWORD>(timeout.count());
+    return ::setsockopt(socket, SOL_SOCKET, name, reinterpret_cast<const char*>(&value), sizeof value);
+}
+int send_some(native_socket socket, string_view input) {
+    return ::send(socket, input.data(), static_cast<int>(input.size()), 0);
+}
+int receive_some(native_socket socket, char* output, std::size_t size) {
+    return ::recv(socket, output, static_cast<int>(size), 0);
+}
+constexpr int shut_writes = SD_SEND;
+#else
+using native_socket = int;
+constexpr native_socket no_socket = -1;
+void close_socket(native_socket socket) { ::close(socket); }
+bool interrupted() { return errno == EINTR; }
+int set_int_option(native_socket socket, int level, int name, int value) {
+    return ::setsockopt(socket, level, name, &value, sizeof value);
+}
+int set_timeout(native_socket socket, int name, std::chrono::milliseconds timeout) {
+    const timeval value{static_cast<time_t>(timeout.count() / 1000),
+                        static_cast<suseconds_t>(timeout.count() % 1000 * 1000)};
+    return ::setsockopt(socket, SOL_SOCKET, name, &value, sizeof value);
+}
+ssize_t send_some(native_socket socket, string_view input) {
+#ifdef MSG_NOSIGNAL
+    constexpr int flags = MSG_NOSIGNAL;
+#else
+    constexpr int flags = 0;
+#endif
+    return ::send(socket, input.data(), input.size(), flags);
+}
+ssize_t receive_some(native_socket socket, char* output, std::size_t size) { return ::recv(socket, output, size, 0); }
+constexpr int shut_writes = SHUT_WR;
+#endif
+
 class Socket {
 public:
     Socket() = default;
-    explicit Socket(int descriptor) : descriptor_(descriptor) { check(descriptor_ >= 0, "could not open TCP socket"); }
+    explicit Socket(native_socket descriptor) : descriptor_(descriptor) {
+        check(descriptor_ != no_socket, "could not open TCP socket");
+    }
     Socket(const Socket&) = delete;
     Socket& operator=(const Socket&) = delete;
     Socket(Socket&& other) noexcept : descriptor_(other.release()) {}
     Socket& operator=(Socket&& other) noexcept {
-        if (descriptor_ >= 0) ::close(descriptor_);
+        if (descriptor_ != no_socket) close_socket(descriptor_);
         descriptor_ = other.release();
         return *this;
     }
-    ~Socket() { if (descriptor_ >= 0) ::close(descriptor_); }
+    ~Socket() { if (descriptor_ != no_socket) close_socket(descriptor_); }
 
-    int get() const { return descriptor_; }
-    int release() { return std::exchange(descriptor_, -1); }
+    native_socket get() const { return descriptor_; }
+    native_socket release() { return std::exchange(descriptor_, no_socket); }
 
 private:
-    int descriptor_ = -1;
+    native_socket descriptor_ = no_socket;
 };
 
 class Loopback {
 public:
     template <typename Respond>
     explicit Loopback(Respond respond, ConnectionLimits limits = {}) {
+#ifdef _WIN32
+        check(!neura::platform::ensure_sockets(), "could not start Winsock");
+#endif
         const Socket listener(::socket(AF_INET, SOCK_STREAM, 0));
         sockaddr_in address{};
         address.sin_family = AF_INET;
@@ -61,18 +117,14 @@ public:
         check(::getsockname(listener.get(), reinterpret_cast<sockaddr*>(&address), &length) == 0, "no ephemeral port assigned");
 
         client_ = Socket(::socket(AF_INET, SOCK_STREAM, 0));
-        const timeval timeout{3, 0};
-        check(::setsockopt(client_.get(), SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout) == 0 &&
-              ::setsockopt(client_.get(), SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof timeout) == 0,
+        check(set_timeout(client_.get(), SO_RCVTIMEO, 3s) == 0 && set_timeout(client_.get(), SO_SNDTIMEO, 3s) == 0,
               "could not set test socket deadlines");
 #ifdef SO_NOSIGPIPE
-        const int enabled = 1;
-        check(::setsockopt(client_.get(), SOL_SOCKET, SO_NOSIGPIPE, &enabled, sizeof enabled) == 0, "could not suppress SIGPIPE");
+        check(set_int_option(client_.get(), SOL_SOCKET, SO_NOSIGPIPE, 1) == 0, "could not suppress SIGPIPE");
 #endif
         check(::connect(client_.get(), reinterpret_cast<const sockaddr*>(&address), length) == 0, "loopback connect failed");
         Socket accepted(::accept(listener.get(), nullptr, nullptr));
-        const int send_buffer = 4096;
-        check(::setsockopt(accepted.get(), SOL_SOCKET, SO_SNDBUF, &send_buffer, sizeof send_buffer) == 0, "could not set server send buffer");
+        check(set_int_option(accepted.get(), SOL_SOCKET, SO_SNDBUF, 4096) == 0, "could not set server send buffer");
 
         std::packaged_task task([socket = std::move(accepted), responder = std::move(respond), limits]() mutable {
             return serve_tcp_connection(socket.release(), responder, limits);
@@ -82,27 +134,22 @@ public:
     }
 
     void send(string_view input) const {
-#ifdef MSG_NOSIGNAL
-        constexpr int flags = MSG_NOSIGNAL;
-#else
-        constexpr int flags = 0;
-#endif
         while (!input.empty()) {
-            const auto count = ::send(client_.get(), input.data(), input.size(), flags);
-            if (count < 0 && errno == EINTR) continue;
+            const auto count = send_some(client_.get(), input);
+            if (count < 0 && interrupted()) continue;
             check(count > 0, "client could not send request");
             input.remove_prefix(static_cast<std::size_t>(count));
         }
     }
 
-    void finish_writes() const { check(::shutdown(client_.get(), SHUT_WR) == 0, "client half-close failed"); }
+    void finish_writes() const { check(::shutdown(client_.get(), shut_writes) == 0, "client half-close failed"); }
 
     string receive(std::size_t size) const {
         string reply(size, '\0');
         std::size_t have = 0;
         while (have < reply.size()) {
-            const auto count = ::recv(client_.get(), reply.data() + have, reply.size() - have, 0);
-            if (count < 0 && errno == EINTR) continue;
+            const auto count = receive_some(client_.get(), reply.data() + have, reply.size() - have);
+            if (count < 0 && interrupted()) continue;
             check(count > 0, "client did not receive the expected number of response bytes");
             have += static_cast<std::size_t>(count);
         }
@@ -113,9 +160,9 @@ public:
         string reply;
         std::array<char, 4096> buffer;
         for (;;) {
-            const auto count = ::recv(client_.get(), buffer.data(), buffer.size(), 0);
+            const auto count = receive_some(client_.get(), buffer.data(), buffer.size());
             if (count == 0) return reply;
-            if (count < 0 && errno == EINTR) continue;
+            if (count < 0 && interrupted()) continue;
             check(count > 0, "connection did not close cleanly");
             reply.append(buffer.data(), static_cast<std::size_t>(count));
         }

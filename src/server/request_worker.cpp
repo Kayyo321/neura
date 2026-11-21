@@ -12,8 +12,13 @@
 #include <algorithm>
 #include <iostream>
 #include <stdexcept>
+#ifdef _WIN32
+#include "platform/text.hpp"
+#include "platform/windows.hpp"
+#else
 #include <sys/socket.h>
 #include <unistd.h>
+#endif
 
 namespace neura::server {
 namespace {
@@ -246,7 +251,13 @@ int serve_assignment(const WorkerOptions& options, const PreparedImage& prepared
     capabilities.entropy = true;
     capabilities.native = false;
 
-    Channel channel(worker_channel_descriptor, worker::PeerRole::Worker, worker::server_identity(image_digest));
+#ifdef _WIN32
+    if (options.channel == platform::invalid_socket) {
+        std::cerr << "neura-server-host: a worker needs --channel=<socket>, which the host gives it\n";
+        return 70;
+    }
+#endif
+    Channel channel(options.channel, worker::PeerRole::Worker, worker::server_identity(image_digest));
     worker::Hello hello;
     hello.role = worker::PeerRole::Worker;
     hello.identity = worker::server_identity(image_digest);
@@ -257,10 +268,19 @@ int serve_assignment(const WorkerOptions& options, const PreparedImage& prepared
         // this worker's Hello, so the host's Assign is refused for certain.
         const auto host_hello = channel.receive(forever);
         if (!host_hello || host_hello->kind != FrameKind::Hello) return 70;
-        ::shutdown(worker_channel_descriptor, SHUT_RD);
+#ifdef _WIN32
+        // Whether the host's send then fails depends on the system, as on
+        // macOS; server_host_test.py runs this hook on Linux only.
+        ::shutdown(options.channel, SD_RECEIVE);
+        const auto encoded = worker::encode_hello(hello);
+        if (channel.send(FrameKind::Hello, encoded.bytes, forever) != Channel::Status::Ok) return 70;
+        for (;;) ::Sleep(INFINITE);
+#else
+        ::shutdown(options.channel, SHUT_RD);
         const auto encoded = worker::encode_hello(hello);
         if (channel.send(FrameKind::Hello, encoded.bytes, forever) != Channel::Status::Ok) return 70;
         for (;;) ::pause();
+#endif
     }
     if (channel.greet(hello, forever) != Channel::Status::Ok) return 70;
 
@@ -286,7 +306,12 @@ int serve_assignment(const WorkerOptions& options, const PreparedImage& prepared
         run_options.record = *options.record_directory / (request->request_id + ".trace");
     }
     const std::vector<std::string> arguments;
-    const int status = runner::run(image, host, arguments, run_options, options.image.string(), bytes.size());
+#ifdef _WIN32
+    const auto name = platform::utf8_path(options.image);
+#else
+    const auto name = options.image.string();
+#endif
+    const int status = runner::run(image, host, arguments, run_options, name, bytes.size());
     exchange.drain();
     return status;
 }

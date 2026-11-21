@@ -2,10 +2,11 @@
 
 // Typed bodies of the Assign and Head frames of the request-worker protocol
 // (docs/design/Backend030.md, "Request-worker protocol"), and a blocking
-// channel that sends and receives checked frames over one POSIX stream
-// socket.
+// channel that sends and receives checked frames over one stream socket (a
+// descriptor on POSIX, an AF_UNIX Winsock socket on Windows).
 
 #include "nvm/app_services.hpp"
+#include "platform/socket.hpp"
 #include "server/worker_wire.hpp"
 
 #include <chrono>
@@ -51,7 +52,7 @@ public:
     enum class Status { Ok, Closed, TimedOut, Failed };
 
     // Takes ownership of `descriptor`, a connected stream socket.
-    Channel(int descriptor, PeerRole role, WorkerIdentity expected);
+    Channel(platform::native_socket descriptor, PeerRole role, WorkerIdentity expected);
     ~Channel();
     Channel(const Channel&) = delete;
     Channel& operator=(const Channel&) = delete;
@@ -65,7 +66,7 @@ public:
     Status status() const { return status_; }
     ProtocolFailure failure() const { return sequence_.failure(); }
     const ChannelSequence& sequence() const { return sequence_; }
-    int descriptor() const { return descriptor_; }
+    platform::native_socket descriptor() const { return descriptor_; }
 
     // Sends this side's Hello and checks the peer's.
     Status greet(const Hello& hello, Clock::time_point deadline);
@@ -80,7 +81,7 @@ private:
     Status fill(Clock::time_point deadline, bool wait = true);
     std::optional<Frame> receive(Clock::time_point deadline, bool wait);
 
-    int descriptor_;
+    platform::native_socket descriptor_;
     PeerRole role_;
     ChannelSequence sequence_;
     FrameDecoder decoder_;

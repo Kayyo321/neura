@@ -1,5 +1,6 @@
 #pragma once
 
+#include "platform/socket.hpp"
 #include "server/http_wire.hpp"
 
 #include <atomic>
@@ -40,6 +41,11 @@ struct ConnectionLimits {
 // became readable before the stream did.
 enum class StreamStatus { Ready, End, TimedOut, Failed, Woken };
 
+// A wake descriptor: a descriptor on POSIX, a socket on Windows (where only
+// sockets can be waited on together with the stream), and no_wake for none.
+using WakeDescriptor = platform::native_socket;
+inline constexpr WakeDescriptor no_wake = platform::invalid_socket;
+
 struct StreamRead {
     StreamStatus status;
     std::size_t size = 0; // A Ready result contains at least one byte.
@@ -49,9 +55,9 @@ class ConnectionStream {
 public:
     virtual ~ConnectionStream() = default;
     virtual StreamRead read(std::span<char> output, ConnectionClock::time_point deadline) = 0;
-    // As read(), and also returns Woken when `wake` (a descriptor, or -1 for
-    // none) becomes readable first. The default ignores `wake`.
-    virtual StreamRead read(std::span<char> output, ConnectionClock::time_point deadline, int wake) {
+    // As read(), and also returns Woken when `wake` (a descriptor, or no_wake
+    // for none) becomes readable first. The default ignores `wake`.
+    virtual StreamRead read(std::span<char> output, ConnectionClock::time_point deadline, WakeDescriptor wake) {
         (void)wake;
         return read(output, deadline);
     }
@@ -95,8 +101,8 @@ public:
     virtual ~RequestBody() = default;
     virtual Piece read() = 0;
     // While read() waits for the client, it also returns Woken when
-    // `descriptor` becomes readable; -1 stops that.
-    virtual void wake_on(int descriptor) { (void)descriptor; }
+    // `descriptor` becomes readable; no_wake stops that.
+    virtual void wake_on(WakeDescriptor descriptor) { (void)descriptor; }
 };
 
 // The response of the request being served. Nothing reaches the client

@@ -2,6 +2,16 @@
 
 #include "server/http_connection.hpp"
 
+#ifdef _WIN32
+// Winsock 2.2 (W14): pollfd, POLLIN and POLLOUT are WSAPoll's, and the
+// socket calls report errors through WSAGetLastError (platform::
+// last_socket_error), not errno. This header is private to the server's .cpp
+// files.
+#include "platform/socket.hpp"
+#include "platform/windows.hpp"
+
+#include <climits>
+#else
 #include <cerrno>
 #include <climits>
 #include <fcntl.h>
@@ -9,9 +19,47 @@
 #include <netinet/tcp.h>
 #include <poll.h>
 #include <sys/socket.h>
+#endif
 
 namespace neura::server::http::socket_io {
 
+#ifdef _WIN32
+// Non-blocking and not inherited by the workers the host starts. Windows has
+// no SIGPIPE: a send to a closed connection fails with WSAECONNRESET.
+inline bool configure(platform::native_socket descriptor) {
+    if (!platform::set_nonblocking(descriptor) || !platform::set_no_inherit(descriptor)) return false;
+    // As on POSIX: a response is written as whole pieces, which Nagle's
+    // algorithm would hold back for the client's delayed acknowledgement.
+    const BOOL no_delay = TRUE;
+    (void)::setsockopt(descriptor, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&no_delay),
+                       sizeof no_delay);
+    return true;
+}
+
+// At most INT_MAX bytes, the most one Winsock call takes.
+inline int send(platform::native_socket descriptor, const void* data, std::size_t size) {
+    const int count = size > INT_MAX ? INT_MAX : static_cast<int>(size);
+    return ::send(descriptor, static_cast<const char*>(data), count, 0);
+}
+
+inline int recv(platform::native_socket descriptor, void* data, std::size_t size) {
+    const int count = size > INT_MAX ? INT_MAX : static_cast<int>(size);
+    return ::recv(descriptor, static_cast<char*>(data), count, 0);
+}
+
+// WSAPoll does not return early for a signal, so only a timeout that ends
+// before the deadline (its clock is coarser than steady_clock) repeats.
+inline int poll_until(std::span<pollfd> entries, ConnectionClock::time_point deadline) {
+    for (;;) {
+        const auto left = deadline - ConnectionClock::now();
+        if (left <= ConnectionClock::duration::zero()) return 0;
+        const auto milliseconds = std::chrono::ceil<std::chrono::milliseconds>(left).count();
+        const int timeout = milliseconds > INT_MAX ? INT_MAX : static_cast<int>(milliseconds);
+        const int ready = ::WSAPoll(entries.data(), static_cast<ULONG>(entries.size()), timeout);
+        if (ready != 0) return ready;
+    }
+}
+#else
 inline bool configure(int descriptor) {
     const int status = ::fcntl(descriptor, F_GETFL);
     const int flags = ::fcntl(descriptor, F_GETFD);
@@ -49,11 +97,13 @@ inline int poll_until(std::span<pollfd> entries, ConnectionClock::time_point dea
         if (ready > 0 || (ready < 0 && errno != EINTR)) return ready;
     }
 }
+#endif
 
-// Waits for `events` on `descriptor`, or for `wake` (when not -1) to become
-// readable first, which answers Woken.
-inline StreamStatus wait_for(int descriptor, short events, ConnectionClock::time_point deadline, int wake) {
-    if (wake < 0) {
+// Waits for `events` on `descriptor`, or for `wake` (when not no_wake) to
+// become readable first, which answers Woken.
+inline StreamStatus wait_for(platform::native_socket descriptor, short events, ConnectionClock::time_point deadline,
+                             WakeDescriptor wake) {
+    if (wake == no_wake) {
         pollfd entry{descriptor, events, 0};
         const int ready = poll_until(std::span(&entry, 1), deadline);
         if (ready == 0) return StreamStatus::TimedOut;
@@ -67,7 +117,7 @@ inline StreamStatus wait_for(int descriptor, short events, ConnectionClock::time
     return StreamStatus::Ready;
 }
 
-inline StreamStatus wait_for(int descriptor, short events, ConnectionClock::time_point deadline) {
+inline StreamStatus wait_for(platform::native_socket descriptor, short events, ConnectionClock::time_point deadline) {
     pollfd entry{descriptor, events, 0};
     const int ready = poll_until(std::span(&entry, 1), deadline);
     if (ready == 0) return StreamStatus::TimedOut;

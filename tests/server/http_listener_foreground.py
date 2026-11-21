@@ -1,32 +1,85 @@
 import argparse
 from contextlib import contextmanager
+import os
 from pathlib import Path
+import queue
 import select
 import shutil
 import signal
 import socket
 import subprocess
 import tempfile
+import threading
 import time
 
 
 HOST = "127.0.0.1"
 TIMEOUT = 4
 PLAIN = (0, "-", "-")
+# Windows (docs/design/Windows030.md, W34): the fixture runs in a process
+# group of its own and Ctrl+Break stands for SIGTERM; a reload is its named
+# event, as SIGHUP has no counterpart there; select() takes sockets only, so
+# a thread reads the fixture's output.
+WINDOWS = os.name == "nt"
+NEW_GROUP = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if WINDOWS else {}
+TERMINATE = signal.CTRL_BREAK_EVENT if WINDOWS else signal.SIGTERM
+LINES = {}
 
 
 def command(fixture, cap, endpoints):
     return [fixture, str(cap), *(str(item) for endpoint in endpoints for item in endpoint)]
 
 
+def windows_line(process):
+    if process.pid not in LINES:
+        lines = queue.Queue()
+
+        def read():
+            for line in process.stdout:
+                lines.put(line)
+            lines.put("")
+
+        threading.Thread(target=read, daemon=True).start()
+        LINES[process.pid] = lines
+    try:
+        return LINES[process.pid].get(timeout=TIMEOUT)
+    except queue.Empty:
+        raise RuntimeError("timed out reading the foreground responder") from None
+
+
 def line_from(process):
-    readable, _, _ = select.select([process.stdout], [], [], TIMEOUT)
-    if not readable:
-        raise RuntimeError("timed out reading the foreground responder")
-    line = process.stdout.readline().strip()
+    if WINDOWS:
+        line = windows_line(process).strip()
+    else:
+        readable, _, _ = select.select([process.stdout], [], [], TIMEOUT)
+        if not readable:
+            raise RuntimeError("timed out reading the foreground responder")
+        line = process.stdout.readline().strip()
     if not line:
         raise RuntimeError(f"foreground responder exited: {process.stderr.read().strip()}")
     return line
+
+
+def reload(process):
+    if not WINDOWS:
+        process.send_signal(signal.SIGHUP)
+        return
+    import ctypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenEventW.restype = ctypes.c_void_p
+    kernel32.SetEvent.argtypes = [ctypes.c_void_p]
+    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+    event_modify_state = 0x0002
+    name = f"Local\\neura-http-listener-fixture-reload-{process.pid}"
+    event = kernel32.OpenEventW(event_modify_state, False, name)
+    if not event:
+        raise OSError(ctypes.get_last_error(), "cannot open the fixture's reload event")
+    try:
+        if not kernel32.SetEvent(event):
+            raise OSError(ctypes.get_last_error(), "cannot set the fixture's reload event")
+    finally:
+        kernel32.CloseHandle(event)
 
 
 def no_listener(port):
@@ -39,7 +92,7 @@ def no_listener(port):
 @contextmanager
 def foreground(fixture, cap, endpoints):
     with subprocess.Popen(command(fixture, cap, endpoints), stdout=subprocess.PIPE,
-                          stderr=subprocess.PIPE, text=True) as process:
+                          stderr=subprocess.PIPE, text=True, **NEW_GROUP) as process:
         ports = []
         try:
             ready = line_from(process).split()
@@ -49,7 +102,7 @@ def foreground(fixture, cap, endpoints):
             yield process, ports
         finally:
             if process.poll() is None:
-                process.send_signal(signal.SIGTERM)
+                process.send_signal(TERMINATE)
             try:
                 process.wait(TIMEOUT)
             except subprocess.TimeoutExpired:
@@ -192,7 +245,7 @@ def tls_reload(fixture, openssl):
 
                 replace_pair(new_a, active_a)
                 replace_file(new_b[0], active_b[0])
-                process.send_signal(signal.SIGHUP)
+                reload(process)
                 assert line_from(process) == "RELOAD_FAILED"
                 with secure_client(tls_a, old_a[0], v13) as client:
                     request(client, close=True)
@@ -200,7 +253,7 @@ def tls_reload(fixture, openssl):
                     request(client, close=True)
 
                 replace_file(new_b[1], active_b[1])
-                process.send_signal(signal.SIGHUP)
+                reload(process)
                 assert line_from(process) == "RELOADED"
                 with secure_client(tls_a, new_a[0], v13) as client:
                     request(client, close=True)

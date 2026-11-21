@@ -1,25 +1,73 @@
 #include "server/http_listener.hpp"
 
+#include <atomic>
 #include <cerrno>
 #include <charconv>
 #include <csignal>
 #include <future>
 #include <iostream>
-#include <netinet/in.h>
-#include <pthread.h>
 #include <stdexcept>
-#include <sys/socket.h>
+#include <string>
 #include <system_error>
 #include <thread>
-#include <unistd.h>
 #include <utility>
 #include <vector>
+#ifdef _WIN32
+#include "platform/console.hpp"
+#include "platform/self.hpp"
+#include "platform/socket.hpp"
+#include "platform/windows.hpp"
+#else
+#include <netinet/in.h>
+#include <pthread.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
 
 namespace {
 
 using namespace neura::server::http;
 using namespace std::chrono_literals;
 
+#ifdef _WIN32
+// Windows has no SIGTERM or SIGHUP (W10): Ctrl+C and Ctrl+Break stop the
+// fixture, and the driver asks for a reload by setting the event
+// Local\neura-http-listener-fixture-reload-<pid>.
+std::atomic<bool> reload_requested{false};
+std::atomic<bool> stop_requested{false};
+
+bool stop_on_console_event(neura::platform::ConsoleEvent) {
+    stop_requested = true;
+    return true;
+}
+
+struct Controls {
+    HANDLE reload = nullptr;
+};
+
+Controls install_handlers() {
+    neura::platform::on_console_event(stop_on_console_event);
+    const auto name = L"Local\\neura-http-listener-fixture-reload-" +
+                      std::to_wstring(neura::platform::current_process_id());
+    Controls controls;
+    controls.reload = ::CreateEventW(nullptr, FALSE, FALSE, name.c_str());
+    if (controls.reload == nullptr) {
+        throw std::system_error(static_cast<int>(::GetLastError()), std::system_category(), "create fixture reload event");
+    }
+    return controls;
+}
+
+// Console handlers run on a thread of their own: nothing to block.
+class BlockSignals {
+public:
+    explicit BlockSignals(const Controls&) {}
+};
+
+constexpr int address_in_use = WSAEADDRINUSE;
+using native_socket = neura::platform::native_socket;
+constexpr native_socket no_socket = neura::platform::invalid_socket;
+void close_socket(native_socket socket) { ::closesocket(socket); }
+#else
 volatile std::sig_atomic_t reload_requested = 0;
 volatile std::sig_atomic_t stop_requested = 0;
 
@@ -55,6 +103,12 @@ private:
     sigset_t previous_;
 };
 
+constexpr int address_in_use = EADDRINUSE;
+using native_socket = int;
+constexpr native_socket no_socket = -1;
+void close_socket(native_socket socket) { ::close(socket); }
+#endif
+
 template<typename Number>
 Number parse_number(std::string_view input) {
     Number value = 0;
@@ -81,12 +135,12 @@ void reap_finished(std::vector<Active>& active) {
 
 struct TestSocket {
     TestSocket() : descriptor(::socket(AF_INET, SOCK_STREAM, 0)) {
-        if (descriptor < 0) throw std::runtime_error("could not make fixture socket");
+        if (descriptor == no_socket) throw std::runtime_error("could not make fixture socket");
     }
     TestSocket(const TestSocket&) = delete;
     TestSocket& operator=(const TestSocket&) = delete;
-    ~TestSocket() { ::close(descriptor); }
-    int descriptor;
+    ~TestSocket() { close_socket(descriptor); }
+    native_socket descriptor;
 };
 
 sockaddr_in loopback(std::uint16_t port) {
@@ -112,7 +166,7 @@ void check_ownership() {
     try {
         ListenerSet incomplete(transaction);
     } catch (const std::system_error& error) {
-        bind_failed = error.code().value() == EADDRINUSE;
+        bind_failed = error.code().value() == address_in_use;
     }
     const TestSocket reusable;
     const auto reusable_address = loopback(first_port);
@@ -143,6 +197,9 @@ void check_ownership() {
 }
 
 int run(int argc, char** argv) {
+#ifdef _WIN32
+    if (const auto error = neura::platform::ensure_sockets()) throw std::system_error(error, "start Winsock");
+#endif
     if (argc == 2 && std::string_view(argv[1]) == "--ownership") {
         check_ownership();
         return 0;
@@ -167,6 +224,9 @@ int run(int argc, char** argv) {
     std::cout << std::endl;
 
     while (!stop_requested) {
+#ifdef _WIN32
+        if (::WaitForSingleObject(controls.reload, 0) == WAIT_OBJECT_0) reload_requested = true;
+#endif
         bool reload = false;
         {
             const BlockSignals blocked(controls);
