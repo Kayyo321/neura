@@ -16,6 +16,12 @@
 // type, then each argument type. Arguments are the values' bytes back to back
 // in native byte order, each exactly its type's size (a struct its C size).
 // The result is the result type's bytes, empty for void.
+//
+// On Windows (W19) libraries load through platform::Library with the
+// Std.DynamicForeign search rules, library 0 searches the executable,
+// ucrtbase.dll, kernel32.dll and then the other loaded modules, calls use
+// libffi's FFI_WIN64 ABI, and the embedded native library is a DLL written to
+// a private temporary directory that is removed once the DLL is unloaded.
 
 #include "provider_internal.hpp"
 
@@ -25,11 +31,25 @@
 #include <cstring>
 #include <memory>
 
-#if !defined(_WIN32) && !defined(NEURA_NO_NATIVE_INTEROP)
+#ifndef NEURA_NO_NATIVE_INTEROP
+#ifdef _WIN32
+#include "platform/dirs.hpp"
+#include "platform/dynlib.hpp"
+#include "platform/file.hpp"
+#include "platform/text.hpp"
+#include "platform/windows.hpp"
+
+#include <malloc.h>
+
+#include <filesystem>
+#include <mutex>
+#include <string_view>
+#else
 #include <dlfcn.h>
-#include <ffi.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#endif
+#include <ffi.h>
 #endif
 
 namespace neura::nvm::provider {
@@ -73,17 +93,11 @@ std::string target_triple() {
 
 std::string native_triple() { return target_triple(); }
 
-#if defined(_WIN32) || defined(NEURA_NO_NATIVE_INTEROP)
+#ifdef NEURA_NO_NATIVE_INTEROP
 
 void add_ffi_services(const Adder& add, StandardServices::Tables&, const Capabilities& capabilities) {
-#ifdef NEURA_NO_NATIVE_INTEROP
     (void)capabilities;
     const auto unsupported = [](const HostRequest&) { return fail(host_error::unsupported); };
-#else
-    const auto unsupported = [&capabilities](const HostRequest&) {
-        return capabilities.native ? fail(host_error::unsupported) : denied();
-    };
-#endif
     add(signature("neura.ffi.abi", {}, tuple({text(), byte_list()})), unsupported);
     add(signature("neura.ffi.arena.open", {}, int64()), unsupported);
     add(signature("neura.ffi.arena.close", {int64()}, void_type()), unsupported);
@@ -354,7 +368,15 @@ void upcall_entry(ffi_cif*, void* result, void** arguments, void* data) {
     if (!answer || answer->bytes.size() != size) {
         // The run ended in the callback, or it returned a malformed result:
         // give native code zeros; the run reports how it ended.
-        std::memset(result, 0, std::max<std::size_t>(size, sizeof(ffi_arg)));
+#ifdef _WIN32
+        // Win64 libffi returns a struct of any size but 1, 2, 4 or 8 bytes
+        // through the caller's hidden pointer, a buffer of exactly `size`
+        // bytes, so only a scalar result has an ffi_arg-wide slot.
+        const auto zeroed = upcall->result_tag == Struct ? size : std::max<std::size_t>(size, sizeof(ffi_arg));
+#else
+        const auto zeroed = std::max<std::size_t>(size, sizeof(ffi_arg));
+#endif
+        std::memset(result, 0, zeroed);
         return;
     }
     if (size > 0) store_result(result, upcall->result_tag, answer->bytes, size);
@@ -367,6 +389,161 @@ struct SizeAlign {
 
 template <typename T>
 SizeAlign layout_of() { return {sizeof(T), alignof(T)}; }
+
+// Arena memory. The MSVC C runtime has no aligned_alloc: its aligned blocks
+// come from _aligned_malloc and go back through _aligned_free.
+void* allocate_block(std::size_t alignment, std::size_t size) {
+#ifdef _WIN32
+    return ::_aligned_malloc(size, alignment);
+#else
+    return std::aligned_alloc(alignment, size);
+#endif
+}
+
+void free_block(void* block) {
+#ifdef _WIN32
+    ::_aligned_free(block);
+#else
+    std::free(block);
+#endif
+}
+
+#ifdef _WIN32
+
+namespace fs = std::filesystem;
+
+// The start of the name of an embedded library's directory, which goes on
+// with the process ID, '-' and a unique name.
+constexpr std::string_view embedded_prefix = "neura-native-";
+
+// A library as the tables hold it on Windows. Library 0, the default lookup,
+// holds ucrtbase.dll, which a program linked with the static C runtime has
+// not loaded. The embedded native library holds the private directory of its
+// file, which goes once the DLL is unloaded: Windows cannot remove the file
+// of a mapped DLL.
+struct WindowsLibrary {
+    platform::Library module;
+    bool default_lookup = false;
+    fs::path directory;
+
+    WindowsLibrary() = default;
+    WindowsLibrary(const WindowsLibrary&) = delete;
+    WindowsLibrary& operator=(const WindowsLibrary&) = delete;
+
+    ~WindowsLibrary() {
+        void* const address = module.native_handle();
+        module.close();
+        if (directory.empty()) return;
+        // Another reference (the library loading itself again) keeps the DLL
+        // mapped. Its directory is then left to remove_abandoned_directories
+        // of a later process, instead of retrying a removal that must fail.
+        HMODULE still_loaded = nullptr;
+        if (address != nullptr &&
+            ::GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                 static_cast<LPCWSTR>(address), &still_loaded))
+            return;
+        try {
+            std::error_code ignored;
+            platform::remove_tree(directory, ignored);
+        } catch (...) {
+        }
+    }
+};
+
+void* open_library(const std::string& path) {
+    std::string error;
+    auto module = platform::Library::open(path, platform::LibrarySearch::foreign, error);
+    if (!module) return nullptr;
+    auto library = std::make_unique<WindowsLibrary>();
+    library->module = std::move(module);
+    return library.release();
+}
+
+void* open_default_library() {
+    auto library = std::make_unique<WindowsLibrary>();
+    library->default_lookup = true;
+    // When it cannot be loaded, the lookup still searches the modules that
+    // are, among them ntdll.dll with its C string and memory functions.
+    std::string error;
+    library->module = platform::Library::open("ucrtbase.dll", platform::LibrarySearch::system, error);
+    return library.release();
+}
+
+// A symbol of a library, or for library 0 of the first module that exports
+// it: the executable, ucrtbase.dll, kernel32.dll, then the other loaded
+// modules in EnumProcessModulesEx order (W19).
+void* find_symbol(void* handle, const std::string& name) {
+    const auto& library = *static_cast<const WindowsLibrary*>(handle);
+    if (!library.default_lookup) return library.module.symbol(name);
+    void* const first[] = {::GetModuleHandleW(nullptr), library.module.native_handle(),
+                           ::GetModuleHandleW(L"kernel32.dll")};
+    for (void* module : first) {
+        if (module == nullptr) continue;
+        if (void* address = platform::module_symbol(module, name)) return address;
+    }
+    for (void* module : platform::loaded_modules()) {
+        if (std::find(std::begin(first), std::end(first), module) != std::end(first)) continue;
+        if (void* address = platform::module_symbol(module, name)) return address;
+    }
+    return nullptr;
+}
+
+void close_library(void* handle) { delete static_cast<WindowsLibrary*>(handle); }
+
+// Whether the process `id` has ended. A process this one may not open is
+// taken to be running.
+bool process_ended(DWORD id) {
+    HANDLE process = ::OpenProcess(SYNCHRONIZE, FALSE, id);
+    if (process == nullptr) return ::GetLastError() == ERROR_INVALID_PARAMETER;
+    const bool ended = ::WaitForSingleObject(process, 0) == WAIT_OBJECT_0;
+    ::CloseHandle(process);
+    return ended;
+}
+
+// Removes the embedded-library directories of this user's processes that
+// have ended without unloading their DLL: a crash, std::_Exit after a misused
+// upcall stub, TerminateProcess or an interrupt leaves the file behind,
+// because Windows removes no file while it is mapped and runs no cleanup
+// for such an end. Only private directories of this user whose process is
+// gone are removed.
+void remove_abandoned_directories(const fs::path& temporary) {
+    std::vector<fs::path> abandoned;
+    std::error_code error;
+    fs::directory_iterator entries(temporary, fs::directory_options::skip_permission_denied, error);
+    for (; !error && entries != fs::directory_iterator(); entries.increment(error)) {
+        const auto name = platform::try_to_utf8(entries->path().filename().native());
+        if (!name || !name->starts_with(embedded_prefix)) continue;
+        const auto digits = std::string_view(*name).substr(embedded_prefix.size());
+        const auto end = digits.find('-');
+        if (end == 0 || end == std::string_view::npos) continue;
+        DWORD id = 0;
+        bool numeric = true;
+        for (const char digit : digits.substr(0, end)) {
+            if (digit < '0' || digit > '9' || id > (MAXDWORD - 9) / 10) {
+                numeric = false;
+                break;
+            }
+            id = id * 10 + static_cast<DWORD>(digit - '0');
+        }
+        if (!numeric || id == 0 || id == ::GetCurrentProcessId() || !process_ended(id)) continue;
+        std::error_code ignored;
+        if (platform::is_private_directory(entries->path(), ignored)) abandoned.push_back(entries->path());
+    }
+    for (const auto& directory : abandoned) {
+        std::error_code ignored;
+        platform::remove_tree(directory, ignored);
+    }
+}
+
+#else
+
+void* open_library(const std::string& path) { return ::dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL); }
+
+void* find_symbol(void* library, const std::string& name) { return ::dlsym(library, name.c_str()); }
+
+void close_library(void* library) { ::dlclose(library); }
+
+#endif
 
 } // namespace
 
@@ -408,12 +585,12 @@ void add_ffi_services(const Adder& add, StandardServices::Tables& tables, const 
         const auto found = native.arenas.find(as_int64(request.arguments.at(0)));
         if (found == native.arenas.end()) return fail(host_error::invalid_input);
         for (auto* upcall : found->second.upcalls) upcall->alive = false;
-        for (auto* block : found->second.blocks) std::free(block);
+        for (auto* block : found->second.blocks) free_block(block);
         for (auto* library : found->second.libraries) {
             // Forget the library's IDs before unloading it, so a later
             // lookup through them fails instead of using a closed handle.
             std::erase_if(native.libraries, [library](const auto& entry) { return entry.second == library; });
-            ::dlclose(library);
+            close_library(library);
         }
         native.arenas.erase(found);
         return HostCompletion::ok();
@@ -437,7 +614,7 @@ void add_ffi_services(const Adder& add, StandardServices::Tables& tables, const 
             const auto alignment = std::max<std::size_t>(static_cast<std::size_t>(align), alignof(std::max_align_t));
             const auto rounded = (std::max<std::size_t>(static_cast<std::size_t>(size), 1) + alignment - 1) /
                                  alignment * alignment;
-            void* block = std::aligned_alloc(alignment, rounded);
+            void* block = allocate_block(alignment, rounded);
             if (block == nullptr) return fail(host_error::other);
             std::memset(block, 0, rounded);
             arena->blocks.push_back(block);
@@ -452,7 +629,9 @@ void add_ffi_services(const Adder& add, StandardServices::Tables& tables, const 
         return HostCompletion::ok(int64_value(id));
     };
     // library.open(arena, path): a path containing '/' loads that file;
-    // another name is searched the way the platform's loader searches.
+    // another name is searched the way the platform's loader searches. On
+    // Windows a path may also contain '\' or start with a drive, and a bare
+    // name is searched in the application directory, System32 and PATH (W19).
     add(signature("neura.ffi.library.open", {int64(), text()}, int64()),
         [&granted, &native, library_id](const HostRequest& request) {
             if (!granted) return denied();
@@ -460,14 +639,24 @@ void add_ffi_services(const Adder& add, StandardServices::Tables& tables, const 
             const auto& path = request.arguments.at(1).bytes;
             if (!usable_text(path) || (arena != 0 && !native.arenas.contains(arena)))
                 return fail(host_error::invalid_input);
-            void* handle = ::dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+            void* handle = open_library(path);
             if (handle == nullptr) return fail(host_error::not_found);
             return library_id(handle, arena);
         });
     // The libraries already loaded into the process, including the C library.
     add(signature("neura.ffi.library.default", {}, int64()), [&granted, &native](const HostRequest&) {
         if (!granted) return denied();
+#ifdef _WIN32
+        if (!native.libraries.contains(0)) {
+            // Library 0 belongs to the global arena, which frees it at the
+            // end of the run.
+            void* library = open_default_library();
+            native.global.libraries.push_back(library);
+            native.libraries.emplace(0, library);
+        }
+#else
         native.libraries.emplace(0, RTLD_DEFAULT);
+#endif
         return HostCompletion::ok(int64_value(0));
     });
     // The image's embedded native library (NVR NATV section), loaded once.
@@ -486,7 +675,7 @@ void add_ffi_services(const Adder& add, StandardServices::Tables& tables, const 
         const auto found = native.libraries.find(as_int64(request.arguments.at(0)));
         const auto& name = request.arguments.at(1).bytes;
         if (found == native.libraries.end() || !usable_text(name)) return fail(host_error::invalid_input);
-        void* address = ::dlsym(found->second, name.c_str());
+        void* address = find_symbol(found->second, name);
         if (address == nullptr) return fail(host_error::not_found);
         return HostCompletion::ok(int64_value(static_cast<std::int64_t>(reinterpret_cast<std::uintptr_t>(address))));
     });
@@ -571,6 +760,42 @@ void add_ffi_services(const Adder& add, StandardServices::Tables& tables, const 
         });
 }
 
+#ifdef _WIN32
+
+// The DLL goes to a new file in a private directory of the temporary
+// directory, which the library's WindowsLibrary removes after FreeLibrary.
+// The directory's name carries the process ID, so that a later process can
+// remove what one that ended abnormally left behind.
+void* load_embedded_object(const std::string& object) {
+    try {
+        std::error_code error;
+        const auto temporary = platform::temp_directory(error);
+        if (error) return nullptr;
+        static std::once_flag swept;
+        std::call_once(swept, [&temporary] { remove_abandoned_directories(temporary); });
+        auto library = std::make_unique<WindowsLibrary>();
+        const auto directory =
+            temporary / platform::path_from_utf8(platform::unique_name(
+                            std::string(embedded_prefix) + std::to_string(::GetCurrentProcessId()) + "-"));
+        if (!platform::make_private_directory(directory, error)) return nullptr;
+        library->directory = directory;
+        const auto file = directory / L"neura-native.dll";
+        {
+            const auto output = platform::open_no_follow(file, platform::OpenAccess::write,
+                                                         platform::OpenDisposition::create_new, error);
+            if (!output || !platform::write_all(output.get(), object.data(), object.size(), error)) return nullptr;
+        }
+        std::string message;
+        library->module = platform::Library::open(platform::utf8_path(file), platform::LibrarySearch::foreign, message);
+        if (!library->module) return nullptr;
+        return library.release();
+    } catch (const std::exception&) {
+        return nullptr;
+    }
+}
+
+#else
+
 void* load_embedded_object(const std::string& object) {
     std::string path;
     int descriptor = -1;
@@ -601,15 +826,17 @@ void* load_embedded_object(const std::string& object) {
     return handle;
 }
 
+#endif
+
 void close_native(StandardServices::Tables& tables) {
     auto& native = tables.native;
     for (auto& [id, arena] : native.arenas) {
-        for (auto* block : arena.blocks) std::free(block);
-        for (auto* library : arena.libraries) ::dlclose(library);
+        for (auto* block : arena.blocks) free_block(block);
+        for (auto* library : arena.libraries) close_library(library);
     }
     native.arenas.clear();
-    for (auto* block : native.global.blocks) std::free(block);
-    for (auto* library : native.global.libraries) ::dlclose(library);
+    for (auto* block : native.global.blocks) free_block(block);
+    for (auto* library : native.global.libraries) close_library(library);
     native.global = {};
     native.libraries.clear();
     native.upcalls.clear();
