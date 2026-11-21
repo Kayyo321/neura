@@ -1628,6 +1628,9 @@ if(BUILD_TESTING AND NEURA_SDK)
     add_test(NAME typed-numeric-literals COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressions/typed-numeric-literals.py" "$<TARGET_FILE:neura>")
 
+    add_test(NAME nil-conditions COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressions/nil_conditions.py" "$<TARGET_FILE:neura>")
+
     # Grouped parameters and the constructor shorthand build the image of
     # their written-out form (docs/design/Parameters030.md).
     add_test(NAME parameters-equivalence COMMAND "${Python3_EXECUTABLE}"

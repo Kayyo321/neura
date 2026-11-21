@@ -21,6 +21,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 - Numeric literals accept apostrophe digit separators and fixed-width integer and floating-point suffixes.
 - `if (let binding = value; condition)` evaluates one binding or destructuring before the condition, with its names scoped to the condition and branches. `else if` may have its own initializer.
+- Class and interface references can be tested directly in conditions and with `!` or `not`. The tests use normal nil comparisons and preserve reference reads and runtime safety checks.
 
 ## [0.3.0] - 2026-11-20
 
