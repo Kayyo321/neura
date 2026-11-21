@@ -8,7 +8,31 @@
 #include <optional>
 #include <ostream>
 
+#ifdef _WIN32
+#include <fcntl.h>
+#include <initializer_list>
+#include <io.h>
+#include <stdexcept>
+#include <string>
+#endif
+
 namespace neura::tooling {
+#ifdef _WIN32
+// Content-Length framing and byte-exact output need binary standard streams:
+// text mode would write "\n" as "\r\n", read "\r\n" as "\n" and end input at
+// a ^Z. A tool starts with them binary (tool::start, W08), except a console
+// stdin; this makes sure of it for `descriptors` however the protocol was
+// reached, and fails rather than exchange altered bytes. POSIX streams have
+// no text mode.
+inline void require_binary_stdio(std::initializer_list<int> descriptors) {
+    for (const int descriptor : descriptors) {
+        if (_setmode(descriptor, _O_BINARY) == -1)
+            throw std::runtime_error("cannot put standard " +
+                                     std::string(descriptor == 0 ? "input" : descriptor == 1 ? "output" : "error") +
+                                     " in binary mode");
+    }
+}
+#endif
 inline std::optional<Json> read_message(std::istream &input) {
     constexpr std::size_t maximum = 16 * 1024 * 1024;
     std::string line;

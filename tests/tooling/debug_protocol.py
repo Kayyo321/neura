@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Real DAP/NVM integration: no mocked frames, events or execution."""
+import hashlib
 import json
+import os
 import pathlib
 import queue
 import subprocess
@@ -101,7 +103,8 @@ class DebugProtocol(unittest.TestCase):
 
     def source(self, name, content):
         path = self.root / name
-        path.write_text(content)
+        # UTF-8 with LF, the same bytes on every host.
+        path.write_bytes(content.encode('utf-8'))
         return path
 
     def launch(self, path, **options):
@@ -136,7 +139,8 @@ let App = module:program.Entry (
         self.assertEqual(self.client.event('stopped')['reason'], 'breakpoint')
         frame = self.frame()
         self.assertEqual(frame['line'], 7)
-        self.assertEqual(frame['source']['path'], str(path))
+        # The adapter reports the generic form, C:/a/main.nra on Windows.
+        self.assertEqual(pathlib.Path(frame['source']['path']), path)
         self.assertEqual(self.client.request('evaluate', {'frameId': frame['id'], 'expression': 'counter'})['result'], '1')
         self.assertEqual(self.client.request('evaluate', {'frameId': frame['id'], 'expression': 'counter < 2 && counter >= 1'})['result'], 'true')
         self.assertEqual(self.client.request('evaluate', {'frameId': frame['id'], 'expression': 'values[1]'})['result'], '5')
@@ -164,7 +168,7 @@ let App = module:program.Entry (
         frame = self.frame()
         self.assertEqual(frame['line'], 8)
         self.assertEqual(self.client.request('evaluate', {'frameId': frame['id'], 'expression': 'counter'})['result'], '2')
-        path.write_text(source + "\n// changed after compilation\n")
+        path.write_bytes((source + "\n// changed after compilation\n").encode('utf-8'))
         stale = self.client.request('setBreakpoints', {'source': {'path': str(path)}, 'breakpoints': [{'line': 7}]})
         self.assertFalse(stale['breakpoints'][0]['verified'])
         self.assertIn('changed since compilation', stale['breakpoints'][0]['message'])
@@ -174,6 +178,47 @@ let App = module:program.Entry (
         outputs = [e['body']['output'] for e in self.client.events if e.get('event') == 'output']
         self.assertIn('dap output\n', ''.join(outputs))
         self.assertFalse(self.capabilities['supportsStepBack'])
+
+    def test_crlf_source_breakpoints_and_checksum(self):
+        # W08: the compiler reads a CR LF file as LF, and the file is unchanged
+        # since compilation while only its line endings differ from that text.
+        source = '''let program = import:Std.Program;
+let console = import:Std.Io.Console;
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let counter: int32 = 1;
+        counter += 1;
+        console.print_line("crlf output");
+        return program.ExitCode.Ok;
+    };
+);
+'''
+        path = self.root / 'crlf.nra'
+        data = source.replace('\n', '\r\n').encode('utf-8')
+        path.write_bytes(data)
+        self.launch(path)
+        result = self.client.request('setBreakpoints', {'source': {'path': str(path)}, 'breakpoints': [{'line': 6}]})
+        self.assertTrue(result['breakpoints'][0]['verified'], result)
+        self.assertEqual(result['breakpoints'][0]['line'], 6)
+        self.assertNotIn('message', result['breakpoints'][0])
+        self.client.request('configurationDone')
+        self.assertEqual(self.client.event('stopped')['reason'], 'breakpoint')
+        frame = self.frame()
+        self.assertEqual(frame['line'], 6)
+        self.assertEqual(self.client.request('evaluate', {'frameId': frame['id'], 'expression': 'counter'})['result'], '1')
+        # The checksum is that of the file on disk; the snapshot is the
+        # compiled text.
+        self.assertEqual(frame['source']['checksums'],
+                         [{'algorithm': 'SHA256', 'checksum': hashlib.sha256(data).hexdigest()}])
+        content = self.client.request('source', {'sourceReference': frame['source']['sourceReference']})['content']
+        self.assertEqual(content, source)
+        path.write_bytes(data + b'// changed after compilation\r\n')
+        stale = self.client.request('setBreakpoints', {'source': {'path': str(path)}, 'breakpoints': [{'line': 7}]})
+        self.assertFalse(stale['breakpoints'][0]['verified'])
+        self.assertIn('changed since compilation', stale['breakpoints'][0]['message'])
+        self.client.request('continue')
+        self.assertEqual(self.client.event('exited')['exitCode'], 0)
+        self.client.event('terminated')
 
     def test_records_and_getters_show_raw_fields(self):
         # docs/design/Records030.md, Tooling: a record's fields are shown
@@ -841,6 +886,55 @@ let App = module:program.Entry (
         self.client.event('terminated')
         output = ''.join(e['body']['output'] for e in self.client.events if e.get('event') == 'output')
         self.assertIn('input received', output)
+
+    def test_launch_environment_sets_removes_and_validates(self):
+        # The launch's "env" sets variables and removes, with null, one the
+        # adapter inherited, before the program runs.
+        self.client.close()
+        os.environ['NEURA_DAP_REMOVED'] = 'inherited'
+        try:
+            self.client = Client()
+        finally:
+            del os.environ['NEURA_DAP_REMOVED']
+        self.client.request('initialize', {'adapterID': 'neura', 'linesStartAt1': True, 'columnsStartAt1': True})
+        path = self.source('environment.nra', """let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        for (let name in args) {
+            match (program.Environment.get(name)) {
+                program.Environment.Lookup.Found(value) => {
+                    console.print_line(name + "=" + value);
+                },
+                program.Environment.Lookup.Missing => {
+                    console.print_line(name + " unset");
+                },
+                program.Environment.Lookup.Failed(_) => {
+                    console.print_line(name + " denied");
+                },
+            }
+        }
+        return program.ExitCode.Ok;
+    };
+);
+""")
+        self.launch(path, args=['NEURA_DAP_VALUE', 'NEURA_DAP_REMOVED'],
+                    env={'NEURA_DAP_VALUE': 'from launch \u00e9', 'NEURA_DAP_REMOVED': None})
+        self.client.request('configurationDone')
+        self.assertEqual(self.client.event('exited')['exitCode'], 0)
+        self.client.event('terminated')
+        output = ''.join(e['body']['output'] for e in self.client.events if e.get('event') == 'output')
+        self.assertIn('NEURA_DAP_VALUE=from launch \u00e9', output)
+        self.assertIn('NEURA_DAP_REMOVED unset', output)
+        for env, message in (({'NEURA_DAP_VALUE': 5}, 'environment values must be strings or null'),
+                             ({'NEURA_DAP=VALUE': 'x'}, 'invalid environment variable name')):
+            with self.subTest(env=env):
+                self.client.close()
+                self.client = Client()
+                self.client.request('initialize', {'adapterID': 'neura'})
+                failed = self.client.request('launch', {'program': str(path), 'cwd': str(self.root), 'env': env},
+                                             success=False)
+                self.assertIn(message, failed['message'])
 
     def test_pause_and_disconnect_in_running_loop(self):
         path = self.source('loop.nra', '''let program = import:Std.Program;

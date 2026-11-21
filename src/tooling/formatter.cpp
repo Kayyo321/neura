@@ -3,6 +3,7 @@
 #include "lexer/lexer.hpp"
 #include "parser/html_template.hpp"
 #include "parser/syntax.hpp"
+#include "util/line_endings.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -20,7 +21,11 @@
 #include <utility>
 #include <vector>
 
-#ifndef _WIN32
+#ifdef _WIN32
+#include "platform/error.hpp"
+#include "platform/file.hpp"
+#include "platform/windows.hpp"
+#else
 #include <fcntl.h>
 #include <unistd.h>
 #endif
@@ -1154,8 +1159,28 @@ std::string read(const fs::path& file) {
 void write(const fs::path& file, const std::string& original, const std::string& formatted) {
     if (fs::is_symlink(file)) throw std::runtime_error("refusing to replace symbolic link " + file.string());
     if (read(file) != original) throw std::runtime_error("source changed during formatting: " + file.string());
+#ifdef _WIN32
+    // A new file with a unique name replaces the source (retried while an
+    // antivirus or indexer holds it), and then gets the source's read-only,
+    // hidden, system and not-indexed attributes. A read-only source is made
+    // writable for the replacement where the volume cannot replace it
+    // otherwise, and keeps its attributes when the replacement fails.
+    const auto name = file.wstring();
+    const DWORD attributes = ::GetFileAttributesW(name.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES) throw std::runtime_error("cannot read the attributes of " + file.string());
+    const DWORD kept = attributes & (FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM |
+                                     FILE_ATTRIBUTE_NOT_CONTENT_INDEXED);
+    if (attributes & FILE_ATTRIBUTE_READONLY) ::SetFileAttributesW(name.c_str(), attributes & ~FILE_ATTRIBUTE_READONLY);
+    std::error_code error;
+    if (!neura::platform::write_file_atomically(file, formatted, error)) {
+        if (attributes & FILE_ATTRIBUTE_READONLY) ::SetFileAttributesW(name.c_str(), attributes);
+        throw std::runtime_error("cannot write " + file.string() + ": " + neura::platform::error_message(error));
+    }
+    if (kept != 0 && !::SetFileAttributesW(name.c_str(), kept | FILE_ATTRIBUTE_ARCHIVE))
+        throw std::runtime_error("formatted " + file.string() + " but cannot restore its attributes: " +
+                                 neura::platform::error_message(neura::platform::last_error_code()));
+#else
     auto temporary = file;
-#ifndef _WIN32
     temporary += ".neura-fmt-XXXXXX";
     auto name = temporary.string();
     std::vector<char> buffer(name.begin(), name.end());
@@ -1164,10 +1189,6 @@ void write(const fs::path& file, const std::string& original, const std::string&
     if (descriptor < 0) throw std::runtime_error("cannot create formatting temporary file beside " + file.string());
     ::close(descriptor);
     temporary = buffer.data();
-#else
-    temporary += ".neura-fmt.tmp";
-    if (fs::exists(temporary)) throw std::runtime_error("formatting temporary file already exists: " + temporary.string());
-#endif
     try {
         {
             std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
@@ -1184,6 +1205,7 @@ void write(const fs::path& file, const std::string& original, const std::string&
         fs::remove(temporary, ignored);
         throw;
     }
+#endif
 }
 
 } // namespace
@@ -1263,11 +1285,16 @@ int run_formatter(const std::vector<std::string>& arguments) {
     } else {
         for (const auto& file : files) sources.push_back({file, read(file), {}});
     }
-    // Validate the whole batch before changing the first file.
-    for (auto& source : sources) source.formatted = format_source(source.original, source.file.string(), options);
+    // Validate the whole batch before changing the first file. The source is
+    // formatted as the compiler reads it, with CR LF normalized to LF, and
+    // written with LF; a file that differs only in its line endings is
+    // already formatted (W08).
+    for (auto& source : sources)
+        source.formatted = format_source(util::normalize_crlf(source.original), source.file.string(), options);
     bool changed = false;
     for (const auto& source : sources) {
-        const bool different = source.original != source.formatted;
+        const bool different =
+            source.original != source.formatted && !util::only_line_endings_differ(source.original, source.formatted);
         changed |= different;
         if (check && different) std::cerr << source.file.string() << " needs formatting\n";
         else if (inplace && different) write(source.file, source.original, source.formatted);
