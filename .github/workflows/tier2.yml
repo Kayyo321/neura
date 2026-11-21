@@ -21,7 +21,9 @@ jobs:
   linux-arm64:
     name: Build and test (Linux arm64)
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 60
+    # Without the x86-64 JIT the suite takes over two hours on this runner,
+    # as in release.yml (docs/ContinuousIntegration.md, "Time limits").
+    timeout-minutes: 360
     env:
       CC: gcc-14
       CXX: g++-14
@@ -48,7 +50,7 @@ jobs:
           ldd --version | head -1
 
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNEURA_TEST_TIMEOUT_SCALE=12
 
       - name: Build
         run: cmake --build build --parallel "$(nproc)" 2>&1 | tee build/build.log
@@ -76,15 +78,21 @@ jobs:
   macos:
     name: Build and test (macOS ${{ matrix.architecture }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
+    # Without the x86-64 JIT the suite takes hours on these runners. The
+    # time-limit scale and the crypto suites the Intel runner leaves to the
+    # other targets follow release.yml (docs/ContinuousIntegration.md, "Time
+    # limits" and "Tests that run on fewer targets").
+    timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:
         include:
           - architecture: arm64
             runner: macos-15
+            exclude: "^$"
           - architecture: x86-64
             runner: macos-15-intel
+            exclude: "^(stdlib-crypto-advanced|stdlib-crypto-asymmetric|stdlib-crypto-pqc(-.*)?)$"
     env:
       NEURA_LIBCLANG_REQUIRED: "1"
       HOMEBREW_NO_AUTO_UPDATE: "1"
@@ -110,15 +118,17 @@ jobs:
           xcode-select --print-path
 
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNEURA_TEST_TIMEOUT_SCALE=12
 
       - name: Build
         run: cmake --build build --parallel "$(sysctl -n hw.ncpu)" 2>&1 | tee build/build.log
 
       - name: Test
+        env:
+          EXCLUDE: ${{ matrix.exclude }}
         run: >
           ctest --test-dir build --parallel "$(sysctl -n hw.ncpu)" --no-tests=error
-          --output-on-failure --output-junit ctest-junit.xml
+          --output-on-failure --output-junit ctest-junit.xml -E "$EXCLUDE"
 
       # 171 = the 177 tests Tier 1 requires on Linux without a GPU, less the 6
       # that need the Linux native launcher (native-build, native-run,
@@ -169,7 +179,7 @@ jobs:
             gcc-14 g++-14 libffi-dev libclang1-19 libclang-common-19-dev
 
       # A static executable cannot carry the sanitizer runtime, so the static
-      # launcher is left out of this configuration. backend-reference and
+      # launcher and the static dispatcher are left out of this configuration. backend-reference and
       # decompiler-behavior each ran for more than their usual limit of an hour
       # here without a sanitizer report, so each gets three hours. program-fuzz
       # gets two hours instead of ten minutes, for the same reason.
@@ -177,6 +187,7 @@ jobs:
         run: >
           cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
           -DNEURA_STATIC_LAUNCHER=OFF
+          -DNEURA_STATIC_DISPATCHER=OFF
           -DNEURA_REFERENCE_TEST_TIMEOUT=10800
           -DNEURA_DECOMPILER_BEHAVIOR_TEST_TIMEOUT=10800
           -DNEURA_PROGRAM_FUZZ_TEST_TIMEOUT=7200

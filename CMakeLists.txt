@@ -990,8 +990,10 @@ if(WIN32)
 endif()
 # Every command starts neura and then its tool, so neura starts as fast as
 # it can: on Linux it is a static executable, which the loader does not
-# relocate, where the C library has a static form.
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+# relocate, where the C library has a static form. A sanitizer build turns
+# this off, since a static executable cannot carry the sanitizer runtime.
+option(NEURA_STATIC_DISPATCHER "Link the neura dispatcher statically on Linux" ON)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NEURA_STATIC_DISPATCHER)
     find_library(NEURA_DISPATCHER_STATIC_LIBC NAMES libc.a)
     if(NEURA_DISPATCHER_STATIC_LIBC)
         target_link_options(neura PRIVATE -static)
