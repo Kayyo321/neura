@@ -122,7 +122,22 @@ No expression or statement starts with `.`, so a `.` where a declaration, a vari
 
 Whatever is an error with `#` is the same error with `.`: a dot tag before a statement that takes no tags is `E0909`, and an unknown or misspelled tag name is reported as it is for `#`. A `.` at the start of a declaration that is followed by neither a tag name nor `[` is a syntax error at the `.`.
 
-`neura fmt` keeps the sigil the author wrote. `neura fmt --tag-style=dot` rewrites every tag to `.`, `--tag-style=hash` rewrites every tag to `#`, and the default, `--tag-style=keep`, changes neither. The standard library, the tests, and the examples are written with `.`. Diagnostics and generated documentation that print a tag keep printing it as `#Name` in 0.3.1.
+`neura fmt` keeps the sigil the author wrote: `--tag-style=keep` is the default on the command line and in the editor's formatter. `--tag-style=dot` rewrites every tag's sigil to `.` and `--tag-style=hash` rewrites every sigil to `#`. Each is an explicit conversion that changes sigils and nothing else. The standard library, the examples, and the tests are written with `.`, and dedicated fixtures keep the `#` spelling and mixed spellings under test. Diagnostics and generated documentation that print a tag keep printing it as `#Name` in 0.3.1.
+
+## Laws
+
+0.3.1 ships Phase 1 of [laws and mathematical proofs](../design/Laws031.md): module-level `law (...)` declarations with `| proof:` and `let.proof`, checked at compile time and erased before optimization and circuit conversion. Phases 2 to 4 of that design stay on the roadmap. The design page records the grammar, the proof rules, the NeuraIR revision, the diagnostics, and what 0.3.1 must demonstrate.
+
+## Standard library completion and its exceptions
+
+Every `Std.Net` and `Std.Crypto` declaration that 0.3.0 left as a stub is implemented in 0.3.1, with the exceptions below. Each exception is also listed in the release notes.
+
+| Exception | Rule in 0.3.1 |
+| --- | --- |
+| PKCS #11 hardware security modules, TPM, cloud key management services, and live collection of enclave evidence | A backend is supported once it passes end-to-end qualification on its device or service. Until then its provider returns a typed `Unsupported`, with no silent software fallback. Coverage that comes from an emulator is labeled as emulator coverage. |
+| FN-DSA | Deferred until the final FIPS 206 and matching conformance vectors are available. The API is kept, and every call fails explicitly while it is unavailable. |
+
+The software keystore and offline verification of attestation evidence are supported and are not exceptions.
 
 ## Windows native build
 
@@ -149,7 +164,7 @@ After install, `neura update`, `neura uninstall`, the SDK/runtime split, and `ne
 
 ### Targets and parity
 
-- `x86_64-pc-windows-msvc` is required. `aarch64-pc-windows-msvc` is published when it passes the same gates. Otherwise it is listed as not yet supported.
+- `x86_64-windows-msvc` is required, and it is the only spelling in Neura's release and update metadata. The Clang spelling `x86_64-pc-windows-msvc` stays accepted where it already is, at the foreign-function boundary. `aarch64-windows-msvc` is published when it passes the same gates. Otherwise it is listed as not yet supported.
 - Every language feature, standard library package, and tool that exists on Linux exists on Windows. Where Windows needs a different host mechanism, the behaviour seen from Neura code is the same:
   - entropy: `BCryptGenRandom`;
   - locked memory: `VirtualLock`;
@@ -161,12 +176,13 @@ After install, `neura update`, `neura uninstall`, the SDK/runtime split, and `ne
 - Native tier-3 code generation either supports the Windows x64 calling convention or declines to tier 2 on Windows. Both paths must give identical results under the runtime-identity and tier-boundary gates.
 - Apps:
   - `neura build --target web|server|desktop` and `neura run` work on Windows;
-  - `neura package` produces a Windows desktop package (`.zip`, and `.msix` once signing is set up), replacing today's E1033 refusal;
+  - `neura package` produces a Windows desktop package (`.zip`, and `.msix` once trusted signing and a clean Windows install both pass), replacing today's E1033 refusal;
   - the browser runtime is tested in Edge and Chrome on Windows.
 - The editor extension and the debugger work against the native Windows install.
 
 ### Verification
 
+- The final 0.3.1 release requires verified Authenticode signatures on the Windows executables, DLLs, and installers ([code signing](../CodeSigning.md)). Implementation and release candidates may proceed unsigned while the signing application is under review.
 - CI builds and runs the full test suite on a Windows runner for every pull request and release.
 - `qualify.ps1`, or `qualify.sh` running under PowerShell, checks the Windows archive: contents, size budget, install, update from the previous release, and uninstall.
 - The lifecycle tests run against `install.ps1`: a fresh install, an update, a rollback, an uninstall, a path with spaces and non-ASCII characters, and a missing or corrupted download.
