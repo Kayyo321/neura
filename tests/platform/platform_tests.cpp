@@ -600,7 +600,11 @@ PLATFORM_TEST(process, environment_and_directory) {
     fs::create_directory(directory);
     auto cwd = child("print-cwd");
     cwd.working_directory = directory;
-    check_equal(capture(cwd).out, platform::utf8_path(fs::canonical(directory)), "working directory");
+    // Windows reports a working directory as it was set, so a scratch
+    // directory below an 8.3 %TEMP% (C:/Users/RUNNER~1/...) keeps its short
+    // spelling; the canonical forms name the same directory on every host.
+    check_equal(platform::utf8_path(fs::canonical(platform::path_from_utf8(capture(cwd).out))),
+                platform::utf8_path(fs::canonical(directory)), "working directory");
 
     // A relative program is found in the working directory on every host.
     auto relative = child("print-cwd");

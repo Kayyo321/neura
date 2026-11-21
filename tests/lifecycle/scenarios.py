@@ -2456,7 +2456,9 @@ def windows_suite_install(kit: WindowsKit) -> None:
     release = kit.default_release()
     tops = {p: windows_unpack(release / f"neura-{p}-{v}-{t}.tar.gz", kit.work / "unpacked" / p) for p in ("sdk", "runtime")}
     home = WindowsHome(kit, "install")
-    result = home.install(tops["sdk"])
+    # A PATH without <root>\current\bin: neura-update gives the instruction
+    # only when neither PATH nor the user Path lists the entry.
+    result = home.install(tops["sdk"], env={"PATH": WINDOWS_SYSTEM_PATH})
     if not check(result.returncode == 0, f"install.ps1: {result.stdout}{result.stderr}"):
         return
     expect_windows_layout(home, {"neura", *CORE_TOOLS, *SDK_TOOLS}, "the SDK install")

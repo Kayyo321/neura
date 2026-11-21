@@ -1894,7 +1894,14 @@ if(BUILD_TESTING AND NEURA_SDK)
         set_tests_properties(gpu-device gpu-cli PROPERTIES SKIP_RETURN_CODE 77 LABELS gpu TIMEOUT 1800)
     endif()
 
-    foreach(suite IN ITEMS circuits floats format vm heap host nir conversion generics layered fleet placement concurrency tier tier3 jit)
+    set(backend_suites circuits floats format vm heap host nir conversion generics layered fleet placement concurrency tier tier3 jit)
+    if(WIN32)
+        # tests/backend/host_tests.cpp drives the host with POSIX sockets,
+        # processes and files and holds no case on Windows; see "Tests that
+        # run on fewer targets" in docs/ContinuousIntegration.md.
+        list(REMOVE_ITEM backend_suites host)
+    endif()
+    foreach(suite IN LISTS backend_suites)
         add_test(NAME backend-${suite}
             COMMAND neura_backend_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()

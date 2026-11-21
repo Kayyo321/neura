@@ -35,8 +35,12 @@ if not NATIVE_JIT:
     SHADOW_ENV['NEURA_TIER3'] = 'interp'
 
 
+# NEURA_TEST_TIMEOUT_SCALE comes from CMake (docs/ContinuousIntegration.md).
+TIMEOUT = 120 * int(os.environ.get('NEURA_TEST_TIMEOUT_SCALE', '1'))
+
+
 def run(*arguments, env=None):
-    return subprocess.run([str(NEURA), *arguments], capture_output=True, encoding='utf-8', timeout=120,
+    return subprocess.run([str(NEURA), *arguments], capture_output=True, encoding='utf-8', timeout=TIMEOUT,
                           env={**BASE_ENV, 'NEURA_GPU': 'off', **(env or {})})
 
 

@@ -130,11 +130,11 @@ jobs:
             timeout-scale: 12
           # Windows runs the interpreter. Tests for the deferred server
           # transports, PostgreSQL and native launcher are not registered,
-          # and the crypto suites are left out as on x86-64 macOS: 322 of the
-          # 328 tests CMake registers on Windows.
+          # and the crypto suites are left out as on x86-64 macOS: 321 of the
+          # 327 tests CMake registers on Windows.
           - triple: x86_64-windows-msvc
             runner: windows-2022
-            minimum: 322
+            minimum: 321
             exclude: "^(stdlib-crypto-advanced|stdlib-crypto-asymmetric|stdlib-crypto-pqc(-.*)?)$"
             timeout-scale: 12
     env:
