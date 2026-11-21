@@ -1,7 +1,9 @@
 // `neura runtime enable` and `disable` (docs/design/Service030.md, "Starting,
 // retiring and login start"): the start of the supervisor at login, through
 // the user's service manager. Linux uses `systemctl --user`; macOS uses
-// `launchctl` and is written but untested.
+// `launchctl` and is written but untested. Windows has no user service
+// manager: login start is a value of the user's Run key, which the shell
+// runs at logon (W29).
 
 #include "service.hpp"
 
@@ -10,11 +12,90 @@
 #include <iostream>
 #include <sstream>
 
+#ifdef _WIN32
+#include "cli/tool.hpp"
+#include "platform/error.hpp"
+#include "platform/process.hpp"
+#include "platform/text.hpp"
+#include "platform/windows.hpp"
+#else
 #include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
 
 namespace neura::service {
+
+#ifdef _WIN32
+
+namespace {
+
+using cli::RuntimeError;
+
+constexpr const wchar_t* run_key = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+
+std::wstring value_name(const Installation& installation) { return platform::to_utf16("neurad-" + installation.id); }
+
+// The command a login start runs: the active generation's neurad of an
+// installation, or the source build's own, with the arguments quoted as
+// CommandLineToArgvW reads them.
+std::string start_command(const Installation& installation) {
+    const auto neurad = installation.installed
+                            ? installation.root / "current" / "bin" / tool::executable_file("neurad")
+                            : installation.bin / tool::executable_file("neurad");
+    return platform::command_line({platform::native_utf8_path(neurad), "--foreground", "--root",
+                                   platform::native_utf8_path(installation.root)});
+}
+
+} // namespace
+
+std::string login_location(const Installation& installation) {
+    return "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\neurad-" + installation.id;
+}
+
+bool login_registered(const Installation& installation) {
+    return ::RegGetValueW(HKEY_CURRENT_USER, run_key, value_name(installation).c_str(), RRF_RT_ANY, nullptr, nullptr,
+                          nullptr) == ERROR_SUCCESS;
+}
+
+int login_command(const Installation& installation, bool enable, const std::vector<std::string>& arguments) {
+    if (!arguments.empty()) {
+        throw RuntimeError("unexpected argument for neura runtime " + std::string(enable ? "enable" : "disable") + ": " +
+                               arguments.front(),
+                           1);
+    }
+    const auto name = value_name(installation);
+    if (!enable) {
+        if (!login_registered(installation)) {
+            std::cout << "login start is not registered\n";
+            return 0;
+        }
+        const auto status = ::RegDeleteKeyValueW(HKEY_CURRENT_USER, run_key, name.c_str());
+        if (status != ERROR_SUCCESS && status != ERROR_FILE_NOT_FOUND) {
+            throw RuntimeError("cannot remove " + login_location(installation) + ": " +
+                                   platform::error_message(static_cast<int>(status)),
+                               1);
+        }
+        // Nothing is stopped: a running supervisor stays until it exits.
+        std::cout << "login start removed: " << login_location(installation) << '\n';
+        return 0;
+    }
+    if (installation.unmigrated) {
+        throw RuntimeError("finish the 0.3.0 install first: run \"neura update --migrate-install\"", status_not_run);
+    }
+    const auto command = platform::to_utf16(start_command(installation));
+    const auto status = ::RegSetKeyValueW(HKEY_CURRENT_USER, run_key, name.c_str(), REG_SZ, command.c_str(),
+                                          static_cast<DWORD>((command.size() + 1) * sizeof(wchar_t)));
+    if (status != ERROR_SUCCESS) {
+        throw RuntimeError("cannot register " + login_location(installation) + ": " +
+                               platform::error_message(static_cast<int>(status)) + "; nothing was changed",
+                           1);
+    }
+    std::cout << "login start registered: " << login_location(installation) << '\n';
+    return 0;
+}
+
+#else
 
 namespace {
 
@@ -201,5 +282,12 @@ int login_command(const Installation& installation, bool enable, const std::vect
     std::cout << "login start registered: " << unit.string() << '\n';
     return 0;
 }
+
+bool login_registered(const Installation& installation) {
+    std::error_code error;
+    return fs::exists(login_unit_path(installation), error);
+}
+
+#endif
 
 } // namespace neura::service

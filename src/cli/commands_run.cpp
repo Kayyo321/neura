@@ -9,7 +9,8 @@
 #include "nvm/fleet.hpp"
 #include "nvm/host.hpp"
 #include "nvm/schedule.hpp"
-#ifndef _WIN32
+#include "platform/text.hpp"
+#if !defined(_WIN32) || defined(NEURA_HAS_SERVICE)
 #include "service/service.hpp"
 #endif
 
@@ -61,7 +62,7 @@ neura::nvr::Image load_image_bytes(std::span<const std::uint8_t> bytes, const fs
     try {
         return neura::nvr::load(bytes);
     } catch (const neura::nvr::LoadError& error) {
-        throw std::runtime_error(path.string() + ": " + std::string(neura::nvr::describe(error.kind)) + ": " +
+        throw std::runtime_error(neura::platform::utf8_path(path) + ": " + std::string(neura::nvr::describe(error.kind)) + ": " +
                                  error.what());
     }
 }
@@ -73,7 +74,7 @@ neura::nvr::Image load_image(const fs::path& path, std::size_t* byte_count) {
         if (byte_count) *byte_count = bytes.size();
         return image;
     } catch (const neura::nvr::LoadError& error) {
-        throw std::runtime_error(path.string() + ": " + std::string(neura::nvr::describe(error.kind)) + ": " +
+        throw std::runtime_error(neura::platform::utf8_path(path) + ": " + std::string(neura::nvr::describe(error.kind)) + ": " +
                                  error.what());
     }
 }
@@ -140,7 +141,7 @@ int run_each(const Options& options, const neura::nvr::Image& image, Host& host,
              std::optional<std::chrono::steady_clock::time_point> started) {
     const auto& path = options.files.front();
     const auto bindings = neura::nvm::bind(image, host.registry);
-    const auto report_prefix = path.string() + ": " + options.each->string() + ':';
+    const auto report_prefix = neura::platform::utf8_path(path) + ": " + neura::platform::utf8_path(*options.each) + ':';
     MemberTotal steps;
     MemberTotal requests;
     std::uint64_t peak_heap_cells = 0;
@@ -214,7 +215,7 @@ int run(const Options& options) {
     // --tier-stats times the command from before the image is read.
     const auto client_start = std::chrono::steady_clock::now();
     const auto started = options.tier_stats ? std::optional(client_start) : std::nullopt;
-#ifndef _WIN32
+#if !defined(_WIN32) || defined(NEURA_HAS_SERVICE)
     // Through the runtime service only when the command asks for it
     // (docs/design/Service030.md); --runtime-report also describes a direct run.
     if (options.runtime && *options.runtime != RuntimeMode::Off) {
@@ -231,7 +232,7 @@ int run(const Options& options) {
     try {
         bytes = image_bytes_of(read_file(path));
     } catch (const neura::nvr::LoadError& error) {
-        throw std::runtime_error(path.string() + ": " + std::string(neura::nvr::describe(error.kind)) + ": " +
+        throw std::runtime_error(neura::platform::utf8_path(path) + ": " + std::string(neura::nvr::describe(error.kind)) + ": " +
                                  error.what());
     }
     return run_image(options, bytes, path, started);
@@ -270,7 +271,7 @@ int run_image(const Options& options, std::span<const std::uint8_t> bytes, const
     run_options.tier_stats = options.tier_stats;
     run_options.started = started;
     run_options.ending = ending;
-    const auto status = neura::runner::run(image, host, options.arguments, run_options, path.string(), image_bytes);
+    const auto status = neura::runner::run(image, host, options.arguments, run_options, neura::platform::utf8_path(path), image_bytes);
     return gpu.finish(status, options.stats);
 }
 

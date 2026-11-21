@@ -1191,6 +1191,9 @@ cp "$source" "$output"
 
     # Case 61: a file system that cannot lock. A preloaded flock that fails
     # with ENOLCK stands in for it.
+    if os.environ.get("NEURA_TEST_SANITIZERS") == "1":
+        print("NOT RUN: case 61 uses an LD_PRELOAD shim, which interferes with ASan startup")
+        return
     compiler = shutil.which("cc") or shutil.which("gcc")
     if not sys.platform.startswith("linux") or compiler is None:
         print("NOT RUN: case 61 needs Linux (LD_PRELOAD) and a C compiler for the flock stand-in")
@@ -1473,7 +1476,9 @@ def suite_doctor(kit: Kit) -> None:
 
     # Case 61: a file system that cannot lock.
     compiler = shutil.which("cc") or shutil.which("gcc")
-    if compiler and sys.platform.startswith("linux"):
+    if os.environ.get("NEURA_TEST_SANITIZERS") == "1":
+        print("NOT RUN: case 61 in doctor uses an LD_PRELOAD shim, which interferes with ASan startup")
+    elif compiler and sys.platform.startswith("linux"):
         shim = kit.work / "noflock.c"
         shim.write_text("#include <errno.h>\nint flock(int fd, int operation) { (void)fd; (void)operation; errno = ENOLCK; return -1; }\n")
         library = kit.work / "libnoflock.so"
@@ -2762,7 +2767,54 @@ def windows_suite_neurad(kit: WindowsKit) -> None:
     if not kit.has_neurad():
         print("NOT RUN: the real neurad across a change: this build has no neurad.exe")
         return
-    print("NOT RUN: the real neurad across a change on Windows: its checks come with the service's Windows port (WP09)")
+    release = kit.default_release()
+    tops = {
+        product: windows_unpack(release / f"neura-{product}-{kit.version}-{kit.triple}.tar.gz", kit.work / "unpacked")
+        for product in ("sdk", "runtime")
+    }
+    revised = kit.variant("revised", change="share/neura/stdlib/std/core/version.nra")
+    update = kit.release(kit.work / "revised-release", revised)
+    home = WindowsHome(kit, "neurad")
+    installed = home.install(tops["sdk"], "-Add", tops["runtime"])
+    if not check(installed.returncode == 0, f"combined installation: {installed.stdout}{installed.stderr}"):
+        return
+    first = home.current()
+    image = home.path / "echo.nvr"
+    built = home.neura("build", REPOSITORY / "tests/service/programs/echo.nra", "-o", image)
+    if not check(built.returncode == 0, f"echo image: {built.stdout}{built.stderr}"):
+        return
+
+    def running() -> bool:
+        result = home.tool(first, "neura-run", "runtime", "ps", "--json")
+        if result.returncode != 0:
+            return False
+        return any(item["id"].startswith(first + ".") and item["state"] == "running"
+                   for item in json.loads(result.stdout)["applications"])
+
+    command = [home.bin / "neura.exe", "run", "--runtime=required", image]
+    application = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   cwd=home.path, env=home.env())
+    try:
+        if not check(wait_for(running, 30), "the installed supervisor lists the running echo application"):
+            return
+        check(windows_lease_held(home, first), "the running service holds the generation lease")
+        refusal = home.neura("uninstall", "--yes")
+        check(refusal.returncode != 0 and "applications of this installation are running" in refusal.stderr,
+              f"uninstall refuses a running application: {refusal.stdout}{refusal.stderr}")
+        changed = home.neura("update", "--source", update)
+        if not check(changed.returncode == 0 and home.current() != first,
+                     f"update switches generation while the application runs: {changed.stdout}{changed.stderr}"):
+            return
+        check(application.poll() is None and windows_lease_held(home, first), "the old generation stays leased")
+        stdout, stderr = application.communicate(b"still running\n", timeout=60)
+        check(application.returncode == 0 and stdout == b"[still running]\nend\n",
+              f"the old application finishes through its supervisor: {stdout!r} {stderr!r}")
+        check(wait_for(lambda: not windows_lease_held(home, first), 30), "the retired generation releases its lease")
+    finally:
+        if application.poll() is None:
+            application.kill()
+            application.communicate(timeout=30)
+        home.neura("runtime", "shutdown", "--terminate")
 
 
 WINDOWS_SUITES = {

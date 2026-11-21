@@ -9,6 +9,15 @@
 #include <cstring>
 #include <thread>
 
+#ifdef _WIN32
+#include "cli/tool.hpp"
+#include "platform/error.hpp"
+#include "platform/file.hpp"
+#include "platform/process.hpp"
+#include "platform/socket.hpp"
+#include "platform/text.hpp"
+#include "platform/windows.hpp"
+#else
 #include <fcntl.h>
 #include <spawn.h>
 #include <sys/file.h>
@@ -16,6 +25,7 @@
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
+#endif
 
 namespace neura::service {
 
@@ -25,6 +35,23 @@ using Millis = std::chrono::milliseconds;
 
 namespace {
 
+#ifdef _WIN32
+UniqueFd connect_to(const fs::path& socket_path) {
+    if (platform::ensure_sockets()) return {};
+    const SOCKET socket = ::socket(AF_UNIX, SOCK_STREAM, 0);
+    if (socket == INVALID_SOCKET) return {};
+    UniqueFd fd(static_cast<Descriptor>(socket), UniqueFd::Kind::socket);
+    set_cloexec(fd.get());
+    sockaddr_un address{};
+    address.sun_family = AF_UNIX;
+    const auto text = platform::native_utf8_path(socket_path);
+    if (text.size() >= sizeof address.sun_path) return {};
+    std::memcpy(address.sun_path, text.data(), text.size());
+    if (::connect(socket, reinterpret_cast<sockaddr*>(&address), sizeof address) != 0) return {};
+    if (!platform::set_nonblocking(static_cast<platform::native_socket>(socket))) return {};
+    return fd;
+}
+#else
 UniqueFd connect_to(const fs::path& socket_path) {
     int type = SOCK_STREAM;
 #ifdef SOCK_CLOEXEC
@@ -43,6 +70,7 @@ UniqueFd connect_to(const fs::path& socket_path) {
 #endif
     return fd;
 }
+#endif
 
 Message hello_message(const Installation& installation, Purpose purpose) {
     Message hello;
@@ -61,10 +89,25 @@ Message hello_message(const Installation& installation, Purpose purpose) {
 // with the identity reason, which `auto` does not fall back from.
 std::optional<Session> greet(UniqueFd fd, const Installation& installation, Purpose purpose,
                              Clock::time_point deadline) {
+#ifdef _WIN32
+    const auto peer = peer_identity(fd.get());
+    if (!peer.known || !peer.same_user) {
+        throw NotRun{"the service's socket belongs to another user; nothing was run", false, "identity"};
+    }
+    // An elevated and a normal process of one user share the run directory,
+    // but not a service: the supervisor runs programs at its own level.
+    if (peer.integrity != 0) {
+        throw NotRun{std::string("the service runs at a ") + (peer.integrity < 0 ? "lower" : "higher") +
+                         " integrity level than this process (an elevated and a normal process of one user do not "
+                         "share it); nothing was run",
+                     true, "identity"};
+    }
+#else
     const auto uid = peer_uid(fd.get());
     if (!uid || *uid != ::geteuid()) {
         throw NotRun{"the service's socket belongs to another user; nothing was run", false, "identity"};
     }
+#endif
     try {
         send_message(fd.get(), hello_message(installation, purpose), {}, deadline);
         auto welcome = receive_message(fd.get(), deadline);
@@ -91,6 +134,35 @@ std::optional<Session> greet(UniqueFd fd, const Installation& installation, Purp
     }
 }
 
+#ifdef _WIN32
+// Starts `neurad --foreground --root ROOT --on-demand` with no console, in a
+// process group of its own and outside the caller's job, so that it outlives
+// the terminal and the command that started it (W29); in the caller's job
+// when that job does not allow breaking away. Its input is NUL, its output
+// and errors are appended to its log.
+bool start_supervisor(const Installation& installation, const fs::path& log, bool on_demand) {
+    std::error_code error;
+    auto output = platform::open_no_follow(log, platform::OpenAccess::append, platform::OpenDisposition::open_or_create,
+                                           error);
+    if (!output) return false;
+    platform::Spawn spawn;
+    spawn.program = installation.bin / tool::executable_file("neurad");
+    spawn.arguments = {platform::native_utf8_path(spawn.program), "--foreground", "--root",
+                       platform::native_utf8_path(installation.root)};
+    if (on_demand) spawn.arguments.emplace_back("--on-demand");
+    spawn.input = platform::Stdio::null();
+    spawn.output = platform::Stdio::from(output.get());
+    spawn.error = platform::Stdio::from(output.get());
+    spawn.detached = true;
+    spawn.breakaway = true;
+    auto process = platform::Process::start(spawn, error);
+    if (!process) {
+        spawn.breakaway = false;
+        process = platform::Process::start(spawn, error);
+    }
+    return static_cast<bool>(process);
+}
+#else
 // Starts `neurad --foreground --root ROOT --on-demand` in a new session,
 // its streams on /dev/null and its log.
 bool start_supervisor(const Installation& installation, const fs::path& log, bool on_demand) {
@@ -124,6 +196,7 @@ bool start_supervisor(const Installation& installation, const fs::path& log, boo
     posix_spawnattr_destroy(&attributes);
     return error == 0;
 }
+#endif
 
 } // namespace
 
@@ -138,6 +211,20 @@ Session connect_service(const Installation& installation, std::string_view gener
     } catch (const TransportError& error) {
         throw NotRun{error.what(), true, "unavailable"};
     }
+#ifdef _WIN32
+    const auto check_private = [&](const fs::path& directory) {
+        std::error_code error;
+        if (fs::symlink_status(directory, error).type() != fs::file_type::not_found && !error &&
+            !private_directory(directory)) {
+            throw NotRun{platform::utf8_path(directory) +
+                             " is not a directory of this user that only this user can open; nothing was run",
+                         false, "identity"};
+        }
+    };
+    // <run>, or the private directory under %TEMP% that holds the endpoint.
+    const auto parent = endpoint.directory.parent_path();
+    check_private(parent);
+#else
     const auto check_private = [&](const fs::path& directory) {
         struct stat status{};
         if (::lstat(directory.c_str(), &status) == 0 && !private_directory(directory)) {
@@ -146,6 +233,7 @@ Session connect_service(const Installation& installation, std::string_view gener
         }
     };
     check_private(run / "neura");
+#endif
     check_private(endpoint.directory);
     const auto attempt = [&](Millis wait) -> std::optional<Session> {
         auto fd = connect_to(endpoint.socket);
@@ -154,6 +242,43 @@ Session connect_service(const Installation& installation, std::string_view gener
     };
     if (auto session = attempt(Millis(250))) return std::move(*session);
     if (!start) throw NotRun{"no supervisor is running", true, "not-running"};
+#ifdef _WIN32
+    const auto state = state_directory(installation, generation);
+    const auto log = state / "log";
+    try {
+        make_private_directory(parent);
+        make_private_directory(endpoint.directory);
+        // Private before the log is opened in it.
+        make_state_root(installation);
+    } catch (const TransportError& error) {
+        throw NotRun{std::string(error.what()) + "; nothing was run", false, "identity"};
+    }
+    std::error_code error;
+    fs::create_directories(state, error);
+    // Clients that arrive meanwhile wait on the start lock and find the
+    // supervisor started.
+    platform::FileLock lock;
+    const auto deadline = Clock::now() + Millis(2000);
+    for (;;) {
+        lock = platform::FileLock::acquire(endpoint.start, platform::LockMode::exclusive, platform::LockWait::try_once,
+                                           error);
+        if (lock || error != std::errc::resource_unavailable_try_again || Clock::now() >= deadline) break;
+        std::this_thread::sleep_for(Millis(5));
+    }
+    if (auto session = attempt(Millis(250))) return std::move(*session);
+    if (!lock) {
+        throw NotRun{"the service start lock could not be acquired; see " + platform::utf8_path(log), true,
+                     "start-failed"};
+    }
+    if (!start_supervisor(installation, log, start_mode == StartMode::OnDemand)) {
+        throw NotRun{"the service could not be started; see " + platform::utf8_path(log), true, "start-failed"};
+    }
+    while (Clock::now() < deadline) {
+        if (auto session = attempt(Millis(250))) return std::move(*session);
+        std::this_thread::sleep_for(Millis(5));
+    }
+    throw NotRun{"the service did not start within 2 seconds; see " + platform::utf8_path(log), true, "start-timeout"};
+#else
     try {
         make_private_directory(run / "neura");
         make_private_directory(endpoint.directory);
@@ -182,6 +307,7 @@ Session connect_service(const Installation& installation, std::string_view gener
         std::this_thread::sleep_for(Millis(5));
     }
     throw NotRun{"the service did not start within 2 seconds; see " + log.string(), true, "start-timeout"};
+#endif
 }
 
 } // namespace neura::service

@@ -13,6 +13,18 @@
 #include <fstream>
 #include <sstream>
 
+#ifdef _WIN32
+#include "platform/dirs.hpp"
+#include "platform/environment.hpp"
+#include "platform/error.hpp"
+#include "platform/file.hpp"
+#include "platform/socket.hpp"
+#include "platform/text.hpp"
+#include "platform/windows.hpp"
+
+#include <bcrypt.h>
+#include <sddl.h>
+#else
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -32,8 +44,124 @@
 #else
 extern char** environ;
 #endif
+#endif
 
 namespace neura::service {
+
+#ifdef _WIN32
+
+namespace {
+
+HANDLE handle_of(Descriptor descriptor) { return reinterpret_cast<HANDLE>(descriptor); }
+
+std::string system_message(DWORD code) { return platform::error_message(static_cast<int>(code)); }
+
+std::string socket_message() { return platform::last_socket_error().message(); }
+
+std::string text_of(const fs::path& path) { return platform::utf8_path(path); }
+
+} // namespace
+
+void UniqueFd::reset(Descriptor fd) {
+    if (fd_ != invalid_descriptor && fd_ != 0) {
+        if (kind_ == Kind::socket) {
+            ::closesocket(static_cast<SOCKET>(fd_));
+        } else {
+            ::CloseHandle(handle_of(fd_));
+        }
+    }
+    fd_ = fd;
+}
+
+void set_cloexec(Descriptor fd) { ::SetHandleInformation(handle_of(fd), HANDLE_FLAG_INHERIT, 0); }
+
+void set_nonblocking(Descriptor fd, bool nonblocking) {
+    platform::set_nonblocking(static_cast<platform::native_socket>(fd), nonblocking);
+}
+
+// --- Messages ----------------------------------------------------------------
+
+namespace {
+
+// The handles of a whole message: the values of its handles_tag fields,
+// owned from here on, so that they are closed whether or not the message
+// decodes. The bounds are checked again by decode().
+std::vector<UniqueFd> take_handles(std::string_view bytes) {
+    std::vector<UniqueFd> handles;
+    std::size_t at = header_bytes;
+    while (at + 6 <= bytes.size()) {
+        std::uint16_t tag = 0;
+        std::uint32_t length = 0;
+        std::memcpy(&tag, bytes.data() + at, 2);
+        std::memcpy(&length, bytes.data() + at + 2, 4);
+        at += 6;
+        if (length > bytes.size() - at) break;
+        if (tag == handles_tag) {
+            for (std::size_t i = 0; i + 8 <= length; i += 8) {
+                handles.emplace_back(static_cast<Descriptor>(get_u64(bytes.substr(at, length), i)));
+            }
+        }
+        at += length;
+    }
+    if (handles.size() > 8) throw ProtocolError("a message carried more descriptors than any message may");
+    return handles;
+}
+
+int remaining_ms(std::optional<Clock::time_point> deadline) {
+    if (!deadline) return -1;
+    const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(*deadline - Clock::now()).count();
+    return left <= 0 ? 0 : static_cast<int>(std::min<long long>(left, 1 << 30));
+}
+
+int wait_for(Descriptor fd, short events, int timeout_ms) {
+    platform::PollItem item{static_cast<platform::native_socket>(fd), events, 0};
+    return platform::poll(std::span(&item, 1), timeout_ms);
+}
+
+} // namespace
+
+bool MessageReader::fill(Descriptor fd) {
+    while (!ready_) {
+        // Only what is available: a socket that has nothing to read is left
+        // alone, whatever its blocking mode.
+        const int readable = wait_for(fd, platform::poll_in, 0);
+        if (readable < 0) {
+            if (platform::last_socket_error().interrupted()) continue;
+            throw TransportError("the connection failed: " + socket_message());
+        }
+        if (readable == 0) return true;
+        const auto have = buffer_.size();
+        std::string chunk(need_ - have, '\0');
+        const int count = ::recv(static_cast<SOCKET>(fd), chunk.data(), static_cast<int>(chunk.size()), 0);
+        if (count == SOCKET_ERROR) {
+            const auto error = platform::last_socket_error();
+            if (error.interrupted()) continue;
+            if (error.would_block()) return true;
+            throw TransportError("the connection failed: " + error.message());
+        }
+        if (count == 0) {
+            if (buffer_.empty()) return false;
+            throw TransportError("the connection ended inside a message");
+        }
+        buffer_.append(chunk.data(), static_cast<std::size_t>(count));
+        if (buffer_.size() < need_) continue;
+        if (need_ == 4) {
+            std::array<std::uint8_t, 4> length{};
+            std::memcpy(length.data(), buffer_.data(), 4);
+            need_ = 4 + std::size_t{announced_length(length)};
+            continue;
+        }
+        auto handles = take_handles(buffer_);
+        const std::span<const std::uint8_t> bytes(reinterpret_cast<const std::uint8_t*>(buffer_.data()), buffer_.size());
+        auto message = decode(bytes, handles.size());
+        ready_ = Received{std::move(message), std::move(handles)};
+        buffer_.clear();
+        need_ = 4;
+    }
+    return true;
+}
+
+#else
 
 void UniqueFd::reset(int fd) {
     if (fd_ >= 0) ::close(fd_);
@@ -109,11 +237,15 @@ bool MessageReader::fill(int fd) {
     return true;
 }
 
+#endif
+
 std::optional<Received> MessageReader::take() {
     auto out = std::move(ready_);
     ready_.reset();
     return out;
 }
+
+#ifndef _WIN32
 
 namespace {
 
@@ -282,6 +414,232 @@ std::string own_build() {
     return build;
 }
 
+#else
+
+namespace {
+
+// Closes handles that were duplicated into `process` for a message that was
+// not sent whole.
+void close_given(HANDLE process, const std::vector<HANDLE>& given) {
+    for (HANDLE theirs : given) {
+        ::DuplicateHandle(process, theirs, nullptr, nullptr, 0, FALSE, DUPLICATE_CLOSE_SOURCE);
+    }
+}
+
+} // namespace
+
+void send_message(Descriptor fd, const Message& message, const std::vector<Descriptor>& descriptors,
+                  std::optional<Clock::time_point> deadline, void* recipient) {
+    if (descriptors.size() > 8) throw TransportError("too many descriptors for one message");
+    // Every service socket is non-blocking, so that the deadline holds.
+    set_nonblocking(fd, true);
+    std::vector<HANDLE> given;
+    std::string bytes;
+    if (descriptors.empty()) {
+        bytes = encode(message);
+    } else {
+        if (recipient == nullptr) throw TransportError("no process to pass the handles to");
+        Message out = message;
+        std::string values;
+        for (const auto descriptor : descriptors) {
+            HANDLE theirs = nullptr;
+            if (!::DuplicateHandle(::GetCurrentProcess(), handle_of(descriptor), recipient, &theirs, 0, FALSE,
+                                   DUPLICATE_SAME_ACCESS)) {
+                const auto code = ::GetLastError();
+                close_given(recipient, given);
+                throw TransportError("cannot pass a handle to the peer: " + system_message(code));
+            }
+            given.push_back(theirs);
+            put_u64(values, static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(theirs)));
+        }
+        out.fields.push_back({handles_tag, std::move(values)});
+        try {
+            bytes = encode(out);
+        } catch (...) {
+            close_given(recipient, given);
+            throw;
+        }
+    }
+    std::size_t sent = 0;
+    try {
+        while (sent < bytes.size()) {
+            const auto size = static_cast<int>(std::min<std::size_t>(bytes.size() - sent, 1 << 20));
+            const int count = ::send(static_cast<SOCKET>(fd), bytes.data() + sent, size, 0);
+            if (count == SOCKET_ERROR) {
+                const auto error = platform::last_socket_error();
+                if (error.interrupted()) continue;
+                if (error.would_block()) {
+                    const int ready = wait_for(fd, platform::poll_out, remaining_ms(deadline));
+                    if (ready == 0) throw TransportError("the peer did not accept the message in time");
+                    continue;
+                }
+                throw TransportError("cannot send: " + error.message());
+            }
+            sent += static_cast<std::size_t>(count);
+        }
+    } catch (...) {
+        // Handles of a message the peer never gets whole are its no longer.
+        close_given(recipient, given);
+        throw;
+    }
+}
+
+void send_message(Descriptor fd, const Message& message, const std::vector<Descriptor>& descriptors,
+                  std::optional<Clock::time_point> deadline) {
+    if (descriptors.empty()) {
+        send_message(fd, message, descriptors, deadline, nullptr);
+        return;
+    }
+    std::error_code error;
+    const auto pid = platform::peer_pid(static_cast<platform::native_socket>(fd), error);
+    if (!pid) throw TransportError("cannot tell which process is at the other end: " + platform::error_message(error));
+    UniqueFd process(reinterpret_cast<Descriptor>(::OpenProcess(PROCESS_DUP_HANDLE, FALSE, *pid)));
+    if (!process) {
+        throw TransportError("cannot pass handles to process " + std::to_string(*pid) + ": " +
+                             system_message(::GetLastError()));
+    }
+    send_message(fd, message, descriptors, deadline, handle_of(process.get()));
+}
+
+std::optional<Received> receive_message(Descriptor fd, std::optional<Clock::time_point> deadline) {
+    MessageReader reader;
+    for (;;) {
+        if (!reader.fill(fd)) return std::nullopt;
+        if (auto message = reader.take()) return message;
+        const int ready = wait_for(fd, platform::poll_in, remaining_ms(deadline));
+        if (ready < 0 && platform::last_socket_error().interrupted()) continue;
+        if (ready < 0) throw TransportError("the connection failed: " + socket_message());
+        if (ready == 0) throw TransportError("no reply in time");
+    }
+}
+
+namespace {
+
+// The user SID and integrity level of a process's token.
+struct TokenIdentity {
+    std::vector<std::byte> user;  // TOKEN_USER
+    DWORD integrity = 0;          // the RID of the mandatory label
+    bool known = false;
+};
+
+TokenIdentity identity_of(HANDLE process) {
+    TokenIdentity identity;
+    HANDLE token = nullptr;
+    if (!::OpenProcessToken(process, TOKEN_QUERY, &token)) return identity;
+    UniqueFd owned(reinterpret_cast<Descriptor>(token));
+    DWORD size = 0;
+    ::GetTokenInformation(token, TokenUser, nullptr, 0, &size);
+    if (size == 0) return identity;
+    identity.user.resize(size);
+    if (!::GetTokenInformation(token, TokenUser, identity.user.data(), size, &size)) return identity;
+    size = 0;
+    ::GetTokenInformation(token, TokenIntegrityLevel, nullptr, 0, &size);
+    if (size == 0) return identity;
+    std::vector<std::byte> label(size);
+    if (!::GetTokenInformation(token, TokenIntegrityLevel, label.data(), size, &size)) return identity;
+    const auto* mandatory = reinterpret_cast<const TOKEN_MANDATORY_LABEL*>(label.data());
+    const auto count = *::GetSidSubAuthorityCount(mandatory->Label.Sid);
+    if (count == 0) return identity;
+    identity.integrity = *::GetSidSubAuthority(mandatory->Label.Sid, count - 1);
+    identity.known = true;
+    return identity;
+}
+
+PSID sid_of(TokenIdentity& identity) { return reinterpret_cast<TOKEN_USER*>(identity.user.data())->User.Sid; }
+
+} // namespace
+
+PeerIdentity peer_identity(Descriptor socket) {
+    PeerIdentity peer;
+    std::error_code error;
+    const auto pid = platform::peer_pid(static_cast<platform::native_socket>(socket), error);
+    if (!pid) return peer;
+    UniqueFd process(reinterpret_cast<Descriptor>(::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, *pid)));
+    if (!process) return peer;
+    auto theirs = identity_of(handle_of(process.get()));
+    auto own = identity_of(::GetCurrentProcess());
+    if (!theirs.known || !own.known) return peer;
+    peer.known = true;
+    peer.same_user = ::EqualSid(sid_of(theirs), sid_of(own)) != FALSE;
+    peer.integrity = theirs.integrity < own.integrity ? -1 : theirs.integrity > own.integrity ? 1 : 0;
+    return peer;
+}
+
+void random_bytes(std::span<std::uint8_t> out) {
+    std::size_t done = 0;
+    while (done < out.size()) {
+        const auto chunk = static_cast<ULONG>(std::min<std::size_t>(out.size() - done, 1u << 30));
+        if (!BCRYPT_SUCCESS(::BCryptGenRandom(nullptr, out.data() + done, chunk, BCRYPT_USE_SYSTEM_PREFERRED_RNG))) {
+            throw TransportError("no random bytes are available");
+        }
+        done += chunk;
+    }
+}
+
+// --- The build ------------------------------------------------------------------
+
+namespace {
+
+// The GUID and age of the CodeView record of a loaded module, as
+// "rsds <32 hexadecimal digits>.<age>", or nothing.
+std::string codeview_identity(HMODULE module) {
+    const auto* base = reinterpret_cast<const std::uint8_t*>(module);
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return {};
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE ||
+        nt->OptionalHeader.NumberOfRvaAndSizes <= IMAGE_DIRECTORY_ENTRY_DEBUG) {
+        return {};
+    }
+    const auto& directory = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG];
+    if (directory.VirtualAddress == 0) return {};
+    const auto* entries = reinterpret_cast<const IMAGE_DEBUG_DIRECTORY*>(base + directory.VirtualAddress);
+    const std::size_t count = directory.Size / sizeof(IMAGE_DEBUG_DIRECTORY);
+    for (std::size_t i = 0; i < count; ++i) {
+        const auto& entry = entries[i];
+        if (entry.Type != IMAGE_DEBUG_TYPE_CODEVIEW || entry.AddressOfRawData == 0 || entry.SizeOfData < 24) continue;
+        const auto* record = base + entry.AddressOfRawData;
+        if (std::memcmp(record, "RSDS", 4) != 0) continue;
+        std::uint32_t age = 0;
+        std::memcpy(&age, record + 20, 4);
+        return "rsds " + hex(std::span(record + 4, 16)) + "." + std::to_string(age);
+    }
+    return {};
+}
+
+} // namespace
+
+std::string own_build() {
+    static const std::string build = [] {
+        std::string identity;
+        HMODULE module = nullptr;
+        if (::GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                 reinterpret_cast<LPCWSTR>(&own_build), &module)) {
+            identity = codeview_identity(module);
+            if (identity.empty()) {
+                std::wstring name(32768, L'\0');
+                const DWORD length = ::GetModuleFileNameW(module, name.data(), static_cast<DWORD>(name.size()));
+                name.resize(length);
+                std::ifstream input(fs::path(name), std::ios::binary);
+                if (length != 0 && input) {
+                    std::ostringstream bytes;
+                    bytes << input.rdbuf();
+                    identity = "sha256 " + util::sha256_hex(bytes.str());
+                }
+            }
+        }
+        if (identity.empty()) identity = "unknown";
+#ifdef NEURA_SERVICE_TEST_BUILD
+        // A test supervisor of another build (tests/service, case 11).
+        identity += " " NEURA_SERVICE_TEST_BUILD;
+#endif
+        return neura::tool::version_line() + "; " + identity;
+    }();
+    return build;
+}
+
+#endif
+
 // --- Files ----------------------------------------------------------------------
 
 namespace {
@@ -291,11 +649,70 @@ std::string short_digest(std::string_view text) { return util::sha256_hex(text).
 } // namespace
 
 std::string endpoint_of(const fs::path& root, std::string_view generation) {
+#ifdef _WIN32
+    // The root in generic form, as the lifecycle names it (W29).
+    std::string text = text_of(root);
+#else
     std::string text = root.string();
+#endif
     text += '\0';
     text += generation;
     return short_digest(text);
 }
+
+#ifdef _WIN32
+
+namespace {
+
+// The real path of `path`, without the \\?\ prefix that the system's final
+// path may carry, as the lifecycle names an installation.
+fs::path real_path(const fs::path& path, std::error_code& error) {
+    auto real = fs::canonical(path, error);
+    if (error) return {};
+    const auto& text = real.native();
+    if (text.starts_with(L"\\\\?\\UNC\\")) return fs::path(L"\\\\" + text.substr(8));
+    if (text.starts_with(L"\\\\?\\")) return fs::path(text.substr(4));
+    return real;
+}
+
+} // namespace
+
+Installation installation_of(const fs::path& executable) {
+    Installation installation;
+    std::error_code error;
+    auto real = real_path(executable, error);
+    if (error) real = executable;
+    installation.bin = real.parent_path();
+    const auto detection = lifecycle::detect_install(real);
+    if (detection.kind == lifecycle::Detection::Kind::Installed) {
+        installation.root = real_path(detection.root, error);
+        if (error) installation.root = detection.root;
+        installation.generation = detection.running_generation;
+        installation.installed = true;
+        installation.unmigrated = lifecycle::needs_migration(detection);
+    } else {
+        installation.root = installation.bin;
+        installation.generation = "dev";
+    }
+    installation.id = short_digest(text_of(installation.root));
+    return installation;
+}
+
+Installation installation_at_root(const fs::path& root) {
+    Installation installation;
+    std::error_code error;
+    installation.root = real_path(root, error);
+    if (error) installation.root = root;
+    // `current` is a junction to versions/<generation> (W22).
+    const auto current = real_path(installation.root / "current", error);
+    if (!error) installation.generation = text_of(current.filename());
+    installation.bin = installation.root / "versions" / installation.generation / "bin";
+    installation.installed = true;
+    installation.id = short_digest(text_of(installation.root));
+    return installation;
+}
+
+#else
 
 Installation installation_of(const fs::path& executable) {
     Installation installation;
@@ -332,6 +749,118 @@ Installation installation_at_root(const fs::path& root) {
     installation.id = short_digest(installation.root.string());
     return installation;
 }
+
+#endif
+
+#ifdef _WIN32
+
+namespace {
+
+// This user's SID as text (S-1-5-21-...), as the lifecycle hashes it.
+std::string user_sid_text() {
+    auto own = identity_of(::GetCurrentProcess());
+    if (own.user.empty()) return {};
+    wchar_t* text = nullptr;
+    if (!::ConvertSidToStringSidW(sid_of(own), &text)) return {};
+    std::string sid = platform::try_to_utf8(text).value_or(std::string());
+    ::LocalFree(text);
+    return sid;
+}
+
+// %LOCALAPPDATA%/Neura, which holds the run and state directories.
+fs::path service_base() {
+    std::error_code error;
+    const auto local = platform::local_app_data(error);
+    if (error || local.empty()) {
+        throw TransportError("the folder %LOCALAPPDATA% is not known (" + platform::error_message(error) +
+                             "); the service is unavailable");
+    }
+    return local / "Neura";
+}
+
+bool exists_no_follow(const fs::path& path) {
+    std::error_code error;
+    return fs::symlink_status(path, error).type() != fs::file_type::not_found && !error;
+}
+
+// Creates `directory` with a protected DACL that grants only this user, or
+// accepts it when it already is such a directory.
+void private_directory_at(const fs::path& directory) {
+    std::error_code error;
+    if (!platform::make_private_directory(directory, error) && error != std::errc::file_exists) {
+        throw TransportError("cannot create " + text_of(directory) + ": " + platform::error_message(error));
+    }
+}
+
+} // namespace
+
+bool private_directory(const fs::path& directory) {
+    std::error_code error;
+    return platform::is_private_directory(directory, error);
+}
+
+void make_private_directory(const fs::path& directory) {
+    private_directory_at(directory);
+    if (!private_directory(directory)) {
+        throw TransportError(text_of(directory) + " is not a directory of this user that only this user can open");
+    }
+}
+
+fs::path run_directory(bool create) {
+    const auto base = service_base();
+    const auto run = base / "run";
+    if (!exists_no_follow(run)) {
+        if (!create) return run;
+        // The base is also the default install root (W22): an ordinary
+        // directory; only what the service keeps in it is private.
+        std::error_code error;
+        fs::create_directories(base, error);
+        if (error) throw TransportError("cannot create " + text_of(base) + ": " + error.message());
+        make_private_directory(run);
+        return run;
+    }
+    if (!private_directory(run)) {
+        throw TransportError(text_of(run) +
+                             " is refused: it must be a directory of this user that only this user can open");
+    }
+    return run;
+}
+
+Endpoint endpoint_files(const fs::path& run, const fs::path& root, std::string_view generation) {
+    // An AF_UNIX address holds 107 bytes of path and its NUL.
+    constexpr std::size_t longest = 107;
+    const auto name = endpoint_of(root, generation);
+    Endpoint endpoint;
+    endpoint.directory = run / name;
+    if (platform::native_utf8_path(endpoint.directory / "s").size() > longest) {
+        std::error_code error;
+        const auto temporary = platform::temp_directory(error);
+        if (error) throw TransportError("the temporary directory is not known: " + platform::error_message(error));
+        endpoint.directory = temporary / ("neura-" + short_digest(user_sid_text())) / name;
+    }
+    endpoint.socket = endpoint.directory / "s";
+    endpoint.lock = endpoint.directory / "lock";
+    endpoint.start = endpoint.directory / "start";
+    if (platform::native_utf8_path(endpoint.socket).size() > longest) {
+        throw TransportError("the socket path " + text_of(endpoint.socket) +
+                             " is longer than this system allows (107 bytes); the service is unavailable");
+    }
+    return endpoint;
+}
+
+fs::path state_root(const Installation& installation) { return service_base() / "state" / installation.id; }
+
+void make_state_root(const Installation& installation) {
+    const auto root = state_root(installation);
+    std::error_code error;
+    fs::create_directories(root.parent_path().parent_path(), error);
+    if (error) throw TransportError("cannot create " + text_of(root.parent_path().parent_path()) + ": " + error.message());
+    for (const auto& directory : {root.parent_path(), root}) {
+        if (!exists_no_follow(directory)) private_directory_at(directory);
+    }
+}
+
+#else
 
 bool private_directory(const fs::path& directory) {
     struct stat status{};
@@ -393,9 +922,22 @@ fs::path state_root(const Installation& installation) {
     return base / "neura" / installation.id;
 }
 
+#endif
+
 fs::path state_directory(const Installation& installation, std::string_view generation) {
     return state_root(installation) / std::string(generation);
 }
+
+#ifdef _WIN32
+
+void write_atomically(const fs::path& path, std::string_view text) {
+    std::error_code error;
+    if (!platform::write_file_atomically(path, text, error)) {
+        throw TransportError("cannot write " + text_of(path) + ": " + platform::error_message(error));
+    }
+}
+
+#else
 
 void write_atomically(const fs::path& path, std::string_view text) {
     auto temporary = path;
@@ -421,6 +963,8 @@ void write_atomically(const fs::path& path, std::string_view text) {
     }
 }
 
+#endif
+
 std::optional<std::string> read_text(const fs::path& path) {
     std::ifstream input(path, std::ios::binary);
     if (!input) return std::nullopt;
@@ -432,7 +976,11 @@ std::optional<std::string> read_text(const fs::path& path) {
 std::vector<std::string> live_generations(const Installation& installation) {
     std::vector<std::string> generations;
     if (installation.installed) {
+#ifdef _WIN32
+        const auto detection = lifecycle::detect_install(installation.bin / neura::tool::executable_file("neura"));
+#else
         const auto detection = lifecycle::detect_install(installation.bin / "neura");
+#endif
         if (detection.kind == lifecycle::Detection::Kind::Installed) generations = detection.marker.generations;
     }
     if (std::ranges::find(generations, installation.generation) == generations.end()) {
@@ -449,6 +997,44 @@ std::vector<std::string> recorded_generations(const Installation& installation) 
     }
     std::ranges::sort(generations);
     return generations;
+}
+
+#ifdef _WIN32
+
+std::vector<std::string> environment_entries() {
+    std::vector<std::string> entries;
+    for (const auto& [name, value] : platform::environment()) entries.push_back(name + "=" + value);
+    return entries;
+}
+
+void clear_environment() {
+    for (const auto& [name, value] : platform::environment()) {
+        std::error_code error;
+        platform::unset_env(name, error);
+    }
+}
+
+// --- Process settings -----------------------------------------------------------
+
+int resource_of(std::uint8_t) { return -1; }
+
+std::uint64_t signal_bit(int signal) { return signal > 0 && signal <= 64 ? std::uint64_t{1} << (signal - 1) : 0; }
+
+void capture_process_settings(Envelope& envelope) {
+    // Not captured on Windows (W29): umask, resource limits, nice and the
+    // signal dispositions; the priority class stands in for nice.
+    envelope.resource_limits.clear();
+    envelope.nice = static_cast<std::int64_t>(::GetPriorityClass(::GetCurrentProcess()));
+    envelope.ignored_signals = 0;
+    envelope.blocked_signals = 0;
+}
+
+#else
+
+std::vector<std::string> environment_entries() {
+    std::vector<std::string> entries;
+    for (char** entry = process_environment(); entry && *entry; ++entry) entries.emplace_back(*entry);
+    return entries;
 }
 
 char** process_environment() {
@@ -517,6 +1103,8 @@ void capture_process_settings(Envelope& envelope) {
         if (sigismember(&blocked, signal) == 1) envelope.blocked_signals |= signal_bit(signal);
     }
 }
+
+#endif
 
 std::uint64_t clock_ns(Clock::time_point point) {
     return static_cast<std::uint64_t>(
