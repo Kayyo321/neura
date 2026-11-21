@@ -621,7 +621,9 @@ void AnalysisSession::parse_document(EditorDocument &document) {
     }
     document.syntax_diagnostics.clear();
     document.tokens = lex_recovering(document.source, document.path, document.syntax_diagnostics);
-    document.syntax = parse_recovering(document.tokens, document.syntax_diagnostics);
+    document.tag_sigils.clear();
+    document.syntax = parse_recovering(document.tokens, document.syntax_diagnostics, &document.tag_sigils);
+    std::sort(document.tag_sigils.begin(), document.tag_sigils.end());
 }
 EditorDocument &AnalysisSession::open(std::string uri, std::string source, std::int64_t version) {
     const auto path = uri_path(uri);
@@ -1793,7 +1795,11 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
             return Json{{"isIncomplete", false}, {"items", items}};
         }
     }
-    if (before != std::string::npos && doc.source[before] == '#') {
+    const auto tag_open = before != std::string::npos && before > 0 && doc.source[before] == '['
+                              ? doc.source.find_last_not_of(" \t\r\n", before - 1) : before;
+    if (tag_open != std::string::npos &&
+        (doc.source[tag_open] == '#' ||
+         std::binary_search(doc.tag_sigils.begin(), doc.tag_sigils.end(), tag_open))) {
         for (const auto &tag : tag_registry()) {
             if (tag.status == TagStatus::Reserved) continue;
             add(std::string(tag.name), 14, tag_signature(tag) + " — " + std::string(tag_status_name(tag.status)),

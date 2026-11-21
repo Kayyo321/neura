@@ -51,8 +51,8 @@ struct TagArgumentSyntax {
     std::vector<TagArgumentSyntax> items{};
 };
 
-// `#Name` or `#Name(arguments)`, written before a declaration. A group
-// `#[A, B]` gives one TagSyntax per tag.
+// One tag written before a declaration. A group gives one TagSyntax per
+// tag, with the same representation for dot and hash spellings.
 struct TagSyntax {
     Span span;
     Span name_span;
@@ -507,8 +507,11 @@ struct ParsedFile {
     std::optional<Span> untyped_variadic{};
 };
 
-ParsedFile parse(const std::vector<Token>& tokens);
+// When requested, records the byte offsets of tag sigils for source tools.
+// A speculative parse may record an offset more than once.
+ParsedFile parse(const std::vector<Token>& tokens, std::vector<std::size_t>* tag_sigils = nullptr);
 // Retains valid declarations around recovered syntax errors for editor use.
-ParsedFile parse_recovering(const std::vector<Token>& tokens, std::vector<Diagnostic>& diagnostics);
+ParsedFile parse_recovering(const std::vector<Token>& tokens, std::vector<Diagnostic>& diagnostics,
+                            std::vector<std::size_t>* tag_sigils = nullptr);
 
 } // namespace neura

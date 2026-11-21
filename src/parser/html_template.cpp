@@ -51,13 +51,15 @@ void append_code_point(std::string& text, unsigned value) {
 
 class TemplateParser {
 public:
-    TemplateParser(std::string_view source, Span origin) : source_(source), positions_(source, std::move(origin)) {}
+    TemplateParser(std::string_view source, Span origin, std::vector<std::size_t>* tag_sigils)
+        : source_(source), positions_(source, std::move(origin)), tag_sigils_(tag_sigils) {}
 
     TemplateSyntax parse() { return {span(0, source_.size()), nodes(false, false, 0)}; }
 
 private:
     std::string_view source_;
     IslandPositions positions_;
+    std::vector<std::size_t>* tag_sigils_;
     std::size_t offset_{};
     std::vector<const TemplateElement*> ancestors_;
 
@@ -100,20 +102,37 @@ private:
                 .label("nesting depth " + std::to_string(depth + 1) + " exceeds " + std::to_string(maximum));
     }
 
+    void relocate(Span& range, std::size_t origin) const {
+        const auto start = origin + range.offset;
+        range = span(start, start + range.length);
+    }
+
+    void relocate(InterpolationPart& part, std::size_t origin) const {
+        relocate(part.span, origin);
+        if (part.specification_span) relocate(*part.specification_span, origin);
+        for (auto& token : part.tokens) relocate(token, origin);
+        for (auto& piece : part.specification) relocate(piece, origin);
+    }
+
+    void relocate(Token& token, std::size_t origin) const {
+        relocate(token.span, origin);
+        if (token.parts) {
+            auto parts = std::make_shared<std::vector<InterpolationPart>>(*token.parts);
+            for (auto& part : *parts) relocate(part, origin);
+            token.parts = std::move(parts);
+        }
+    }
+
     std::vector<Token> neura_tokens(std::size_t begin, std::size_t end) const {
         std::vector<Token> tokens;
         try {
             tokens = lex_template_neura(source_.substr(begin, end - begin), span(begin, begin).file);
         } catch (const Diagnostic& diagnostic) {
             auto error = diagnostic;
-            const auto relocated = begin + diagnostic.span.offset;
-            error.span = span(relocated, relocated + error.span.length);
+            relocate(error.span, begin);
             throw error;
         }
-        for (auto& token : tokens) {
-            const auto relocated = begin + token.span.offset;
-            token.span = span(relocated, relocated + token.span.length);
-        }
+        for (auto& token : tokens) relocate(token, begin);
         return tokens;
     }
 
@@ -126,7 +145,7 @@ private:
         offset_ = *closing + 1;
         try {
             auto tokens = neura_tokens(start + 1, *closing);
-            return {span(start, offset_), TemplateHole{parse_template_expression(tokens)}};
+            return {span(start, offset_), TemplateHole{parse_template_expression(tokens, tag_sigils_)}};
         } catch (const Diagnostic& error) {
             throw Diagnostic(span(start, offset_), "malformed template hole").with_code("E0247")
                 .label("write one Neura expression inside the braces").label(error.span, error.what());
@@ -448,7 +467,7 @@ private:
         if (word == "for") {
             auto head = [&]() {
                 try {
-                    return parse_template_for_head(control_header(start));
+                    return parse_template_for_head(control_header(start), tag_sigils_);
                 } catch (const Diagnostic& error) {
                     if (error.code() == "E0249") throw;
                     bad_control_head(start, error, "write '@for (let item in items; key: expression)'");
@@ -466,7 +485,7 @@ private:
             std::optional<Expr> condition;
             if (conditional) {
                 try {
-                    condition = parse_template_expression(control_header(branch));
+                    condition = parse_template_expression(control_header(branch), tag_sigils_);
                 } catch (const Diagnostic& error) {
                     if (error.code() == "E0249") throw;
                     bad_control_head(branch, error, "write one Neura expression in the condition");
@@ -537,8 +556,8 @@ private:
 
 } // namespace
 
-TemplateSyntax parse_template(std::string_view body, Span origin) {
-    return TemplateParser(body, std::move(origin)).parse();
+TemplateSyntax parse_template(std::string_view body, Span origin, std::vector<std::size_t>* tag_sigils) {
+    return TemplateParser(body, std::move(origin), tag_sigils).parse();
 }
 
 std::vector<std::pair<std::size_t, std::size_t>> srcset_urls(std::string_view value) {

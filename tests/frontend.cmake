@@ -325,7 +325,7 @@ if(loop_ir MATCHES "[:<, ]int[^0-9a-z_]" OR loop_ir MATCHES "byte")
 endif()
 
 check_rejection(float-remainder "let r: float64 = 1.5 % 2.0;" "2:[1-9][0-9]*" "operator '%' is not defined for float64")
-check_rejection(do-condition "do {} while (1);" "2:14" "expected bool, got int32")
+check_rejection(do-condition "do {} while (1);" "2:14" "expected bool or a class or interface reference, got int32")
 check_rejection(conditional-arm "let result: int = true ? 1 : false;" "2:30" "expected int32, got bool")
 check_rejection(const-update [=[
 const Fixed = 1;

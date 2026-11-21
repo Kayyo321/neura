@@ -30,7 +30,7 @@ std::size_t skip_group_ahead(std::size_t offset) const {
 
 // The offset after the tags that start `offset` tokens ahead.
 std::size_t skip_tags_ahead(std::size_t offset) const {
-    while (next_is(offset, "#")) {
+    while (at_tag_sigil(offset)) {
         ++offset;
         if (next_is(offset, "[")) {
             offset = skip_group_ahead(offset);

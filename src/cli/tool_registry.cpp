@@ -290,7 +290,7 @@ std::string executable_file(std::string_view name) {
 const char* usage_text() {
     return "usage: neura lsp --stdio\n"
            "       neura debug --stdio\n"
-           "       neura fmt [--check | --write] [--stdin --stdin-filepath <file>] <file.nra>...\n"
+           "       neura fmt [--check | --write] [--tag-style=dot|hash|keep] [--stdin --stdin-filepath <file>] <file.nra>...\n"
            "       neura capabilities --json\n"
            "       neura rename [-I source-root] <file.nra> <line>:<column> <new-name>\n"
            "       neura check [-I source-root] [--task-safety | --fix | --show-derived[=Name]] <file.nra>...\n"

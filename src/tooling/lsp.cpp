@@ -946,21 +946,24 @@ class Server {
             options.tab_size =
                 static_cast<unsigned>(std::clamp<std::int64_t>(params["options"]["tabSize"].integer(4), 1, 16));
             options.insert_spaces = params["options"]["insertSpaces"].boolean(true);
+            options.tag_style = parse_tag_style(params["options"]["tagStyle"].string()).value_or(TagStyle::Keep);
+            const bool convert_tags = options.tag_style != TagStyle::Keep;
+            const auto &source = convert_tags && !doc->editor_source.empty() ? doc->editor_source : doc->source;
             std::string formatted;
             try {
-                formatted = format_source(doc->source, doc->path, options);
+                formatted = format_source(source, doc->path, options);
             } catch (const Diagnostic &) {
                 // An editor snapshot can be between keystrokes. Diagnostics
                 // already describe invalid source; formatting should leave it
                 // untouched without turning format-on-save into a popup.
                 return Json::Array{};
             }
-            if (formatted == doc->source)
+            if (formatted == source)
                 return Json::Array{};
             // Full-document edits preserve formatter context even when the
             // requested selection cuts through a declaration or comment.
             return Json::Array{Json{{"range", source_range(doc->source, Span{doc->path, 1, 1, 0, doc->source.size()})},
-                                    {"newText", doc->editor_text(formatted)}}};
+                                    {"newText", convert_tags ? formatted : doc->editor_text(formatted)}}};
         }
         if (method == "textDocument/rename")
             return rename(*doc, params);
