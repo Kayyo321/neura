@@ -721,10 +721,13 @@ private:
             advance();
             expect(",");
             const auto& version = current();
+            const auto digits = numeric_literal_text(version);
             std::uint32_t number = 0;
-            const auto end = version.text.data() + version.text.size();
-            const auto [next, error] = std::from_chars(version.text.data(), end, number);
-            if (version.kind != TokenKind::Integer || error != std::errc{} || next != end || number == 0) {
+            const auto end = digits.data() + digits.size();
+            const auto [next, error] = std::from_chars(digits.data(), end, number);
+            if (version.kind != TokenKind::Integer || is_character_literal(version) ||
+                (version.numeric_suffix && version.numeric_suffix->type != "uint32") ||
+                error != std::errc{} || next != end || number == 0) {
                 if (kernel)
                     throw Diagnostic(version.span, "kernel ABI version must be a positive uint32").with_code("E0783");
                 throw Diagnostic(version.span, "host service version must be a positive uint32").with_code("E0213");
@@ -817,11 +820,14 @@ private:
             result.kind = TagArgumentSyntax::Kind::String;
             result.text = decode_string_literal(advance().text);
         } else if (token.kind == TokenKind::Integer || token.kind == TokenKind::Float) {
+            if (token.numeric_suffix)
+                throw Diagnostic(token.span, "a tag number takes no type suffix").with_code("E0910")
+                    .label("write this tag argument without a suffix");
             result.kind = token.kind == TokenKind::Integer ? TagArgumentSyntax::Kind::Integer
                                                            : TagArgumentSyntax::Kind::Float;
-            const bool character = is_character_literal(token);
-            result.text = advance().text;
-            if (character) result.text = std::to_string(decode_character_literal(result.text));
+            result.text = is_character_literal(token) ? std::to_string(decode_character_literal(token.text))
+                                                      : numeric_literal_text(token);
+            advance();
             if (negative) result.text = "-" + result.text;
         } else if (!negative && (at("true") || at("false"))) {
             result.kind = TagArgumentSyntax::Kind::Boolean;
@@ -3025,8 +3031,12 @@ private:
             result.character = true;
             return result;
         }
-        if (token.kind == TokenKind::Integer) return token_expression(Expr::Kind::Integer);
-        if (token.kind == TokenKind::Float) return token_expression(Expr::Kind::Float);
+        if (token.kind == TokenKind::Integer || token.kind == TokenKind::Float) {
+            auto result = token_expression(token.kind == TokenKind::Integer ? Expr::Kind::Integer : Expr::Kind::Float);
+            result.text = numeric_literal_text(token);
+            if (token.numeric_suffix) result.literal_type = token.numeric_suffix->type;
+            return result;
+        }
         if (token.kind == TokenKind::String && token.parts) return interpolated_string();
         if (token.kind == TokenKind::String) return token_expression(Expr::Kind::String);
         throw Diagnostic(token.span, "expected an expression").with_code("E0204")

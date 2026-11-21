@@ -17,6 +17,8 @@ Errors about characters, literals, and comments.
 | [E0103](E0103.md) | unterminated string literal |
 | [E0104](E0104.md) | invalid escape or character in a string literal |
 | [E0105](E0105.md) | malformed numeric literal |
+| [E0106](E0106.md) | misplaced digit separator |
+| [E0107](E0107.md) | integer suffix on a floating-point literal |
 
 ## E02xx: Parser
 

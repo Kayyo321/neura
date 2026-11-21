@@ -2338,8 +2338,12 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
                 return expression_type(value.operands.front(), context, depth + 1);
             TypeSyntax type;
             switch (value.kind) {
-            case Expr::Kind::Integer: type.name = value.character ? "byte" : "int32"; break;
-            case Expr::Kind::Float: type.name = "float64"; break;
+            case Expr::Kind::Integer:
+                type.name = value.literal_type.empty() ? (value.character ? "byte" : "int32") : value.literal_type;
+                break;
+            case Expr::Kind::Float:
+                type.name = value.literal_type.empty() ? "float64" : value.literal_type;
+                break;
             case Expr::Kind::String: type.name = "string"; break;
             case Expr::Kind::Boolean: type.name = "bool"; break;
             case Expr::Kind::Collection: {

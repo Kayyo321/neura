@@ -1,5 +1,6 @@
 #include "formatter.hpp"
 
+#include "lexer/island.hpp"
 #include "lexer/lexer.hpp"
 #include "parser/html_template.hpp"
 #include "parser/syntax.hpp"
@@ -593,7 +594,9 @@ std::size_t skip_neura(std::string_view text, std::size_t at, char close, Ranges
     int depth = 0;
     while (at < text.size()) {
         const char c = text[at];
-        if (c == '"' || c == '\'') {
+        if (const auto end = island::skip_neura_word(text, at); end != at) {
+            at = end;
+        } else if (c == '"' || c == '\'') {
             const auto start = at++;
             int braces = 0; // holes of an interpolated string
             while (at < text.size() && (text[at] != c || braces > 0)) {

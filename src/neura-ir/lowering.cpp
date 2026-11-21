@@ -452,7 +452,7 @@ private:
     IrNode comparison_chain(const Expr& expr, Context& context);
     IrNode conditional(const Expr& expr, Context& context, const IrType* expected, bool call_argument);
     IrNode update(const Expr& expr, Context& context);
-    IrNode number(const Expr& expr, const IrType* expected, bool negative = false);
+    IrNode number(const Expr& expr, const IrType* expected, const Span* signed_span = nullptr);
     SymbolId cast_method(const IrType& source, const IrType& target, const Context& context,
                          bool diagnose_ambiguity = true);
     IrNode cast_call(SymbolId target, IrNode source, const IrType& type, const Span& span);
@@ -3078,12 +3078,17 @@ IrNode Lowering::allocate(const Expr& expr, Context& context, const IrType* targ
     return finish_call(std::move(result));
 }
 
-IrNode Lowering::number(const Expr& expr, const IrType* expected, bool negative) {
+IrNode Lowering::number(const Expr& expr, const IrType* expected, const Span* signed_span) {
     const bool floating = expr.kind == ExprKind::Float;
     auto kind = floating ? TypeKind::Float : TypeKind::Integer;
+    const bool negative = signed_span != nullptr;
+    const bool suffixed = !expr.literal_type.empty();
+    const auto& span = signed_span ? *signed_span : expr.span;
+    const auto& diagnostic_span = suffixed ? span : expr.span;
     // A character literal defaults to `byte` (docs/design/Expressions030.md).
-    auto result = node(floating ? IrOp::Float : IrOp::Integer, expr.span,
-                       expected && expected->kind == kind ? *expected
+    auto result = node(floating ? IrOp::Float : IrOp::Integer, span,
+                       suffixed                           ? *primitive(expr.literal_type)
+                       : expected && expected->kind == kind ? *expected
                        : floating                         ? float64_type
                        : expr.character                   ? uint8_type
                                                           : int32_type);
@@ -3094,12 +3099,13 @@ IrNode Lowering::number(const Expr& expr, const IrType* expected, bool negative)
         const auto format = float_format(result.type);
         const auto parsed = parse_float_literal(result.text, *format);
         if (parsed.error == FloatLiteralError::Overflow)
-            throw Diagnostic(expr.span, "float literal is outside the range of " + result.type.name).with_code("E0424");
+            throw Diagnostic(diagnostic_span, "float literal is outside the range of " + result.type.name)
+                .with_code("E0424");
         if (parsed.error == FloatLiteralError::Underflow)
-            throw Diagnostic(expr.span, "nonzero float literal rounds to zero in " + result.type.name)
+            throw Diagnostic(diagnostic_span, "nonzero float literal rounds to zero in " + result.type.name)
                 .with_code("E0424");
         if (parsed.error)
-            throw Diagnostic(expr.span, "malformed float literal").with_code("E0105");
+            throw Diagnostic(diagnostic_span, "malformed float literal").with_code("E0105");
         return result;
     }
     const auto& name = result.type.name;
@@ -3118,19 +3124,23 @@ IrNode Lowering::number(const Expr& expr, const IrType* expected, bool negative)
     std::uint64_t magnitude = 0;
     auto [end, error] = std::from_chars(expr.text.data(), expr.text.data() + expr.text.size(), magnitude);
     if (error != std::errc{} || end != expr.text.data() + expr.text.size() ||
-        magnitude > limit || (negative && !signed_integer)) {
-        auto error = Diagnostic(expr.span, "integer literal is outside the range of " + name).with_code("E0424");
+        magnitude > limit || (negative && !signed_integer && (!suffixed || magnitude != 0))) {
+        auto error = Diagnostic(diagnostic_span, "integer literal is outside the range of " + name).with_code("E0424");
         if (expr.character) error.note("a character literal is the integer " + expr.text);
         throw error;
     }
+    if (negative && !signed_integer) result.text = expr.text;
     return result;
 }
 
-bool numeric_literal(const Expr& expr) {
-    if (expr.kind == ExprKind::Integer || expr.kind == ExprKind::Float) return true;
-    return expr.kind == ExprKind::Unary && expr.text == "-" &&
-           (expr.operands.front().kind == ExprKind::Integer ||
-            expr.operands.front().kind == ExprKind::Float);
+const Expr* numeric_literal(const Expr& expr) {
+    const auto& literal = expr.kind == ExprKind::Unary && expr.text == "-" ? expr.operands.front() : expr;
+    return literal.kind == ExprKind::Integer || literal.kind == ExprKind::Float ? &literal : nullptr;
+}
+
+bool contextual_number(const Expr& expr) {
+    const auto* literal = numeric_literal(expr);
+    return literal && literal->literal_type.empty();
 }
 
 bool literal_tree(const Expr& expr) {
@@ -3142,7 +3152,7 @@ bool literal_tree(const Expr& expr) {
     case ExprKind::Collection:
         return std::ranges::all_of(expr.operands, literal_tree);
     default:
-        return numeric_literal(expr);
+        return numeric_literal(expr) != nullptr;
     }
 }
 
@@ -3207,7 +3217,7 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
     // is a class it can construct, and it is lowered once, for the chosen one.
     const auto target_typed = [](const Expr& input) { return input.kind == ExprKind::New && !input.type; };
     const auto contextual = [&](const Expr& input) {
-        return numeric_literal(input) || input.kind == ExprKind::Nil ||
+        return contextual_number(input) || input.kind == ExprKind::Nil ||
             (input.kind == ExprKind::Collection && literal_tree(input)) || target_typed(input) ||
             untyped_lambda_expr(input);
     };
@@ -3420,7 +3430,7 @@ IrNode Lowering::binary(const Expr& expr, Context& context, const IrType* expect
     if (is_shift(op)) {
         left = value(lhs, context, expected);
         right = value(rhs, context);
-    } else if (numeric_literal(lhs) && !numeric_literal(rhs)) {
+    } else if (contextual_number(lhs) && !contextual_number(rhs)) {
         right = value(rhs, context, comparison ? nullptr : expected);
         left = value(lhs, context, &right.type);
     } else {
@@ -3451,7 +3461,7 @@ IrNode Lowering::conditional(const Expr& expr, Context& context, const IrType* e
     const auto& no = expr.operands[2];
     auto result = node(IrOp::SelectValue, expr.span);
     result.operands.push_back(std::move(condition));
-    if (!expected && ((numeric_literal(yes) && !numeric_literal(no)) || yes.kind == ExprKind::Nil)) {
+    if (!expected && ((contextual_number(yes) && !contextual_number(no)) || yes.kind == ExprKind::Nil)) {
         auto when_false = value(no, context);
         result.type = when_false.type;
         result.body.push_back(value(yes, context, &result.type));
@@ -3469,7 +3479,7 @@ IrNode Lowering::comparison_chain(const Expr& expr, Context& context) {
     const auto& subject_expr = expr.operands.front();
     const auto& first_expr = expr.operands[1];
     std::optional<IrNode> first;
-    if (numeric_literal(subject_expr) && !numeric_literal(first_expr)) {
+    if (contextual_number(subject_expr) && !contextual_number(first_expr)) {
         first = value(first_expr, context);
     }
     auto subject = value(subject_expr, context, first ? &first->type : nullptr);
@@ -3933,11 +3943,8 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
     }
     case ExprKind::Unary: {
         const auto& child = expr.operands.front();
-        if (expr.text == "-" && (child.kind == ExprKind::Integer || child.kind == ExprKind::Float)) {
-            auto literal = number(child, expected, true);
-            literal.span = expr.span;
-            return literal;
-        }
+        if (expr.text == "-" && (child.kind == ExprKind::Integer || child.kind == ExprKind::Float))
+            return number(child, expected, &expr.span);
         bool logical = expr.text == "!";
         auto input = [&] {
             if (!expr.spelled_not) return value(child, context, logical ? &bool_type : expected);

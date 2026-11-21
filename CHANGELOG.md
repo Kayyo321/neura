@@ -17,6 +17,10 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ## Unreleased
 
+### Added
+
+- Numeric literals accept apostrophe digit separators and fixed-width integer and floating-point suffixes.
+
 ## [0.3.0] - 2026-11-20
 
 ### Added

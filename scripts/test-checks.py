@@ -405,6 +405,20 @@ def redirects() -> None:
         same(f"site: preview redirect: {name}", response.headers.get("Location", ""), wanted)
 
 
+def numeric_source_syntax() -> None:
+    """Source views highlight the complete spelling of each numeric literal."""
+    import site_docs
+
+    source = """let count = 1'200s32;
+let tiny = 1.0'25e-1'0bf16;
+let letter = 'a';
+"""
+    highlighted = site_docs.highlight("neura", source)
+    numbers = re.findall(r'<span class="n">([^<]*)</span>', highlighted)
+    same("site: numeric separators, exponent and suffix", repr(numbers),
+         repr(["1'200s32", "1.0'25e-1'0bf16"]))
+
+
 def wiki(label: str, change, problem: str | None) -> None:
     """Run generate-wiki.py --check on a tree it has just written, after `change(root)` edits it."""
     generator = load_script("generate-wiki")
@@ -784,6 +798,7 @@ def main() -> int:
     documents_build()
     markdown()
     redirects()
+    numeric_source_syntax()
     site_build()
 
     print(f"{failures} unexpected results.")
