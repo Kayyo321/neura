@@ -9,12 +9,14 @@
 #include <thread>
 
 #ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
+#include "platform/windows.hpp"
 
+#include <map>
 #include <system_error>
+
+// WSAPoll. neura_wait_source_tests compiles this file without the platform
+// library, which links Winsock for the rest of the NVM.
+#pragma comment(lib, "ws2_32.lib")
 #else
 #include <cerrno>
 #include <cstdlib>
@@ -64,50 +66,218 @@ void check_wait_result(DWORD result, DWORD count) {
     }
 }
 
+// Called by the thread pool when a handle beyond the first wait set is
+// signaled: wakes the wait through the fan-in event.
+VOID CALLBACK wake_fan_in(PVOID event, BOOLEAN) { ::SetEvent(static_cast<HANDLE>(event)); }
+
+// The Windows waits (W14): sockets of PosixWait interests through WSAPoll,
+// handles of WindowsWait sources through WaitForMultipleObjects. A wait with
+// both alternates between them in slices of retry_ms. Readiness is
+// level-triggered, as poll(2) reports it.
 class NativeWaits {
 public:
-    std::size_t add(PosixWait::Interest) {
-        throw std::logic_error("a POSIX descriptor wait needs poll(2)");
+    // A PosixWait names a SOCKET on Windows.
+    std::size_t add(PosixWait::Interest source) {
+        const auto socket = static_cast<SOCKET>(source.descriptor);
+        const short wanted = source.events == PosixWait::Events::Read    ? POLLRDNORM
+                             : source.events == PosixWait::Events::Write ? POLLWRNORM
+                                                                         : POLLRDNORM | POLLWRNORM;
+        // Each socket occurs once in the poll set, asked for every event
+        // that a request waits for.
+        const auto [at, inserted] = socket_slots_.emplace(socket, sockets_.size());
+        if (inserted) sockets_.push_back(WSAPOLLFD{socket, 0, 0});
+        sockets_[at->second].events = static_cast<short>(sockets_[at->second].events | wanted);
+        slots_.push_back({false, at->second, wanted});
+        return slots_.size() - 1;
     }
 
     std::size_t add(WindowsWait source) {
-        const auto [at, inserted] = slots_.emplace(source.handle, handles_.size());
+        // Each handle occurs once, even if more than one request waits for it.
+        const auto [at, inserted] = handle_slots_.emplace(source.handle, handles_.size());
         if (inserted) handles_.push_back(source.handle);
-        return at->second;
+        slots_.push_back({true, at->second, 0});
+        return slots_.size() - 1;
     }
 
     void wait(int timeout_ms) {
-        if (handles_.empty()) return;
-        const auto max_handles = static_cast<std::size_t>(MAXIMUM_WAIT_OBJECTS);
-        if (handles_.size() > max_handles) {
-            // The kernel wait accepts a bounded set. Cap the first batch's
-            // wait so activity elsewhere is still observed promptly.
-            timeout_ms = timeout_ms < 0 ? retry_ms : std::min(timeout_ms, retry_ms);
+        socket_ready_.assign(sockets_.size(), 0);
+        handle_ready_.assign(handles_.size(), false);
+        if (handles_.empty()) {
+            if (!sockets_.empty()) poll_sockets(timeout_ms);
+            return;
         }
-        const auto count = static_cast<DWORD>(std::min(handles_.size(), max_handles));
-        const DWORD timeout = timeout_ms < 0 ? INFINITE : static_cast<DWORD>(timeout_ms);
-        const DWORD first = ::WaitForMultipleObjects(count, handles_.data(), FALSE, timeout);
-        check_wait_result(first, count);
-
-        ready_.resize(handles_.size());
-        for (std::size_t index = 0; index < handles_.size(); ++index) {
-            if (first != WAIT_TIMEOUT && index == first - WAIT_OBJECT_0) {
-                ready_[index] = true;
-                continue;
+        if (sockets_.empty()) {
+            wait_handles(timeout_ms);
+            return;
+        }
+        // Neither wait can include the other's objects without changing the
+        // sockets (WSAEventSelect makes them nonblocking and edge-triggered),
+        // so they take turns.
+        const auto start = std::chrono::steady_clock::now();
+        for (;;) {
+            if (poll_sockets(0)) {
+                wait_handles(0);
+                return;
             }
-            const DWORD result = ::WaitForSingleObject(handles_[index], 0);
-            check_wait_result(result, 1);
-            ready_[index] = result == WAIT_OBJECT_0;
+            int slice = retry_ms;
+            if (timeout_ms >= 0) {
+                const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                         std::chrono::steady_clock::now() - start)
+                                         .count();
+                if (elapsed >= timeout_ms) {
+                    wait_handles(0);
+                    return;
+                }
+                slice = static_cast<int>(std::min<std::int64_t>(slice, timeout_ms - elapsed));
+            }
+            if (wait_handles(slice)) {
+                poll_sockets(0);
+                return;
+            }
         }
     }
 
-    bool ready(std::size_t index) const { return ready_[index]; }
+    bool ready(std::size_t index) const {
+        const auto& slot = slots_[index];
+        if (slot.handle) return handle_ready_[slot.index];
+        // An error, a hang-up or an invalid socket is ready too: the attempt
+        // reports it, as after poll(2).
+        constexpr short failures = POLLERR | POLLHUP | POLLNVAL;
+        return (socket_ready_[slot.index] & (slot.events | failures)) != 0;
+    }
 
 private:
-    // Each handle occurs once, even if more than one request waits for it.
-    std::map<HANDLE, std::size_t> slots_;
+    struct Slot {
+        bool handle = false;
+        std::size_t index = 0;
+        short events = 0;
+    };
+
+    // Fills socket_ready_; true when any socket is ready. WSAPoll differs
+    // from poll(2) for a socket that is not open: alone, it fails the whole
+    // call with WSAENOTSOCK, and next to open sockets it reports POLLNVAL
+    // without counting it or ending the wait. A check without waiting comes
+    // first, so such a socket makes the wait ready at once, as POLLNVAL does
+    // after poll(2).
+    bool poll_sockets(int timeout_ms) {
+        if (poll_sockets_once(0) || timeout_ms == 0) return any_socket_ready();
+        return poll_sockets_once(timeout_ms);
+    }
+
+    // One WSAPoll. Readiness is any reported event, POLLNVAL included, not
+    // WSAPoll's count, which leaves POLLNVAL out.
+    bool poll_sockets_once(int timeout_ms) {
+        for (auto& entry : sockets_) entry.revents = 0;
+        const int count = ::WSAPoll(sockets_.data(), static_cast<ULONG>(sockets_.size()), timeout_ms);
+        if (count == SOCKET_ERROR) {
+            const int error = ::WSAGetLastError();
+            for (auto& entry : sockets_) entry.revents = 0;
+            if (error == WSAENOTSOCK) {
+                find_invalid_sockets();
+            } else if (error != WSAEINTR) {
+                throw std::system_error(error, std::system_category(), "WSAPoll failed while waiting for host requests");
+            }
+        }
+        for (std::size_t index = 0; index < sockets_.size(); ++index) socket_ready_[index] = sockets_[index].revents;
+        return any_socket_ready();
+    }
+
+    // After WSAENOTSOCK: polls each socket alone, without waiting, to mark
+    // the ones that are not open with POLLNVAL and report the others.
+    void find_invalid_sockets() {
+        for (auto& entry : sockets_) {
+            WSAPOLLFD alone{entry.fd, entry.events, 0};
+            if (::WSAPoll(&alone, 1, 0) != SOCKET_ERROR) {
+                entry.revents = alone.revents;
+                continue;
+            }
+            const int error = ::WSAGetLastError();
+            if (error == WSAENOTSOCK) {
+                entry.revents = POLLNVAL;
+            } else if (error != WSAEINTR) {
+                throw std::system_error(error, std::system_category(), "WSAPoll failed while waiting for host requests");
+            }
+        }
+    }
+
+    bool any_socket_ready() const {
+        for (const short events : socket_ready_) {
+            if (events != 0) return true;
+        }
+        return false;
+    }
+
+    // Waits for any handle, then sees which handles are signaled.
+    bool wait_handles(int timeout_ms) {
+        if (timeout_ms != 0) {
+            const auto max_handles = static_cast<std::size_t>(MAXIMUM_WAIT_OBJECTS);
+            const DWORD timeout = timeout_ms < 0 ? INFINITE : static_cast<DWORD>(timeout_ms);
+            DWORD result = WAIT_FAILED;
+            if (handles_.size() <= max_handles) {
+                const auto count = static_cast<DWORD>(handles_.size());
+                result = ::WaitForMultipleObjects(count, handles_.data(), FALSE, timeout);
+                check_wait_result(result, count);
+            } else {
+                result = wait_fanned_in(timeout);
+            }
+            if (result == WAIT_TIMEOUT) return false;
+        }
+        bool any = false;
+        for (std::size_t index = 0; index < handles_.size(); ++index) {
+            const DWORD result = ::WaitForSingleObject(handles_[index], 0);
+            check_wait_result(result, 1);
+            handle_ready_[index] = result == WAIT_OBJECT_0;
+            any = any || handle_ready_[index];
+        }
+        return any;
+    }
+
+    // WaitForMultipleObjects takes at most MAXIMUM_WAIT_OBJECTS handles: the
+    // first ones minus one are waited for directly, and the rest through
+    // thread-pool waits that signal one event, the last handle of the set.
+    DWORD wait_fanned_in(DWORD timeout) {
+        const std::size_t direct = MAXIMUM_WAIT_OBJECTS - 1;
+        const HANDLE event = ::CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (event == nullptr) {
+            throw std::system_error(static_cast<int>(::GetLastError()), std::system_category(),
+                                    "creating the event for host handles");
+        }
+        std::vector<HANDLE> registered;
+        registered.reserve(handles_.size() - direct);
+        const auto unregister = [&] {
+            // Waits for running callbacks, so none touches the event after
+            // it is closed.
+            for (const HANDLE wait : registered) ::UnregisterWaitEx(wait, INVALID_HANDLE_VALUE);
+            ::CloseHandle(event);
+        };
+        for (std::size_t index = direct; index < handles_.size(); ++index) {
+            HANDLE wait = nullptr;
+            if (!::RegisterWaitForSingleObject(&wait, handles_[index], wake_fan_in, event, INFINITE,
+                                               WT_EXECUTEONLYONCE | WT_EXECUTEINWAITTHREAD)) {
+                const auto error = static_cast<int>(::GetLastError());
+                unregister();
+                throw std::system_error(error, std::system_category(), "waiting for host handles");
+            }
+            registered.push_back(wait);
+        }
+        std::vector<HANDLE> set(handles_.begin(), handles_.begin() + static_cast<std::ptrdiff_t>(direct));
+        set.push_back(event);
+        const auto count = static_cast<DWORD>(set.size());
+        const DWORD result = ::WaitForMultipleObjects(count, set.data(), FALSE, timeout);
+        const auto error = static_cast<int>(::GetLastError());
+        unregister();
+        if (result == WAIT_FAILED) throw std::system_error(error, std::system_category(), "waiting for host handles");
+        check_wait_result(result, count);
+        return result;
+    }
+
+    std::vector<Slot> slots_;
+    std::map<SOCKET, std::size_t> socket_slots_;
+    std::vector<WSAPOLLFD> sockets_;
+    std::vector<short> socket_ready_;
+    std::map<HANDLE, std::size_t> handle_slots_;
     std::vector<HANDLE> handles_;
-    std::vector<bool> ready_;
+    std::vector<bool> handle_ready_;
 };
 
 #else
@@ -423,7 +593,7 @@ class NativeWaits {
 public:
     std::size_t add(PosixWait::Interest source) {
         const auto index = descriptors_.size();
-        descriptors_.push_back({source.descriptor, poll_events(source.events), 0});
+        descriptors_.push_back({static_cast<int>(source.descriptor), poll_events(source.events), 0});
         return index;
     }
 
@@ -495,7 +665,8 @@ const char* io_backend_name(IoBackend backend) {
     case IoBackend::Poll: return "poll";
     case IoBackend::Epoll: return "epoll";
     case IoBackend::IoUring: return "io_uring";
-    case IoBackend::WaitForMultipleObjects: return "WaitForMultipleObjects";
+    // WSAPoll for sockets and WaitForMultipleObjects for handles (W14).
+    case IoBackend::WaitForMultipleObjects: return "wsapoll+waitformultipleobjects";
     }
     return "poll";
 }

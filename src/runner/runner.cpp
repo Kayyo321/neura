@@ -25,6 +25,13 @@
 #include <cstring>
 #include <fcntl.h>
 #include <unistd.h>
+#else
+#include "platform/error.hpp"
+#include "platform/file.hpp"
+#include "platform/text.hpp"
+
+#include <string_view>
+#include <system_error>
 #endif
 
 namespace neura::runner {
@@ -39,6 +46,28 @@ std::atomic<nvm::TaskDumpRequest*> signalled_request{nullptr};
 extern "C" void request_task_dump(int) {
     if (auto* request = signalled_request.load(std::memory_order_relaxed)) {
         request->requested.store(true, std::memory_order_relaxed);
+    }
+}
+#elif defined(SIGBREAK)
+// Ctrl+Break, the C runtime's SIGBREAK, is the counterpart of SIGQUIT's
+// Ctrl+\ (W10). The C runtime calls the handler on the console's control
+// thread after resetting the signal to SIG_DFL, so the handler installs
+// itself again while a TaskDumps lives.
+extern "C" void request_task_dump(int) {
+    if (auto* request = signalled_request.load(std::memory_order_relaxed)) {
+        std::signal(SIGBREAK, request_task_dump);
+        request->requested.store(true, std::memory_order_relaxed);
+    }
+}
+#endif
+
+#ifdef _WIN32
+// A path as a message shows it (W09).
+std::string path_text(const fs::path& path) {
+    try {
+        return platform::utf8_path(path);
+    } catch (const std::system_error&) {
+        return "?";
     }
 }
 #endif
@@ -59,6 +88,8 @@ TaskDumps::TaskDumps(std::optional<nvm::TaskDumpFormat> on_trap) {
     signalled_request.store(&request_, std::memory_order_relaxed);
 #ifdef SIGQUIT
     std::signal(SIGQUIT, request_task_dump);
+#elif defined(SIGBREAK)
+    std::signal(SIGBREAK, request_task_dump);
 #endif
 }
 
@@ -76,7 +107,18 @@ struct TraceEvents::Output {
 TraceEvents::TraceEvents(const fs::path& path, bool wall_time)
     : output_(std::make_unique<Output>()), wall_time_(wall_time) {
 #ifdef _WIN32
-    output_->file = _wfopen(path.c_str(), L"wb");
+    // Any reparse point at the path (a symbolic link, a junction) is refused
+    // as a symbolic link is on POSIX.
+    std::error_code error;
+    auto file = platform::open_no_follow(path, platform::OpenAccess::write,
+                                         platform::OpenDisposition::create_or_truncate, error);
+    if (!file && error == std::errc::too_many_symbolic_link_levels) {
+        throw std::runtime_error("cannot write " + path_text(path) + ": it is a symbolic link");
+    }
+    if (file) output_->file = platform::open_c_stream(std::move(file), "wb", error);
+    if (!output_->file) {
+        throw std::runtime_error("cannot write " + path_text(path) + ": " + platform::error_message(error));
+    }
 #else
     const int descriptor = ::open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0644);
     if (descriptor < 0 && errno == ELOOP) {
@@ -150,6 +192,10 @@ void TraceEvents::event(const nvm::TaskEvent& event) {
 TaskDumps::~TaskDumps() {
 #ifdef SIGQUIT
     std::signal(SIGQUIT, SIG_DFL);
+#elif defined(SIGBREAK)
+    // First, so that a handler running now does not install itself again.
+    signalled_request.store(nullptr, std::memory_order_relaxed);
+    std::signal(SIGBREAK, SIG_DFL);
 #endif
     signalled_request.store(nullptr, std::memory_order_relaxed);
 }
@@ -180,24 +226,16 @@ std::vector<std::uint8_t> read_file(const fs::path& path) {
 }
 
 #ifdef _WIN32
-// Writes through a temporary file and renames it into place, so a failed
-// build never leaves a partial output.
+// Writes a uniquely named temporary file in the destination directory
+// (CREATE_NEW, without following a reparse point), flushes it, and replaces
+// the destination with it, so a failed write never leaves a partial output
+// and a link at the destination is replaced rather than followed.
 void write_file(const fs::path& path, const std::vector<std::uint8_t>& bytes) {
-    auto temporary = path;
-    temporary += ".tmp";
-    {
-        std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
-        if (!output) {
-            throw std::runtime_error("cannot write " + path.string());
-        }
-        output.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-        output.close();
-        if (!output) {
-            fs::remove(temporary);
-            throw std::runtime_error("error writing " + path.string());
-        }
+    std::error_code error;
+    const std::string_view text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    if (!platform::write_file_atomically(path, text, error)) {
+        throw std::runtime_error("cannot write " + path_text(path) + ": " + platform::error_message(error));
     }
-    fs::rename(temporary, path);
 }
 #else
 namespace {

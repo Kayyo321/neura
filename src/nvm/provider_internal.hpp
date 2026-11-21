@@ -11,9 +11,30 @@
 #include <map>
 #include <memory>
 
+#ifdef _WIN32
+#include "platform/file.hpp"
+#include "platform/socket.hpp"
+
+#include <string_view>
+#endif
+
 namespace neura::nvm {
 
 namespace provider {
+// What the file and socket tables hold: a HANDLE and a SOCKET on Windows, a
+// descriptor elsewhere, each with the value that means "none".
+#ifdef _WIN32
+using NativeFile = platform::native_file;
+using NativeSocket = platform::native_socket;
+inline const NativeFile invalid_native_file = reinterpret_cast<NativeFile>(static_cast<std::intptr_t>(-1));
+inline constexpr NativeSocket invalid_native_socket = platform::invalid_socket;
+#else
+using NativeFile = int;
+using NativeSocket = int;
+inline constexpr NativeFile invalid_native_file = -1;
+inline constexpr NativeSocket invalid_native_socket = -1;
+#endif
+
 // An upcall stub (ffi_provider.cpp); destroyed with UpcallDeleter.
 struct Upcall;
 struct UpcallDeleter {
@@ -28,12 +49,12 @@ struct TlsDeleter {
 
 struct StandardServices::Tables {
     struct File {
-        int descriptor = -1;
+        provider::NativeFile descriptor = provider::invalid_native_file;
         bool readable = false;
         bool writable = false;
     };
     struct Socket {
-        int descriptor = -1;
+        provider::NativeSocket descriptor = provider::invalid_native_socket;
         bool listener = false;
         // A UDP or Unix datagram socket (socket_provider.cpp).
         bool datagram = false;
@@ -118,7 +139,28 @@ inline bool usable_text(const std::string& text) {
 int timeout_milliseconds(std::int64_t nanos);
 // Whether `descriptor` has data to read or has reached its end, without
 // waiting.
-bool readable_now(int descriptor);
+//
+// On Windows it takes a HANDLE (W17): a console is readable when a key press
+// other than a modifier or lock key is pending (the input records before it,
+// such as key releases, modifier keys, focus, menu, mouse and buffer-size
+// events, which a console read would not deliver, are removed so the handle
+// stops being signaled); a pipe when PeekNamedPipe sees bytes or a broken
+// pipe (the end of input); a disk file or another character device always.
+// A handle that cannot be asked counts as readable, so the read reports the
+// failure. The SOCKET overload asks WSAPoll with a timeout of 0; a socket
+// that WSAPoll refuses also counts as readable, as poll(2) reports POLLNVAL.
+bool readable_now(NativeFile descriptor);
+#ifdef _WIN32
+bool readable_now(NativeSocket socket);
+
+// The syntax refusals of the Windows file-system host (W09), for a path as a
+// program gives it: invalid_input for a drive-relative "X:name", a ':' inside
+// a component, a reserved device name, a component that ends in a dot or a
+// space, one of <>"|?* or a control character, and the "\\?\" and "\\.\"
+// device namespaces; 0 when the text may be passed on. resolve_path applies
+// it; a service that takes a path without prefixes applies it itself.
+std::uint32_t windows_path_error(std::string_view path);
+#endif
 
 using Adder = std::function<void(HostSignature, FunctionService::Handler)>;
 // Adds version 1 and the cancellable version 2 of an overlapping service.
