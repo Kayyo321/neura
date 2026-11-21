@@ -2064,6 +2064,721 @@ def neurad_checks(kit: Kit) -> None:
     service.end()
 
 
+
+# --------------------------------------------------------------------------
+# Windows (docs/design/Windows030.md, W22 to W26). The same suites, against
+# the Windows layout: archives packed by make-archive.sh under Git for
+# Windows' bash, installs through install.ps1 -NoPathUpdate (so this user's
+# own Path never changes), a junction for <root>/current, <root>/current/bin
+# as the one PATH entry with no links, LockFileEx leases, and an uninstall
+# that leaves the files its own processes map to a helper. A neura.exe that
+# reports another version cannot be made from a shell script, so a release
+# newer than the installed one is the build itself, installed over a
+# generation that a test lays out by hand under an older version.
+
+WINDOWS = sys.platform == "win32"
+SYSTEM_ROOT = os.environ.get("SystemRoot", r"C:\Windows")
+WINDOWS_SYSTEM_PATH = f"{SYSTEM_ROOT}\\System32;{SYSTEM_ROOT}"
+IO_REPARSE_TAG_MOUNT_POINT = 0xA0000003
+
+
+def git_bash() -> Path:
+    """Git for Windows' bash, found from git itself: System32's bash.exe is
+    WSL's and must not run the packaging scripts."""
+    try:
+        exec_path = Path(subprocess.run(["git", "--exec-path"], capture_output=True, text=True, check=True).stdout.strip())
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise SystemExit(f"git --exec-path failed ({error}); Git for Windows is a test prerequisite (W34)")
+    # <git>/mingw64/libexec/git-core
+    for candidate in (exec_path.parents[2] / "bin" / "bash.exe", exec_path.parents[2] / "usr" / "bin" / "bash.exe"):
+        if candidate.is_file():
+            return candidate
+    raise SystemExit(f"no bash.exe of Git for Windows near {exec_path}")
+
+
+def is_junction(path: Path) -> bool:
+    try:
+        info = os.lstat(path)
+    except OSError:
+        return False
+    return bool(getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT) and \
+        getattr(info, "st_reparse_tag", 0) == IO_REPARSE_TAG_MOUNT_POINT
+
+
+def junction_target(path: Path) -> Path:
+    target = os.readlink(path)
+    return Path(target.removeprefix("\\\\?\\"))
+
+
+class WindowsLock:
+    """A LockFileEx lock on a whole file through ctypes, as the tools take
+    leases: shared for an application, exclusive to probe."""
+
+    def __init__(self, path: Path, exclusive: bool, wait: bool = True):
+        import ctypes
+        import msvcrt
+        from ctypes import wintypes
+        self.ctypes = ctypes
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        self.kernel32 = kernel32
+
+        class Overlapped(ctypes.Structure):
+            _fields_ = [("Internal", ctypes.c_void_p), ("InternalHigh", ctypes.c_void_p), ("Offset", wintypes.DWORD),
+                        ("OffsetHigh", wintypes.DWORD), ("hEvent", wintypes.HANDLE)]
+
+        self.overlapped = Overlapped()
+        kernel32.LockFileEx.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD,
+                                        ctypes.POINTER(Overlapped)]
+        kernel32.UnlockFileEx.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(Overlapped)]
+        self.file = open(path, "rb")
+        self.handle = msvcrt.get_osfhandle(self.file.fileno())
+        flags = (2 if exclusive else 0) | (0 if wait else 1)
+        self.held = bool(kernel32.LockFileEx(self.handle, flags, 0, 0xFFFFFFFF, 0xFFFFFFFF, ctypes.byref(self.overlapped)))
+        if not self.held:
+            self.file.close()
+
+    def release(self) -> None:
+        if self.held:
+            self.kernel32.UnlockFileEx(self.handle, 0, 0xFFFFFFFF, 0xFFFFFFFF, self.ctypes.byref(self.overlapped))
+            self.file.close()
+            self.held = False
+
+
+def windows_lease_held(home: "WindowsHome", generation: str) -> bool:
+    lock = WindowsLock(home.root / "leases" / generation, exclusive=True, wait=False)
+    held = not lock.held
+    lock.release()
+    return held
+
+
+# A process that holds a shared lease of a generation, as an application
+# that the service runs does; it prints "running" once it holds it.
+APPLICATION = """
+import ctypes, msvcrt, sys, time
+from ctypes import wintypes
+class Overlapped(ctypes.Structure):
+    _fields_ = [("Internal", ctypes.c_void_p), ("InternalHigh", ctypes.c_void_p), ("Offset", wintypes.DWORD),
+                ("OffsetHigh", wintypes.DWORD), ("hEvent", wintypes.HANDLE)]
+kernel32 = ctypes.WinDLL("kernel32")
+kernel32.LockFileEx.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(Overlapped)]
+f = open(sys.argv[1], "rb")
+overlapped = Overlapped()
+if not kernel32.LockFileEx(msvcrt.get_osfhandle(f.fileno()), 0, 0, 0xFFFFFFFF, 0xFFFFFFFF, ctypes.byref(overlapped)):
+    sys.exit(1)
+print("running", flush=True)
+time.sleep(600)
+"""
+
+
+# Runs a command in a new job that does not let a process leave it and does
+# not end its processes when it closes, as a CI runner or a sandbox may.
+NO_BREAKAWAY_JOB = """
+import ctypes, subprocess, sys
+from ctypes import wintypes
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+job = kernel32.CreateJobObjectW(None, None)
+if not job or not kernel32.AssignProcessToJobObject(job, kernel32.GetCurrentProcess()):
+    sys.exit(f"cannot run in a new job: error {ctypes.get_last_error()}")
+sys.exit(subprocess.run(sys.argv[1:], stdin=subprocess.DEVNULL).returncode)
+"""
+
+
+def in_no_breakaway_job(home: "WindowsHome", *arguments) -> subprocess.CompletedProcess:
+    return run([sys.executable, "-c", NO_BREAKAWAY_JOB, *arguments], env=home.env(), cwd=home.path)
+
+
+def start_application(lease: Path) -> subprocess.Popen:
+    process = subprocess.Popen([sys.executable, "-c", APPLICATION, str(lease)], stdout=subprocess.PIPE, text=True)
+    check(process.stdout.readline().strip() == "running", f"a stand-in application holds {lease.name}")
+    return process
+
+
+class WindowsKit(Kit):
+    """The build's components, packed by make-archive.sh under Git bash."""
+
+    def __init__(self, build: Path, work: Path, cmake: str):
+        super().__init__(build, work, cmake)
+        self.bash = git_bash()
+        self._releases: dict[str, Path] = {}
+
+    def has_neurad(self) -> bool:
+        return (self.prefixes()["service"] / "bin/neurad.exe").is_file()
+
+    def variant(self, name: str, version: str | None = None, neurad: bool = False, change: str | None = None,
+                without_neurad: bool = False) -> dict[str, Path]:
+        """A copy of the component prefixes. With `neurad`, the service
+        prefix holds a stand-in neurad.exe (a copy of an executable of the
+        build, which no test runs); with `change`, that file of the sdk
+        prefix gets a byte more, which makes another build of the same
+        version. `version` has no Windows form (see above)."""
+        assert version is None, "a Windows variant cannot report another version"
+        base = self.work / "variants" / name
+        shutil.rmtree(base, ignore_errors=True)
+        result = {}
+        for component, prefix in self.prefixes().items():
+            shutil.copytree(prefix, base / component)
+            result[component] = base / component
+        if neurad and not (result["service"] / "bin/neurad.exe").exists():
+            (result["service"] / "bin").mkdir(parents=True, exist_ok=True)
+            shutil.copy2(result["core"] / "bin/neura-inspect.exe", result["service"] / "bin/neurad.exe")
+        if without_neurad:
+            (result["service"] / "bin/neurad.exe").unlink(missing_ok=True)
+        if change is not None:
+            with open(result["sdk"] / change, "ab") as file:
+                file.write(b"\n")
+        return result
+
+    def pack(self, product: str, output: Path, prefixes: dict[str, Path] | None = None, version: str | None = None,
+             build: str | None = None, epoch: str = "0") -> Path:
+        prefixes = prefixes or self.prefixes()
+        arguments = [self.bash, MAKE_ARCHIVE.as_posix(), "--product", product, "--core", prefixes["core"].as_posix()]
+        if product in ("sdk", "legacy"):
+            arguments += ["--sdk", prefixes["sdk"].as_posix()]
+        else:
+            arguments += ["--service", prefixes["service"].as_posix()]
+        arguments += ["--build", build or self.commit]
+        arguments += [output.as_posix(), version or self.version, self.triple]
+        result = run(arguments, env={**os.environ, "SOURCE_DATE_EPOCH": epoch}, timeout=900)
+        if result.returncode != 0:
+            raise SystemExit(f"make-archive.sh {product} failed:\n{result.stderr}")
+        return Path(result.stdout.strip())
+
+    def release(self, directory: Path, prefixes: dict[str, Path] | None = None, version: str | None = None,
+                build: str | None = None) -> Path:
+        """A release directory with the two Windows archives and the
+        metadata (Windows has no legacy archive)."""
+        shutil.rmtree(directory, ignore_errors=True)
+        for product in ("sdk", "runtime"):
+            self.pack(product, directory, prefixes, version, build)
+        result = run([self.bash, MAKE_METADATA.as_posix(), directory.as_posix(), version or self.version])
+        if result.returncode != 0:
+            raise SystemExit(f"make-release-metadata.sh failed:\n{result.stderr}")
+        return directory
+
+    def default_release(self) -> Path:
+        """The build's own release, packed once per suite."""
+        if "default" not in self._releases:
+            self._releases["default"] = self.release(self.work / "release")
+        return self._releases["default"]
+
+
+class WindowsHome:
+    """A new user profile with an install root of its own: USERPROFILE,
+    LOCALAPPDATA and TEMP below it, NEURA_INSTALL_ROOT its root, and a
+    PATH with <root>\\current\\bin and the system directories only."""
+
+    def __init__(self, kit: WindowsKit, name: str):
+        self.kit = kit
+        self.path = kit.work / "homes" / name
+        shutil.rmtree(self.path, ignore_errors=True)
+        for directory in ("AppData/Local", "AppData/Roaming", "Temp"):
+            (self.path / directory).mkdir(parents=True)
+        self.root = self.path / "root"
+        self.bin = self.root / "current" / "bin"
+
+    def env(self, extra: dict | None = None) -> dict:
+        env = {name: os.environ[name] for name in ("SystemDrive", "ProgramData", "ProgramFiles", "PROCESSOR_ARCHITECTURE",
+                                                    "NUMBER_OF_PROCESSORS", "OS", "COMPUTERNAME", "USERNAME") if name in os.environ}
+        env.update({"SystemRoot": SYSTEM_ROOT, "windir": SYSTEM_ROOT, "USERPROFILE": str(self.path), "HOME": str(self.path),
+                    "LOCALAPPDATA": str(self.path / "AppData/Local"), "APPDATA": str(self.path / "AppData/Roaming"),
+                    "TEMP": str(self.path / "Temp"), "TMP": str(self.path / "Temp"), "NEURA_INSTALL_ROOT": str(self.root),
+                    "PATH": f"{self.bin};{WINDOWS_SYSTEM_PATH}", "PATHEXT": ".COM;.EXE"})
+        env.update(extra or {})
+        return env
+
+    def install(self, top: Path, *arguments, env: dict | None = None, front: str = "install.ps1") -> subprocess.CompletedProcess:
+        if front == "install.cmd":
+            command = [f"{SYSTEM_ROOT}\\System32\\cmd.exe", "/d", "/c", top / "install.cmd"]
+        else:
+            command = [f"{SYSTEM_ROOT}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive",
+                       "-ExecutionPolicy", "Bypass", "-File", top / "install.ps1"]
+        return run([*command, "-NoPathUpdate", *arguments], env=self.env(env), cwd=top, timeout=900)
+
+    def neura(self, *arguments, env: dict | None = None, cwd: Path | None = None) -> subprocess.CompletedProcess:
+        return run([self.bin / "neura.exe", *arguments], env=self.env(env), cwd=cwd or self.path)
+
+    def tool(self, generation: str, name: str, *arguments, env: dict | None = None) -> subprocess.CompletedProcess:
+        return run([self.real_root() / "versions" / generation / "bin" / f"{name}.exe", *arguments], env=self.env(env), cwd=self.path)
+
+    def real_root(self) -> Path:
+        return self.root.resolve()
+
+    def marker(self) -> str:
+        try:
+            return (self.root / "neura-install.txt").read_text(encoding="utf-8")
+        except OSError:
+            return ""
+
+    def current(self) -> str:
+        return junction_target(self.root / "current").name if is_junction(self.root / "current") else ""
+
+    def generations(self) -> list[str]:
+        versions = self.root / "versions"
+        return sorted(p.name for p in versions.iterdir()) if versions.is_dir() else []
+
+    def leftovers(self) -> list[str]:
+        if not self.root.is_dir():
+            return []
+        return sorted(p.name for p in self.root.iterdir()
+                      if p.name.startswith((".staging-", ".removing-", ".meta-", ".current-", ".journal", ".neura-install.txt-")))
+
+
+def expect_windows_layout(home: WindowsHome, tools: set[str], what: str) -> None:
+    """W22: current is a junction to a generation in versions, the marker's
+    bin line is <root>/current/bin with no link lines, and every tool is in
+    that directory."""
+    root = home.real_root()
+    current = home.root / "current"
+    if check(is_junction(current), f"{what}: current is a junction"):
+        check(junction_target(current).parent.resolve() == (root / "versions").resolve(),
+              f"{what}: current names a generation in versions: {junction_target(current)}")
+    lines = home.marker().splitlines()
+    check(f"bin {root.as_posix()}/current/bin" in lines, f"{what}: the marker names {root.as_posix()}/current/bin: {lines}")
+    check(not any(line.startswith("link ") for line in lines), f"{what}: the marker lists no links")
+    present = {p.stem for p in home.bin.glob("*.exe")}
+    check(present == tools, f"{what}: tools {sorted(present ^ tools)} differ")
+
+
+def windows_unpack(archive: Path, destination: Path) -> Path:
+    """Unpacks an archive with System32's tar.exe, as a user would."""
+    destination.mkdir(parents=True, exist_ok=True)
+    subprocess.run([f"{SYSTEM_ROOT}\\System32\\tar.exe", "-xzf", str(archive), "-C", str(destination)], check=True,
+                   capture_output=True)
+    return destination / archive.name.removesuffix(".tar.gz")
+
+
+def older_generation(kit: WindowsKit, home: WindowsHome, version: str) -> str:
+    """Lays out an installation of the build's core and sdk components
+    under an older version, as an archive of that version would have made
+    it: versions/<generation> with rewritten manifests, the junction
+    current, the marker and the leases. Its tools are the build's, so a
+    lifecycle command run from it is this build's code."""
+    top = windows_unpack(kit.default_release() / f"neura-sdk-{kit.version}-{kit.triple}.tar.gz", home.path / "older")
+    manifests = {}
+    for component in ("core", "sdk"):
+        path = top / "share/neura/components" / f"{component}.txt"
+        text = path.read_text(encoding="utf-8").replace(f"\nversion {kit.version}\n", f"\nversion {version}\n", 1)
+        path.write_bytes(text.encode())
+        manifests[component] = text.encode()
+    generation = version + "+" + hashlib.sha256(manifests["core"] + manifests["sdk"]).hexdigest()[:12]
+    for extra in ("install.ps1", "install.cmd", "VERSION"):
+        (top / extra).unlink()
+    (home.root / "versions").mkdir(parents=True, exist_ok=True)
+    shutil.move(str(top), str(home.root / "versions" / generation))
+    import _winapi
+    _winapi.CreateJunction(str((home.root / "versions" / generation).resolve()), str(home.root / "current"))
+    (home.root / "leases").mkdir(exist_ok=True)
+    (home.root / "leases" / generation).write_bytes(b"")
+    marker = (f"neura-install 2\nmethod archive\nbin {home.real_root().as_posix()}/current/bin\ncomponents core sdk\n"
+              f"generation {generation}\n")
+    (home.root / "neura-install.txt").write_bytes(marker.encode())
+    return generation
+
+
+def windows_suite_archives(kit: WindowsKit) -> None:
+    """The two Windows archives (W23, W25): names, one top directory, the
+    modes of the members and the manifests, tools without the .exe suffix,
+    the installers, an identical core, reproducible bytes, no legacy
+    archive, and release metadata with no Windows line for 0.2 clients."""
+    v, t = kit.version, kit.triple
+    out = kit.work / "archives"
+    release = kit.default_release()
+    sdk, runtime = release / f"neura-sdk-{v}-{t}.tar.gz", release / f"neura-runtime-{v}-{t}.tar.gz"
+    check(sdk.is_file() and runtime.is_file(), "the SDK and runtime archives")
+    trees = {}
+    for path, top in ((sdk, f"neura-sdk-{v}-{t}"), (runtime, f"neura-runtime-{v}-{t}")):
+        members = archive_members(path)
+        check(all(name == top or name.startswith(top + "/") for name in members), f"{path.name}: one top directory {top}")
+        check(all(kind in ("file", "dir") for kind, _, _ in members.values()), f"{path.name}: only files and directories")
+        wrong = [name for name, (kind, mode, _) in members.items()
+                 if mode != (0o755 if kind == "dir" or name.endswith((".exe", ".dll")) else 0o644)]
+        check(not wrong, f"{path.name}: 755 for directories, .exe and .dll, 644 for the rest: {wrong[:5]}")
+        for name in ("install.ps1", "install.cmd", "VERSION"):
+            check(f"{top}/{name}" in members, f"{path.name}: {name}")
+        check(f"{top}/install.sh" not in members, f"{path.name}: no install.sh")
+        check(members[f"{top}/install.ps1"][2] == (REPOSITORY / "packaging/install.ps1").read_bytes(), f"{path.name}: install.ps1 is the repository's")
+        check(members[f"{top}/VERSION"][2] == f"{v}\n".encode(), f"{path.name}: VERSION")
+        trees[path.name] = (top, members)
+    sdk_top, sdk_members = trees[sdk.name]
+    runtime_top, runtime_members = trees[runtime.name]
+    core = parse_manifest(sdk_members[f"{sdk_top}/share/neura/components/core.txt"][2].decode())
+    check(core["target"] == t and core["version"] == v, "the core manifest names the target and version")
+    check(sorted(core["tools"]) == sorted(CORE_TOOLS), f"the core tools, without .exe: {core['tools']}")
+    check(f"bin/neura-core-{v}.dll" in core["files"] and core["files"][f"bin/neura-core-{v}.dll"][0] == "755", "the core library, mode 755")
+    sdk_manifest = parse_manifest(sdk_members[f"{sdk_top}/share/neura/components/sdk.txt"][2].decode())
+    check(sorted(sdk_manifest["tools"]) == sorted(SDK_TOOLS), f"the sdk tools: {sdk_manifest['tools']}")
+    check(f"bin/neura-sdk-{v}.dll" in sdk_manifest["files"], "the SDK library in bin")
+    for manifest in (core, sdk_manifest):
+        check(all(mode == ("755" if path.endswith((".exe", ".dll")) else "644") for path, (mode, _, _) in manifest["files"].items()),
+              f"the {manifest['name']} manifest's modes follow W25")
+    for path in core["files"]:
+        check(sdk_members[f"{sdk_top}/{path}"][2] == runtime_members[f"{runtime_top}/{path}"][2], f"{path} is the same in both archives")
+    # Reproducible: the runtime archive again, byte for byte.
+    again = kit.pack("runtime", out / "again")
+    check(again.read_bytes() == runtime.read_bytes(), "the runtime archive is reproducible")
+    # No legacy archive for Windows, from either script.
+    result = run([kit.bash, MAKE_ARCHIVE.as_posix(), "--product", "legacy", "--core", kit.prefixes()["core"].as_posix(), "--sdk",
+                  kit.prefixes()["sdk"].as_posix(), "--build", kit.commit, (out / "legacy").as_posix(), v, t])
+    check(result.returncode == 1 and "there is no legacy archive for" in result.stderr, f"make-archive.sh refuses a legacy archive: {result.stderr}")
+    release_text = (release / "neura-release.txt").read_text()
+    check(release_text == f"neura-release 1\nversion {v}\n", f"neura-release.txt names no Windows archive: {release_text!r}")
+    components = (release / "neura-components.txt").read_text().splitlines()
+    check(components[3:] == [f"archive runtime {t} {runtime.name} {sha256(runtime)} {runtime.stat().st_size}",
+                             f"archive sdk {t} {sdk.name} {sha256(sdk)} {sdk.stat().st_size}"], f"neura-components.txt: {components}")
+    with_legacy = out / "with-legacy"
+    shutil.copytree(release, with_legacy)
+    shutil.copy2(sdk, with_legacy / f"neura-{v}-{t}.tar.gz")
+    result = run([kit.bash, MAKE_METADATA.as_posix(), with_legacy.as_posix(), v])
+    check(result.returncode == 1 and "Windows has none" in result.stderr, f"make-release-metadata.sh refuses a Windows legacy archive: {result.stderr}")
+
+
+def windows_suite_install(kit: WindowsKit) -> None:
+    """install.ps1 and install.cmd (W24): the layout of W22, the PATH
+    instruction with -NoPathUpdate, -Add, -Force on a whole generation, a
+    second install of the same generation, and NEURA_BIN_DIR."""
+    v, t = kit.version, kit.triple
+    release = kit.default_release()
+    tops = {p: windows_unpack(release / f"neura-{p}-{v}-{t}.tar.gz", kit.work / "unpacked" / p) for p in ("sdk", "runtime")}
+    home = WindowsHome(kit, "install")
+    result = home.install(tops["sdk"])
+    if not check(result.returncode == 0, f"install.ps1: {result.stdout}{result.stderr}"):
+        return
+    expect_windows_layout(home, {"neura", *CORE_TOOLS, *SDK_TOOLS}, "the SDK install")
+    check("is not on your PATH" in result.stdout and "[Environment]::SetEnvironmentVariable('Path', '" in result.stdout,
+          f"-NoPathUpdate: the PowerShell line to add the entry: {result.stdout}")
+    generation = home.current()
+    check(re.fullmatch(re.escape(v) + r"\+[0-9a-f]{12}", generation) is not None, f"the generation is named <version>+<id>: {generation}")
+    check((home.root / "leases" / generation).is_file(), "the generation has a lease file")
+    check(home.neura("--version").stdout == kit.line + "\n", "neura --version through <root>\\current\\bin")
+    check(home.neura("doctor").returncode == 0, "doctor after the install")
+    result = home.install(tops["sdk"])
+    check(result.returncode == 1 and "is already installed" in result.stderr and "pass -Force" in result.stderr,
+          f"a second install without -Force: {result.stderr}")
+    result = home.install(tops["sdk"], "-Force", front="install.cmd")
+    check(result.returncode == 0 and "is whole; switching to it" in result.stdout, f"install.cmd -Force: {result.stdout}{result.stderr}")
+    result = home.install(tops["sdk"], "-Add", tops["runtime"])
+    check(result.returncode == 0, f"-Add the runtime archive: {result.stderr}")
+    check("components core sdk service" in home.marker().splitlines(), "the marker lists core sdk service")
+    check(len(home.generations()) == 2 and home.current() != generation, f"a second generation: {home.generations()}")
+    other = WindowsHome(kit, "bin-dir")
+    result = other.install(tops["sdk"], env={"NEURA_BIN_DIR": str(other.path / "bin")})
+    check(result.returncode == 1 and "NEURA_BIN_DIR does not apply on Windows" in result.stderr, f"NEURA_BIN_DIR is refused: {result.stderr}")
+    check(not other.root.exists() or not (other.root / "neura-install.txt").exists(), "nothing was installed with NEURA_BIN_DIR")
+    relative = WindowsHome(kit, "relative")
+    result = relative.install(tops["sdk"], env={"NEURA_INSTALL_ROOT": "relative\\root"})
+    check(result.returncode == 1 and "must be an absolute path" in result.stderr, f"a relative NEURA_INSTALL_ROOT: {result.stderr}")
+
+
+def windows_suite_bootstrap(kit: WindowsKit) -> None:
+    """packaging/bootstrap.ps1 from a local release directory (W24):
+    -Components, -Version, the checks of the size, the digest and the
+    members, and bootstrap.sh's PowerShell command under Git bash."""
+    v, t = kit.version, kit.triple
+    release = kit.default_release()
+    script = REPOSITORY / "packaging/bootstrap.ps1"
+    powershell = f"{SYSTEM_ROOT}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+
+    def bootstrap(home: WindowsHome, *arguments) -> subprocess.CompletedProcess:
+        # As "irm | iex" runs it: the text, not a script file.
+        quoted = [str(a) if str(a).startswith("-") else "'" + str(a).replace("'", "''") + "'" for a in arguments]
+        command = f"& ([scriptblock]::Create([IO.File]::ReadAllText('{script}'))) -NoPathUpdate " + " ".join(quoted)
+        return run([powershell, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], env=home.env(), timeout=900)
+
+    for components, tools in (("sdk", {"neura", *CORE_TOOLS, *SDK_TOOLS}), ("runtime", {"neura", *CORE_TOOLS}),
+                              ("sdk,service", {"neura", *CORE_TOOLS, *SDK_TOOLS})):
+        if kit.has_neurad() and components != "sdk":
+            tools = tools | {"neurad"}
+        home = WindowsHome(kit, f"boot-{components}".replace(",", "-"))
+        result = bootstrap(home, "-Source", release, "-Components", components)
+        if not check(result.returncode == 0, f"bootstrap -Components {components}: {result.stdout}{result.stderr}"):
+            continue
+        expect_windows_layout(home, tools, f"bootstrap -Components {components}")
+        check("Not verified: build provenance (the source is a local directory)" in result.stdout, "a local source is not attested")
+        expected = "neura-sdk" if components != "runtime" else "neura-runtime"
+        check(f"Verified: size and SHA-256 of {expected}-{v}-{t}.tar.gz" in result.stdout, f"bootstrap verifies {expected}")
+        check(home.neura("--version").stdout == kit.line + "\n", f"bootstrap -Components {components}: neura --version")
+    home = WindowsHome(kit, "boot-version")
+    result = bootstrap(home, "-Source", release, "-Version", "9.9.9")
+    check(result.returncode != 0 and "asked for version 9.9.9" in result.stderr, f"-Version that the release is not: {result.stderr}")
+
+    def broken(name: str, change) -> Path:
+        directory = kit.work / "broken" / name
+        shutil.copytree(release, directory)
+        change(directory)
+        return directory
+
+    def wrong_digest(directory: Path) -> None:
+        path = directory / "neura-components.txt"
+        lines = path.read_text().splitlines()
+        lines = [re.sub(r" [0-9a-f]{64} ", " " + "0" * 64 + " ", line) if " sdk " in line else line for line in lines]
+        path.write_bytes(("\n".join(lines) + "\n").encode())
+
+    home = WindowsHome(kit, "boot-digest")
+    result = bootstrap(home, "-Source", broken("digest", wrong_digest))
+    check(result.returncode != 0 and "SHA-256 mismatch" in result.stderr and not home.root.exists(), f"a wrong digest: {result.stderr}")
+
+    def escaping(directory: Path) -> None:
+        archive = directory / f"neura-sdk-{v}-{t}.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            data = b"x"
+            info = tarfile.TarInfo("outside.txt")
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+        path = directory / "neura-components.txt"
+        text = path.read_text()
+        text = re.sub(rf"(archive sdk {re.escape(t)} \S+) [0-9a-f]{{64}} \d+",
+                      lambda m: f"{m.group(1)} {sha256(archive)} {archive.stat().st_size}", text)
+        path.write_bytes(text.encode())
+
+    home = WindowsHome(kit, "boot-escape")
+    result = bootstrap(home, "-Source", broken("escape", escaping))
+    check(result.returncode != 0 and "member outside" in result.stderr and not home.root.exists(), f"a member outside the top directory: {result.stderr}")
+    result = run([kit.bash, (REPOSITORY / "packaging/bootstrap.sh").as_posix(), "--source", release.as_posix()])
+    check(result.returncode == 1 and "install Neura from PowerShell: irm https://github.com/" in result.stderr,
+          f"bootstrap.sh under Git bash prints the PowerShell command: {result.stderr}")
+
+
+def windows_suite_update(kit: WindowsKit) -> None:
+    """neura update on Windows: --check, an update over an older generation,
+    the junction moved in place (and a reader that always sees a whole
+    generation while rollbacks move it), faults and a crash with their
+    recovery, a generation kept while an application holds its lease, and
+    an archive with a member Windows cannot keep."""
+    v = kit.version
+    release = kit.default_release()
+    home = WindowsHome(kit, "update")
+    older = older_generation(kit, home, "0.2.99")
+
+    def update(*arguments, env: dict | None = None) -> subprocess.CompletedProcess:
+        return home.tool(home.current(), "neura-update", "update", *arguments, env=env)
+
+    result = update("--check", "--source", release)
+    check(result.returncode == 4 and f"neura 0.2.99 is installed; neura {v} is available" in result.stdout, f"--check: {result.stdout}{result.stderr}")
+    # A fault before the marker is written undoes the change.
+    result = update("--source", release, env={"NEURA_TEST_UPDATE_FAULT": "activate-marker"})
+    check(result.returncode == 1 and "rolled back" in result.stderr and home.current() == older, f"a fault at activate-marker: {result.stderr}")
+    check(not home.leftovers(), f"no leftovers after the fault: {home.leftovers()}")
+    # A crash after the junction moved: --repair completes the change.
+    result = update("--source", release, env={"NEURA_TEST_UPDATE_CRASH": "activate-marker"})
+    check(result.returncode == 70 and (home.root / ".journal").exists(), f"a crash at activate-marker: {result.stderr}")
+    result = home.tool(home.current(), "neura-update", "update", "--repair")
+    check(result.returncode == 0 and "completed an interrupted update" in result.stdout, f"--repair completes it: {result.stdout}{result.stderr}")
+    updated = home.current()
+    check(updated != older and updated.startswith(v + "+"), f"the update is active: {updated}")
+    expect_windows_layout(home, {"neura", *CORE_TOOLS, *SDK_TOOLS}, "after the update")
+    check(older in home.generations(), "the older generation is kept as the previous one")
+    # Rollbacks move the junction while a reader resolves it: every read
+    # sees one whole generation.
+    import threading
+    seen: set[str] = set()
+    problems: list[str] = []
+    done = threading.Event()
+
+    def reader() -> None:
+        manifest = home.root / "current" / "share/neura/components/core.txt"
+        while not done.is_set():
+            try:
+                version = re.search(r"^version (\S+)$", manifest.read_text(), re.M).group(1)
+                seen.add(version)
+            except (OSError, AttributeError) as error:
+                problems.append(str(error))
+
+    thread = threading.Thread(target=reader)
+    thread.start()
+    for _ in range(4):
+        result = home.tool(home.current(), "neura-update", "update", "--rollback")
+        check(result.returncode == 0, f"--rollback: {result.stderr}")
+    done.set()
+    thread.join()
+    check(not problems and seen <= {v, "0.2.99"}, f"a reader through current saw only whole generations: {seen} {problems[:3]}")
+    check(home.current() == updated, f"four rollbacks return to the update: {home.current()}")
+    # A generation an application holds is kept, and removed once it ends.
+    application = start_application(home.root / "leases" / older)
+    try:
+        result = home.tool(updated, "neura-update", "update", "--repair")
+        check(result.returncode == 0 and older in home.generations(), f"--repair keeps a previous generation: {result.stderr}")
+        check(windows_lease_held(home, older), "the application holds its lease")
+        result = home.tool(updated, "neura-doctor")
+        check(result.returncode == 0, f"doctor with an application: {result.stdout}")
+    finally:
+        application.kill()
+        application.wait()
+    # An archive with a member Windows cannot keep as named.
+    hostile = kit.work / "hostile"
+    hostile.mkdir()
+    top = f"neura-sdk-9.9.9-{kit.triple}"
+    archive = hostile / f"{top}.tar.gz"
+    with tarfile.open(archive, "w:gz") as tar:
+        for name, data in ((f"{top}/VERSION", b"9.9.9\n"), (f"{top}/bin/CON.txt", b"x")):
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+    # Written as bytes: Path.write_text would end the lines with CR LF here.
+    (hostile / "neura-components.txt").write_bytes(
+        f"neura-components 1\nversion 9.9.9\nbuild test\narchive sdk {kit.triple} {archive.name} {sha256(archive)} "
+        f"{archive.stat().st_size}\n".encode())
+    result = home.tool(updated, "neura-update", "update", "--source", hostile)
+    check(result.returncode == 1 and "has a name that Windows cannot keep as it is" in result.stderr and home.current() == updated,
+          f"a member named CON.txt is refused: {result.stderr}")
+
+
+def windows_suite_migrate(kit: WindowsKit) -> None:
+    """--migrate-install on Windows: a schema 2 root is already migrated,
+    and a schema 1 marker, which only a 0.2 client writes, is refused,
+    since no 0.2 client runs on Windows."""
+    home = WindowsHome(kit, "migrate")
+    generation = older_generation(kit, home, "0.2.99")
+    result = home.tool(generation, "neura-update", "update", "--migrate-install")
+    check(result.returncode == 0 and "already migrated" in result.stdout, f"a schema 2 root: {result.stdout}{result.stderr}")
+    # Schema 1 names its link by a POSIX path, as only 0.2 clients wrote it.
+    (home.root / "neura-install.txt").write_bytes(b"neura-install 1\nmethod archive\nlink /legacy/bin/neura\nversion 0.2.99\n")
+    for command in (["neura-update", "update", "--migrate-install"], ["neura-uninstall", "uninstall", "--yes"]):
+        result = home.tool(generation, *command)
+        check(result.returncode == 1 and "has schema 1" in result.stderr, f"{command[0]} refuses a schema 1 marker: {result.stderr}")
+
+
+def windows_suite_doctor(kit: WindowsKit) -> None:
+    """neura doctor of an installation: the Windows lines (path, leases,
+    curl and tar from System32), damage, and an interrupted change."""
+    v, t = kit.version, kit.triple
+    top = windows_unpack(kit.default_release() / f"neura-sdk-{v}-{t}.tar.gz", kit.work / "unpacked" / "sdk")
+    home = WindowsHome(kit, "doctor")
+    check(home.install(top).returncode == 0, "the install")
+    result = home.neura("doctor")
+    out = result.stdout
+    check(result.returncode == 0, f"a whole install: {out}")
+    system32 = (Path(SYSTEM_ROOT) / "System32").as_posix().lower()
+    for expected in ("ok  install: method archive, root ", ", state complete", "ok  integrity: ", "ok  path: ", "ok  transaction: none interrupted",
+                     "ok  leases: each tool holds the lease"):
+        check(expected in out, f"doctor prints {expected!r}: {out}")
+    check(any(line.lower().startswith(f"ok  curl: {system32}/curl.exe") for line in out.splitlines()), f"curl from System32: {out}")
+    check(any(line.lower().startswith(f"ok  tar: {system32}/tar.exe") for line in out.splitlines()), f"tar from System32: {out}")
+    outside = home.neura("doctor", env={"PATH": WINDOWS_SYSTEM_PATH})
+    check("warn  path: " in outside.stdout and "[Environment]::SetEnvironmentVariable" in outside.stdout, f"the path line off PATH: {outside.stdout}")
+    generation = home.current()
+    damaged = home.root / "versions" / generation / "bin" / "neura-run.exe"
+    damaged.write_bytes(damaged.read_bytes() + b"x")
+    result = home.neura("doctor")
+    check(result.returncode == 1 and "FAIL  integrity: " in result.stdout and "install.ps1 -Force" in result.stdout, f"a damaged file: {result.stdout}")
+    (home.root / ".journal").write_bytes(b"neura-journal 1\noperation update\nold -\nnew " + generation.encode() + b"\n")
+    result = home.neura("doctor")
+    check(result.returncode == 1 and "FAIL  transaction" in result.stdout, f"an interrupted change: {result.stdout}")
+
+
+def windows_suite_components(kit: WindowsKit) -> None:
+    """--components and uninstall --component on Windows: the service
+    component added from the installed version's release and removed, each
+    a new generation behind the junction."""
+    v, t = kit.version, kit.triple
+    release = kit.default_release()
+    top = windows_unpack(release / f"neura-sdk-{v}-{t}.tar.gz", kit.work / "unpacked" / "sdk")
+    home = WindowsHome(kit, "components")
+    check(home.install(top).returncode == 0, "the SDK install")
+    first = home.current()
+    result = home.tool(first, "neura-update", "update", "--components", "sdk,service", "--source", release)
+    check(result.returncode == 0 and "added service" in result.stdout, f"--components sdk,service: {result.stdout}{result.stderr}")
+    check("components core sdk service" in home.marker().splitlines() and home.current() != first, "a generation with the service")
+    tools = {"neura", *CORE_TOOLS, *SDK_TOOLS} | ({"neurad"} if kit.has_neurad() else set())
+    expect_windows_layout(home, tools, "with the service")
+    result = home.tool(home.current(), "neura-uninstall", "uninstall", "--component", "service")
+    check(result.returncode == 0 and "removed service" in result.stdout, f"uninstall --component service: {result.stdout}{result.stderr}")
+    check("components core sdk" in home.marker().splitlines(), "back to core sdk")
+    expect_windows_layout(home, {"neura", *CORE_TOOLS, *SDK_TOOLS}, "without the service")
+
+
+def windows_suite_uninstall(kit: WindowsKit) -> None:
+    """neura uninstall on Windows (W22): --dry-run, the refusal without a
+    terminal, the refusal while a tool of the generation runs, and the
+    removal through the dispatcher, whose own files a helper removes once
+    the command has ended, also from a job that does not let a process
+    leave it."""
+    v, t = kit.version, kit.triple
+    top = windows_unpack(kit.default_release() / f"neura-sdk-{v}-{t}.tar.gz", kit.work / "unpacked" / "sdk")
+    home = WindowsHome(kit, "uninstall")
+    check(home.install(top).returncode == 0, "the install")
+    before = snapshot(home.root)
+    result = home.neura("uninstall", "--dry-run")
+    check(result.returncode == 0 and "nothing was removed (--dry-run)" in result.stdout and snapshot(home.root) == before,
+          f"--dry-run: {result.stdout}{result.stderr}")
+    result = home.neura("uninstall")
+    check(result.returncode == 1 and "standard input is not a terminal" in result.stderr, f"no terminal and no --yes: {result.stderr}")
+    session = subprocess.Popen([str(home.bin / "neura-lsp.exe"), "--stdio"], env=home.env(), stdin=subprocess.PIPE,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        check(wait_for(lambda: windows_lease_held(home, home.current())), "neura-lsp holds its lease")
+        result = home.neura("uninstall", "--yes")
+        check(result.returncode == 1 and "is in use by a running neura process" in result.stderr and home.root.exists(),
+              f"refused while neura-lsp runs: {result.stderr}")
+    finally:
+        session.stdin.close()
+        session.wait(timeout=30)
+    result = home.neura("uninstall", "--yes")
+    check(result.returncode == 0 and "once this command has ended" in result.stdout, f"uninstall --yes: {result.stdout}{result.stderr}")
+    check(wait_for(lambda: not home.root.exists(), 60), f"the helper removes the rest: {list(home.root.rglob('*')) if home.root.exists() else []}")
+    # In a job that does not let a process leave it, as a CI runner or a
+    # sandbox may run commands in: through `neura`, the helper leaves the
+    # kill-on-close job of `neura` (which allows that) and stays in the outer
+    # job; run directly, it stays in the outer job. The outer job outlives
+    # the helper here, and uninstall says that it may not.
+    for name, program in (("neura", "neura.exe"), ("neura-uninstall", "neura-uninstall.exe")):
+        check(home.install(top).returncode == 0, f"the install again for {name}")
+        result = in_no_breakaway_job(home, home.bin / program, "uninstall", "--yes")
+        check(result.returncode == 0 and "once this command has ended" in result.stdout
+              and "warning: the helper that removes what goes once this command has ended runs in a job" in result.stderr,
+              f"{name} uninstall in a job without breakaway: {result.stdout}{result.stderr}")
+        check(wait_for(lambda: not home.root.exists(), 60),
+              f"the helper in that job removes the rest: {list(home.root.rglob('*')) if home.root.exists() else []}")
+
+
+def windows_suite_service(kit: WindowsKit) -> None:
+    """The service across a change, with stand-ins: an application holding
+    its generation's lease survives an update and a rollback and keeps its
+    generation, which is removed once it ends. The real neurad belongs to
+    lifecycle-neurad."""
+    v = kit.version
+    release = kit.default_release()
+    home = WindowsHome(kit, "service")
+    older = older_generation(kit, home, "0.2.99")
+    application = start_application(home.root / "leases" / older)
+    try:
+        result = home.tool(older, "neura-update", "update", "--source", release)
+        check(result.returncode == 0 and home.current() != older, f"an update while an application runs: {result.stderr}")
+        check(application.poll() is None and windows_lease_held(home, older) and older in home.generations(),
+              "the application continues on its generation")
+        result = home.tool(home.current(), "neura-update", "update", "--rollback")
+        check(result.returncode == 0 and home.current() == older and application.poll() is None, f"a rollback leaves it alone: {result.stderr}")
+        result = home.tool(older, "neura-update", "update", "--rollback")
+        check(result.returncode == 0 and home.current().startswith(v + "+"), f"back to the update: {result.stderr}")
+    finally:
+        application.kill()
+        application.wait()
+
+
+def windows_suite_neurad(kit: WindowsKit) -> None:
+    if not kit.has_neurad():
+        print("NOT RUN: the real neurad across a change: this build has no neurad.exe")
+        return
+    print("NOT RUN: the real neurad across a change on Windows: its checks come with the service's Windows port (WP09)")
+
+
+WINDOWS_SUITES = {
+    "archives": windows_suite_archives,
+    "install": windows_suite_install,
+    "bootstrap": windows_suite_bootstrap,
+    "update": windows_suite_update,
+    "migrate": windows_suite_migrate,
+    "doctor": windows_suite_doctor,
+    "components": windows_suite_components,
+    "uninstall": windows_suite_uninstall,
+    "service": windows_suite_service,
+    "neurad": windows_suite_neurad,
+}
+
+
 SUITES = {
     "archives": suite_archives,
     "install": suite_install,
@@ -2085,8 +2800,12 @@ def main() -> int:
     suite, build, work, cmake = sys.argv[1], Path(sys.argv[2]), Path(sys.argv[3]), sys.argv[4]
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
-    kit = Kit(build, work, cmake)
-    SUITES[suite](kit)
+    if WINDOWS:
+        kit = WindowsKit(build, work, cmake)
+        WINDOWS_SUITES[suite](kit)
+    else:
+        kit = Kit(build, work, cmake)
+        SUITES[suite](kit)
     if FAILURES:
         print(f"{len(FAILURES)} check(s) failed in {suite}")
         return 1

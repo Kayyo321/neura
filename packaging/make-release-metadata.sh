@@ -11,11 +11,14 @@
 #   neura-sdk-<version>-<triple>.tar.gz      Neura-sdk
 #   neura-runtime-<version>-<triple>.tar.gz  Neura-runtime
 #
-# and nothing else named neura-*.tar.gz. It writes, next to them:
+# except that a *-windows-msvc target has no legacy archive: no 0.2 client
+# runs on Windows, so neura-release.txt never names a Windows archive
+# (docs/design/Windows030.md, W23). Nothing else is named neura-*.tar.gz.
+# It writes, next to them:
 #
 #   SHA256SUMS            "<sha256>  <file>" for every archive, sorted by name
 #   neura-release.txt     schema 1, which 0.2 clients read: the version and one
-#                         asset line for each target, naming the legacy archive
+#                         asset line for each target with a legacy archive
 #   neura-components.txt  neura-components 1, the version, the build that the
 #                         archives' core manifests name, and one sorted line
 #                         "archive <product> <triple> <file> <sha256> <size>"
@@ -67,6 +70,9 @@ for file in $files; do
     esac
     triple=${triple%"$suffix"}
     printf '%s\n' "$triple" | grep -Eq '^[0-9A-Za-z_.-]+$' || die "not a target triple in $file: $triple"
+    case $product/$triple in
+    legacy/*-windows-msvc) die "$file is a legacy archive for $triple; Windows has none, since no 0.2 client runs there" ;;
+    esac
     sum=$(digest "$file")
     size=$(wc -c <"$file" | tr -d ' ')
     [ "$size" -gt 0 ] || die "$file is empty"
@@ -90,9 +96,13 @@ for file in $files; do
         die "$file is build $this_build; another archive is build $build"
     fi
 done
-# Each target has all three archives.
+# Each target has all three archives; Windows has the two product archives.
 for triple in $(cut -d ' ' -f 1 "$work/legacy") $(cut -d ' ' -f 2 "$work/products"); do
-    grep -q "^$triple " "$work/legacy" || die "there is no neura-$version-$triple$suffix"
+    case $triple in
+    *-windows-msvc) ;;
+    *) grep -q "^$triple " "$work/legacy" || die "there is no neura-$version-$triple$suffix" ;;
+    esac
+
     for product in sdk runtime; do
         grep -q "^$product $triple " "$work/products" || die "there is no neura-$product-$version-$triple$suffix"
     done
