@@ -58,8 +58,8 @@ export let TlsConnector = module (
             return match (outcome) {
                 host.TlsOutcome.Ok(opened) => Result<TlsStream>.Ok(stream_of(opened, target)),
                 host.TlsOutcome.Error(code) => Result<TlsStream>.Err(host_error.io(code, host_error.kind_of(code) == IoErrorKind.Unsupported
-                        ? "TLS operation is unavailable in this runtime"
-                        : "TLS connect failed", text)),
+                    ? "TLS operation is unavailable in this runtime"
+                    : "TLS connect failed", text)),
             };
         };
 

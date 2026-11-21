@@ -55,8 +55,8 @@ export let TlsStream = module (
             return match (host.tls_read(id, max, timeout_nanos)) {
                 host.BytesOutcome.Ok(chunk) => Result<uint8[list]>.Ok(chunk),
                 host.BytesOutcome.Error(code) => Result<uint8[list]>.Err(host_error.io(code, host_error.kind_of(code) == IoErrorKind.Unsupported
-                        ? "TLS operation is unavailable in this runtime"
-                        : "TLS read failed", label)),
+                    ? "TLS operation is unavailable in this runtime"
+                    : "TLS read failed", label)),
             };
         };
 
@@ -76,8 +76,8 @@ export let TlsStream = module (
                     },
                     host.CountOutcome.Error(code) => {
                         return Result<Unit>.Err(host_error.io(code, host_error.kind_of(code) == IoErrorKind.Unsupported
-                        ? "TLS operation is unavailable in this runtime"
-                        : "TLS write failed", label));
+                            ? "TLS operation is unavailable in this runtime"
+                            : "TLS write failed", label));
                     },
                 }
             }
@@ -149,8 +149,8 @@ export let TlsStream = module (
             return match (host.tls_close(id)) {
                 host.DoneOutcome.Ok => bytes.ok(),
                 host.DoneOutcome.Error(code) => Result<Unit>.Err(host_error.io(code, host_error.kind_of(code) == IoErrorKind.Unsupported
-                        ? "TLS operation is unavailable in this runtime"
-                        : "TLS close failed", label)),
+                    ? "TLS operation is unavailable in this runtime"
+                    : "TLS close failed", label)),
             };
         };
 
