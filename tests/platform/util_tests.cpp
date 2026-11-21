@@ -93,7 +93,11 @@ void test_arithmetic() {
     expect(UInt128(ones) - unsigned_of(1, 0), ones, ones, "borrow out of the high word");
     expect(UInt128(ones) * UInt128(ones), 0xfffffffffffffffe, 1, "64 x 64 bit product");
     expect(Int128(-3) * signed_of(0x0000000004000000, 1), 0xfffffffff3ffffff, 0xfffffffffffffffd, "signed product");
+#if !defined(__SIZEOF_INT128__) || defined(_MSC_VER)
+    // The portable implementation defines wrapping negation. Built-in
+    // signed __int128 follows C++ overflow rules instead.
     expect(-signed_of(0x8000000000000000, 0), 0x8000000000000000, 0, "minimum negated wraps");
+#endif
     expect(-Int128(1), ones, ones, "unary minus");
     expect(Int128(std::numeric_limits<std::int64_t>::max()) + std::int64_t{1}, 0, 0x8000000000000000,
            "mixed with int64_t");

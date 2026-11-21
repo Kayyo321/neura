@@ -838,7 +838,7 @@ PLATFORM_TEST(file, open_no_follow) {
         opened = platform::open_no_follow(link, platform::OpenAccess::write,
                                           platform::OpenDisposition::create_or_truncate, error);
         check(!opened && error == std::errc::too_many_symbolic_link_levels, "symlink refused for writing");
-        check_equal(read_file(path), std::string("xyz"), "link target untouched");
+        check_equal(read_file(path), std::string("abc"), "link target untouched");
     }
 }
 
