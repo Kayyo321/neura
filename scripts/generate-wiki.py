@@ -98,6 +98,7 @@ REPOSITORY_ONLY = (
     "docs/design/Concurrency.md",
     "docs/design/GpuExecution.md",
     "docs/design/Release030.md",
+    "docs/lang/Neura0.3.1.md",
     "docs/design/Representation030.md",
     "docs/design/Parameters030.md",
     "docs/design/Products030.md",

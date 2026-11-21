@@ -12,6 +12,7 @@ This will also add langauge features, and only one new Std library,
 
 A numeric literal may contain `'` between digits, and it may end in a type suffix. The marks make a long value easier to read. The suffix fixes the literal's type, so the literal no longer takes the type of its context.
 
+<!-- example: fragment: specified for 0.3.1 and not yet implemented -->
 ```neura
 let x = 120'000'000u64;
 let y = 64'000s32;
@@ -37,6 +38,7 @@ A literal with no suffix is unchanged: it takes the expected numeric type, or `i
 
 An `if` condition may open with one `let` declaration, a `;`, and then the condition. The declaration is evaluated once, before the condition. Its names are in scope in the condition, the `if` body, and the `else` body, and nowhere after the statement. The declaration may bind one name or destructure, and it follows the ordinary rules for `let`. The text after `;` is a condition under the same rules as a condition written on its own.
 
+<!-- example: fragment: specified for 0.3.1 and not yet implemented -->
 ```neura
 let console = import:Std.Io.Console;
 
@@ -57,6 +59,7 @@ A condition is a `bool`, or a class or interface reference. A reference is true 
 
 A nil condition narrows like a type test. Inside the body of `if (val)`, `val` is known to be non-nil, so its members can be used without another check. The same holds in the `else` body of `if (!val)` or `if (not val)`, and in the code after such an `if` when its body always leaves through `return`, `break`, `continue`, or a trap.
 
+<!-- example: fragment: specified for 0.3.1 and not yet implemented -->
 ```neura
 if (not val) {
     return;
@@ -70,6 +73,7 @@ Numbers, strings, enums, and other values that cannot be `nil` are still not con
 
 `Error` is a payload enum and cannot be `nil`. The test applies to a reference, such as a missing log entry:
 
+<!-- example: fragment: specified for 0.3.1 and not yet implemented -->
 ```neura
 let console = import:Std.Io.Console;
 
@@ -207,6 +211,7 @@ It allows multiple references to the same storage without exposing raw memory or
 
 ### Construction
 
+<!-- example: fragment: specified for 0.3.1 and not yet implemented -->
 ```neura
 let cell = import:Std.Core.Cell;
 let.promote _ = import:Std.Core.Pointer;
@@ -228,6 +233,7 @@ A `Pointer<T>` references a managed storage cell. It does not take ownership of 
 
 ### Example
 
+<!-- example: fragment: specified for 0.3.1 and not yet implemented -->
 ```neura
 let storage = cell.of<int64>(5);
 
@@ -275,6 +281,7 @@ No `write()`, `handle()`, mutable indexing, or mutable-borrow method is availabl
 
 ### Example
 
+<!-- example: fragment: specified for 0.3.1 and not yet implemented -->
 ```neura
 let cell = import:Std.Core.Cell;
 let.promote _ = import:Std.Core.Pointer;
@@ -335,6 +342,7 @@ Unlike an unchecked array pointer, it never permits access outside the valid col
 
 ### Construction
 
+<!-- example: fragment: specified for 0.3.1 and not yet implemented -->
 ```neura
 let.promote _ = import:Std.Core.Pointer;
 
@@ -361,6 +369,7 @@ The constructor receives:
 
 ### Example
 
+<!-- example: fragment: specified for 0.3.1 and not yet implemented -->
 ```neura
 let data: int64[] = [1, 2, 3, 4, 5];
 
@@ -432,6 +441,7 @@ Borrowing is compiler-enforced. A mutable borrow cannot be duplicated, retained,
 
 ### Example
 
+<!-- example: fragment: specified for 0.3.1 and not yet implemented -->
 ```neura
 let Point = class (
     export let x: int64 = 0;
@@ -512,6 +522,7 @@ It is intended for data structures, graph representations, shared application ob
 
 ### Example
 
+<!-- example: fragment: specified for 0.3.1 and not yet implemented -->
 ```neura
 let.promote _ = import:Std.Core.Pointer;
 
@@ -584,6 +595,7 @@ It is useful for parent references, observers, caches, and object graphs in whic
 
 ### Example
 
+<!-- example: fragment: specified for 0.3.1 and not yet implemented -->
 ```neura
 let.promote _ = import:Std.Core.Pointer;
 let optional = import:Std.Core.Optional;
@@ -644,6 +656,7 @@ Unlike a strong pointer, a soft reference allows the runtime to discard its targ
 
 ### Example
 
+<!-- example: fragment: specified for 0.3.1 and not yet implemented -->
 ```neura
 let.promote _ = import:Std.Core.Pointer;
 let optional = import:Std.Core.Optional;
@@ -722,6 +735,7 @@ These restrictions require compiler enforcement, including checks of generic typ
 
 ### Example
 
+<!-- example: fragment: specified for 0.3.1 and not yet implemented -->
 ```neura
 let.promote _ = import:Std.Core.Pointer;
 
@@ -803,6 +817,7 @@ The implementation should reuse Neura's existing `Std.Concurrent.Guarded<T>` syn
 
 ### Example
 
+<!-- example: fragment: specified for 0.3.1 and not yet implemented -->
 ```neura
 let.promote _ = import:Std.Core.Pointer;
 
@@ -927,6 +942,7 @@ Reading arbitrary memory, corrupting an allocation, or continuing with a danglin
 
 The following is a proposed usage example written with Neura's declaration and expression syntax. It is not an executable test until the library and its compiler-level ownership and borrowing contracts are implemented.
 
+<!-- example: fragment: specified for 0.3.1 and not yet implemented -->
 ```neura
 let.promote _ = import:Std.Core.Pointer;
 let cell = import:Std.Core.Cell;
