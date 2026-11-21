@@ -12,6 +12,7 @@
 #include "neura-ir/verifier.hpp"
 #include "nvr/format.hpp"
 #include "parser/syntax.hpp"
+#include "platform/text.hpp"
 
 #include "backend/converter.hpp"
 
@@ -363,7 +364,7 @@ NEURA_TEST(nir, programs_without_tasks_keep_the_bytes_of_the_previous_writer) {
         bool polled = false;
         for_each_node(program, [&](const IrNode& item) { polled = polled || item.poll; });
         check(!polled && !has_spawn(program), name + ": a program without tasks has no poll");
-        rename_file(program, fs::canonical(golden.source).string(), "nir-versions/" + name + ".nra");
+        rename_file(program, neura::platform::utf8_path(fs::canonical(golden.source)), "nir-versions/" + name + ".nra");
         const auto written = write_nir(program);
         check(written == expected, name + ": the current writer's bytes differ from the previous writer's (" +
                                        std::to_string(written.size()) + " and " + std::to_string(expected.size()) +

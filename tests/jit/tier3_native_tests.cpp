@@ -43,7 +43,6 @@ struct Fake {
     std::uint32_t block = 0;
     std::vector<std::uint64_t> values;
     std::vector<std::uint64_t> constants;
-    t3::Context context;
     // What the endings recorded.
     std::uint32_t left_at = t3::none;
     std::uint64_t left_counter = 0;
@@ -162,7 +161,7 @@ Fake run(const t3::Program& program, const std::vector<std::uint64_t>& slots, st
     fake.flags.assign(slots.size(), 0);
     fake.values.assign(program.ir.insts.size(), 0xDEADBEEFDEADBEEFULL);
     fake.constants = {0x1234, 0xFFFFFFFFFFFFFFFFULL};
-    auto& c = fake.context;
+    t3::Context c;
     c.owner = &fake;
     c.C = 0;
     c.room = room;

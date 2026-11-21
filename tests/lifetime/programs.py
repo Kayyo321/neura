@@ -58,6 +58,9 @@ GENERATOR_STATE = 'inferred from provenance names, not from the circuit: generat
 YIELD = re.compile(r'^\s*yield\b', re.MULTILINE)
 
 BASE = {'NEURA_GPU': 'off', 'PATH': '/usr/bin:/bin'}
+if os.name == 'nt':
+    BASE.update({name: os.environ[name] for name in ('PATH', 'SystemRoot') if name in os.environ})
+TIMEOUT = 300 * int(os.environ.get('NEURA_TEST_TIMEOUT_SCALE', '1'))
 # (name, environment, run options)
 MODES = [
     ('tier0', {}, ['--tier=0']),
@@ -84,11 +87,13 @@ TRAP = re.compile(r'^.*trap.*$', re.M)
 def run(arguments, environment=None):
     env = dict(BASE)
     env.update(environment or {})
-    return subprocess.run([str(NEURA), *arguments], capture_output=True, text=True, timeout=300, env=env)
+    return subprocess.run([str(NEURA), *arguments], capture_output=True, text=True, timeout=TIMEOUT, env=env, encoding='utf-8')
 
 
 def main():
     failures = []
+    if os.name == 'nt':
+        print('NOT RUN: lifetime execution modes that require --jit=on; Windows has no JIT in 0.3.0')
     programs = sorted(DIRECTORY.glob('*.expected'))
     if not programs:
         sys.exit('no programs')
@@ -154,7 +159,7 @@ def main():
                                         f'{"shows" if labelled else "does not show"} the generator state')
                 observed = {}
                 for mode, environment, options in MODES:
-                    if mode in skipped:
+                    if mode in skipped or (os.name == 'nt' and '--jit=on' in options):
                         continue
                     result = run(['run', '--stats', '--tier-stats', *options, str(image)], environment)
                     where = f'{source.name} {build} {mode}'

@@ -552,6 +552,9 @@ add_library(neura_compiler STATIC
 target_include_directories(neura_compiler PUBLIC src)
 target_include_directories(neura_compiler PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(neura_compiler PUBLIC neura_circuit neura_lift neura_nvr PRIVATE neura_libclang neura_hash)
+if(WIN32)
+    target_link_libraries(neura_compiler PUBLIC neura_platform)
+endif()
 neura_target_defaults(neura_compiler)
 
 # The decompiler reads images through the shared loader and lifts their

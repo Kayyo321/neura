@@ -75,10 +75,10 @@ endif()
 
 # A schedule that asks for a task that is not there belongs to another
 # program, and a file that is not a schedule is refused before any test runs.
-file(WRITE "${TEST_DIR}/other.schedule" "neura-schedule 1\ntest OrderTests.test_assumes_spawn_order\nseed 1\nquantum 1024\nvirtual-time off\nchoose 1 9\n")
+file(CONFIGURE OUTPUT "${TEST_DIR}/other.schedule" CONTENT "neura-schedule 1\ntest OrderTests.test_assumes_spawn_order\nseed 1\nquantum 1024\nvirtual-time off\nchoose 1 9\n" NEWLINE_STYLE LF)
 expect("foreign schedule" 1 "FAIL OrderTests.test_assumes_spawn_order \\[saved schedule\\]: the schedule does not fit this program: at decision 1 "
     test --schedule other.schedule "${order}")
-file(WRITE "${TEST_DIR}/unknown.schedule" "neura-schedule 1\ntest OrderTests.test_missing\nseed 1\nquantum 1024\nvirtual-time off\n")
+file(CONFIGURE OUTPUT "${TEST_DIR}/unknown.schedule" CONTENT "neura-schedule 1\ntest OrderTests.test_missing\nseed 1\nquantum 1024\nvirtual-time off\n" NEWLINE_STYLE LF)
 expect("unknown test" 1 "unknown.schedule: the schedule is for test OrderTests.test_missing, which these files do not define"
     test --schedule unknown.schedule "${order}")
 foreach(case IN ITEMS
@@ -93,7 +93,7 @@ foreach(case IN ITEMS
     string(REPLACE "|" ";" parts "${case}")
     list(GET parts 0 text)
     list(GET parts 1 message)
-    file(WRITE "${TEST_DIR}/bad.schedule" "${text}")
+    file(CONFIGURE OUTPUT "${TEST_DIR}/bad.schedule" CONTENT "${text}" NEWLINE_STYLE LF)
     expect("malformed schedule" 1 "bad.schedule${message}" test --schedule bad.schedule "${order}")
 endforeach()
 

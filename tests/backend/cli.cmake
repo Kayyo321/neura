@@ -25,6 +25,19 @@ function(neura prefix directory)
     set("${prefix}_stderr" "${stderr}" PARENT_SCOPE)
 endfunction()
 
+# Writes `content` to `path` as it is: on Windows file(WRITE) ends lines with
+# CRLF, so there the text goes through file(CONFIGURE) with LF line endings,
+# each @ kept by substituting @neura_at@ for it.
+function(write_text path content)
+    if(CMAKE_HOST_WIN32)
+        string(REPLACE "@" "@neura_at@" escaped "${content}")
+        set(neura_at "@")
+        file(CONFIGURE OUTPUT "${path}" CONTENT "${escaped}" @ONLY NEWLINE_STYLE LF)
+    else()
+        file(WRITE "${path}" "${content}")
+    endif()
+endfunction()
+
 function(build_image image)
     neura(result "${TEST_DIR}" build ${ARGN} -o "${image}")
     if(NOT result_status STREQUAL "0")
@@ -98,6 +111,14 @@ endfunction()
 # Hello World: two build routes, reproducibility, and a run from a directory
 # that holds only the image.
 set(hello "${SOURCE_DIR}/examples/hello-world/hello-world.nra")
+if(CMAKE_HOST_WIN32)
+    expect_build_failure("Windows native launcher" "Windows has no native launcher in 0[.]3[.]0"
+        "${TEST_DIR}/native.exe" --native "${hello}")
+    set(tls_refusal "${TEST_DIR}/windows-tls-refusal.nvr")
+    build_image("${tls_refusal}" "${tests}/windows-tls-refusal.nra")
+    expect_run("Windows TLS provider" "${tls_refusal}"
+        "Unsupported: TLS operation is unavailable in this runtime (127.0.0.1:443)\n" 0 "" --allow-net)
+endif()
 build_image("${TEST_DIR}/hello.nvr" "${hello}")
 neura(emit "${TEST_DIR}" emit-ir "${hello}" -o "${TEST_DIR}/hello.nir")
 if(NOT emit_status STREQUAL "0")
@@ -147,10 +168,17 @@ endif()
 expect_run("hello world" "${TEST_DIR}/isolated/hello.nvr" "Hello, World!\n" 0 "")
 expect_run("hello world with arguments" "${TEST_DIR}/isolated/hello.nvr" "Hello, World!\n" 0 "" -- one two)
 file(STRINGS "${TEST_DIR}/hello.nvr" image_strings)
+# The source directory as text, in CMake's form and the system's (with
+# backslashes on Windows), not as a pattern: a path's characters are not
+# regular-expression syntax.
+file(TO_NATIVE_PATH "${SOURCE_DIR}" native_source_dir)
 foreach(string IN LISTS image_strings)
-    if(string MATCHES "${SOURCE_DIR}")
-        message(FATAL_ERROR "the image contains a build-machine path: ${string}")
-    endif()
+    foreach(directory IN ITEMS "${SOURCE_DIR}" "${native_source_dir}")
+        string(FIND "${string}" "${directory}" at)
+        if(NOT at EQUAL -1)
+            message(FATAL_ERROR "the image contains a build-machine path: ${string}")
+        endif()
+    endforeach()
 endforeach()
 if(NOT image_strings MATCHES "hello-world[.]nra")
     message(FATAL_ERROR "the source map should label hello-world.nra")
@@ -337,7 +365,7 @@ if(NOT wide_status STREQUAL "0" OR NOT wide_stdout STREQUAL "sum 3591\n" OR
    NOT wide_stderr MATCHES "tier: not lifted [1-9][0-9]*: not recognized: graph too large to search")
     message(FATAL_ERROR "wide-sum: status ${wide_status}\n${wide_stdout}${wide_stderr}")
 endif()
-file(WRITE "${TEST_DIR}/tree-sizes.txt" "4\n6\n8\n")
+write_text("${TEST_DIR}/tree-sizes.txt" "4\n6\n8\n")
 neura(trees_each "${TEST_DIR}" run --tier-stats --each "${TEST_DIR}/tree-sizes.txt" "${TEST_DIR}/binary-trees.nvr")
 expect_tier_time("run --each with --tier-stats" "${trees_each_stderr}")
 neura(tier_test "${TEST_DIR}" test --tier-stats ${roots} "${SOURCE_DIR}/examples/testing/math-tests.nra")
@@ -581,14 +609,14 @@ build_image("${TEST_DIR}/startup-from-nir.nvr" "${TEST_DIR}/startup.nir")
 same_bytes("startup blocks from .nir" "${TEST_DIR}/startup.nvr" "${TEST_DIR}/startup-from-nir.nvr")
 file(MAKE_DIRECTORY "${TEST_DIR}/startup-nir")
 neura(emit "${TEST_DIR}" emit-ir "${tests}/startup/registry.nra" -o "${TEST_DIR}/startup-nir/registry.nir")
-file(WRITE "${TEST_DIR}/startup-nir/user.nra" [=[
+write_text("${TEST_DIR}/startup-nir/user.nra" [=[
 let registry = import:"registry.nir";
 export let User = module (
     export let count = func() -> int32 => registry.count;
 );
 ]=])
 neura(emit "${TEST_DIR}/startup-nir" emit-ir "${TEST_DIR}/startup-nir/user.nra" -o "${TEST_DIR}/startup-nir/user.nir")
-file(WRITE "${TEST_DIR}/startup-nir/app.nra" [=[
+write_text("${TEST_DIR}/startup-nir/app.nra" [=[
 let registry = import:"registry.nir";
 let user = import:"user.nir";
 let console = import:Std.Io.Console;
@@ -730,7 +758,7 @@ neura(task_stats "${TEST_DIR}" run --stats "${TEST_DIR}/region-tasks.nvr")
 if(NOT task_stats_stdout STREQUAL "11\n22\n5\n" OR NOT task_stats_stderr MATCHES "peak heap cells [0-9]+, peak stack cells 10,")
     message(FATAL_ERROR "--stats of a region image with tasks\n${task_stats_stdout}${task_stats_stderr}")
 endif()
-file(WRITE "${TEST_DIR}/region-lists.txt" "one\n")
+write_text("${TEST_DIR}/region-lists.txt" "one\n")
 neura(region_each "${TEST_DIR}" run --stats --each "${TEST_DIR}/region-lists.txt" "${TEST_DIR}/region-storage.nvr")
 if(NOT region_each_stderr MATCHES "peak heap cells [0-9]+, peak stack cells 160,")
     message(FATAL_ERROR "--stats of --each over a region image\n${region_each_stderr}")

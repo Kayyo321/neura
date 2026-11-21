@@ -48,7 +48,7 @@ std::string path_name(const fs::path& path) {
 
 // A path from UTF-8 text, such as the header and library names of a C
 // import. On Windows a std::string would be read in the process code page.
-fs::path utf8_path(const std::string& text) {
+fs::path utf8_path(std::string_view text) {
 #ifdef _WIN32
     return fs::path(std::u8string(text.begin(), text.end()));
 #else

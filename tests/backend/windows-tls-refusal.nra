@@ -1,0 +1,24 @@
+let console = import:Std.Io.Console;
+let error = import:Std.Core.Error;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let socket_addr = import:Std.Net.Core.SocketAddr;
+let config = import:Std.Net.Tls.TlsConfig;
+let tls_connector = import:Std.Net.Tls.TlsConnector;
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last target = result.expect<socket_addr.SocketAddr>(socket_addr.parse("127.0.0.1:443"), "address");
+        last builder = config.builder();
+        last client = result.expect<config.TlsConfig>(builder.build_client(), "config");
+        match (new tls_connector.TlsConnector(target, client).connect()) {
+            result.Result.Ok(_) => {
+                console.print_line("unexpected TLS stream");
+            },
+            result.Result.Err(failure) => {
+                console.print_line(error.message(failure));
+            },
+        }
+        return program.ExitCode.Ok;
+    };
+);

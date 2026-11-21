@@ -11,6 +11,7 @@
 #include <io.h>
 #include <iostream>
 #include <mutex>
+#include <stdexcept>
 #include <streambuf>
 #include <string>
 #else
@@ -40,7 +41,14 @@ bool is_console(HANDLE handle) noexcept {
 // a sequence that is not yet complete.
 class ConsoleStreambuf final : public std::streambuf {
 public:
-    explicit ConsoleStreambuf(HANDLE console) : console_(console) {}
+    explicit ConsoleStreambuf(HANDLE console) {
+        // _dup2 during test output capture closes the original CRT handle.
+        // Keep our own handle so restoring the streams cannot leave it stale.
+        if (!::DuplicateHandle(::GetCurrentProcess(), console, ::GetCurrentProcess(), &console_,
+                               0, FALSE, DUPLICATE_SAME_ACCESS)) {
+            throw std::runtime_error("cannot duplicate console output handle");
+        }
+    }
 
 protected:
     std::streamsize xsputn(const char* data, std::streamsize size) override {
@@ -105,7 +113,7 @@ private:
         pending_.erase(0, length);
     }
 
-    HANDLE console_;
+    HANDLE console_ = INVALID_HANDLE_VALUE;
     std::mutex mutex_;
     std::string pending_;
     std::wstring buffer_;

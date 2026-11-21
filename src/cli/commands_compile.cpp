@@ -86,6 +86,7 @@ int run_command(const std::vector<std::string>& arguments, std::string& output, 
 void link_native(neura::IrProgram& program, const Options& options) {
     if (program.native_units.empty()) return;
 #ifdef _WIN32
+    (void)options;
     throw std::runtime_error("linking C imports is not supported on Windows in this release");
 #else
     std::error_code ignored;
@@ -316,6 +317,11 @@ void note_denied_imports(const neura::nvr::Image& image, const neura::nvm::Capab
 }
 
 void package_native(const Options& options, std::span<const std::uint8_t> bytes) {
+#ifdef _WIN32
+    (void)options;
+    (void)bytes;
+    throw std::runtime_error("--native: Windows has no native launcher in 0.3.0; run the image with 'neura run' instead");
+#else
     constexpr const char* static_interop_error =
         "--static: the image uses native interop, which the static launcher does not provide";
     if (options.static_launcher && options.allow_native_requested) throw std::runtime_error(static_interop_error);
@@ -370,6 +376,7 @@ void package_native(const Options& options, std::span<const std::uint8_t> bytes)
     const neura::launcher::Policy policy{capabilities, options.limits, options.sealed};
     neura::launcher::write_executable(*options.output, launcher, bytes, policy);
     note_denied_imports(image, policy.capabilities);
+#endif
 }
 
 } // namespace
