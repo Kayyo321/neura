@@ -426,7 +426,9 @@ jobs:
           for source in examples/hello-world/hello-world.nra examples/types/class-hooks.nra examples/concurrency/monitor.nra; do
             "$tool" build --no-source-map "$source" -o "identity/$(basename "$source" .nra).nvr"
           done
-          (cd identity && sha256sum *.nvr) | tee image-sha256.txt
+          # --tag, because without it the Windows sha256sum marks each name
+          # with '*' (binary mode) and the Linux one does not.
+          (cd identity && sha256sum --tag *.nvr) | tee image-sha256.txt
 
       - name: Upload the cross-host image hashes
         if: ${{ matrix.triple == 'x86_64-linux-gnu' || runner.os == 'Windows' }}
