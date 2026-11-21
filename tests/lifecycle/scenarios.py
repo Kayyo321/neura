@@ -2356,20 +2356,27 @@ def windows_unpack(archive: Path, destination: Path) -> Path:
     return destination / archive.name.removesuffix(".tar.gz")
 
 
-def older_generation(kit: WindowsKit, home: WindowsHome, version: str) -> str:
-    """Lays out an installation of the build's core and sdk components
+def older_generation(kit: WindowsKit, home: WindowsHome, version: str, service: bool = False) -> str:
+    """Lays out an installation of the build's core, sdk and optional service components
     under an older version, as an archive of that version would have made
     it: versions/<generation> with rewritten manifests, the junction
     current, the marker and the leases. Its tools are the build's, so a
     lifecycle command run from it is this build's code."""
     top = windows_unpack(kit.default_release() / f"neura-sdk-{kit.version}-{kit.triple}.tar.gz", home.path / "older")
+    components = ["core", "sdk"]
+    if service:
+        runtime = windows_unpack(kit.default_release() / f"neura-runtime-{kit.version}-{kit.triple}.tar.gz",
+                                 home.path / "older")
+        shutil.copy2(runtime / "bin/neurad.exe", top / "bin/neurad.exe")
+        shutil.copy2(runtime / "share/neura/components/service.txt", top / "share/neura/components/service.txt")
+        components.append("service")
     manifests = {}
-    for component in ("core", "sdk"):
+    for component in components:
         path = top / "share/neura/components" / f"{component}.txt"
         text = path.read_text(encoding="utf-8").replace(f"\nversion {kit.version}\n", f"\nversion {version}\n", 1)
         path.write_bytes(text.encode())
         manifests[component] = text.encode()
-    generation = version + "+" + hashlib.sha256(manifests["core"] + manifests["sdk"]).hexdigest()[:12]
+    generation = version + "+" + hashlib.sha256(b"".join(manifests.values())).hexdigest()[:12]
     for extra in ("install.ps1", "install.cmd", "VERSION"):
         (top / extra).unlink()
     (home.root / "versions").mkdir(parents=True, exist_ok=True)
@@ -2378,7 +2385,7 @@ def older_generation(kit: WindowsKit, home: WindowsHome, version: str) -> str:
     _winapi.CreateJunction(str((home.root / "versions" / generation).resolve()), str(home.root / "current"))
     (home.root / "leases").mkdir(exist_ok=True)
     (home.root / "leases" / generation).write_bytes(b"")
-    marker = (f"neura-install 2\nmethod archive\nbin {home.real_root().as_posix()}/current/bin\ncomponents core sdk\n"
+    marker = (f"neura-install 2\nmethod archive\nbin {home.real_root().as_posix()}/current/bin\ncomponents {' '.join(components)}\n"
               f"generation {generation}\n")
     (home.root / "neura-install.txt").write_bytes(marker.encode())
     return generation
@@ -2768,17 +2775,8 @@ def windows_suite_neurad(kit: WindowsKit) -> None:
         print("NOT RUN: the real neurad across a change: this build has no neurad.exe")
         return
     release = kit.default_release()
-    tops = {
-        product: windows_unpack(release / f"neura-{product}-{kit.version}-{kit.triple}.tar.gz", kit.work / "unpacked")
-        for product in ("sdk", "runtime")
-    }
-    revised = kit.variant("revised", change="share/neura/stdlib/std/core/version.nra")
-    update = kit.release(kit.work / "revised-release", revised)
     home = WindowsHome(kit, "neurad")
-    installed = home.install(tops["sdk"], "-Add", tops["runtime"])
-    if not check(installed.returncode == 0, f"combined installation: {installed.stdout}{installed.stderr}"):
-        return
-    first = home.current()
+    first = older_generation(kit, home, "0.2.99", service=True)
     image = home.path / "echo.nvr"
     built = home.neura("build", REPOSITORY / "tests/service/programs/echo.nra", "-o", image)
     if not check(built.returncode == 0, f"echo image: {built.stdout}{built.stderr}"):
@@ -2801,7 +2799,7 @@ def windows_suite_neurad(kit: WindowsKit) -> None:
         refusal = home.neura("uninstall", "--yes")
         check(refusal.returncode != 0 and "applications of this installation are running" in refusal.stderr,
               f"uninstall refuses a running application: {refusal.stdout}{refusal.stderr}")
-        changed = home.neura("update", "--source", update)
+        changed = home.neura("update", "--source", release)
         if not check(changed.returncode == 0 and home.current() != first,
                      f"update switches generation while the application runs: {changed.stdout}{changed.stderr}"):
             return
