@@ -275,13 +275,18 @@ jobs:
           python scripts/check-windows-binaries.py build-${{ matrix.preset }}
           python scripts/check-core-closure.py build-${{ matrix.preset }}
           sh scripts/check-kernels.sh build-${{ matrix.preset }}
+      # The crypto suites that x86-64 macOS leaves out are left out here too:
+      # without the JIT stdlib-crypto-asymmetric alone runs for hours
+      # (docs/ContinuousIntegration.md, "Tests that run on fewer targets").
+      # 322 = the 328 tests CMake registers on Windows, less those 6.
       - name: Test
         run: >
           ctest --test-dir build-${{ matrix.preset }} --parallel 6 --no-tests=error
           --output-on-failure --output-junit ctest-junit.xml
+          -E "^(stdlib-crypto-advanced|stdlib-crypto-asymmetric|stdlib-crypto-pqc(-.*)?)$"
       - name: Require every registered test to have run
         if: ${{ !cancelled() }}
-        run: python scripts/check-test-report.py build-${{ matrix.preset }}/ctest-junit.xml --minimum 328
+        run: python scripts/check-test-report.py build-${{ matrix.preset }}/ctest-junit.xml --minimum 322
       - name: Upload the build and test evidence
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

@@ -238,14 +238,20 @@ jobs:
           python scripts/check-core-closure.py build-windows-msvc
           sh scripts/check-kernels.sh build-windows-msvc
           python scripts/check-windows-binaries.py build-windows-msvc
+      # Windows has no JIT, and on the interpreter the twelve tests left out
+      # here take most of the suite's time: about 400 of its 494 test-minutes
+      # on arm64 macOS, where stdlib-crypto-asymmetric alone ran for two
+      # hours. Tier 2 and release.yml run them on Windows, all but the crypto
+      # suites that x86-64 macOS also leaves out. This job runs the other 316
+      # of the 328 tests that CMake registers on Windows.
       - name: Test
         run: >
           ctest --test-dir build-windows-msvc --parallel 6 --no-tests=error
           --output-on-failure --output-junit ctest-junit.xml
-      # The initial local inventory, pending confirmation on windows-2022.
-      - name: Require every registered test to have run
+          -E "^(stdlib-crypto-asymmetric|stdlib-crypto-advanced|stdlib-crypto-pqc(-.*)?|stdlib-crypto-token|stdlib-crypto-enclave|stdlib-crypto-pki|stdlib-character|backend-reference|lifetime-programs)$"
+      - name: Require every selected test to have run
         if: ${{ !cancelled() }}
-        run: python scripts/check-test-report.py build-windows-msvc/ctest-junit.xml --minimum 328
+        run: python scripts/check-test-report.py build-windows-msvc/ctest-junit.xml --minimum 316
       - name: Build an image for the runtime-only job
         run: build-windows-msvc/neura.exe build examples/hello-world/hello-world.nra -o hello-windows.nvr
       - name: Upload the runtime-only input
