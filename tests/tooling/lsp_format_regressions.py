@@ -21,8 +21,8 @@ class EditorFormattingTests(unittest.TestCase):
         self.client.close()
         self.directory.cleanup()
 
-    def formatting(self, path, method):
-        request = {**params(path), 'options': {'tabSize': 4, 'insertSpaces': True}}
+    def formatting(self, path, method, **options):
+        request = {**params(path), 'options': {'tabSize': 4, 'insertSpaces': True, **options}}
         if method == 'textDocument/rangeFormatting':
             request['range'] = {'start': {'line': 0, 'character': 0},
                                 'end': {'line': 0, 'character': 1}}
@@ -61,6 +61,31 @@ class EditorFormattingTests(unittest.TestCase):
         self.assertEqual(len(edits), 1)
         self.assertIn('func -> int => 1;', edits[0]['newText'])
         self.assertIn(') = new;', edits[0]['newText'])
+
+    def test_tag_style_preserves_spelling_by_default_and_converts_on_request(self):
+        path = self.root / 'tags.nra'
+        mixed = '#Note("one")\r\nlet one = 1;\r\n.Note("two")\r\nlet two = 2;\r\n'
+        self.client.open(path, mixed)
+        full = 'textDocument/formatting'
+        self.assertEqual(self.formatting(path, full), [])
+        self.assertEqual(self.formatting(path, full, tagStyle='keep'), [])
+        self.assertEqual(self.formatting(path, full, tagStyle='dot')[0]['newText'],
+                         mixed.replace('#Note', '.Note'))
+        self.assertEqual(self.formatting(path, 'textDocument/rangeFormatting', tagStyle='hash')[0]['newText'],
+                         mixed.replace('.Note', '#Note'))
+
+        unformatted = mixed.replace(' = ', '=').replace('1;\r\n', '1;\n', 1).rstrip()
+        converted = unformatted.replace('#Note', '.Note')
+        self.client.notify('textDocument/didChange', {
+            'textDocument': {'uri': path.as_uri(), 'version': 2},
+            'contentChanges': [{'text': unformatted}],
+        })
+        self.assertEqual(self.formatting(path, full, tagStyle='dot')[0]['newText'], converted)
+        self.client.notify('textDocument/didChange', {
+            'textDocument': {'uri': path.as_uri(), 'version': 3},
+            'contentChanges': [{'text': converted}],
+        })
+        self.assertEqual(self.formatting(path, full, tagStyle='dot'), [])
 
     def test_next_valid_snapshot_formats_after_incomplete_source(self):
         path = self.root / 'recover.nra'

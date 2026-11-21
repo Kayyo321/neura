@@ -60,12 +60,12 @@ NEURA_KEYWORDS = {
 NEURA_DIGITS = r"[0-9]+(?:'[0-9]+)*"
 NEURA_SUFFIX = r"(?:[su](?:8|16|32|64)|bf16|f(?:16|32|64))"
 NEURA_NUMBER = rf"\b{NEURA_DIGITS}(?:\.{NEURA_DIGITS})?(?:[eE][+-]?{NEURA_DIGITS})?{NEURA_SUFFIX}?\b"
-# A tag before a declaration (docs/lang/Tags.md), `#Name` or the opening of a
-# group `#[Name`, is marked like a keyword.
+# A tag or group opener is marked like a keyword. Dots are also used for
+# member access, so highlighting checks the preceding code token.
 NEURA_TOKEN = re.compile(
     r'(?P<c>//[^\n]*|/\*.*?\*/)|(?P<s>"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\')'
-    r"|(?P<t>#(?:\[\s*)?[A-Za-z_][A-Za-z0-9_]*)"
-    rf"|(?P<n>{NEURA_NUMBER})|(?P<w>\b[A-Za-z_][A-Za-z0-9_]*\b)",
+    r"|(?P<t>#[ \t]*(?:\[[ \t]*)?[A-Za-z_][A-Za-z0-9_]*|\.[ \t]*(?:\[[ \t]*)?[A-Z][A-Za-z0-9_]*|[#.][ \t]*\[)"
+    rf"|(?P<n>{NEURA_NUMBER})|(?P<w>\b[A-Za-z_][A-Za-z0-9_]*\b)|(?P<p>[^\s])",
     re.DOTALL,
 )
 # The word of an accessor clause (Types.md, Accessors), followed by its colon.
@@ -88,9 +88,26 @@ def highlight(language: str, source: str) -> str | None:
     if language not in ("neura", "nra"):
         return None
     out, position = [], 0
+    previous, after_tag = "", False
+    tag_delimiters = []
     for match in NEURA_TOKEN.finditer(source):
         out.append(html.escape(source[position:match.start()], quote=False))
         kind, text = match.lastgroup, match.group()
+        if kind == "t" and text.startswith(".") and (
+                tag_delimiters or (not after_tag and previous not in ("", "(", "{", "}", ",", ";"))):
+            kind = "p"
+        if kind != "c":
+            if kind == "t":
+                if "[" in text:
+                    tag_delimiters.append("]")
+                after_tag = True
+            elif text in ("(", "[") and (tag_delimiters or (after_tag and text == "(")):
+                tag_delimiters.append(")" if text == "(" else "]")
+            elif tag_delimiters and text == tag_delimiters[-1]:
+                tag_delimiters.pop()
+            else:
+                after_tag = bool(tag_delimiters)
+            previous = text
         if kind == "w" and text in CONTEXTUAL_KEYWORDS:
             follower = CONTEXTUAL_FOLLOWER.match(source, match.end())
             keyword = follower is not None and follower.group(1) not in NEURA_KEYWORDS
@@ -100,7 +117,7 @@ def highlight(language: str, source: str) -> str | None:
         if (kind == "w" and text in ("get", "set") and ACCESSOR_CLAUSE.match(source, match.start())
                 and re.search(r"\|\s*$", source[:match.start()])):
             keyword = True
-        if kind == "w" and not keyword:
+        if kind == "p" or (kind == "w" and not keyword):
             out.append(html.escape(text, quote=False))
         else:
             out.append(f'<span class="{"k" if kind in ("w", "t") else kind}">{html.escape(text, quote=False)}</span>')

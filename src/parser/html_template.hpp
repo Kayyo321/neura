@@ -119,9 +119,12 @@ struct StylesheetSyntax {
     std::optional<ResolvedStylesheet> resolved{};
 };
 
-TemplateSyntax parse_template(std::string_view body, Span origin);
-Expr parse_template_expression(const std::vector<Token>& tokens);
-TemplateForHead parse_template_for_head(const std::vector<Token>& tokens);
+TemplateSyntax parse_template(std::string_view body, Span origin,
+                              std::vector<std::size_t>* tag_sigils = nullptr);
+Expr parse_template_expression(const std::vector<Token>& tokens,
+                               std::vector<std::size_t>* tag_sigils = nullptr);
+TemplateForHead parse_template_for_head(const std::vector<Token>& tokens,
+                                       std::vector<std::size_t>* tag_sigils = nullptr);
 
 // The URLs of a srcset value, as byte ranges: each candidate is a URL, then
 // optional descriptors, separated by commas (HTML, "srcset"). A URL may

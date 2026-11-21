@@ -320,6 +320,22 @@ class EditorRegressionTests(unittest.TestCase):
         self.assertIn('The smallest positive normal value.', hover)
         self.assertNotIn('@brief', hover)
 
+    def test_dot_tag_completion_uses_parser_context(self):
+        for index, prefix in enumerate(('.', '#', '.[', '#[')):
+            with self.subTest(prefix=prefix):
+                path = self.root / f'tags-{index}.nra'
+                self.client.open(path, prefix + 'Not')
+                items = self.client.request('textDocument/completion', params(path, 0, len(prefix) + 3))['items']
+                self.assertIn('Note', [item['label'] for item in items])
+
+        path = self.root / 'continued-member.nra'
+        self.client.open(path, 'let Store = module (export let Notice = 1;);\n'
+                               'let result = Store\n    .Not;\n')
+        items = self.client.request('textDocument/completion', params(path, 2, 8))['items']
+        labels = [item['label'] for item in items]
+        self.assertIn('Notice', labels)
+        self.assertNotIn('Note', labels)
+
     def test_completion_ignores_strings_and_comments(self):
         self.assertEqual(self.labels('let text = "import:Std.<cursor>";'), set())
         self.assertEqual(self.labels('// let.<cursor>'), set())
