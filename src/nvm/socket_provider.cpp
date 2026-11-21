@@ -718,7 +718,7 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
                 std::size_t done = 0;
                 while (done < static_cast<std::size_t>(got)) {
                     const auto wrote = ::send(socket->descriptor, buffer.data() + done, got - done, 0);
-                    if (wrote < 0 && errno == EINTR) continue;
+                    if (wrote < 0 && retry_send(errno)) continue;
                     if (wrote < 0) return sent > 0 ? HostCompletion::ok(int64_value(sent)) : errno_failure();
                     done += static_cast<std::size_t>(wrote);
                 }

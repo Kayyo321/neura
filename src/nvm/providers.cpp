@@ -90,6 +90,13 @@ std::uint32_t host_error::from_errno(int error) {
     }
 }
 
+bool retry_send(int error) {
+#if defined(__APPLE__) && defined(EPROTOTYPE)
+    if (error == EPROTOTYPE) return true;
+#endif
+    return error == EINTR;
+}
+
 namespace provider {
 
 bool readable_now(int descriptor) {

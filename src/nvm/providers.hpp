@@ -54,6 +54,13 @@ inline constexpr std::uint32_t other = 100;
 std::uint32_t from_errno(int error);
 } // namespace host_error
 
+// Whether a failed send() should be made again at once rather than reported.
+// EINTR means a signal interrupted it. On Apple systems the kernel can also
+// answer EPROTOTYPE for a stream whose peer is tearing the connection down,
+// a transient state after which the same call reports EPIPE or ECONNRESET;
+// libuv retries it for the same reason.
+bool retry_send(int error);
+
 // At most this many file IDs and this many socket IDs are open at once in a
 // run (Stdlib.md section 5.5).
 inline constexpr std::size_t max_open_ids = 1024;

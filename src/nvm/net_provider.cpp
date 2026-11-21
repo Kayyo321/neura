@@ -444,7 +444,7 @@ void add_net_services(const Adder& add, const OverlapAdder& overlap, StandardSer
         for (;;) {
             const auto count = ::send(stream->descriptor, bytes.data(), size, flags);
             if (count >= 0) return HostCompletion::ok(int32_value(static_cast<std::int32_t>(count)));
-            if (errno != EINTR) return errno_failure();
+            if (!retry_send(errno)) return errno_failure();
         }
     };
 
@@ -638,7 +638,7 @@ void add_net_services(const Adder& add, const OverlapAdder& overlap, StandardSer
                 for (;;) {
                     const auto sent = ::send(held->fd, data->data(), size, flags);
                     if (sent >= 0) return HostCompletion::ok(int32_value(static_cast<std::int32_t>(sent)));
-                    if (errno == EINTR) continue;
+                    if (retry_send(errno)) continue;
                     if (errno == EAGAIN || errno == EWOULDBLOCK) break;
                     return errno_failure();
                 }

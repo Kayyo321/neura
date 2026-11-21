@@ -581,11 +581,19 @@ NEURA_TEST(host, socket_services_report_error_codes) {
     expect_error(host.call("neura.net.listen", {text("127.0.0.1"), i32(-1)}), host_error::invalid_input, "port -1");
 
     // The peer closed: the stream ends, and writes soon fail with a reset.
+    // The first write after the close is accepted locally and draws the
+    // peer's reset, which a later write reports. Linux handles the reset of
+    // a loopback connection within that first call; macOS handles it
+    // asynchronously, and on a loaded machine many writes can be accepted
+    // before it arrives. So the writes continue, a millisecond apart, until
+    // one fails or a deadline passes.
     expect_ok(host.call("neura.net.close", {i64(server)}), "close the server side");
     check(host.call("neura.net.read", {i64(client), i32(8), i64(0)}).value.bytes.empty(), "end of stream");
     HostCompletion failed = HostCompletion::ok();
-    for (int i = 0; i < 100 && failed.success; ++i) {
+    const auto give_up = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    while (failed.success && std::chrono::steady_clock::now() < give_up) {
         failed = host.call("neura.net.write", {i64(client), bytes("after close")});
+        if (failed.success) std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     expect_error(failed, host_error::connection_reset, "write after the peer closed");
 
