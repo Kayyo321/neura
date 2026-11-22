@@ -1,0 +1,42 @@
+let console = import:Std.Io.Console;
+let math = import:Std.Math.Math;
+let program = import:Std.Program;
+
+let sqrt_leaf = func(values: float64[], before: int, after: int, count: uint64) -> uint64 {
+    let root = math.sqrt(values[before]);
+    return root.to_bits() ^ values[after].to_bits() ^ (count + 1u64);
+};
+
+let sqrt_caller = func(values: float64[], before: int, after: int, count: uint64) -> uint64 {
+    return sqrt_leaf(values, before, after, count);
+};
+
+let SqrtInline = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let nan = float64.from_bits(9'223'092'407'043'655'969u64);
+        let subnormal = float64.from_bits(1u64);
+        let values = [-0.0, nan, -1.0, 4.0, 0.0, subnormal];
+        let checksum = 0u64;
+        // Publish the leaf before the caller's first invocation.
+        for (let i = 0; i < 1'024; i = i + 1) {
+            checksum = checksum ^ sqrt_leaf(values, i % values.length, 4, 0u64);
+        }
+        for (let i = 0; i < 1'024; i = i + 1) {
+            checksum = checksum ^ sqrt_caller(values, i % values.length, 4, 0u64);
+        }
+        console.println("{:x}", checksum);
+        if (args.length > 0) {
+            if (args[0] == "before") {
+                console.println("{:x}", sqrt_caller(values, values.length, 4, 0u64));
+            } else if (args[0] == "after") {
+                console.println("{:x}", sqrt_caller(values, 3, values.length, 0u64));
+            } else if (args[0] == "overflow") {
+                console.println("{:x}", sqrt_caller(values, 3, 4, 18'446'744'073'709'551'615u64));
+            }
+        }
+        for (let i = 0; i < values.length; i = i + 1) {
+            console.println("{:x}", sqrt_caller(values, i, 4, 0u64) ^ 1u64);
+        }
+        return program.ExitCode.Ok;
+    };
+);
