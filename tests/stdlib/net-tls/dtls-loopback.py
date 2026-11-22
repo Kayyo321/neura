@@ -6,8 +6,8 @@ free-port races. Stdin barriers select application phases, not sleeps. The relay
 never decrypts, edits protocol fields, or sends packets outside the two peers.
 
 Upstream OpenSSL 4.1.0 issue coverage (ordinary regressions, not reproducers):
-  #32878: KeyUpdate with loss/reordering is adjacent coverage. These tests do not
-          establish overlapping outstanding post-handshake retransmission lists.
+  #32878: The reciprocal update arrives before the client's pending update ACK.
+          This does not test retransmission of another lost post-handshake record.
   #33277: deadline expiry exercises listener retries; it does not force a
           permanent receive-system-call failure in the provider's memory BIO.
   #33278: ordinary listener output is covered, but no retryable write failure is
@@ -64,6 +64,7 @@ class Peer:
         self.output = {"stdout": [], "stderr": []}
         self.queues = {name: queue.Queue() for name in self.output}
         self.threads = []
+        self.commands = []
         for name in self.output:
             thread = threading.Thread(target=self._read, args=(name,), daemon=True)
             thread.start()
@@ -95,12 +96,30 @@ class Peer:
                       for name, lines in self.output.items()}
         if hasattr(self, "related"):
             diagnostic["other-peer"] = self.related.diagnostic()
+        diagnostic["commands"] = self.commands[-8:]
+        if hasattr(self, "relay"):
+            diagnostic["relay"] = self.relay.snapshot()
         return diagnostic
+
+    def count(self, fragment, stream="stdout"):
+        return sum(fragment in line for line in self.output[stream])
+
+    def expect_count(self, fragment, count, stream="stdout", timeout=WAIT):
+        limit = time.monotonic() + timeout
+        while self.count(fragment, stream) < count:
+            remaining = limit - time.monotonic()
+            assert remaining > 0, ("marker count timeout", fragment, count, self.diagnostic())
+            try:
+                line = self.queues[stream].get(timeout=remaining)
+            except queue.Empty:
+                raise AssertionError(("marker count timeout", fragment, count, self.diagnostic())) from None
+            assert line is not None, ("peer closed before marker count", fragment, count, self.diagnostic())
 
     def send(self, text="go\n"):
         assert self.process.poll() is None, (self.command, self.output)
         self.process.stdin.write(text)
         self.process.stdin.flush()
+        self.commands.append((text[:16].rstrip(), len(text)))
 
     def finish(self):
         code = self.process.wait(timeout=WAIT)
@@ -129,6 +148,7 @@ class Relay:
         self.lock = threading.Lock()
         self.mode = handshake
         self.events = collections.Counter()
+        self.packets = collections.deque(maxlen=40)
         self.held = None
         self.failure = None
         self.stopped = threading.Event()
@@ -156,6 +176,7 @@ class Relay:
     def _packet(self, side, data):
         # Side zero is the client's ingress, side one the server's ingress.
         self.events[f"packets-{side}"] += 1
+        self.packets.append((self.mode, side, len(data)))
         if self.mode == "handshake-drop" and side == 0 and not self.events["handshake-drop"]:
             self.events["handshake-drop"] += 1
             return
@@ -204,16 +225,20 @@ class Relay:
             self.events["key-drop"] += 1
             return
         if self.mode == "key-reorder" and side == 1:
-            if len(data) == 35 and not self.events["key-reorder"] and self.held is None:
+            if len(data) == 40 and not self.events["key-reorder"] and self.held is None:
                 self.held = (side, data)
                 return
-            elif len(data) > 200 and self.held is not None:
-                # Reverse the reciprocal update and an expendable application
-                # response. Required data is sent only after the update marker.
+            elif len(data) == 35 and self.held is not None:
+                # Reverse two distinct protocol packets: the reciprocal
+                # KeyUpdate is delivered before the preceding ACK of the
+                # client's update. No old update is replayed after app data.
+                held_side, held = self.held
+                assert held_side == side and len(held) == 40 and held != data
                 self._forward(side, data)
-                self._forward(*self.held)
+                self._forward(held_side, held)
                 self.held = None
                 self.events["key-reorder"] += 1
+                self.events["distinct-key-reorder"] += 1
                 return
         self._forward(side, data)
 
@@ -239,6 +264,10 @@ class Relay:
         assert self.failure is None, self.failure
         for event in events:
             assert self.events[event] > 0, ("relay action not exercised", event, self.events)
+
+    def snapshot(self):
+        with self.lock:
+            return {"events": dict(self.events), "packets": list(self.packets), "held": self.held is not None}
 
     def close(self):
         self.stopped.set()
@@ -349,13 +378,13 @@ def openssl_client(runner, openssl, certificates, key_update=False, drop=False, 
     with contextlib.ExitStack() as stack:
         relay = Relay()
         stack.callback(relay.close)
-        server = neura_peer(stack, runner, relay, True, cert, key, client_cert,
-                            scenario="key-update-reorder" if reorder else "round-trip")
+        server = neura_peer(stack, runner, relay, True, cert, key, client_cert)
         client = Peer([str(openssl), "s_client", "-dtls1_3", "-connect", relay.endpoint(0),
                        "-servername", "localhost", "-verify_hostname", "localhost", "-verify_return_error",
                        "-CAfile", str(cert), "-cert", str(client_cert), "-key", str(client_key), "-msg"])
         stack.callback(client.close)
         client.related = server
+        client.relay = relay
         server.expect("READY")
         server.send()
         client.send(wire_text("ping-one"))
@@ -366,26 +395,31 @@ def openssl_client(runner, openssl, certificates, key_update=False, drop=False, 
         server.send()
         if key_update:
             relay.arm("key-drop" if drop else "key-reorder" if reorder else "plain")
+            acknowledgments = client.count(">>> DTLS 1.3, ACK")
+            updates = client.count("<<< DTLS 1.3, Handshake [length 000d], KeyUpdate")
             client.send("K\n")
             client.expect("KEYUPDATE", stream="stderr")
             client.expect(">>> DTLS 1.3, Handshake [length 000d], KeyUpdate")
             client.expect("<<< DTLS 1.3, ACK", exact=False)
             if reorder:
-                client.send(wire_text("probe"))
-                server.expect("UPDATED")
-                client.expect("<<< DTLS 1.3, Handshake [length 000d], KeyUpdate")
-                server.send()
+                # The reciprocal update preceded the ACK in the reordered
+                # output, so its callback may already have been consumed.
+                client.expect_count("<<< DTLS 1.3, Handshake [length 000d], KeyUpdate", updates + 1)
+                client.expect_count(">>> DTLS 1.3, ACK", acknowledgments + 1)
         client.send(wire_text("ping-two"))
         client.expect(wire_text("pong-two").rstrip("\n"))
         server.expect("DONE")
         server.send()
         server.expect("RESULT ok")
         server.finish()
+        assert [line for line in server.output["stdout"] if line.startswith("RECEIVED ")] == [
+            "RECEIVED ping-one", "RECEIVED ping-two"], server.diagnostic()
+        assert client.count(wire_text("pong-two").rstrip("\n")) == 1, client.diagnostic()
         if key_update:
             assert any(line.startswith("<<< ") and line.endswith(", KeyUpdate")
                        for line in client.output["stdout"]), client.diagnostic()
             assert not any("NewSessionTicket" in line for line in client.output["stdout"]), client.diagnostic()
-        relay.check(*(["key-drop"] if drop else ["key-reorder"] if reorder else []))
+        relay.check(*(["key-drop"] if drop else ["key-reorder", "distinct-key-reorder"] if reorder else []))
     label = ("key-update-drop" if drop else "key-update-reorder" if reorder
              else "key-update" if key_update else "mutual-round-trip")
     print(f"PASS openssl-client-{label}", flush=True)
