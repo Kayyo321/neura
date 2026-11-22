@@ -1,5 +1,5 @@
 // Linux-only focused regression of a real pending net.read after a
-// zero-copy completion. See the receipt for the small-link build command.
+// zero-copy completion. Registered with CTest as host-zerocopy-readiness.
 #include "nvm/provider_internal.hpp"
 #include <arpa/inet.h>
 #include <sys/socket.h>
@@ -13,13 +13,6 @@
 #endif
 #include <cassert>
 #include <iostream>
-
-// Unrelated resources are never constructed by this focused harness.
-namespace neura::nvm::provider {
-void TlsDeleter::operator()(TlsStream*) const { std::abort(); }
-void UpcallDeleter::operator()(Upcall*) const { std::abort(); }
-std::optional<std::uint32_t> set_socket_options(NativeSocket, const HostValue&, const HostValue&) { std::abort(); }
-}
 
 int main() {
 #if defined(__linux__) && defined(SO_ZEROCOPY) && defined(MSG_ZEROCOPY)

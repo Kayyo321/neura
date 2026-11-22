@@ -1,5 +1,5 @@
 // Focused loopback provider tests, independent of the compiler and full suite.
-// See the worker receipt for the exact small-link build command.
+// Registered with CTest as host-socket-transfers.
 #include "nvm/provider_internal.hpp"
 #include "nvm/driver.hpp"
 #include <arpa/inet.h>
@@ -13,15 +13,6 @@
 #include <cassert>
 #include <chrono>
 #include <iostream>
-
-// These unrelated resources/services are never constructed by this harness.
-namespace neura::nvm::provider {
-void TlsDeleter::operator()(TlsStream*) const { std::abort(); }
-void UpcallDeleter::operator()(Upcall*) const { std::abort(); }
-}
-namespace neura::nvm {
-std::optional<IoBackend> available_io_backend(std::int32_t) { return std::nullopt; }
-}
 
 using namespace neura::nvm;
 using namespace neura::nvm::provider;
