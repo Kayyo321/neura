@@ -38,7 +38,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - `EventLoop.select` returns `Ok(Poll)` on Windows. Successful event-loop installs apply to the native driver and debugger. Replays use the recorded result.
 - Raw IP sockets require the explicit `raw` capability and network access. SPIFFE SVID verification requires a nonempty trust domain.
 - Unqualified device and enclave evidence APIs and FN-DSA return typed `Unsupported` results. FN-DSA signing and verification now return `Result`.
-- `TcpSocket.send_file` (`neura.net.send_file`) no longer holds the scheduler. It parks only the calling task and stops after 30 seconds with the count accepted so far. Linux still uses `sendfile(2)`; Windows now copies through a bounded buffer instead of `TransmitFile`. Version 2 of the service is cancellable. [Socket services](docs/runtime/NVM.md#host-services)
+- `TcpSocket.send_file` (`neura.net.send_file`) no longer holds the scheduler. It parks only the calling task and fails with TimedOut when the socket accepts nothing for 30 seconds; the error message reports the bytes already sent. Linux still uses `sendfile(2)`; Windows now copies through a bounded buffer instead of `TransmitFile`. Version 3 of the service sends a prefix per call. [Socket services](docs/runtime/NVM.md#host-services)
 
 ### Known limitations
 

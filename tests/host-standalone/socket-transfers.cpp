@@ -51,6 +51,7 @@ struct Fixture {
     FunctionService::Begin begin_transfer;
     FunctionService::Handler invoke_transfer;
     FunctionService::Handler invoke_file;
+    FunctionService::Handler invoke_file_prefix;
     Fixture() {
         capabilities.net = true;
         capabilities.fs = true;
@@ -60,6 +61,10 @@ struct Fixture {
             if (signature.name == "neura.net.send_zerocopy" && signature.version == 3) {
                 begin_transfer = std::move(fn);
                 invoke_transfer = std::move(invoke);
+            } else if (signature.name == "neura.net.send_file" && signature.version == 3) {
+                // Version 3 sends a prefix; versions 1 and 2 the whole range.
+                invoke_file_prefix = std::move(invoke);
+                begin["neura.net.send_file#3"] = std::move(fn);
             } else {
                 if (signature.name == "neura.net.send_file") invoke_file = invoke;
                 begin[signature.name] = std::move(fn);
@@ -292,7 +297,8 @@ void raw_read_leaves_the_scheduler_available() {
 }
 
 // A Unix-domain stream with a small send buffer gives deterministic
-// backpressure. On Linux the bytes move by sendfile(2).
+// backpressure. Versions 1 and 2 keep the 0.3.0 shape: the whole range, under
+// one 30-second deadline for the call. On Linux the bytes move by sendfile(2).
 void file_transfer_is_bounded() {
     Fixture f;
     FILE* file = ::tmpfile();
@@ -445,6 +451,126 @@ void file_transfer_resumes_under_the_scheduler() {
     std::cout << "PASS: file transfer resumes after its attempt budget under poll and epoll\n";
 }
 
+class ManualClock final : public TaskClock {
+public:
+    std::int64_t now() override { return time; }
+    void wait_until(std::int64_t deadline) override { time = deadline; }
+    bool virtual_time() const override { return true; }
+    std::int64_t time = 0;
+};
+
+// Version 3, as TcpSocket.send_file drives it: each call returns the prefix
+// it sent once the socket would block, and waits only while nothing is
+// accepted, so its 30-second deadline is a no-progress deadline. A slow
+// reader that keeps draining completes a transfer lasting far longer than
+// the window; a stalled one times out, with the count known to the caller.
+void file_prefix_transfer_has_an_idle_deadline() {
+    Fixture f;
+    FILE* file = ::tmpfile();
+    assert(file != nullptr);
+    const int fd = ::fileno(file);
+    std::string content(2 * 1024 * 1024 + 7, '\0');
+    for (std::size_t index = 0; index < content.size(); ++index) content[index] = static_cast<char>('a' + index % 19);
+    assert(::write(fd, content.data(), content.size()) == static_cast<ssize_t>(content.size()));
+    assert(::lseek(fd, 5, SEEK_SET) == 5);
+    f.table.files[1] = {fd, true, false};
+    int stream[2] = {-1, -1};
+    assert(::socketpair(AF_UNIX, SOCK_STREAM, 0, stream) == 0);
+    int small = 4096;
+    assert(::setsockopt(stream[0], SOL_SOCKET, SO_SNDBUF, &small, sizeof small) == 0);
+    f.table.sockets[1] = {stream[0]};
+    const auto& begin = f.begin.at("neura.net.send_file#3");
+    const auto request = [&](std::int64_t offset, std::int64_t count, std::int64_t now) {
+        HostRequest result{0, 0, {int64_value(1), int64_value(1), int64_value(offset), int64_value(count)}};
+        result.now = now;
+        return result;
+    };
+
+    // With room, a call completes at once with the prefix the socket took.
+    auto first = begin(request(100, 1024 * 1024, 0));
+    const auto& prefix = std::get<HostCompletion>(first);
+    assert(prefix.success && prefix.value.bits > 0 && prefix.value.bits < 1024 * 1024);
+    std::string received = read_exact(stream[1], prefix.value.bits);
+    assert(received == content.substr(100, received.size()));
+
+    // A slow reader: every 20 virtual seconds it drains what is queued, so
+    // each call makes progress inside its window although the transfer
+    // lasts for many windows.
+    ManualClock clock;
+    PendingRequests pending(clock, IoBackend::Poll);
+    const auto total_wanted = static_cast<std::int64_t>(content.size()) - 100;
+    std::int64_t total = static_cast<std::int64_t>(received.size());
+    std::uint64_t sequence = 1;
+    int calls = 0;
+    while (total < total_wanted) {
+        auto started = begin(request(100 + total, total_wanted - total, clock.now()));
+        ++calls;
+        if (auto* done = std::get_if<HostCompletion>(&started)) {
+            // The reader has not run: the next call finds the socket full.
+            assert(done->success && done->value.bits > 0);
+            total += static_cast<std::int64_t>(done->value.bits);
+            continue;
+        }
+        assert(std::get<PendingOperation>(started).deadline == clock.now() + 30'000'000'000);
+        pending.add(sequence, std::move(started), true);
+        clock.time += 20'000'000'000;
+        // Nothing was read yet: the call is still waiting, not expired.
+        assert(pending.poll().empty());
+        // The reader drains; the call then completes with its prefix.
+        std::optional<HostCompletion> answer;
+        for (int round = 0; round < 1000 && !answer; ++round) {
+            char chunk[4096];
+            const auto got = ::recv(stream[1], chunk, sizeof chunk, MSG_DONTWAIT);
+            if (got > 0) received.append(chunk, static_cast<std::size_t>(got));
+            for (auto& done : pending.poll()) answer = done.completion;
+        }
+        assert(answer && answer->success && answer->value.bits > 0);
+        total += static_cast<std::int64_t>(answer->value.bits);
+        ++sequence;
+    }
+    assert(total == total_wanted);
+    while (static_cast<std::int64_t>(received.size()) < total) {
+        received += read_exact(stream[1], static_cast<std::size_t>(total) - received.size());
+    }
+    assert(received == content.substr(100));
+    assert(calls > 2 && clock.time > 60'000'000'000);
+    // At the end of the file a call returns 0.
+    auto end = begin(request(static_cast<std::int64_t>(content.size()), 10, clock.now()));
+    assert(std::get<HostCompletion>(end).success && std::get<HostCompletion>(end).value.bits == 0);
+
+    // A stalled reader: after a prefix, a call that sends nothing for the
+    // whole window ends with TimedOut, and the caller still holds the count.
+    const auto filler = fill(stream[0]);
+    auto stalled = begin(request(0, 1000, clock.now()));
+    auto& operation = std::get<PendingOperation>(stalled);
+    assert(!operation.attempt(false));
+    pending.add(sequence, std::move(stalled), true);
+    clock.time += 29'999'999'999;
+    assert(pending.poll().empty());
+    clock.time += 1;
+    const auto expired = pending.poll();
+    assert(expired.size() == 1 && !expired.front().completion.success &&
+           expired.front().completion.value.bits == host_error::timed_out);
+    // Cancellation of a waiting call carries no count either: none was sent.
+    auto waiting = begin(request(0, 1000, clock.now()));
+    const auto cancelled = std::get<PendingOperation>(waiting).attempt(true);
+    assert(cancelled && !cancelled->success && cancelled->value.bits == host_error::cancelled);
+    assert(read_exact(stream[1], filler) == std::string(filler, 'f'));
+    char byte;
+    assert(::recv(stream[1], &byte, 1, MSG_DONTWAIT) < 0 && errno == EAGAIN);
+    assert(::lseek(fd, 0, SEEK_CUR) == 5);
+    // The synchronous form returns a prefix too.
+    const auto sync = f.invoke_file_prefix(HostRequest{0, 0, {int64_value(1), int64_value(1), int64_value(0),
+                                                              int64_value(static_cast<std::int64_t>(content.size()))}});
+    assert(sync.success && sync.value.bits > 0 && sync.value.bits < content.size());
+    assert(read_exact(stream[1], sync.value.bits) == content.substr(0, sync.value.bits));
+
+    ::close(stream[0]);
+    ::close(stream[1]);
+    ::fclose(file);
+    std::cout << "PASS: prefix file transfer: progress resets the 30 s window, stall times out, EOF, cancel\n";
+}
+
 // Linux refuses sendfile(2) from some files (EINVAL); /proc/self/cmdline is
 // one that pread still reads. The transfer then copies through its buffer.
 void file_transfer_falls_back_to_a_copy() {
@@ -464,6 +590,9 @@ void file_transfer_falls_back_to_a_copy() {
     auto sent = f.invoke_file(HostRequest{0, 0, {int64_value(1), int64_value(1), int64_value(0), int64_value(4096)}});
     assert(sent.success && sent.value.bits == expected.size());
     assert(read_exact(stream[1], expected.size()) == expected);
+    sent = f.invoke_file_prefix(HostRequest{0, 0, {int64_value(1), int64_value(1), int64_value(1), int64_value(4096)}});
+    assert(sent.success && sent.value.bits == expected.size() - 1);
+    assert(read_exact(stream[1], expected.size() - 1) == expected.substr(1));
     ::close(stream[0]);
     ::close(stream[1]);
     ::close(fd);
@@ -478,6 +607,7 @@ int main() {
     raw_read_leaves_the_scheduler_available();
     file_transfer_is_bounded();
     file_transfer_resumes_under_the_scheduler();
+    file_prefix_transfer_has_an_idle_deadline();
 #ifdef __linux__
     file_transfer_falls_back_to_a_copy();
 #endif

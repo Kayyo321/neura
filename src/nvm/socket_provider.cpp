@@ -1561,12 +1561,19 @@ struct NonblockingDescription {
 // and for a file sendfile refuses (EINVAL, ENOSYS), each attempt reads at
 // most 64 KiB at the offset and sends without blocking; bytes read but not
 // accepted stay in `buffer`. Either way `sent` is exactly the prefix the
-// socket accepted. A deadline, a cancellation or a failure after progress
-// completes with that prefix.
+// socket accepted.
+//
+// Version 3 (`prefix`) completes with that prefix as soon as the socket
+// would block after progress or the attempt budget is spent, so it only ever
+// waits with nothing sent: its deadline is a no-progress deadline, and the
+// library continues from the returned count. Versions 1 and 2 keep the 0.3.0
+// shape (the whole transfer, a count that is short at the end of the file)
+// for saved images: they wait under one 30-second deadline for the whole
+// call and then return the prefix.
 struct FileTransfer {
     static constexpr std::size_t chunk = 64 * 1024;
-    // Yield to other tasks after this much in one attempt; the socket stays
-    // writable, so the readiness wait returns at once.
+    // Yield to other tasks after this much in one attempt. Version 1 and 2
+    // stay pending: the socket is still writable, so the wait returns at once.
     static constexpr std::int64_t attempt_budget = 1024 * 1024;
 
     std::int64_t socket_id;
@@ -1575,6 +1582,7 @@ struct FileTransfer {
     NativeFile file;
     std::int64_t offset;
     std::int64_t count;
+    bool prefix;
     std::int64_t sent = 0;
     std::string buffer{};
     std::size_t used = 0;
@@ -1587,6 +1595,11 @@ struct FileTransfer {
     }
     HostCompletion finish(const HostCompletion& failure) const {
         return sent > 0 ? HostCompletion::ok(int64_value(sent)) : failure;
+    }
+    // The socket would block: version 3 reports any progress of this call.
+    std::optional<HostCompletion> blocked() const {
+        if (prefix && sent > 0) return HostCompletion::ok(int64_value(sent));
+        return std::nullopt;
     }
 
     std::optional<HostCompletion> attempt(const StandardServices::Tables& table, bool cancelled) {
@@ -1601,7 +1614,7 @@ struct FileTransfer {
         if (!nonblocking.ready) return finish(socket_failure());
         const auto started = sent;
         while (sent < count) {
-            if (sent - started >= attempt_budget) return std::nullopt;
+            if (sent - started >= attempt_budget) return prefix ? HostCompletion::ok(int64_value(sent)) : blocked();
 #ifdef __linux__
             if (kernel_copy && used == buffer.size()) {
                 NonblockingDescription description(target.descriptor);
@@ -1616,7 +1629,7 @@ struct FileTransfer {
                 }
                 if (moved == 0) break; // The end of the file.
                 if (errno == EINTR) continue;
-                if (errno == EAGAIN || errno == EWOULDBLOCK) return std::nullopt;
+                if (errno == EAGAIN || errno == EWOULDBLOCK) return blocked();
                 if (errno != EINVAL && errno != ENOSYS) return finish(host_error::from_errno(errno));
                 kernel_copy = false; // This file needs the buffered copy.
             }
@@ -1634,7 +1647,7 @@ struct FileTransfer {
                                         stream_send_flags | nonblocking_flags);
             if (written < 0) {
                 if (auto failure = nonblocking_failure()) return finish(*failure);
-                return std::nullopt;
+                return blocked();
             }
             if (written == 0) return finish(host_error::connection_reset);
             used += static_cast<std::size_t>(written);
@@ -2184,9 +2197,10 @@ void add_socket_services(const Adder& add, const OverlapAdder& overlap, Standard
 
     // Sends up to `count` bytes of an open file from `offset` to a connected
     // stream (FileTransfer); needs both the net and the fs groups. It stops at
-    // the end of the file, leaves the file position unchanged, and parks on
-    // socket readiness for at most 30 seconds in all.
-    const FunctionService::Begin begin_file_transfer = [=](const HostRequest& request)
+    // the end of the file, leaves the file position unchanged and parks on
+    // socket readiness for at most 30 seconds: with nothing sent in version 3,
+    // for the whole call in versions 1 and 2.
+    const auto begin_file_transfer = [=](const HostRequest& request, bool prefix)
         -> std::variant<HostCompletion, PendingOperation> {
         if (!granted->net || !granted->fs) return denied();
         const auto socket_id = as_int64(request.arguments.at(0));
@@ -2205,7 +2219,7 @@ void add_socket_services(const Adder& add, const OverlapAdder& overlap, Standard
         const auto held = hold_socket(socket->descriptor);
         if (!held) return socket_failure();
         auto transfer = std::make_shared<FileTransfer>(
-            FileTransfer{socket_id, file_id, *held, file->second.descriptor, offset, length});
+            FileTransfer{socket_id, file_id, *held, file->second.descriptor, offset, length, prefix});
         const auto attempt = [=](bool cancelled) { return transfer->attempt(*table, cancelled); };
         if (auto done = attempt(false)) return *done;
         PendingOperation operation;
@@ -2215,11 +2229,16 @@ void add_socket_services(const Adder& add, const OverlapAdder& overlap, Standard
         operation.expire = [transfer] { return transfer->finish(host_error::timed_out); };
         return operation;
     };
-    overlap(signature("neura.net.send_file", {int64(), int64(), int64(), int64()}, int64()),
-            [=](const HostRequest& request) {
-                const auto started_at = socket_time_nanos();
-                return finish_socket_operation(begin_file_transfer(request), started_at);
-            }, begin_file_transfer);
+    for (const bool prefix : {false, true}) {
+        const FunctionService::Begin begin = [=](const HostRequest& request) {
+            return begin_file_transfer(request, prefix);
+        };
+        overlap({"neura.net.send_file", prefix ? 3u : 1u, {int64(), int64(), int64(), int64()}, int64(), uint32()},
+                [=](const HostRequest& request) {
+                    const auto started_at = socket_time_nanos();
+                    return finish_socket_operation(begin(request), started_at);
+                }, begin);
+    }
 
     const FunctionService::Begin begin_relay = [=](const HostRequest& request)
         -> std::variant<HostCompletion, PendingOperation> {
