@@ -9,7 +9,7 @@ let result = import:Std.Core.Result;
 let ui = import:Std.Ui;
 let web = import:Std.Web;
 
-#Immutable
+.Immutable
 let Row = class (
     export last key: string;
     export last count: int32;

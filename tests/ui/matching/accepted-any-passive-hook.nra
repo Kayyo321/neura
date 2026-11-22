@@ -3,9 +3,9 @@ let count = 0;
 let Session = class (
     | get: { count += 1; return instance; };
 );
-#Pure
+.Pure
 let test = func(x: any) -> bool => x is Session;
-#Pure
+.Pure
 let choose = func(x: any) -> bool => match.is (x) {
     Session => true,
     nil => false,

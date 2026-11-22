@@ -1,7 +1,7 @@
 error[W0005]: the setter of 'level' never stores 'level'
   --> $DIR/setter-allow-deny.nra:16:11
    |
-12 | #Deny(W0005)
+12 | .Deny(W0005)
    | ------------ the warning is denied here
 ...
 16 |         | set: {

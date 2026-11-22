@@ -10,7 +10,7 @@ let console = import:Std.Io.Console;
 let program = import:Std.Program;
 let channels = import:Std.Concurrent.Channel;
 
-#Synchronized
+.Synchronized
 let Mailbox = class (
     let visits: int64 = 0;
 

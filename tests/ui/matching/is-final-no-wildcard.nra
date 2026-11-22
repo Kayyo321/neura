@@ -1,7 +1,7 @@
 // Edge case 2: a #Final class subject still needs '_'.
 let.promote _ = import:Std.Core.Optional;
 let Shape = class ( export let sides: int = 0; );
-#Final
+.Final
 let Leaf = class ( export let value: int = 0; );
 let classify = func(value: Leaf) -> int => match.is (value) {
     leaf: Leaf => leaf.value,

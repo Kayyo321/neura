@@ -31,12 +31,12 @@ let Ring = class : Circle (
 );
 // Case 94: '.virtual' in a #Final class, and an override of a #Final class's
 // base.
-#Final
+.Final
 let Sealed = class (
     export let size: int = 1;
         | get.virtual: size;
 );
-#Final
+.Final
 let Disc = class : Shape (
     export let.override label: string;
         | get.override: "disc";

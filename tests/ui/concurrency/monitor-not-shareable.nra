@@ -4,7 +4,7 @@
 let Counter = class (
     let count: int64 = 0;
 
-    #Synchronized
+    .Synchronized
     export let add = func(amount: int64) -> int64 {
         count = count + amount;
         return count;

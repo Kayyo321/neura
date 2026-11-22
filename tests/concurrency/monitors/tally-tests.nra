@@ -5,7 +5,7 @@ let test = import:Std.Test;
 // writes the count back. Every schedule must give the exact total, which
 // holds only because the synchronized methods exclude one another.
 let TallyTests = module (
-    #Synchronized
+    .Synchronized
     let Tally = class (
         let count: int32 = 0;
 

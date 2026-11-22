@@ -16,7 +16,7 @@ let light = func(a: Light = Light.Red) -> Light => a;
 let shape = func(a: Shape = nil) -> Shape => a;
 let wide = func(a: uint64 = 18446744073709551615, b: int64 = -9223372036854775808, c: bool = true) -> uint64 => a;
 let later = func(a: int = 1, b: int) -> int => a + b;
-let tagged = func(#Note("x") a: int = 1) -> int => a;
+let tagged = func(.Note("x") a: int = 1) -> int => a;
 
 let pick = func(a: int) -> int => a
     or func(a: int, b: int = 1) -> int => a + b;

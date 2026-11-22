@@ -1,4 +1,4 @@
 // #Frozen outside the standard library (E0581; Components030 case 31).
-#Frozen
+.Frozen
 let Snapshot = class (
 );

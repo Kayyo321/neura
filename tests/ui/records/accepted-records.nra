@@ -25,12 +25,12 @@ let entry = record("B");
 let total = record(first) + record(second);
 
 // Case 15: tags on the record and on a field.
-#Since("0.3.0")
-let Tagged = record (#Deprecated("use b") a: int, b: int);
+.Since("0.3.0")
+let Tagged = record (.Deprecated("use b") a: int, b: int);
 
 // Case 16: writing the implied tags changes nothing.
-#Immutable
-#Final
+.Immutable
+.Final
 let Plain = record (x: int);
 
 // Case 21: a record may hold its own type.

@@ -3,7 +3,7 @@ let console = import:Std.Io.Console;
 let program = import:Std.Program;
 
 let Holder = class (
-    #[Final, Immutable]
+    .[Final, Immutable]
     export static let Inner = class (
         export last value: int;
         export last flag: bool;

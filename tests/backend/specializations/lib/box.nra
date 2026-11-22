@@ -1,7 +1,7 @@
 // Generic module functions and a generic method. Their specializations for
 // two classes named Row are both named, for example, copy_of_list<Row>.
 export let Box = module (
-    #Final
+    .Final
     export let Holder = class<T> (
         last storage: T[list];
 

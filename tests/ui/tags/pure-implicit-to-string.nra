@@ -10,7 +10,7 @@ let Tag = class (
     };
 );
 
-#Pure
+.Pure
 let describe = func(tags: Tag[list]) -> string {
     return tags.to_string();
 };

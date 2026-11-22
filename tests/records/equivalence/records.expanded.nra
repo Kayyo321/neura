@@ -2,7 +2,7 @@
 let console = import:Std.Io.Console;
 let program = import:Std.Program;
 
-#[Final, Immutable]
+.[Final, Immutable]
 let Node = class (
     export last value: int;
     export last next: Node;
@@ -27,7 +27,7 @@ let Node = class (
         (instance.next == nil ? "nil" : instance.next.to_string()) + ")";
 );
 
-#[Final, Immutable]
+.[Final, Immutable]
 let User = class (
     export last id: int64;
     export last name: string;

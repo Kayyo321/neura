@@ -21,7 +21,7 @@ let Counter = class (
 );
 
 // An immutable class: its instances are values that a summary does not track.
-#Immutable
+.Immutable
 let Frozen = class (
     export last size: int64;
 

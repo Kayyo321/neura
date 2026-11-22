@@ -1,7 +1,7 @@
 error[E0913]: method 'sides' overrides a final method
   --> $DIR/final-method.nra:10:25
    |
- 3 |     #Final
+ 3 |     .Final
    |     ------ 'sides' is marked #Final here
 ...
 10 |     export let.override sides = func() -> int32 {
