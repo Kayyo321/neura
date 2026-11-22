@@ -980,7 +980,7 @@ struct VmGeneration {
     pid_t owner = ::getpid();
     std::uint64_t epoch = 0;
     std::optional<std::uint64_t> observed;
-    int clock = -2; // -2: not probed; -1: unavailable for this process.
+    int clock = -2; // -2: probe on next call; -1: unavailable for this process.
     int events = -2;
 };
 VmGeneration vm_generation;
@@ -1053,6 +1053,10 @@ std::uint64_t vm_generation_events(int socket) {
     return count;
 }
 
+bool vmclock_unavailable(int error) {
+    return error == EACCES || error == EPERM || error == ENODEV || error == ENOENT;
+}
+
 HostCompletion process_generation() {
     struct Lock {
         Lock() { prepare_generation_fork(); }
@@ -1068,7 +1072,8 @@ HostCompletion process_generation() {
     if (vm_generation.events == -2) vm_generation.events = vm_generation_socket();
     vm_generation.epoch += vm_generation_events(vm_generation.events);
     if (vm_generation.clock == -2) {
-        vm_generation.clock = ::open("/dev/vmclock0", O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+        const int clock = ::open("/dev/vmclock0", O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+        if (clock >= 0 || vmclock_unavailable(errno)) vm_generation.clock = clock;
     }
     if (vm_generation.clock >= 0) {
         std::array<unsigned char, generation_internal::vmclock_size> snapshot{};
@@ -1079,20 +1084,22 @@ HostCompletion process_generation() {
         if (size >= 0) {
             const auto observation = generation_internal::vmclock_generation(
                 std::span(snapshot).first(static_cast<std::size_t>(size)));
-            if (!observation.valid) return fail(host_error::other);
-            if (observation.generation && vm_generation.observed != observation.generation) {
+            if (!observation.valid) {
+                // An unknown layout or version does not change between reads.
+                ::close(vm_generation.clock);
+                vm_generation.clock = -1;
+            } else if (observation.generation && vm_generation.observed != observation.generation) {
                 vm_generation.observed = observation.generation;
                 ++vm_generation.epoch;
             }
-        } else if (errno == EACCES || errno == EPERM || errno == ENODEV || errno == ENOENT) {
+        } else if (vmclock_unavailable(errno)) {
             ::close(vm_generation.clock);
             vm_generation.clock = -1;
-        } else {
-            return fail(host_error::from_errno(errno));
         }
     }
-    // Missing or inaccessible optional drivers leave the remaining detectors
-    // active; they are not a failure of OS entropy or POSIX fork detection.
+    // A missing, unreadable or unrecognized VMClock sample leaves the PID and
+    // netlink detectors active. Other open and read errors (EMFILE, EIO) are
+    // retried on the next call.
     return HostCompletion::ok(scalar(vm_generation.epoch));
 }
 #elif defined(_WIN32)
