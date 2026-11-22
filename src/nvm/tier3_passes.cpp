@@ -1168,6 +1168,9 @@ void optimize(const nvr::Image& image, Function& f, bool verify_each) {
     run("fold and propagate", [&] { simplify(f, counts); });
     run("loop-invariant code motion", [&] { hoist_invariants(f, counts); });
     run("value numbering", [&] { number_values(f, counts); });
+    // Hoisting and the second value-numbering round can expose shared
+    // lengths and indices that the first round could not prove related.
+    run("check elimination after hoisting", [&] { eliminate_checks(image, f, counts); });
     run("frame-state loop phis", [&] { merge_loop_state_phis(f, counts); });
     run("dead code removal", [&] { remove_dead(f, counts); });
     run("checkpoint lengths", [&] { compute_budgets(f); });
