@@ -49,8 +49,10 @@ PG_PASSWORD = "neura-sql-test-secret"
 # seconds without the JIT on a slow runner (a 504 on x86_64 macOS, release
 # trial 16). NEURA_TEST_TIMEOUT_SCALE comes from CMake (docs/ContinuousIntegration.md).
 TIMEOUT_SCALE = int(os.environ.get("NEURA_TEST_TIMEOUT_SCALE", "1"))
-# At most 10 s: /slow's answer must come well inside call()'s 30 s.
-PROBE_DEADLINE = min(2 * TIMEOUT_SCALE, 10)
+PROBE_DEADLINE = 2 * TIMEOUT_SCALE
+# A request waits well past the deadline, so /slow's 504 arrives inside it
+# (under the sanitizers, scale 6, /big?1100000 needed more than 10 s).
+CALL_TIMEOUT = PROBE_DEADLINE + 30
 
 
 def check(condition, message):
@@ -112,7 +114,7 @@ def run_host(args, image, *options, env=None, timeout=120):
                           timeout=timeout)
 
 
-def call(args, port, method, path, body=None, timeout=30):
+def call(args, port, method, path, body=None, timeout=CALL_TIMEOUT):
     """One request: with curl when the build found it, otherwise with http.client."""
     if args.curl:
         command = [args.curl, "-s", "-S", "--max-time", str(timeout), "-X", method, "-o", "-", "-w",

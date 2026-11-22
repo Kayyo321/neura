@@ -86,10 +86,12 @@ class Host:
             self.err.flush()
         return self.err_path.read_text()
 
-    def children(self, zygote=False):
+    def children(self, zygote=False, running=False):
+        """`running` leaves out a worker that has exited (a zombie on Linux,
+        a process the host still holds a handle to on Windows)."""
         if WINDOWS:
             # Every worker runs the host's executable; Windows has no zygote.
-            return [] if zygote else windows_children(self.process.pid, self.executable)
+            return [] if zygote else windows_children(self.process.pid, self.executable, running)
         # Workers are children of whichever host thread spawned them; a
         # worker forked by the zygote is a child of the host too. The zygote
         # is left out unless asked for.
@@ -104,7 +106,8 @@ class Host:
         # from a later one. Only the processes that still exist after every
         # list has been read (zombies included) are counted: all of them
         # existed at one moment, the end of the reading.
-        return sorted(pid for pid in set(pids) if exists(pid) and (comm(pid) == "neura-zygote") == zygote)
+        return sorted(pid for pid in set(pids) if exists(pid) and (comm(pid) == "neura-zygote") == zygote
+                      and not (running and zombie(pid)))
 
     def stop(self, sig=TERMINATE, timeout=15):
         if self.process.poll() is None:
@@ -122,8 +125,20 @@ def exists(pid):
     return Path(f"/proc/{pid}").exists()
 
 
-def windows_children(parent, executable):
-    """The processes running `executable` that `parent` started, from a snapshot."""
+def zombie(pid):
+    """Whether a Linux process has exited and awaits its parent's wait; a
+    process that is gone counts as one."""
+    try:
+        return Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0] == "Z"
+    except (OSError, IndexError):
+        return True
+
+
+def windows_children(parent, executable, running=False):
+    """The processes running `executable` that `parent` started, from a
+    snapshot. A process that has exited stays in the snapshot while a handle
+    to it is open, as the host keeps the startup check's worker's; with
+    `running` it is left out."""
     import ctypes
     from ctypes import wintypes
 
@@ -155,7 +170,24 @@ def windows_children(parent, executable):
             found = kernel32.Process32NextW(snapshot, ctypes.byref(entry))
     finally:
         kernel32.CloseHandle(snapshot)
-    return sorted(pids)
+    if not running:
+        return sorted(pids)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    query_limited_information, still_active = 0x1000, 259
+    running = []
+    for pid in pids:
+        process = kernel32.OpenProcess(query_limited_information, False, pid)
+        if not process:
+            continue
+        try:
+            code = wintypes.DWORD()
+            if kernel32.GetExitCodeProcess(process, ctypes.byref(code)) and code.value == still_active:
+                running.append(pid)
+        finally:
+            kernel32.CloseHandle(process)
+    return sorted(running)
 
 
 def reload(args, host):
@@ -376,7 +408,7 @@ def test_limits(args, image):
     # has been reaped, so a request that follows a response at once waits
     # for it instead of being refused.
     host = Host(args, image, "--max-workers", "1", "--max-queue", "1", "--ready-workers", "0",
-                "--request-timeout", "2", "--max-response-bytes", "2000", "--max-body-bytes", "1024")
+                "--request-timeout", "4", "--max-response-bytes", "2000", "--max-body-bytes", "1024")
     try:
         port = host.port
         status, _, body = request(port, "GET", "/big?2000")
@@ -396,10 +428,14 @@ def test_limits(args, image):
         def queued():
             results["queued"] = request(port, "GET", "/hello")[0]
 
+        # S-8 runs from the end of a request's head, queueing included: the
+        # queued request is sent 2 s before the slow one's deadline frees the
+        # slot, so 2 s of its own remain to start a worker (with no ready
+        # worker) and answer; a Windows exec worker did not fit in 0.5 s.
         started = time.time()
         thread = threading.Thread(target=slow)
         thread.start()
-        time.sleep(0.5)
+        time.sleep(2.0)
         waiting = threading.Thread(target=queued)
         waiting.start()
         time.sleep(0.3)
@@ -409,7 +445,7 @@ def test_limits(args, image):
         waiting.join()
         check(results.get("queued") in (200, 503), f"queued behind the slow request: {results}")
         elapsed = time.time() - started
-        check(results.get("slow") == 504 and elapsed < 6, f"deadline: {results} after {elapsed:.1f} s")
+        check(results.get("slow") == 504 and elapsed < 8, f"deadline: {results} after {elapsed:.1f} s")
         time.sleep(0.5)
         status, _, _ = request(port, "GET", "/hello")
         check(status == 200, f"after the deadline: {status}")
@@ -623,9 +659,11 @@ def test_dead_ready_worker(args, image):
     host = Host(args, image, "--ready-workers", "2")
     try:
         deadline = time.time() + 10
-        while len(host.children()) < 2 and time.time() < deadline:
+        # Running workers only: the startup check's worker can still be in
+        # the list once it has exited, and killing it is refused on Windows.
+        while len(host.children(running=True)) != 2 and time.time() < deadline:
             time.sleep(0.05)
-        ready = host.children()
+        ready = host.children(running=True)
         check(len(ready) == 2, f"two ready workers: {ready}")
         for pid in ready:
             os.kill(pid, KILL)
@@ -741,7 +779,9 @@ def test_process_bound(args, image):
             stop.set()
             sampler.join()
             check(statuses.count(200) == 300, f"bounded load ({start}): {sorted(set(statuses))} {len(statuses)}")
-            check(0 < peak[0] <= 3, f"workers at the peak ({start}): {peak[0]}, the bound is 3")
+            # S-1 + S-2 = 3; on Windows S-1 + S-2 + 1 (docs/runtime/ServerHost.md).
+            bound = 4 if WINDOWS else 3
+            check(0 < peak[0] <= bound, f"workers at the peak ({start}): {peak[0]}, the bound is {bound}")
             check(len(host.children(zygote=True)) == (1 if start == "zygote" else 0), f"zygote count ({start})")
         finally:
             stop.set()

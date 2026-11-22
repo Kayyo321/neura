@@ -318,6 +318,8 @@ jobs:
       - repository
       - build-and-test
       - runtime-only
+      - build-and-test-windows
+      - runtime-only-windows
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

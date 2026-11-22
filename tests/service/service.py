@@ -503,13 +503,19 @@ def worker_suite(work: Work) -> None:
                                env=work.env, cwd=work.root)
     process.wait(timeout=30)
     pid = int(pid_file.read_text()) if pid_file.exists() else 0
+
+    def state():
+        """The worker's /proc state, or "X" once it is gone: the entry can
+        disappear between any two reads, which is the end being waited for."""
+        try:
+            return (Path(f"/proc/{pid}") / "stat").read_text().split()[2]
+        except (FileNotFoundError, ProcessLookupError):
+            return "X"
+
     deadline = time.monotonic() + 5
-    while pid and Path(f"/proc/{pid}").exists() and time.monotonic() < deadline:
-        state = (Path(f"/proc/{pid}") / "stat").read_text().split()[2] if Path(f"/proc/{pid}").exists() else "X"
-        if state == "Z":
-            break
+    while pid and state() not in ("X", "Z") and time.monotonic() < deadline:
         time.sleep(0.05)
-    alive = pid and Path(f"/proc/{pid}").exists() and (Path(f"/proc/{pid}") / "stat").read_text().split()[2] != "Z"
+    alive = pid and state() not in ("X", "Z")
     check(process.returncode == 99 and pid and not alive, "the worker ends when its supervisor does")
     process.stdin.close()
     process.stdout.close()
