@@ -1949,6 +1949,13 @@ if(BUILD_TESTING AND NEURA_SDK)
     # Tier 3's checkable variant under the region check of NEURA_TIER_CHECK=1.
     add_test(NAME backend-tier3-check COMMAND neura_backend_tests tier3_check "${CMAKE_CURRENT_SOURCE_DIR}")
     set_tests_properties(backend-tier3-check PROPERTIES ENVIRONMENT "NEURA_TIER_CHECK=1;NEURA_TIER3=interp")
+    # This fixture examines the result join in the native Tier 3 IR dump.
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND neura_host_arch STREQUAL "x86_64")
+        add_test(NAME backend-tier3-nil-result COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/bench-wall/check-tier-invariant.py"
+            --candidate "$<TARGET_FILE:neura>" --fixture nil-result)
+        set_tests_properties(backend-tier3-nil-result PROPERTIES TIMEOUT 180)
+    endif()
 
     add_test(NAME backend-each COMMAND "${CMAKE_COMMAND}"
         "-DNEURA=$<TARGET_FILE:neura>"
