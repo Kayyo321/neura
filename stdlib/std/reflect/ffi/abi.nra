@@ -6,26 +6,26 @@ let.promote optional = import:Std.Core.Optional;
 /// (Linux, BSD, macOS on x86-64), AAPCS64 (Linux and macOS on AArch64), Windows x64, and wasm32.
 /// `long double`, bit fields and packed structs are not described.
 /// @see [Std.Reflect.Ffi.Abi](https://github.com/Kayyo321/neura/wiki/Stdlib-Reflect-Ffi-Abi)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Abi = module (
     /// @brief The calling-convention family of a target.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let CallingConvention = enum (SystemV64, Aapcs64, Win64, Wasm32);
 
     /// @brief A target: its triple, family, and the sizes that differ between C data models (LP64, LLP64,
     /// ILP32).
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let Target = record (triple: string, convention: CallingConvention, pointer_bytes: int, long_bytes: int);
 
     /// @brief The C scalar types.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let CType = enum (
         Bool, Char, SChar, UChar, Short, UShort, Int, UInt, Long, ULong, LongLong, ULongLong, Float, Double,
         Pointer, SizeT, Int8, UInt8, Int16, UInt16, Int32, UInt32, Int64, UInt64
     );
 
     /// @brief One member of a C struct: a scalar or a nested struct, repeated `count` times (a C array).
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let CMember = class (
         export last name: string;
         export last scalar: CType;
@@ -57,7 +57,7 @@ export let Abi = module (
     );
 
     /// @brief A C struct: its members in declaration order.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let CStruct = class (
         export last name: string;
         export last members: CMember[list];
@@ -98,7 +98,7 @@ export let Abi = module (
     );
 
     /// @brief The layout of a struct on a target: size, alignment and each member's byte offset.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let AbiLayout = class (
         export last target: Target;
         export last size: int;
@@ -144,13 +144,13 @@ export let Abi = module (
     /// @brief How an aggregate argument is passed: per eightbyte in integer or SSE registers (System V), in
     /// floating-point registers (an AAPCS64 homogeneous floating-point aggregate), in general registers, or in
     /// memory (on the stack, or by a hidden reference on AAPCS64 and Windows x64).
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let ArgumentClass = enum (Integer, Sse, FloatRegisters, GeneralRegisters, Memory, Indirect);
 
     /// @brief The target a triple names: `x86_64-...-linux-gnu`, `x86_64-apple-darwin`, `aarch64-...`,
     /// `arm64-apple-darwin`, `x86_64-windows-msvc` (any triple naming `windows` on x86-64), `wasm32-...`. Another
     /// triple, Windows on AArch64 among them, returns None.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let target = func(triple: string) -> Optional<Target> {
         last arch = before(triple, "-");
         if (arch == "x86_64" || arch == "amd64") {
@@ -170,7 +170,7 @@ export let Abi = module (
     };
 
     /// @brief The size of a scalar in bytes on the target.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let size_of = func(type: CType, on: Target) -> int => match (type) {
         CType.Bool => 1,
         CType.Char => 1,
@@ -199,17 +199,17 @@ export let Abi = module (
     };
 
     /// @brief The alignment of a scalar in bytes on the target (its size on every supported target).
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let align_of = func(type: CType, on: Target) -> int => size_of(type, on);
 
     /// @brief Whether a scalar is a floating-point type.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let is_float = func(type: CType) -> bool => type == CType.Float || type == CType.Double;
 
     /// @brief The layout of `shape` on `on`, with C's rules: each member at the next multiple of its alignment,
     /// the struct aligned to its strictest member and padded to a multiple of that alignment. An empty struct
     /// traps (C has none).
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let layout = func(shape: CStruct, on: Target) -> AbiLayout {
         if (shape.members.length == 0) {
             trap_with_message("invalid argument: a C struct needs at least one member");
@@ -230,7 +230,7 @@ export let Abi = module (
 
     /// @brief How `shape` is passed as an argument on `on`: one class per eightbyte on System V x86-64, and
     /// one class for the whole value on the other targets.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let classify = func(shape: CStruct, on: Target) -> ArgumentClass[list] {
         last result: ArgumentClass[list] = new;
         last described = layout(shape, on);

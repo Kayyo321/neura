@@ -11,10 +11,10 @@ let slices = import:Std.Net.Core.IoSlice;
 /// heap object reclaimed by the tracing collector; nothing is reference-counted. It is not synchronized:
 /// share it between tasks only behind a lock.
 /// @see [Std.Net.Core.ByteRing](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Core-ByteRing)
-#Since("0.3.0")
+.Since("0.3.0")
 export let ByteRing = module (
     /// @brief A mutable ring buffer of bytes with a fixed capacity.
-    #[Final, NoDiscard, Since("0.3.0")]
+    .[Final, NoDiscard, Since("0.3.0")]
     export let ByteRing = class (
         /// @brief The ring storage, `capacity` bytes long.
         last storage: uint8[list];

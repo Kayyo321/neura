@@ -22,7 +22,7 @@ let.promote _ = import:Std.Core.Unit;
 /// The private key is held as an ordinary string: this runtime cannot lock it in memory or guarantee that it is
 /// erased. `to_string` never shows it.
 /// @see [Std.Net.Tls.DynamicCertResolver](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Tls-DynamicCertResolver)
-#Since("0.3.0")
+.Since("0.3.0")
 export let DynamicCertResolver = module (
     /// @brief The PEM boundary of a certificate.
     const BeginCertificate: string = "-----BEGIN CERTIFICATE-----";
@@ -30,7 +30,7 @@ export let DynamicCertResolver = module (
     const EndCertificate: string = "-----END CERTIFICATE-----";
 
     /// @brief A certificate chain, its private key and a CA trust bundle, as PEM text.
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let CertificateBundle = class (
         /// @brief The leaf certificate first, then intermediates (PEM).
         export last chain_pem: string;
@@ -47,11 +47,11 @@ export let DynamicCertResolver = module (
         };
 
         /// @brief The number of certificates in the chain.
-        #Pure
+        .Pure
         export let chain_length = func -> int => count_certificates(chain_pem);
 
         /// @brief The number of trusted CA certificates.
-        #Pure
+        .Pure
         export let trust_anchor_count = func -> int => count_certificates(trust_pem);
 
         /// @brief Equal when the chain, key and trust bundle are.
@@ -72,7 +72,7 @@ export let DynamicCertResolver = module (
     );
 
     /// @brief Rotates a `CertificateBundle` when the injected change detector reports new material.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let DynamicCertResolver = class (
         /// @brief Reads a new bundle.
         last loader: func() -> Result<CertificateBundle>;
@@ -101,17 +101,17 @@ export let DynamicCertResolver = module (
         };
 
         /// @brief The bundle in use now.
-        #NoDiscard
+        .NoDiscard
         export let current = func -> CertificateBundle => active;
 
         /// @brief How many times the bundle was replaced since creation.
-        #Pure
+        .Pure
         export let generation = func -> int64 => swaps;
 
         /// @brief When the check interval has passed since the last check, asks the detector and reloads on a
         /// change. Ok(true) when the bundle was replaced; Err when the clock, the detector or the reload failed
         /// (the current bundle stays).
-        #NoDiscard
+        .NoDiscard
         export let poll = func -> Result<bool> {
             last now = (clock.monotonic()?).to_nanos();
             if (now - checked_at < interval_nanos) {
@@ -123,7 +123,7 @@ export let DynamicCertResolver = module (
         };
 
         /// @brief Loads and checks a bundle now and swaps it in. Ok(false) when it equals the current one.
-        #NoDiscard
+        .NoDiscard
         export let reload = func -> Result<bool> {
             last loaded = loader();
             last fresh = match (loaded) {
@@ -155,13 +155,13 @@ export let DynamicCertResolver = module (
     /// @brief A bundle from PEM text: the chain must hold at least one complete certificate block, the key a
     /// `PRIVATE KEY` block, and a non-empty trust bundle at least one certificate block. Else a Custom error
     /// with the code `tls.certificate`.
-    #NoDiscard
+    .NoDiscard
     export let bundle = func(chain: string, key: string, trust: string) -> Result<CertificateBundle> =>
         validate(new CertificateBundle(chain, key, trust));
 
     /// @brief A resolver whose first bundle comes from `loader` now. A negative interval traps with "invalid
     /// argument: interval". Err when the clock, the loader or the first bundle fails.
-    #NoDiscard
+    .NoDiscard
     export let create = func(loader: func() -> Result<CertificateBundle>, changed: func() -> Result<bool>,
         clock: Clock, check_interval: Duration) -> Result<DynamicCertResolver> {
         if (check_interval.to_nanos() < 0) {
@@ -175,7 +175,7 @@ export let DynamicCertResolver = module (
 
     /// @brief Watches files for changes and reloads the resolver when they change.
     /// @stub file watching needs a host service (inotify or kqueue) that no runtime offers
-    #NoDiscard
+    .NoDiscard
     export let watch_paths = func(resolver: DynamicCertResolver, paths: string[list]) -> Result<Unit> {
         trap_with_message("unsupported: Std.Net.Tls.DynamicCertResolver.watch_paths is not implemented in Neura 0.3.0 (file watching needs a host service (inotify or kqueue) that no runtime offers)");
     };
@@ -196,7 +196,7 @@ export let DynamicCertResolver = module (
     };
 
     /// @brief The number of complete BEGIN/END CERTIFICATE blocks.
-    #Pure
+    .Pure
     let count_certificates = func(pem: string) -> int {
         let count = 0;
         let from = 0;

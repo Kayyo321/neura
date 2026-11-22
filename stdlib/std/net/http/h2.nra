@@ -15,7 +15,7 @@ let.promote _ = import:Std.Core.Unit;
 /// Unknown identifiers are kept (receivers ignore them). Opening a connection needs TCP and TLS with ALPN "h2"
 /// from the runtime; HPACK (RFC 7541) header compression is not implemented.
 /// @see [Std.Net.Http.H2](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-H2)
-#Since("0.3.0")
+.Since("0.3.0")
 export let H2 = module (
     /// @brief The client connection preface, "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n" (section 3.4).
     export const Preface: string = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
@@ -111,7 +111,7 @@ export let H2 = module (
     export const ErrorHttp11Required: int = 13;
 
     /// @brief A frame header (section 4.1).
-    #[Final, Immutable, ThreadSafe]
+    .[Final, Immutable, ThreadSafe]
     export let FrameHeader = class (
         /// @brief The payload length, 0 through 2^24-1.
         export last length: int;
@@ -152,7 +152,7 @@ export let H2 = module (
     );
 
     /// @brief The identifiers and values of a SETTINGS frame, in order.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Settings = class (
         /// @brief The identifiers, 0 through 65,535.
         export last ids: int[list] = new;
@@ -209,7 +209,7 @@ export let H2 = module (
     );
 
     /// @brief The preface as bytes.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let preface_bytes = func -> uint8[list] {
         last bytes: uint8[list] = new;
         for (let i = 0; i < Preface.byte_length; i++) {
@@ -220,7 +220,7 @@ export let H2 = module (
 
     /// @brief The 9 octets of `header`, the reserved bit unset. Traps with "invalid argument: frame header" when
     /// a field is out of range.
-    #[NoDiscard]
+    .[NoDiscard]
     export let encode_frame_header = func(header: FrameHeader) -> uint8[list] {
         if (header.length < 0 || (header.length as int64) > MaxFrameLength || header.frame_type < 0
             || header.frame_type > 255 || header.flags < 0 || header.flags > 255 || header.stream_id < 0
@@ -243,7 +243,7 @@ export let H2 = module (
 
     /// @brief The frame header at `offset`; the reserved bit is ignored. Err (UnexpectedEnd) when fewer than 9
     /// bytes remain.
-    #[NoDiscard]
+    .[NoDiscard]
     export let decode_frame_header = func(bytes: uint8[list], offset: int) -> Result<FrameHeader> {
         if (offset < 0 || offset + FrameHeaderSize > bytes.length) {
             return Result<FrameHeader>.Err(error.Error.Parse {
@@ -257,7 +257,7 @@ export let H2 = module (
     };
 
     /// @brief The SETTINGS payload holding `settings` in order (section 6.5.1).
-    #[NoDiscard]
+    .[NoDiscard]
     export let encode_settings = func(settings: Settings) -> uint8[list] {
         last bytes: uint8[list] = new;
         for (let i = 0; i < settings.ids.length; i++) {
@@ -277,7 +277,7 @@ export let H2 = module (
     /// code: FRAME_SIZE_ERROR for a length that is not a multiple of 6 (section 6.5); PROTOCOL_ERROR for
     /// ENABLE_PUSH or ENABLE_CONNECT_PROTOCOL other than 0 or 1, or MAX_FRAME_SIZE outside 16,384 through
     /// 16,777,215; FLOW_CONTROL_ERROR for INITIAL_WINDOW_SIZE above 2^31-1 (section 6.5.2).
-    #[NoDiscard]
+    .[NoDiscard]
     export let decode_settings = func(payload: uint8[list]) -> Result<Settings> {
         if (payload.length % 6 != 0) {
             return Result<Settings>.Err(error.custom("FRAME_SIZE_ERROR", "SETTINGS length is not a multiple of 6"));
@@ -303,7 +303,7 @@ export let H2 = module (
     };
 
     /// @brief An HTTP/2 connection over TLS.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let H2Connection = class (
         /// @brief The authority the connection was opened to.
         export last authority: string;
@@ -329,20 +329,20 @@ export let H2 = module (
     /// @brief Opens an HTTP/2 connection to `authority` (host:port): TCP, TLS with ALPN "h2", the preface and
     /// a SETTINGS frame holding `settings` (sections 3.2, 3.4).
     /// @stub needs TLS transport; connection management is not implemented
-    #NoDiscard
+    .NoDiscard
     export let connect = func(authority: string, settings: Settings) -> Result<H2Connection> =>
         host_connect(authority, encode_settings(settings));
 
     /// @brief The HPACK encoding of a field section (RFC 7541).
     /// @stub HPACK (RFC 7541) header compression is not implemented
-    #NoDiscard
+    .NoDiscard
     export let hpack_encode = func(fields: header_map.Headers) -> uint8[list] {
         trap_with_message("unsupported: Std.Net.Http.H2.hpack_encode is not implemented in Neura 0.3.0 (HPACK (RFC 7541) header compression is not implemented)");
     };
 
     /// @brief The field section of an HPACK header block (RFC 7541).
     /// @stub HPACK (RFC 7541) header compression is not implemented
-    #NoDiscard
+    .NoDiscard
     export let hpack_decode = func(block: uint8[list]) -> Result<header_map.Headers> {
         trap_with_message("unsupported: Std.Net.Http.H2.hpack_decode is not implemented in Neura 0.3.0 (HPACK (RFC 7541) header compression is not implemented)");
     };

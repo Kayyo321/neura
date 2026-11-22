@@ -18,17 +18,17 @@ let writer = import:Std.Crypto.Pki.DerWriter;
 /// SLH-DSA, HashML-DSA (NIST CSOR OIDs) and ML-DSA-65 with Ed25519 (composite signatures draft -19). The parameters must have the form each specification gives, and keys of a fixed
 /// size must have that size; anything else is a `Parse` error. Other algorithms parse as `Unknown`.
 /// @see [Std.Crypto.Pki.PublicKeyInfo](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-PublicKeyInfo)
-#Since("0.3.0")
+.Since("0.3.0")
 export let PublicKeyInfo = module (
     /// @brief The public-key algorithms this module identifies.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let KeyAlgorithm = enum (
         Rsa, RsaPss, Ec, Ed25519, Ed448, X25519, X448, MlDsa44, MlDsa65, MlDsa87, MlKem512,
         MlKem768, MlKem1024, SlhDsa, Unknown, MlDsa65Ed25519
     );
 
     /// @brief A subject public key with its algorithm. Compared by its DER encoding.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let SubjectPublicKeyInfo = class (
         /// @brief The AlgorithmIdentifier.
         export last algorithm: AlgorithmIdentifier;
@@ -200,7 +200,7 @@ export let PublicKeyInfo = module (
         Result<T>.Err(Error.Parse { kind: ParseErrorKind.Syntax, offset: offset, message: message });
 
     /// @brief Reads a SubjectPublicKeyInfo element.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse = func(e: der.Element) -> Result<SubjectPublicKeyInfo> {
         if (not e.is_universal(der.TagSequence)) {
             return fail<SubjectPublicKeyInfo>(e.offset, "SubjectPublicKeyInfo must be a SEQUENCE");
@@ -328,11 +328,11 @@ export let PublicKeyInfo = module (
     };
 
     /// @brief Parses the DER encoding of a SubjectPublicKeyInfo.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_der = func(bytes: uint8[list]) -> Result<SubjectPublicKeyInfo> => parse(der.parse(bytes)?);
 
     /// @brief A SubjectPublicKeyInfo from an AlgorithmIdentifier and the raw key bytes (checked like `parse`).
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let of = func(id: AlgorithmIdentifier, key: uint8[list]) -> Result<SubjectPublicKeyInfo> =>
         parse_der(writer.sequence(new([id.der_bytes, writer.bit_string_bytes(key)])));
 

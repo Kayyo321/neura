@@ -9,7 +9,7 @@ let words = import:Std.Crypto.Internal.Words;
 ///
 /// The supported hashes are SHA-224, SHA-256, SHA-384, SHA-512, SHA-512/256, SHA3-224, SHA3-256, SHA3-384 and
 /// SHA3-512; any other value traps with "invalid argument: <name> is not a supported hash here".
-#Since("0.3.0")
+.Since("0.3.0")
 export let AsymHash = module (
     /// @brief Whether the algorithm is one of the supported hashes.
     export let is_supported = func(algorithm: Algorithm) -> bool => match (algorithm) {

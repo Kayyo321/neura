@@ -24,10 +24,10 @@ let words = import:Std.Crypto.Internal.Words;
 /// key are branch-free in source; the sampling, reduction and decoding code branches on secret values, and
 /// the runtime does not guarantee constant time in any case.
 /// @see [Std.Crypto.Pqc.MlKem](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-MlKem)
-#Since("0.3.0")
+.Since("0.3.0")
 export let MlKem = module (
     /// @brief The parameter sets of FIPS 203, section 8: ML-KEM-512, ML-KEM-768 and ML-KEM-1024.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let ParameterSet = enum (MlKem512, MlKem768, MlKem1024);
 
     /// @brief The module rank k of the parameter set.
@@ -45,7 +45,7 @@ export let MlKem = module (
     };
 
     /// @brief The standard's name of the parameter set, such as "ML-KEM-768".
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let name = func(set: ParameterSet) -> string => match (set) {
         ParameterSet.MlKem512 => "ML-KEM-512",
         ParameterSet.MlKem768 => "ML-KEM-768",
@@ -53,15 +53,15 @@ export let MlKem = module (
     };
 
     /// @brief The encapsulation-key length in bytes: 800, 1184 or 1568.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let public_key_length = func(set: ParameterSet) -> int => 384 * rank(set) + 32;
 
     /// @brief The decapsulation-key length in bytes: 1632, 2400 or 3168.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let private_key_length = func(set: ParameterSet) -> int => 768 * rank(set) + 96;
 
     /// @brief The ciphertext length in bytes: 768, 1088 or 1568.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let ciphertext_length = func(set: ParameterSet) -> int => match (set) {
         ParameterSet.MlKem512 => 768,
         ParameterSet.MlKem768 => 1088,
@@ -69,14 +69,14 @@ export let MlKem = module (
     };
 
     /// @brief The length of the shared secret, 32 bytes for every parameter set.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export const SharedSecretLength = 32;
 
     let invalid_key = func<T>(text: string) -> Result<T> => Result<T>.Err(error.custom("crypto.invalid_key", text));
 
     /// @brief An ML-KEM encapsulation key. Every instance has passed the length and modulus checks of FIPS 203,
     /// section 7.2. Equal keys have equal bytes.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let MlKemPublicKey = class (
         /// @brief The parameter set.
         export last parameter_set: ParameterSet;
@@ -99,7 +99,7 @@ export let MlKem = module (
         };
 
         /// @brief A copy of the encoded key.
-        #NoDiscard
+        .NoDiscard
         export let to_bytes = func -> uint8[list] => words.copy(encoded);
 
         export let.override equals = func(other: class) -> bool {
@@ -132,7 +132,7 @@ export let MlKem = module (
 
     /// @brief An ML-KEM decapsulation key (dk_PKE || ek || H(ek) || z) in secret memory. Every instance has
     /// passed the length and hash checks of FIPS 203, section 7.3. `to_string` never prints it.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let MlKemPrivateKey = class implements PrivateKey<MlKem> (
         /// @brief The parameter set.
         export last parameter_set: ParameterSet;
@@ -165,7 +165,7 @@ export let MlKem = module (
         };
 
         /// @brief The matching public key.
-        #NoDiscard
+        .NoDiscard
         export let public_key = func -> MlKemPublicKey => new(parameter_set, public_key_bytes());
 
         /// @brief A fixed placeholder, never the key.
@@ -174,7 +174,7 @@ export let MlKem = module (
 
     /// @brief An ML-KEM parameter set as a `KeyEncapsulation`. The shared secret is a 32-byte `SecretBytes`
     /// and the ciphertext a byte list.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let MlKem = class implements KeyEncapsulation<MlKemPublicKey, MlKemPrivateKey, SecretBytes, uint8[list]> (
         /// @brief The parameter set.
         export last parameter_set: ParameterSet;
@@ -207,7 +207,7 @@ export let MlKem = module (
 
         /// @brief ML-KEM.KeyGen_internal (FIPS 203, Algorithm 16) from the 32-byte seeds d and z. Another
         /// length traps.
-        #NoDiscard
+        .NoDiscard
         export let key_pair_from_seed = func(d: uint8[list], z: uint8[list]) -> MlKemPrivateKey {
             if (d.length != 32 || z.length != 32) {
                 trap_with_message("invalid argument: ML-KEM seeds d and z must be 32 bytes each");
@@ -220,7 +220,7 @@ export let MlKem = module (
 
         /// @brief ML-KEM.KeyGen (FIPS 203, Algorithm 19) with 64 random bytes. Fails when the entropy source
         /// fails.
-        #NoDiscard
+        .NoDiscard
         export let generate_key_pair = func -> Result<MlKemPrivateKey> {
             match (random_bytes(64)) {
                 Result.Ok(seed) => {
@@ -242,7 +242,7 @@ export let MlKem = module (
 
         /// @brief ML-KEM.Encaps_internal (FIPS 203, Algorithm 17) with the given 32-byte m. Another length, or a
         /// key of another parameter set, traps.
-        #NoDiscard
+        .NoDiscard
         export let encapsulate_with = func(public_key: MlKemPublicKey, m: uint8[list])
             -> Encapsulation<SecretBytes, uint8[list]> {
             check_set(public_key.parameter_set);
@@ -257,7 +257,7 @@ export let MlKem = module (
 
         /// @brief ML-KEM.Encaps (FIPS 203, Algorithm 20) with 32 random bytes. Fails when the entropy source
         /// fails.
-        #NoDiscard
+        .NoDiscard
         export let try_encapsulate = func(public_key: MlKemPublicKey) -> Result<Encapsulation<SecretBytes, uint8[list]>> {
             match (random_bytes(32)) {
                 Result.Ok(m) => {
@@ -301,7 +301,7 @@ export let MlKem = module (
 
         /// @brief An encapsulation key from outside the program, after the length and modulus checks of FIPS
         /// 203, section 7.2. A failure is `Custom` code `crypto.invalid_key`.
-        #NoDiscard
+        .NoDiscard
         export let parse_public_key = func(bytes: uint8[list]) -> Result<MlKemPublicKey> {
             if (bytes.length != public_key_length(parameter_set)) {
                 return invalid_key<MlKemPublicKey>(name(parameter_set) .. " encapsulation key must be "
@@ -315,7 +315,7 @@ export let MlKem = module (
 
         /// @brief A decapsulation key from outside the program, after the length and hash checks of FIPS 203,
         /// section 7.3. A failure is `Custom` code `crypto.invalid_key`.
-        #NoDiscard
+        .NoDiscard
         export let parse_private_key = func(bytes: uint8[list]) -> Result<MlKemPrivateKey> {
             if (bytes.length != private_key_length(parameter_set)) {
                 return invalid_key<MlKemPrivateKey>(name(parameter_set) .. " decapsulation key must be "

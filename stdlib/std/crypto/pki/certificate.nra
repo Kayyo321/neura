@@ -28,10 +28,10 @@ let sha2 = import:Std.Crypto.Hash.Sha2;
 /// into its typed field. Unknown extensions stay in `extensions` with their criticality; path validation refuses
 /// an unknown critical one. Profile rules about criticality and names are checked by path validation, not here.
 /// @see [Std.Crypto.Pki.Certificate](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Certificate)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Certificate = module (
     /// @brief The parts of a certificate while it is read. Internal to the parser.
-    #[Internal, Since("0.3.0")]
+    .[Internal, Since("0.3.0")]
     export let CertificateParts = class (
         export let der_bytes: uint8[list] = new;
         export let tbs_bytes: uint8[list] = new;
@@ -68,7 +68,7 @@ export let Certificate = module (
     );
 
     /// @brief A parsed certificate. Equal certificates have equal DER.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Certificate = class (
         /// @brief The DER of the whole certificate.
         export last der_bytes: uint8[list];
@@ -215,11 +215,11 @@ export let Certificate = module (
         Result<T>.Err(Error.Parse { kind: ParseErrorKind.Syntax, offset: offset, message: message });
 
     /// @brief Parses a DER certificate.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse = func(bytes: uint8[list]) -> Result<Certificate> => parse_certificate(bytes, false);
 
     /// @brief Parses a historical AMD Milan CA certificate using its original signed bytes.
-    #[Hidden, NoDiscard, Since("0.3.0")]
+    .[Hidden, NoDiscard, Since("0.3.0")]
     export let parse_amd_milan_ca = func(bytes: uint8[list]) -> Result<Certificate> {
         last cert = parse_certificate(bytes, true)?;
         last names = cert.subject.common_names();
@@ -260,7 +260,7 @@ export let Certificate = module (
     };
 
     /// @brief Every CERTIFICATE block of PEM text, parsed.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_pem = func(text: string) -> Result<Certificate[list]> {
         let out: Certificate[list] = new;
         for (let block in pem.decode_all(text)?) {

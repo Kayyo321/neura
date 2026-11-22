@@ -2,10 +2,10 @@ let.promote _ = import:Std.Crypto.SecretMemory;
 
 /// @brief The contract of a private key typed by its algorithm (Stdlib.md section 21.1).
 /// @see [Std.Crypto.PrivateKey](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-PrivateKey)
-#Since("0.3.0")
+.Since("0.3.0")
 export let PrivateKey = module (
     /// @brief The encoded private key in secret memory. `Alg` is the class of the scheme that uses it.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let PrivateKey = interface<Alg>:SecretMemory<uint8[list]> (
         /// @brief The encoding of the matching public key, which is not secret.
         let public_key_bytes = func -> uint8[list];

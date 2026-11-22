@@ -26,11 +26,11 @@ let words = import:Std.Crypto.Internal.Words;
 /// with R's bytes. The scalar multiplications are branch-free in source; the runtime does not guarantee
 /// constant time.
 /// @see [Std.Crypto.Asymmetric.Ed448](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-Ed448)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Ed448 = module (
     /// @brief An Ed448 public key: the 57-byte encoding of A. Equal keys have equal bytes. The point is
     /// checked when a signature is verified.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Ed448PublicKey = class (
         last encoded: uint8[list];
 
@@ -44,7 +44,7 @@ export let Ed448 = module (
         };
 
         /// @brief A copy of the 57 bytes.
-        #NoDiscard
+        .NoDiscard
         export let to_bytes = func -> uint8[list] => words.copy(encoded);
 
         export let.override equals = func(other: class) -> bool {
@@ -67,7 +67,7 @@ export let Ed448 = module (
 
     /// @brief An Ed448 private key: the 57-byte seed of RFC 8032 in secret memory, with its public key.
     /// `to_string` never prints it.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Ed448PrivateKey = class implements PrivateKey<Ed448Signer> (
         last material: SecretBytes;
         last public_encoded: uint8[list];
@@ -92,7 +92,7 @@ export let Ed448 = module (
         export let public_key_bytes = func -> uint8[list] => words.copy(public_encoded);
 
         /// @brief The matching public key.
-        #NoDiscard
+        .NoDiscard
         export let public_key = func -> Ed448PublicKey => new(public_encoded);
 
         /// @brief A fixed placeholder, never the key.
@@ -100,7 +100,7 @@ export let Ed448 = module (
     );
 
     /// @brief Signs with an Ed448 private key; it also verifies against the matching public key.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Ed448Signer = class implements Signer<Ed448PrivateKey, uint8[list]>,
         Verifier<Ed448PublicKey, uint8[list]> (
         last key: Ed448PrivateKey;
@@ -122,7 +122,7 @@ export let Ed448 = module (
         export let sign = func(message: uint8[list]) -> uint8[list] => sign_core(key, dom4(0, new), message);
 
         /// @brief The Ed448 signature under a context of at most 255 bytes; a longer one traps.
-        #NoDiscard
+        .NoDiscard
         export let sign_with_context = func(message: uint8[list], context: uint8[list]) -> uint8[list] {
             check_context(context);
             return sign_core(key, dom4(0, context), message);
@@ -130,7 +130,7 @@ export let Ed448 = module (
 
         /// @brief The Ed448ph signature: the message is hashed with SHAKE256 to 64 bytes first. The context has
         /// at most 255 bytes.
-        #NoDiscard
+        .NoDiscard
         export let sign_prehashed = func(message: uint8[list], context: uint8[list]) -> uint8[list] {
             check_context(context);
             return sign_core(key, dom4(1, context), sha3.shake256(message, 64));
@@ -147,7 +147,7 @@ export let Ed448 = module (
 
     /// @brief Verifies Ed448 and Ed448ph signatures under a public key, strictly (see the
     /// module).
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Ed448Verifier = class implements Verifier<Ed448PublicKey, uint8[list]> (
         last key: Ed448PublicKey;
 
@@ -169,7 +169,7 @@ export let Ed448 = module (
             verify_core(key.to_bytes(), dom4(0, new), message, signature);
 
         /// @brief Whether the signature is a valid Ed448 signature under the context (at most 255 bytes).
-        #NoDiscard
+        .NoDiscard
         export let verify_with_context = func(message: uint8[list], signature: uint8[list], context: uint8[list])
             -> bool {
             check_context(context);
@@ -177,7 +177,7 @@ export let Ed448 = module (
         };
 
         /// @brief Whether the signature is a valid Ed448ph signature under the context.
-        #NoDiscard
+        .NoDiscard
         export let verify_prehashed = func(message: uint8[list], signature: uint8[list], context: uint8[list])
             -> bool {
             check_context(context);
@@ -288,7 +288,7 @@ export let Ed448 = module (
 
     /// @brief A new private key from a 57-byte seed of `Entropy.os_bytes`, or from the given generator. Fails
     /// when the entropy source fails.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let generate_key_pair = func -> Result<Ed448PrivateKey> {
         match (entropy.os_bytes(57)) {
             Result.Ok(seed) => {
@@ -309,7 +309,7 @@ export let Ed448 = module (
 
     /// @brief A public key from outside the program. A wrong length, or bytes that are not the canonical
     /// encoding of a point, is `Custom` code `crypto.invalid_key`.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_public_key = func(bytes: uint8[list]) -> Result<Ed448PublicKey> {
         if (bytes.length != 57) {
             return Result<Ed448PublicKey>.Err(error.custom("crypto.invalid_key", "Ed448 public key must be 57 bytes"));

@@ -20,14 +20,14 @@ let strings = import:Std.Text.Strings;
 /// own `{"error":"internal"}` answer is not reached through this adapter. A request field whose name is not a token or
 /// whose value has a control character is skipped (the host has already refused such requests).
 /// @see [Std.Net.Http.AppHandler](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-AppHandler)
-#Since("0.3.0")
+.Since("0.3.0")
 export let AppHandler = module (
     /// @brief The fields the host owns or that apply to one connection only, lowercase.
     const HostOwned: string[] = ["content-length", "transfer-encoding", "connection", "keep-alive",
         "proxy-connection", "te", "trailer", "upgrade"];
 
     /// @brief A router answering the requests `Std.App.Context.serve` receives.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let RouterHandler = class implements app.Handler (
         /// @brief The router.
         last router: http.Router;
@@ -57,11 +57,11 @@ export let AppHandler = module (
     );
 
     /// @brief `router` as a handler.
-    #NoDiscard
+    .NoDiscard
     export let handler = func(router: http.Router) -> app.Handler => new RouterHandler(router);
 
     /// @brief The `http.Request` for a host request.
-    #NoDiscard
+    .NoDiscard
     export let to_http_request = func(request: app.Request) -> http.Request {
         last fields = new http.Headers();
         for (let field in request.headers) {
@@ -75,7 +75,7 @@ export let AppHandler = module (
 
     /// @brief The `app.Response` for a router response: status, fields without the host-owned ones, and the
     /// body (a stream collected in memory).
-    #NoDiscard
+    .NoDiscard
     export let to_app_response = func(response: http.Response) -> Result<app.Response> {
         last sink = new http.MemorySink();
         response.write_to(sink)?;

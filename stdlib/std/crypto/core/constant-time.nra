@@ -5,10 +5,10 @@
 /// tiers and the processor may still take time that depends on values. Use these functions so that the
 /// source adds no timing leak of its own, and do not rely on them against a local attacker.
 /// @see [Std.Crypto.Core.ConstantTime](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Core-ConstantTime)
-#Since("0.3.0")
+.Since("0.3.0")
 export let ConstantTime = module (
     /// @brief 1 when `a` equals `b`, otherwise 0, as a uint32.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let ct_eq_uint32 = func(a: uint32, b: uint32) -> uint32 {
         // (x + 2^32 - 1) >> 32 is 1 for every x from 1 to 2^32 - 1 and 0 for x = 0.
         last nonzero = (((a ^ b) as uint64) + 4294967295) >> 32;
@@ -16,7 +16,7 @@ export let ConstantTime = module (
     };
 
     /// @brief 1 when `a` is below `b`, otherwise 0, as a uint32.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let ct_less = func(a: uint32, b: uint32) -> uint32 {
         // a + 2^32 - b reaches 2^32 exactly when a >= b.
         last not_less = ((a as uint64) + 4294967296 - (b as uint64)) >> 32;
@@ -25,7 +25,7 @@ export let ConstantTime = module (
 
     /// @brief `a` when `choice` is 1 and `b` when it is 0. Any other choice traps with "invalid argument:
     /// choice must be 0 or 1", a check on the caller's public contract rather than on secret data.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let ct_select = func(choice: uint32, a: uint32, b: uint32) -> uint32 {
         if (choice > 1) {
             trap_with_message("invalid argument: choice must be 0 or 1");
@@ -36,7 +36,7 @@ export let ConstantTime = module (
 
     /// @brief A new list holding `a` when `choice` is 1 and `b` when it is 0, byte by byte. The lists must have
     /// one length; otherwise, or for a choice other than 0 or 1, it traps.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let ct_select_bytes = func(choice: uint32, a: uint8[list], b: uint8[list]) -> uint8[list] {
         if (choice > 1) {
             trap_with_message("invalid argument: choice must be 0 or 1");
@@ -54,7 +54,7 @@ export let ConstantTime = module (
 
     /// @brief Whether the two lists hold the same bytes. Lists of different lengths are unequal at once: the
     /// length is treated as public. Otherwise every byte is read, whatever the first difference.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let ct_eq = func(a: uint8[list], b: uint8[list]) -> bool {
         if (a.length != b.length) {
             return false;

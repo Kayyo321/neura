@@ -2,7 +2,7 @@
 /// is Std.Crypto.Symmetric.AesBlock, and the modes build on this. Table lookups are indexed by secret bytes, so
 /// this code is not constant-time on hardware with caches (and the runtime promises no constant time anyway).
 /// The S-boxes are printed by scripts/crypto-vectors/constants.py.
-#Since("0.3.0")
+.Since("0.3.0")
 export let Aes = module (
     /// @brief A new list of the table (a function, so that tasks can use it: arrays are not transferable).
     let sbox_table = func -> uint8[list] => new([

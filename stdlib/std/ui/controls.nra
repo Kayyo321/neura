@@ -9,10 +9,10 @@ let ui = import:Std.Ui;
 /// `form`, `ul`, `table`, `dialog`), so focus, keyboard use and accessibility come from the browser.
 /// The markup is plain and unstyled: give the page a stylesheet. A view given to a control comes
 /// from a render function, because a control renders a fresh view each time.
-#Since("0.3.0")
+.Since("0.3.0")
 export let Controls = module (
     /// @brief One option of a `select`: the value submitted and the text shown.
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let Choice = class (
         export last value: string;
         export last label: string;
@@ -35,7 +35,7 @@ export let Controls = module (
     );
 
     /// @brief One row of a `table`: a key that stays with the row when rows move, and its cells' text.
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let TableRow = class (
         export last key: string;
         export last cells: frozen.FrozenList<string>;

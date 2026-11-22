@@ -17,7 +17,7 @@ let.promote _ = import:Std.Time.Duration;
 /// window to 1 MSS. An ECN-CE congestion event is handled like a loss. TARGET is at most 100 ms (section 2.5).
 /// The window does not grow while the sender is application-limited.
 /// @see [Std.Net.Quic.Ledbat](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Quic-Ledbat)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Ledbat = module (
     /// @brief CURRENT_FILTER: the delay samples the MIN filter keeps.
     export const CurrentFilter: int = 4;
@@ -29,7 +29,7 @@ export let Ledbat = module (
     const MinuteNanos: int64 = 60000000000;
 
     /// @brief One connection's LEDBAT state.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Ledbat = class implements CongestionController (
         /// @brief The MSS (maximum datagram size) in bytes.
         export last max_datagram_size: int64;
@@ -72,7 +72,7 @@ export let Ledbat = module (
         export let can_send = func(bytes: int64) -> bool => in_flight + bytes <= cwnd;
 
         /// @brief The filtered current delay minus the base delay in microseconds; 0 before any sample.
-        #Pure
+        .Pure
         export let queuing_delay_micros = func -> int64 {
             return if (current_delays.length == 0) -> 0
                 else -> minimum(current_delays) - minimum(base_delays);

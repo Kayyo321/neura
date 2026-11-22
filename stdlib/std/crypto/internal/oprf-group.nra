@@ -15,7 +15,7 @@ let xmd = import:Std.Crypto.Internal.HashToCurveXmd;
 
 /// @brief RFC 9497 ciphersuite operations for the shared OPRF protocol. Internal.
 /// Points are opaque to the caller and come from one selected group. Scalars are ordinary limbs.
-#Since("0.3.0")
+.Since("0.3.0")
 export let OprfGroup = module (
     export let Suite = enum (Ristretto255Sha512, P256Sha256, P384Sha384, P521Sha512, Decaf448Shake256);
 
@@ -63,7 +63,7 @@ export let OprfGroup = module (
         let decode = func(bytes: uint8[list]) -> Optional<class>;
     );
 
-    #Final
+    .Final
     let RistrettoGroup = class implements Group (
         last g: ristretto.Group = new;
 
@@ -132,7 +132,7 @@ export let OprfGroup = module (
         return xof.squeeze(length);
     };
 
-    #Final
+    .Final
     let DecafGroup = class implements Group (
         last g: decaf.Group = new;
 
@@ -206,7 +206,7 @@ export let OprfGroup = module (
         export let.override to_string = func -> string => "OprfGroup.DecafGroup";
     );
 
-    #Final
+    .Final
     let WeierstrassGroup = class implements Group (
         last g: weierstrass.Curve;
 

@@ -18,21 +18,21 @@ let slh_dsa = import:Std.Crypto.Pqc.SlhDsa;
 
 /// @brief Signature verification for certificates, certification requests, OCSP and Certificate Transparency.
 /// @see [Std.Crypto.Pki.AlgorithmVerifier](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-AlgorithmVerifier)
-#Since("0.3.0")
+.Since("0.3.0")
 export let AlgorithmVerifier = module (
     /// @brief Dispatches by signature OID. Unknown or policy-denied algorithms give UnsupportedAlgorithm.
     /// Mismatched keys, malformed parameters and failed signature checks give Invalid.
     /// @see [Std.Crypto.Pki.AlgorithmVerifier](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-AlgorithmVerifier)
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let AlgorithmVerifier = class implements SignatureVerifier (
         /// @brief Creates a stateless verifier with the library's algorithm dispatch.
         /// @see [Std.Crypto.Pki.AlgorithmVerifier](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-AlgorithmVerifier)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let init = func {};
 
         /// @brief Checks the signature under the supplied key and signature AlgorithmIdentifier.
         /// @see [Std.Crypto.Pki.AlgorithmVerifier](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-AlgorithmVerifier)
-        #[NoDiscard, Since("0.3.0")]
+        .[NoDiscard, Since("0.3.0")]
         export let verify_signature = func(algorithm: AlgorithmIdentifier, key: SubjectPublicKeyInfo,
             signed: uint8[list], signature: uint8[list]) -> SignatureCheck {
             last dotted = algorithm.oid.dotted;
@@ -70,7 +70,7 @@ export let AlgorithmVerifier = module (
 
         /// @brief The verifier's class name.
         /// @see [Std.Crypto.Pki.AlgorithmVerifier](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-AlgorithmVerifier)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let.override to_string = func -> string => "AlgorithmVerifier";
     );
 

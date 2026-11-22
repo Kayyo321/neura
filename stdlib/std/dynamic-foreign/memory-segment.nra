@@ -11,10 +11,10 @@ let scopes = import:Std.DynamicForeign.Internal.Scope;
 /// a raw address, such as a pointer returned by native code, has size 0 until `reinterpret` gives it a size.
 /// Values use the runner's native byte order. Needs the native capability.
 /// @see [Std.DynamicForeign.MemorySegment](https://github.com/Kayyo321/neura/wiki/Stdlib-DynamicForeign-MemorySegment)
-#Since("0.1.0")
+.Since("0.1.0")
 export let MemorySegment = module (
     /// @brief A native address, a size in bytes, and the scope that owns the memory.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let MemorySegment = class (
         /// @brief The address of the first byte.
         last base: int64;
@@ -31,28 +31,28 @@ export let MemorySegment = module (
         };
 
         /// @brief The native address of the first byte.
-        #Pure
+        .Pure
         export let address = func -> int64 => base;
 
         /// @brief The number of accessible bytes.
-        #Pure
+        .Pure
         export let byte_size = func -> int64 => length;
 
         /// @brief Whether the address is 0.
-        #Pure
+        .Pure
         export let is_null = func -> bool => base == 0;
 
         /// @brief Whether the owning arena is still open.
-        #Pure
+        .Pure
         export let is_alive = func -> bool => owner.is_alive();
 
         /// @brief The scope that owns the memory; library code passes it on to derived segments.
-        #Pure
+        .Pure
         export let scope = func -> scopes.Scope => owner;
 
         /// @brief The same address with `size` accessible bytes, for memory whose extent native code defines.
         /// Like Java's reinterpret, this is unsafe: the size is not checked against the real allocation.
-        #Pure
+        .Pure
         export let reinterpret = func(size: int64) -> MemorySegment {
             if (size < 0) {
                 trap_with_message("invalid argument: negative size");
@@ -61,14 +61,14 @@ export let MemorySegment = module (
         };
 
         /// @brief The `size` bytes starting at `offset`, sharing this segment's scope.
-        #Pure
+        .Pure
         export let as_slice = func(offset: int64, size: int64) -> MemorySegment {
             check(offset, size);
             return new(base + offset, size, owner);
         };
 
         /// @brief The bytes from `offset` to the end, sharing this segment's scope.
-        #Pure
+        .Pure
         export let as_slice_from = func(offset: int64) -> MemorySegment => as_slice(offset, length - offset);
 
         /// @brief Reads a C `_Bool`; any nonzero byte is true.
@@ -195,16 +195,16 @@ export let MemorySegment = module (
         };
 
         /// @brief Hashes the address and size.
-        #Pure
+        .Pure
         export let.override hash_code = func -> uint32 => (base.to_string() .. ":" .. length.to_string()).hash_code();
 
         /// @brief `MemorySegment(address, size)` with the address in hexadecimal.
-        #Pure
+        .Pure
         export let.override to_string = func -> string =>
             "MemorySegment(0x" .. hex(base) .. ", " .. length.to_string() .. ")";
 
         /// @brief Traps unless the scope is open and `size` bytes at `offset` lie inside the segment.
-        #Pure
+        .Pure
         export let check = func(offset: int64, size: int64) {
             owner.check_alive();
             if (offset < 0 || size < 0 || offset > length || size > length - offset) {

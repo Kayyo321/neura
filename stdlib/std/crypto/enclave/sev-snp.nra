@@ -17,7 +17,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// and the minimum reported TCB. Supply current, independently authenticated revocation information
 /// when deciding whether to trust a live peer.
 /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
-#Since("0.3.0")
+.Since("0.3.0")
 export let SevSnp = module (
     const ReportLength = 1184;
     const SignedLength = 672;
@@ -26,13 +26,13 @@ export let SevSnp = module (
 
     /// @brief A structurally valid SEV-SNP report with its signed bytes retained. Verify it before trusting any field.
     /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Report = class (
         last encoded: uint8[list];
 
         /// @brief Copies a structurally valid report. For untrusted bytes, call parse.
         /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let init = func(bytes: uint8[list]) {
             last problem = format_problem(bytes);
             if (problem != "") {
@@ -43,48 +43,48 @@ export let SevSnp = module (
 
         /// @brief All bytes of this report, including its signature structure.
         /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
-        #[NoDiscard, Since("0.3.0")]
+        .[NoDiscard, Since("0.3.0")]
         export let to_bytes = func -> uint8[list] => words.copy(encoded);
 
         /// @brief The signed 64-byte report data.
         /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
-        #[NoDiscard, Since("0.3.0")]
+        .[NoDiscard, Since("0.3.0")]
         export let report_data = func -> uint8[list] => words.slice(encoded, 80, 144);
 
         /// @brief The signed 48-byte launch measurement.
         /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
-        #[NoDiscard, Since("0.3.0")]
+        .[NoDiscard, Since("0.3.0")]
         export let measurement = func -> uint8[list] => words.slice(encoded, 144, 192);
 
         /// @brief The reported TCB field. Milan orders its SPLs as bootloader, TEE, four reserved bytes, SNP, microcode.
         /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
-        #[NoDiscard, Since("0.3.0")]
+        .[NoDiscard, Since("0.3.0")]
         export let reported_tcb = func -> uint64 => words.load64_le(encoded, 384);
 
         /// @brief The reported guest VM privilege level.
         /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
-        #[NoDiscard, Since("0.3.0")]
+        .[NoDiscard, Since("0.3.0")]
         export let vmpl = func -> uint32 => words.load32_le(encoded, 48);
 
         /// @brief Whether the signed policy allows debugging.
         /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
-        #[NoDiscard, Since("0.3.0")]
+        .[NoDiscard, Since("0.3.0")]
         export let debug_allowed = func -> bool => (words.load64_le(encoded, 8) & 524288) != 0;
 
         /// @brief Equality by complete report bytes.
         /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let.override equals = func(other: class) -> bool =>
             other is Report && constant_time.ct_eq(encoded, (other as Report).encoded);
 
         /// @brief Hash of the complete report bytes.
         /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let.override hash_code = func -> uint32 => der.hash_range(encoded, 0, ReportLength);
 
         /// @brief Displays the report type without displaying chip identification or challenge bytes.
         /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let.override to_string = func -> string => "SevSnp.Report(v2)";
     );
 
@@ -125,7 +125,7 @@ export let SevSnp = module (
 
     /// @brief Parses an untrusted version 2 report and checks its fixed layout and signature padding.
     /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse = func(bytes: uint8[list]) -> Result<Report> {
         last problem = format_problem(bytes);
         if (problem != "") {
@@ -195,7 +195,7 @@ export let SevSnp = module (
     /// Checks VMPL 0, the 64-byte expected report data, the 48-byte expected measurement, and a componentwise
     /// minimum Milan TCB. Debug policy is denied by default. Supply the certificate DER and provision the trusted ARK independently of the report.
     /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let verify = func(bytes: uint8[list], vcek_der, ask_der, trusted_ark_der: uint8[list],
         at: time.Instant, expected_data, expected_measurement: uint8[list],
         minimum_tcb: uint64, allow_debug: bool = false) -> Result<Report> {
@@ -251,14 +251,14 @@ export let SevSnp = module (
     /// @brief Parses an AMD Milan ASK or ARK, accepting the historical one-bit keyUsage padding.
     /// Verification uses the original signed bytes. Authenticate the ARK independently before use.
     /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_milan_ca = func(bytes: uint8[list]) -> Result<certs.Certificate> =>
         certs.parse_amd_milan_ca(bytes);
 
     /// @brief Requests a fresh report from an AMD SEV-SNP guest device.
     /// @stub the runtime has no SEV-SNP guest report host service
     /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let request_report = func(report_data: uint8[list]) -> Result<uint8[list]> {
         trap_with_message("unsupported: Std.Crypto.Enclave.SevSnp.request_report is not implemented in Neura 0.3.0 (the runtime has no SEV-SNP guest report host service)");
     };

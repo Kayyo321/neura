@@ -32,14 +32,14 @@ let writer = import:Std.Crypto.Pki.DerWriter;
 /// Errors are `Custom` codes ct.version, ct.log_id, ct.signature, ct.unsupported, ct.range and ct.proof; malformed
 /// input is a `Parse` error.
 /// @see [Std.Crypto.Pki.Transparency](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Transparency)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Transparency = module (
     /// @brief LogEntryType of RFC 6962, section 3.1.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let EntryType = enum (X509Entry, PrecertEntry);
 
     /// @brief One SignedCertificateTimestamp (version v1).
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let SignedCertificateTimestamp = class (
         export last version: int;
         /// @brief The log's ID: SHA-256 of its public key's SubjectPublicKeyInfo.
@@ -80,7 +80,7 @@ export let Transparency = module (
     );
 
     /// @brief A signed tree head (the get-sth response of RFC 6962, section 4.3).
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let SignedTreeHead = class (
         export last tree_size: int64;
         export last timestamp: uint64;
@@ -161,7 +161,7 @@ export let Transparency = module (
 
     /// @brief Reads a TLS SignedCertificateTimestampList: a 2-byte length, then SCTs each with a 2-byte length.
     /// The list and each SCT must be non-empty, and every length must fit.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_list = func(bytes: uint8[list]) -> Result<SignedCertificateTimestamp[list]> {
         if (bytes.length < 2) {
             return fail<SignedCertificateTimestamp[list]>(0, "truncated SCT list");
@@ -187,7 +187,7 @@ export let Transparency = module (
     };
 
     /// @brief Reads one serialized SCT; `offset` places error offsets in the enclosing input.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_sct = func(bytes: uint8[list], offset: int) -> Result<SignedCertificateTimestamp> {
         // version(1) log_id(32) timestamp(8) extensions(2 + n) hash(1) signature algorithm(1) signature(2 + m)
         if (bytes.length < 47) {
@@ -216,7 +216,7 @@ export let Transparency = module (
     };
 
     /// @brief The SCTs of a certificate's SCT list extension (RFC 6962, section 3.3); empty when it has none.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let scts_of = func(certificate: Certificate) -> Result<SignedCertificateTimestamp[list]> {
         match (certificate.sct_list) {
             Optional.Some(list) => {
@@ -231,7 +231,7 @@ export let Transparency = module (
 
     /// @brief The certificate's TBSCertificate with the SCT list extension removed (and the extensions field
     /// removed if that leaves it empty), re-encoded in DER: the precertificate's TBSCertificate.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let precert_tbs = func(certificate: Certificate) -> Result<uint8[list]> {
         last tbs = der.parse(certificate.tbs_bytes)?;
         let fields: uint8[list][list] = new;
@@ -293,7 +293,7 @@ export let Transparency = module (
 
     /// @brief The bytes the log signed for the SCT (RFC 6962, section 3.2): version, certificate_timestamp,
     /// timestamp, entry type and signed entry, and the SCT's extensions.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let signed_data = func(sct: SignedCertificateTimestamp, entry: EntryType, certificate: Certificate,
         issuer: Optional<Certificate>) -> Result<uint8[list]> {
         let out: uint8[list] = new([0, 0]);
@@ -307,7 +307,7 @@ export let Transparency = module (
     /// SubjectPublicKeyInfo, and the signature must verify over `signed_data`. Unless supplied, the verifier
     /// is the library's AlgorithmVerifier.
     /// @see [Std.Crypto.Pki.Transparency](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Transparency)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let verify_sct = func(sct: SignedCertificateTimestamp, entry: EntryType, certificate: Certificate,
         issuer: Optional<Certificate>, log_key: SubjectPublicKeyInfo) -> Result<Unit> {
         return verify_sct(sct, entry, certificate, issuer, log_key, new algorithm_verifier.AlgorithmVerifier());
@@ -345,7 +345,7 @@ export let Transparency = module (
 
     /// @brief Verifies a signed tree head under the log's key using the library verifier or a supplied verifier.
     /// @see [Std.Crypto.Pki.Transparency](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Transparency)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let verify_sth = func(sth: SignedTreeHead, log_key: SubjectPublicKeyInfo) -> Result<Unit> {
         return verify_sth(sth, log_key, new algorithm_verifier.AlgorithmVerifier());
     } or func(sth: SignedTreeHead, log_key: SubjectPublicKeyInfo, verifier: SignatureVerifier)
@@ -356,7 +356,7 @@ export let Transparency = module (
 
     /// @brief The MerkleTreeLeaf (RFC 6962, section 3.4) of an SCT's entry: version v1, timestamped_entry, and the
     /// TimestampedEntry. Its leaf hash is `merkle.leaf_hash<Sha256>(leaf)`.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let leaf_input = func(sct: SignedCertificateTimestamp, entry: EntryType, certificate: Certificate,
         issuer: Optional<Certificate>) -> Result<uint8[list]> {
         let out: uint8[list] = new([0, 0]);
@@ -367,11 +367,11 @@ export let Transparency = module (
     };
 
     /// @brief The leaf hash of a MerkleTreeLeaf: SHA-256(0x00 || leaf).
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let leaf_hash = func(leaf: uint8[list]) -> uint8[list] => merkle.leaf_hash<sha2.Sha256>(leaf);
 
     /// @brief Whether the audit path proves the leaf hash at `index` in the tree of `tree_size` with the root.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let verify_inclusion = func(leaf_hash_bytes: uint8[list], index: int64, tree_size: int64,
         proof: uint8[list][list], root: uint8[list]) -> Result<Unit> {
         if (index < 0 || index > 2147483647 || tree_size < 0 || tree_size > 2147483647) {
@@ -385,7 +385,7 @@ export let Transparency = module (
 
     /// @brief Whether the consistency proof shows that the tree of `old_size` with `old_root` is a prefix of the
     /// tree of `new_size` with `new_root`.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let verify_consistency = func(old_size: int64, new_size: int64, old_root: uint8[list], new_root: uint8[list],
         proof: uint8[list][list]) -> Result<Unit> {
         if (old_size < 0 || old_size > 2147483647 || new_size < 0 || new_size > 2147483647) {
@@ -399,7 +399,7 @@ export let Transparency = module (
 
     /// @brief Parses a get-sth JSON response: tree_size, timestamp, sha256_root_hash (Base64, 32 bytes) and
     /// tree_head_signature (Base64 of a TLS DigitallySigned).
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_sth_json = func(text: string) -> Result<SignedTreeHead> {
         last value = json.parse(text)?;
         match (value) {

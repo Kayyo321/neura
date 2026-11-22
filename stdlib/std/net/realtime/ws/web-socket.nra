@@ -34,7 +34,7 @@ let.promote _ = import:Std.Core.Unit;
 /// a close frame with status 1000, reads until the peer's close frame arrives (discarding data), and closes the
 /// transport. Extensions are never negotiated: RSV bits must be zero.
 /// @see [Std.Net.Realtime.Ws.WebSocket](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-Ws-WebSocket)
-#Since("0.3.0")
+.Since("0.3.0")
 export let WebSocket = module (
     /// @brief The largest HTTP head `connect` and `accept` read, in bytes.
     export const MaxHeadBytes: int = 16384;
@@ -43,7 +43,7 @@ export let WebSocket = module (
     export let ReadyState = enum (Open, Closing, Closed);
 
     /// @brief Size limits of a connection.
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let WebSocketOptions = class (
         /// @brief The largest frame payload accepted.
         export last max_frame_size: int;
@@ -83,12 +83,12 @@ export let WebSocket = module (
     );
 
     /// @brief 1 MiB frames, 16 MiB messages, 64 KiB fragments.
-    #NoDiscard
+    .NoDiscard
     export let default_options = func -> WebSocketOptions => new WebSocketOptions(1048576, 16777216, 65536);
 
     /// @brief A byte transport over read, write and close functions, such as the bound methods of a
     /// `Std.Net.TcpStream`. `receive` reads at most `chunk` bytes; an empty read is the end of the stream.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let StreamTransport = class implements Transport<uint8[list], uint8[list]> (
         /// @brief Reads up to the given number of bytes; an empty list at the end.
         last read_fn: func(int) -> Result<uint8[list]>;
@@ -129,12 +129,12 @@ export let WebSocket = module (
     );
 
     /// @brief A byte transport over a TCP stream, reading 16 KiB at a time.
-    #NoDiscard
+    .NoDiscard
     export let over_tcp = func(stream: tcp.TcpStream) -> StreamTransport =>
         new StreamTransport(new bound(stream.read), new bound(stream.write), new bound(stream.close), 16384);
 
     /// @brief One WebSocket connection.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let WebSocket = class implements FramedTransport<Message> (
         /// @brief The byte transport underneath.
         last transport: Transport<uint8[list], uint8[list]>;
@@ -186,7 +186,7 @@ export let WebSocket = module (
         /// @brief The next data message, `None` after the closing handshake, or the failure that ended the
         /// connection. An Io error of kind TimedOut from the transport (a TCP read timeout) is returned without
         /// closing anything: the caller may check the heartbeat and call `receive` again.
-        #NoDiscard
+        .NoDiscard
         export let receive = func -> Result<Optional<Message>> {
             while (state != ReadyState.Closed) {
                 let next = Optional<frames.Frame>.None;
@@ -261,7 +261,7 @@ export let WebSocket = module (
 
         /// @brief Sends a message, fragmented as the options say. Fails with an Io error of kind Closed once this
         /// end has started closing.
-        #NoDiscard
+        .NoDiscard
         export let send = func(data: Message) -> Result<Unit> {
             if (state != ReadyState.Open || sent_close) {
                 return Result<Unit>.Err(errors.Error.Io { kind: errors.IoErrorKind.Closed,
@@ -274,7 +274,7 @@ export let WebSocket = module (
         };
 
         /// @brief Sends a ping with the payload (at most 125 bytes, or it fails with status 1002).
-        #NoDiscard
+        .NoDiscard
         export let ping = func(payload: uint8[list]) -> Result<Unit> {
             if (state != ReadyState.Open || sent_close) {
                 return Result<Unit>.Err(errors.Error.Io { kind: errors.IoErrorKind.Closed,
@@ -330,7 +330,7 @@ export let WebSocket = module (
         /// and moves to Closing; `receive` then returns `None` once the peer's close frame arrives. Fails like
         /// `close_with` for an invalid status or reason, and with an Io error of kind Closed when a close frame
         /// was already sent.
-        #NoDiscard
+        .NoDiscard
         export let send_close = func(code: int, reason: string) -> Result<Unit> {
             if (state == ReadyState.Closed || sent_close) {
                 return Result<Unit>.Err(errors.Error.Io { kind: errors.IoErrorKind.Closed,
@@ -351,7 +351,7 @@ export let WebSocket = module (
 
         /// @brief Runs the attached heartbeat once: sends the ping it asks for, or on `PeerDead` closes the
         /// transport without a closing handshake. Without a supervisor it answers `Wait`.
-        #NoDiscard
+        .NoDiscard
         export let check_heartbeat = func -> Result<heartbeat.HeartbeatAction> {
             match (supervisor) {
                 Optional.None => {
@@ -468,7 +468,7 @@ export let WebSocket = module (
 
     /// @brief Wraps a transport whose opening handshake already happened (for instance an HTTP/2 or HTTP/3
     /// stream opened by extended CONNECT).
-    #NoDiscard
+    .NoDiscard
     export let over_upgraded = func(bytes: Transport<uint8[list], uint8[list]>, role: frames.Role, random: Random,
         options: WebSocketOptions, protocol: Optional<string>) -> WebSocket =>
             new WebSocket(bytes, role, random, options, protocol, new);
@@ -477,7 +477,7 @@ export let WebSocket = module (
     /// (`Handshake.validate_server_response`), and returns the open connection. A response that agrees to an
     /// extension fails with status 1010, since this connection implements none. On failure the transport is
     /// closed.
-    #NoDiscard
+    .NoDiscard
     export let connect = func(bytes: Transport<uint8[list], uint8[list]>, request: handshake.ClientRequest,
         random: Random, options: WebSocketOptions) -> Result<WebSocket> {
         last sent = bytes.send(strings.to_bytes(request.to_text()));
@@ -527,7 +527,7 @@ export let WebSocket = module (
     /// response without extensions, and returns the open connection. An invalid request is answered with 400
     /// (426 and Sec-WebSocket-Version for a wrong version), the transport is closed, and the validation error
     /// is returned.
-    #NoDiscard
+    .NoDiscard
     export let accept = func(bytes: Transport<uint8[list], uint8[list]>, supported: string[list], random: Random,
         options: WebSocketOptions) -> Result<WebSocket> {
         last read = read_head(bytes);

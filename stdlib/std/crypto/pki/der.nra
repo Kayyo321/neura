@@ -23,66 +23,66 @@ let utf8 = import:Std.Encoding.Utf8;
 /// Elements are views: an `Element` keeps the input list and its position, and copies bytes only when asked.
 /// The input must not change while elements over it are in use.
 /// @see [Std.Crypto.Pki.Der](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Der)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Der = module (
     /// @brief Tag class of universal tags.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export const Universal: int = 0;
     /// @brief Tag class of application tags.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export const Application: int = 1;
     /// @brief Tag class of context-specific tags ([n] in ASN.1).
-    #Since("0.3.0")
+    .Since("0.3.0")
     export const ContextSpecific: int = 2;
     /// @brief Tag class of private tags.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export const Private: int = 3;
 
-    #Since("0.3.0")
+    .Since("0.3.0")
     export const TagBoolean: int = 1;
-    #Since("0.3.0")
+    .Since("0.3.0")
     export const TagInteger: int = 2;
-    #Since("0.3.0")
+    .Since("0.3.0")
     export const TagBitString: int = 3;
-    #Since("0.3.0")
+    .Since("0.3.0")
     export const TagOctetString: int = 4;
-    #Since("0.3.0")
+    .Since("0.3.0")
     export const TagNull: int = 5;
-    #Since("0.3.0")
+    .Since("0.3.0")
     export const TagOid: int = 6;
-    #Since("0.3.0")
+    .Since("0.3.0")
     export const TagEnumerated: int = 10;
-    #Since("0.3.0")
+    .Since("0.3.0")
     export const TagUtf8String: int = 12;
-    #Since("0.3.0")
+    .Since("0.3.0")
     export const TagSequence: int = 16;
-    #Since("0.3.0")
+    .Since("0.3.0")
     export const TagSet: int = 17;
-    #Since("0.3.0")
+    .Since("0.3.0")
     export const TagNumericString: int = 18;
-    #Since("0.3.0")
+    .Since("0.3.0")
     export const TagPrintableString: int = 19;
-    #Since("0.3.0")
+    .Since("0.3.0")
     export const TagTeletexString: int = 20;
-    #Since("0.3.0")
+    .Since("0.3.0")
     export const TagIa5String: int = 22;
-    #Since("0.3.0")
+    .Since("0.3.0")
     export const TagUtcTime: int = 23;
-    #Since("0.3.0")
+    .Since("0.3.0")
     export const TagGeneralizedTime: int = 24;
-    #Since("0.3.0")
+    .Since("0.3.0")
     export const TagVisibleString: int = 26;
-    #Since("0.3.0")
+    .Since("0.3.0")
     export const TagUniversalString: int = 28;
-    #Since("0.3.0")
+    .Since("0.3.0")
     export const TagBmpString: int = 30;
 
     /// @brief The default limit on nesting: the outermost element is depth 0.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export const DefaultMaxDepth: int = 32;
 
     /// @brief A `Parse` error of the kind at the offset.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let error_at = func<T>(kind: ParseErrorKind, offset: int, message: string) -> Result<T> =>
         Result<T>.Err(Error.Parse { kind: kind, offset: offset, message: message });
 
@@ -93,7 +93,7 @@ export let Der = module (
         Result<T>.Err(Error.Parse { kind: ParseErrorKind.UnexpectedEnd, offset: offset, message: message });
 
     /// @brief One DER element: a view of a tag, a length and contents inside an input list.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Element = class (
         /// @brief The whole input. Do not change it.
         export last data: uint8[list];
@@ -150,7 +150,7 @@ export let Der = module (
         export let reader = func -> Reader => new Reader(data, content_offset(), end(), depth + 1, max_depth, true);
 
         /// @brief The elements inside a constructed element.
-        #NoDiscard
+        .NoDiscard
         export let children = func -> Result<Element[list]> {
             return fail<Element[list]>(offset, "expected a constructed element") unless constructed;
             let r = reader();
@@ -162,7 +162,7 @@ export let Der = module (
         };
 
         /// @brief The single element inside an explicitly tagged element.
-        #NoDiscard
+        .NoDiscard
         export let explicit_inner = func -> Result<Element> {
             return fail<Element>(offset, "explicit tag must be constructed") unless constructed;
             let r = reader();
@@ -172,7 +172,7 @@ export let Der = module (
         };
 
         /// @brief The value of a BOOLEAN: one content byte, 0x00 or 0xFF.
-        #NoDiscard
+        .NoDiscard
         export let boolean = func -> Result<bool> {
             expect_tag(TagBoolean, "BOOLEAN")?;
             if (length != 1) {
@@ -189,14 +189,14 @@ export let Der = module (
         };
 
         /// @brief The two's-complement content of an INTEGER, checked to be minimal.
-        #NoDiscard
+        .NoDiscard
         export let integer = func -> Result<uint8[list]> {
             expect_tag(TagInteger, "INTEGER")?;
             return integer_content();
         };
 
         /// @brief The two's-complement content of an implicitly tagged INTEGER, checked to be minimal.
-        #NoDiscard
+        .NoDiscard
         export let integer_content = func -> Result<uint8[list]> {
             if (constructed) {
                 return fail<uint8[list]>(offset, "INTEGER must be primitive");
@@ -216,7 +216,7 @@ export let Der = module (
 
         /// @brief The value of an INTEGER or ENUMERATED that must be from 0 to `max`; a negative value or one
         /// above `max` is an `OutOfRange` error.
-        #NoDiscard
+        .NoDiscard
         export let small_integer = func(max: int64) -> Result<int64> {
             if (not (is_universal(TagInteger) || is_universal(TagEnumerated))) {
                 return fail<int64>(offset, "expected an INTEGER");
@@ -244,7 +244,7 @@ export let Der = module (
         };
 
         /// @brief Checks a NULL: no content.
-        #NoDiscard
+        .NoDiscard
         export let null = func -> Result<Unit> {
             expect_tag(TagNull, "NULL")?;
             if (length != 0) {
@@ -254,21 +254,21 @@ export let Der = module (
         };
 
         /// @brief The value of an OBJECT IDENTIFIER.
-        #NoDiscard
+        .NoDiscard
         export let oid = func -> Result<Oid> {
             expect_tag(TagOid, "OBJECT IDENTIFIER")?;
             return oids.from_content(content(), content_offset());
         };
 
         /// @brief The value of a BIT STRING (or of an implicitly tagged one when `implicit` is true).
-        #NoDiscard
+        .NoDiscard
         export let bit_string = func -> Result<BitString> {
             expect_tag(TagBitString, "BIT STRING")?;
             return bit_string_content();
         };
 
         /// @brief The value of an implicitly tagged BIT STRING.
-        #NoDiscard
+        .NoDiscard
         export let bit_string_content = func -> Result<BitString> {
             if (constructed) {
                 return fail<BitString>(offset, "BIT STRING must be primitive");
@@ -288,7 +288,7 @@ export let Der = module (
         };
 
         /// @brief The content of an OCTET STRING.
-        #NoDiscard
+        .NoDiscard
         export let octet_string = func -> Result<uint8[list]> {
             expect_tag(TagOctetString, "OCTET STRING")?;
             return Result<uint8[list]>.Ok(content());
@@ -303,14 +303,14 @@ export let Der = module (
         /// @brief The text of a string type: UTF8String (valid UTF-8), PrintableString, NumericString,
         /// IA5String (bytes below 128), VisibleString (32 to 126), TeletexString (read as Latin-1, as most
         /// software does), BMPString (UCS-2, no surrogates) or UniversalString (UCS-4).
-        #NoDiscard
+        .NoDiscard
         export let text = func -> Result<string> {
             return fail<string>(offset, "expected a string type") unless is_string();
             return string_content(tag_number);
         };
 
         /// @brief The content read as the universal string type `kind` (for implicit tags such as dNSName).
-        #NoDiscard
+        .NoDiscard
         export let string_content = func(kind: int) -> Result<string> {
             if (constructed) {
                 return fail<string>(offset, "string must be primitive");
@@ -364,7 +364,7 @@ export let Der = module (
 
         /// @brief The instant of a UTCTime (`YYMMDDHHMMSSZ`, years 1950 to 2049) or a GeneralizedTime
         /// (`YYYYMMDDHHMMSSZ`, no fraction).
-        #NoDiscard
+        .NoDiscard
         export let time = func -> Result<instant.Instant> {
             if (constructed || tag_class != Universal || (tag_number != TagUtcTime && tag_number != TagGeneralizedTime)) {
                 return fail<instant.Instant>(offset, "expected UTCTime or GeneralizedTime");
@@ -457,7 +457,7 @@ export let Der = module (
     );
 
     /// @brief Reads consecutive DER elements from a range of an input list.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Reader = class (
         last data: uint8[list];
         /// @brief The position of the next element.
@@ -512,7 +512,7 @@ export let Der = module (
         };
 
         /// @brief The next element, fully checked.
-        #NoDiscard
+        .NoDiscard
         export let next = func -> Result<Element> {
             last e = read_header(data, position, limit, depth, max_depth, not checked)?;
             position = e.end();
@@ -520,7 +520,7 @@ export let Der = module (
         };
 
         /// @brief The next element, which must have the universal tag `number`.
-        #NoDiscard
+        .NoDiscard
         export let next_universal = func(number: int, name: string) -> Result<Element> {
             if (not peek_is(Universal, number)) {
                 if (position >= limit) {
@@ -532,7 +532,7 @@ export let Der = module (
         };
 
         /// @brief The next element if it has the context tag [number], else None.
-        #NoDiscard
+        .NoDiscard
         export let optional_context = func(number: int) -> Result<Optional<Element>> {
             if (not peek_is(ContextSpecific, number)) {
                 return Result<Optional<Element>>.Ok(Optional<Element>.None);
@@ -542,7 +542,7 @@ export let Der = module (
         };
 
         /// @brief The next element if it has the universal tag, else None.
-        #NoDiscard
+        .NoDiscard
         export let optional_universal = func(number: int) -> Result<Optional<Element>> {
             if (not peek_is(Universal, number)) {
                 return Result<Optional<Element>>.Ok(Optional<Element>.None);
@@ -552,7 +552,7 @@ export let Der = module (
         };
 
         /// @brief Fails when bytes remain.
-        #NoDiscard
+        .NoDiscard
         export let finish = func -> Result<Unit> {
             if (position < limit) {
                 return fail<Unit>(position, "unexpected trailing data");
@@ -565,11 +565,11 @@ export let Der = module (
     );
 
     /// @brief Parses an input that holds exactly one DER element, with the default nesting limit.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse = func(input: uint8[list]) -> Result<Element> => parse_with_depth(input, DefaultMaxDepth);
 
     /// @brief Parses an input that holds exactly one DER element; nesting deeper than `max_depth` is an error.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_with_depth = func(input: uint8[list], max_depth: int) -> Result<Element> {
         let r = new Reader(input, 0, input.length, 0, max_depth, false);
         return truncated<Element>(0, "empty input") unless r.has_more();
@@ -742,7 +742,7 @@ export let Der = module (
     };
 
     /// @brief A copy of input[start, end).
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let copy_range = func(input: uint8[list], start: int, stop: int) -> uint8[list] {
         let out: uint8[list] = new;
         for (let i = start; i < stop; i++) {
@@ -752,7 +752,7 @@ export let Der = module (
     };
 
     /// @brief A hash of input[start, end).
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let hash_range = func(input: uint8[list], start: int, stop: int) -> uint32 {
         let h: uint32 = 17;
         for (let i = start; i < stop; i++) {

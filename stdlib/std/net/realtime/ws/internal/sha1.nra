@@ -5,10 +5,10 @@
 /// `Std.Net.Realtime.Ws.Handshake.sha1` is its public face. Words are uint32 values; a sum modulo 2^32 widens
 /// each term to uint64, adds, masks with 4294967295 and converts back (Stdlib.md section 7.2).
 /// @see [Std.Net.Realtime.Ws.Handshake](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-Ws-Handshake)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Sha1 = module (
     /// @brief The 20-byte SHA-1 hash of the bytes.
-    #[NoDiscard, Pure]
+    .[NoDiscard, Pure]
     export let of = func(bytes: uint8[list]) -> uint8[list] {
         // Initial hash value H(0), FIPS 180-4 section 5.3.1:
         // 0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0.

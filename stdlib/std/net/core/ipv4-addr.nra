@@ -13,10 +13,10 @@ let.promote _ = import:Std.Core.Result;
 /// form: four decimal parts 0 to 255, no leading zeros except a lone `0`, no sign, no space; the shorthand
 /// forms `inet_aton` accepts (`127.1`, `0x7f.0.0.1`, `0177.0.0.1`) are rejected.
 /// @see [Std.Net.Core.Ipv4Addr](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Core-Ipv4Addr)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Ipv4Addr = module (
     /// @brief An IPv4 address, ordered by its unsigned 32-bit value (the same as its octets in order).
-    #[Final, NoDiscard, Immutable, ThreadSafe, Since("0.3.0")]
+    .[Final, NoDiscard, Immutable, ThreadSafe, Since("0.3.0")]
     export let Ipv4Addr = class implements NetAddress, Comparable<Ipv4Addr> (
         /// @brief The address as a number: the first octet is the most significant byte.
         export last bits: uint32;
@@ -27,7 +27,7 @@ export let Ipv4Addr = module (
         };
 
         /// @brief The four octets in network order, as a new list.
-        #Pure
+        .Pure
         export let octets = func -> uint8[list] {
             last bytes: uint8[list] = new;
             bytes.append(((bits >> 24) & 255) as uint8);
@@ -38,15 +38,15 @@ export let Ipv4Addr = module (
         };
 
         /// @brief Tests for `0.0.0.0`.
-        #Pure
+        .Pure
         export let is_unspecified = func -> bool => bits == 0;
 
         /// @brief Tests for `127.0.0.0/8` (RFC 1122 section 3.2.1.3).
-        #Pure
+        .Pure
         export let is_loopback = func -> bool => octet(0) == 127;
 
         /// @brief Tests for the private ranges of RFC 1918: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`.
-        #Pure
+        .Pure
         export let is_private = func -> bool {
             last a = octet(0);
             last b = octet(1);
@@ -54,20 +54,20 @@ export let Ipv4Addr = module (
         };
 
         /// @brief Tests for `169.254.0.0/16` (RFC 3927).
-        #Pure
+        .Pure
         export let is_link_local = func -> bool => octet(0) == 169 && octet(1) == 254;
 
         /// @brief Tests for `224.0.0.0/4` (RFC 5771).
-        #Pure
+        .Pure
         export let is_multicast = func -> bool => octet(0) >= 224 && octet(0) <= 239;
 
         /// @brief Tests for the limited broadcast address `255.255.255.255` (RFC 919).
-        #Pure
+        .Pure
         export let is_broadcast = func -> bool => bits == 4294967295;
 
         /// @brief Tests for the documentation ranges of RFC 5737: `192.0.2.0/24`, `198.51.100.0/24`,
         /// `203.0.113.0/24`.
-        #Pure
+        .Pure
         export let is_documentation = func -> bool {
             last a = octet(0);
             last b = octet(1);
@@ -77,11 +77,11 @@ export let Ipv4Addr = module (
         };
 
         /// @brief Always `AddressFamily.Ipv4`.
-        #Pure
+        .Pure
         export let family = func -> AddressFamily => AddressFamily.Ipv4;
 
         /// @brief Compares the unsigned values.
-        #Pure
+        .Pure
         export let compare_to = func(other: Ipv4Addr) -> Ordering {
             return if (bits == other.bits) -> Ordering.Equal
                 else -> bits < other.bits ? Ordering.Less : Ordering.Greater;
@@ -96,11 +96,11 @@ export let Ipv4Addr = module (
         };
 
         /// @brief Combines 17 with the value.
-        #Pure
+        .Pure
         export let.override hash_code = func -> uint32 => hashing.combine(17, bits);
 
         /// @brief The dotted-decimal form, for example `192.0.2.1`.
-        #Pure
+        .Pure
         export let.override to_string = func -> string =>
             octet(0).to_string() .. "." .. octet(1).to_string() .. "." .. octet(2).to_string() .. "."
             .. octet(3).to_string();
@@ -110,7 +110,7 @@ export let Ipv4Addr = module (
     );
 
     /// @brief The address `a.b.c.d`; traps when a part is outside 0 to 255.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let of = func(a: int, b: int, c: int, d: int) -> Ipv4Addr {
         if (a < 0 || a > 255 || b < 0 || b > 255 || c < 0 || c > 255 || d < 0 || d > 255) {
             trap_with_message("Ipv4Addr.of: a part is outside 0 to 255");
@@ -120,7 +120,7 @@ export let Ipv4Addr = module (
 
     /// @brief The address held in `bytes[offset]` to `bytes[offset + 3]`, network order; traps when fewer
     /// than four bytes follow `offset`.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let from_bytes = func(bytes: uint8[list], offset: int) -> Ipv4Addr {
         if (offset < 0 || offset + 4 > bytes.length) {
             trap_with_message("Ipv4Addr.from_bytes: fewer than 4 bytes at the offset");
@@ -133,11 +133,11 @@ export let Ipv4Addr = module (
     };
 
     /// @brief `127.0.0.1`.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let localhost = func -> Ipv4Addr => new Ipv4Addr(2130706433);
 
     /// @brief `0.0.0.0`.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let unspecified = func -> Ipv4Addr => new Ipv4Addr(0);
 
     /// @brief Parses strict dotted-decimal text: exactly four parts of 1 to 3 decimal digits, each 0 to 255,
@@ -146,7 +146,7 @@ export let Ipv4Addr = module (
     /// Errors: Empty for ""; InvalidCharacter at the first byte that is not a digit or a dot (also a leading
     /// zero, at the zero); Syntax at an empty part or a fifth part; OutOfRange at the start of a part above
     /// 255; UnexpectedEnd at the length when fewer than four parts are given.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let parse = func(text: string) -> Result<Ipv4Addr> {
         last length = text.byte_length;
         if (length == 0) {

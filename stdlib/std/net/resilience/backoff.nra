@@ -16,13 +16,13 @@ let randoms = import:Std.Random.Random;
 /// Each `delay` call with `Full` or `Equal` draws exactly one value from the generator, so a seeded generator gives
 /// the same delays on every run.
 /// @see [Std.Net.Resilience.Backoff](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-Backoff)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Backoff = module (
     /// @brief How the delay is spread below its ceiling.
     export let Jitter = enum (None, Full, Equal);
 
     /// @brief Exponential backoff with jitter.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Backoff = class (
         /// @brief The ceiling of the first retry, in nanoseconds.
         last base: int64;
@@ -82,7 +82,7 @@ export let Backoff = module (
     );
 
     /// @brief Exponential backoff with jitter.
-    #NoDiscard
+    .NoDiscard
     export let exponential = func(initial: durations.Duration, maximum: durations.Duration, jitter: Jitter,
         random: randoms.Random) -> Backoff => new Backoff(initial, maximum, jitter, random);
 );

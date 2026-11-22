@@ -2,11 +2,11 @@ let.promote _ = import:Std.Crypto.SecretMemory;
 
 /// @brief The contract of a symmetric key typed by its algorithm (Stdlib.md section 21.1).
 /// @see [Std.Crypto.SymmetricKey](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-SymmetricKey)
-#Since("0.3.0")
+.Since("0.3.0")
 export let SymmetricKey = module (
     /// @brief Key bytes in secret memory. `Alg` is the class of the primitive that takes the key, such as
     /// `Std.Crypto.Symmetric.AesGcm.AesGcm`, so a key made for one algorithm does not type-check as another's.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let SymmetricKey = interface<Alg>:SecretMemory<uint8[list]> (
         /// @brief The key length in bytes.
         let key_length = func -> int;

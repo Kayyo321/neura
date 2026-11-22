@@ -7,11 +7,11 @@ let words = import:Std.Crypto.Internal.Words;
 /// @brief PBKDF2 of RFC 8018, section 5.2 (NIST SP 800-132), with HMAC over any digest (Stdlib.md section
 /// 20.6).
 /// @see [Std.Crypto.Kdf.Pbkdf2](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Kdf-Pbkdf2)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Pbkdf2 = module (
     /// @brief `length` bytes derived from the password and salt with `iterations` rounds of HMAC-H. Fewer than
     /// one iteration or a negative length traps.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let derive = func<H: StreamingDigest<H>>(password: uint8[list], salt: uint8[list], iterations: int,
         length: int) -> uint8[list] {
         crypto_policy.require(Algorithm.Pbkdf2);

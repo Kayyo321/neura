@@ -2,7 +2,7 @@ let words = import:Std.Crypto.Internal.Words;
 
 /// @brief The encodings of NIST SP 800-185, section 2.3: left_encode, right_encode, encode_string and bytepad.
 /// Internal.
-#Since("0.3.0")
+.Since("0.3.0")
 export let Sp800185 = module (
     /// @brief The big-endian bytes of the value with no leading zero byte (one zero byte for 0).
     let minimal = func(value: uint64) -> uint8[list] {

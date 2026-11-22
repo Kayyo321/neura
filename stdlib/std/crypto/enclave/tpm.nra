@@ -3,17 +3,17 @@ let versioned = import:Std.Crypto.Enclave.VersionedKeyStore;
 
 /// @brief A TPM 2.0-backed key store provider.
 /// @see [Std.Crypto.Enclave.Tpm](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Tpm)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Tpm = module (
     /// @brief An opaque versioned key store for this backend. String handles have meaning only to their provider.
     /// @see [Std.Crypto.Enclave.Tpm](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Tpm)
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let Provider = interface:versioned.VersionedKeyStore<string> ();
 
     /// @brief Opens this configured provider.
     /// @stub the runtime has no TPM command host service
     /// @see [Std.Crypto.Enclave.Tpm](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Tpm)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let open = func(device_path: string) -> Result<Provider> {
         trap_with_message("unsupported: Std.Crypto.Enclave.Tpm.open is not implemented in Neura 0.3.0 (the runtime has no TPM command host service)");
     };

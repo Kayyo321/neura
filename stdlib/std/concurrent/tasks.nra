@@ -14,7 +14,7 @@ let task_handles = import:Std.Concurrent.Task;
 /// cannot build an array whose length is known only at run time, and a function with type parameters cannot be
 /// overloaded for arrays as well.
 /// @see [Std.Concurrent.Tasks](https://github.com/Kayyo321/neura/wiki/Stdlib-Concurrent-Tasks)
-#Since("0.1.0")
+.Since("0.1.0")
 export let Tasks = module (
     /// @brief Runs every call as a task and returns their results in the order of the calls. Waits for all of
     /// them; nothing is cancelled.

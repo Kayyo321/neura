@@ -13,13 +13,13 @@ let words = import:Std.Crypto.Internal.Words;
 /// the scalar. That is branch-free in source; the runtime does not
 /// guarantee constant time. Decoding works on public data. The constants come from
 /// scripts/crypto-vectors/gen-asymmetric-constants.py.
-#Since("0.3.0")
+.Since("0.3.0")
 export let Weierstrass = module (
     /// @brief The curves.
     export let CurveId = enum (P256, P384, P521, Secp256k1);
 
     /// @brief A point in projective coordinates (Montgomery-form field elements). Immutable by convention.
-    #Final
+    .Final
     export let Point = class (
         export last x: uint32[list];
         export last y: uint32[list];
@@ -68,7 +68,7 @@ export let Weierstrass = module (
 
     /// @brief One curve: its field modulo p, its scalars modulo n, and the coefficients. Build one per operation
     /// (it holds scratch state, so a task must not share it).
-    #Final
+    .Final
     export let Curve = class (
         /// @brief The curve.
         export last id: CurveId;

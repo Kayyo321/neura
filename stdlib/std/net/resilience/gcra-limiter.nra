@@ -24,13 +24,13 @@ let.promote _ = import:Std.Core.Result;
 /// A compare-and-set that loses a race rereads and retries, up to `attempts` times; after that the request fails with
 /// the `Custom` error `resilience.rate_store_contention`. A store error is returned as is.
 /// @see [Std.Net.Resilience.GcraLimiter](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-GcraLimiter)
-#Since("0.3.0")
+.Since("0.3.0")
 export let GcraLimiter = module (
     /// @brief The error code after too many lost compare-and-set races.
     export const ContentionCode = "resilience.rate_store_contention";
 
     /// @brief A GCRA limiter over a rate store.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let GcraLimiter = class implements limiters.RateLimiter (
         /// @brief The emission interval in nanoseconds.
         last interval: int64;
@@ -112,13 +112,13 @@ export let GcraLimiter = module (
     );
 
     /// @brief A limiter of `rate` per `period` with bursts of `burst`, keeping its state in a new in-memory store.
-    #NoDiscard
+    .NoDiscard
     export let in_memory = func(rate: int, period: durations.Duration, burst: int, clock: Clock) -> GcraLimiter =>
         new GcraLimiter(rate, period, burst, memory_stores.create(), clock, 1);
 
     /// @brief A limiter of `rate` per `period` with bursts of `burst` over a shared store, retrying a lost
     /// compare-and-set up to 8 times.
-    #NoDiscard
+    .NoDiscard
     export let distributed = func(rate: int, period: durations.Duration, burst: int, store: stores.RateStore,
         clock: Clock) -> GcraLimiter => new GcraLimiter(rate, period, burst, store, clock, 8);
 );

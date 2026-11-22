@@ -14,13 +14,13 @@ let utf8 = import:Std.Encoding.Utf8;
 /// is not UTF-8 fails with status 1007 (checked when the message completes); a message above the size limit
 /// fails with status 1009 as soon as a fragment crosses it.
 /// @see [Std.Net.Realtime.Ws.Message](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-Ws-Message)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Message = module (
     /// @brief A whole data message.
     export let Message = enum (Text(string), Binary(uint8[list]));
 
     /// @brief The payload bytes of a message: the UTF-8 bytes of text.
-    #NoDiscard
+    .NoDiscard
     export let bytes_of = func(message: Message) -> uint8[list] => match (message) {
         Message.Text(text) => strings.to_bytes(text),
         Message.Binary(data) => data,
@@ -28,7 +28,7 @@ export let Message = module (
 
     /// @brief The frames of a message with fragments of at most `max_fragment` payload bytes (at least 1). An
     /// empty message is one empty final frame. A maximum below 1 traps with "invalid argument: max_fragment".
-    #NoDiscard
+    .NoDiscard
     export let fragment = func(message: Message, max_fragment: int) -> frames.Frame[list] {
         if (max_fragment < 1) {
             trap_with_message("invalid argument: max_fragment");
@@ -54,7 +54,7 @@ export let Message = module (
     };
 
     /// @brief Reassembles messages from data frames received in order.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let MessageAssembler = class (
         /// @brief The largest message accepted, in bytes.
         last max_message_size: int;
@@ -73,13 +73,13 @@ export let Message = module (
         };
 
         /// @brief Whether a fragmented message is open.
-        #NoDiscard
+        .NoDiscard
         export let in_message = func -> bool => open_code >= 0;
 
         /// @brief Adds a data frame (opcode 0, 1 or 2). Returns the message when the frame completes one, `None`
         /// when more fragments are needed, or the failure of a broken sequence. A control frame traps with
         /// "invalid argument: control frame".
-        #NoDiscard
+        .NoDiscard
         export let add = func(frame: frames.Frame) -> Result<Optional<Message>> {
             if (frame.is_control()) {
                 trap_with_message("invalid argument: control frame");

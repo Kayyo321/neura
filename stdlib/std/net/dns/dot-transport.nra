@@ -14,13 +14,13 @@ let transports = import:Std.Net.Dns.DnsTransport;
 /// server (`set_server_name`) so the certificate is checked against it; RFC 7858 itself names no ALPN token, so
 /// none is set here.
 /// @see [Std.Net.Dns.DotTransport](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-DotTransport)
-#Since("0.3.0")
+.Since("0.3.0")
 export let DotTransport = module (
     /// @brief The DoT port (RFC 7858 section 3.1).
     export const DotPort: int = 853;
 
     /// @brief A DoT transport: one TLS connection per exchange.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let DotTransport = class implements transports.DnsTransport (
         /// @brief The server.
         export last server: SocketAddr;

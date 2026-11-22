@@ -44,7 +44,7 @@ let udp_dns = import:Std.Net.Dns.UdpDnsTransport;
 ///   (the TCP services are overlapping); the datagram and system services, once merged, block every task while
 ///   they wait (Std.Net.Internal.Sockets says none of its calls overlaps).
 /// @see [Std.Net.Dns.StubResolver](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-StubResolver)
-#Since("0.3.0")
+.Since("0.3.0")
 export let StubResolver = module (
     /// @brief The most CNAME links followed for one question.
     export const MaxCnameChain: int = 8;
@@ -53,7 +53,7 @@ export let StubResolver = module (
 
     /// @brief One upstream server: a datagram (or stream) transport and an optional stream transport for
     /// truncated answers.
-    #Final
+    .Final
     export let Upstream = class (
         /// @brief The first transport tried.
         export last primary: transports.DnsTransport;
@@ -77,7 +77,7 @@ export let StubResolver = module (
     export let Source = enum (Hosts, Cache, Network);
 
     /// @brief The outcome of a lookup.
-    #Final
+    .Final
     export let Answer = class (
         /// @brief The question finally answered (the last search candidate tried).
         export last question: messages.Question;
@@ -104,15 +104,15 @@ export let StubResolver = module (
         };
 
         /// @brief Whether the name does not exist.
-        #NoDiscard
+        .NoDiscard
         export let is_name_error = func -> bool => rcode == messages.RcodeNameError;
 
         /// @brief Whether the name exists without records of the type.
-        #NoDiscard
+        .NoDiscard
         export let is_no_data = func -> bool => rcode == messages.RcodeNoError && records.length == 0;
 
         /// @brief The addresses among the records (A and AAAA).
-        #NoDiscard
+        .NoDiscard
         export let addresses = func -> ips.IpAddr[list] {
             last out: ips.IpAddr[list] = new;
             for (let record in records) {
@@ -136,7 +136,7 @@ export let StubResolver = module (
     );
 
     /// @brief A split-horizon route: a suffix and its servers.
-    #Final
+    .Final
     let Route = class (
         /// @brief The suffix.
         export last suffix: names.DnsName;
@@ -154,7 +154,7 @@ export let StubResolver = module (
     );
 
     /// @brief The resolver.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let StubResolver = class (
         /// @brief Search list, ndots, attempts, rotate and edns0.
         export last config: resolv_confs.ResolvConf;
@@ -189,7 +189,7 @@ export let StubResolver = module (
         };
 
         /// @brief The servers for a name: the longest matching route, else the defaults.
-        #NoDiscard
+        .NoDiscard
         export let servers_for = func(name: names.DnsName) -> Upstream[list] {
             let best = -1;
             let best_length = -1;
@@ -204,7 +204,7 @@ export let StubResolver = module (
         };
 
         /// @brief The candidate names for `name` after search-list expansion.
-        #NoDiscard
+        .NoDiscard
         export let candidates = func(name: string) -> Result<names.DnsName[list]> {
             last out: names.DnsName[list] = new;
             last absolute = names.parse(name)?;
@@ -245,7 +245,7 @@ export let StubResolver = module (
 
         /// @brief Looks up records of `qtype` for `name`: the hosts table for the name as given (A and AAAA), then each
         /// search-list candidate.
-        #NoDiscard
+        .NoDiscard
         export let lookup = func(name: string, qtype: int) -> Result<Answer> {
             // The hosts table sees the name as given, before any search domain is appended.
             match (from_hosts(new messages.Question(names.parse(name)?, qtype, messages.ClassIn))) {
@@ -283,7 +283,7 @@ export let StubResolver = module (
 
         /// @brief The addresses of `host`: an address literal as itself; else the hosts table; else A and AAAA
         /// lookups (A first). Err (Io NotFound) when there are none.
-        #NoDiscard
+        .NoDiscard
         export let resolve = func(host: string) -> Result<ips.IpAddr[list]> {
             match (ips.parse(host)) {
                 Result.Ok(ip) => {
@@ -313,7 +313,7 @@ export let StubResolver = module (
         };
 
         /// @brief Looks up one absolute name (no search list): hosts, cache, then the network with CNAME chasing.
-        #NoDiscard
+        .NoDiscard
         export let lookup_name = func(name: names.DnsName, qtype: int) -> Result<Answer> {
             last question = new messages.Question(name, qtype, messages.ClassIn);
             match (from_hosts(question)) {
@@ -512,7 +512,7 @@ export let StubResolver = module (
 
     /// @brief One `Upstream` per name server of `settings` (`effective_nameservers`, port 53): UDP first, TCP for
     /// truncated answers, each waiting `timeout_seconds`. The UDP half needs the `neura.net.udp.*` services.
-    #NoDiscard
+    .NoDiscard
     export let upstreams_for = func(settings: resolv_confs.ResolvConf) -> Upstream[list] {
         last out: Upstream[list] = new;
         last limit = durations.of_seconds(settings.timeout_seconds as int64);
@@ -524,13 +524,13 @@ export let StubResolver = module (
     };
 
     /// @brief A resolver whose servers come from `settings` through `upstreams_for`.
-    #NoDiscard
+    .NoDiscard
     export let from_config = func(settings: resolv_confs.ResolvConf, table: hosts_files.HostsFile, store: caches.DnsCache,
         random: Random) -> StubResolver => new StubResolver(settings, table, store, upstreams_for(settings), random);
 
     /// @brief Checks that a response answers a query: QR set, the same ID and the same single question. Err
     /// (Custom `dns.mismatch`) otherwise.
-    #NoDiscard
+    .NoDiscard
     export let check_match = func(query: messages.Message, response: messages.Message) -> Result<int> {
         if (not response.header.is_response || response.header.id != query.header.id) {
             return Result<int>.Err(errors.custom("dns.mismatch", "response ID or QR does not match the query"));

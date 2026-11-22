@@ -8,10 +8,10 @@ let.promote _ = import:Std.Core.Result;
 /// @brief An immutable 128-bit identifier (Stdlib.md section 12.2), held as its first and last 8 bytes in
 /// big-endian order, so comparing the halves compares the bytes.
 /// @see [Std.Random.Uuid](https://github.com/Kayyo321/neura/wiki/Stdlib-Random-Uuid)
-#Since("0.1.0")
+.Since("0.1.0")
 export let Uuid = module (
     /// @brief An immutable 128-bit identifier ordered by its unsigned big-endian bytes.
-    #[Final, NoDiscard, Immutable, ThreadSafe]
+    .[Final, NoDiscard, Immutable, ThreadSafe]
     export let Uuid = class implements Comparable<Uuid> (
         /// @brief The most significant eight bytes.
         last high: uint64;
@@ -25,7 +25,7 @@ export let Uuid = module (
         };
 
         /// @brief The 16 bytes in order, as a new list.
-        #Pure
+        .Pure
         export let to_bytes = func -> uint8[list] {
             last bytes: uint8[list] = new;
             append_word(bytes, high);
@@ -34,7 +34,7 @@ export let Uuid = module (
         };
 
         /// @brief Lexicographic over the bytes, each unsigned.
-        #Pure
+        .Pure
         export let compare_to = func(other: Uuid) -> Ordering {
             if (high != other.high) {
                 return order(high < other.high);
@@ -52,7 +52,7 @@ export let Uuid = module (
         };
 
         /// @brief Starts from 17 and combines each byte in order.
-        #Pure
+        .Pure
         export let.override hash_code = func -> uint32 {
             let hash: uint32 = 17;
             for (let b in to_bytes()) {
@@ -62,7 +62,7 @@ export let Uuid = module (
         };
 
         /// @brief The 36-character hyphenated form in lowercase.
-        #Pure
+        .Pure
         export let.override to_string = func -> string {
             let text = "";
             last bytes = to_bytes();
@@ -82,7 +82,7 @@ export let Uuid = module (
 
     /// @brief A version 4 identifier from 16 bytes of random.fill_bytes, with the version bits set to 0100 and
     /// the variant bits to 10.
-    #ThreadSafe
+    .ThreadSafe
     export let random = func(source: Random) -> Uuid {
         last bytes = source.fill_bytes(16);
         bytes[6] = (bytes[6] & 15) | 64;
@@ -94,7 +94,7 @@ export let Uuid = module (
     ///
     /// Errors: Empty; InvalidCharacter at the first byte that is not a hex digit or a hyphen in its place, or
     /// at offset 36 when text follows; UnexpectedEnd at the length for shorter text.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let parse = func(text: string) -> Result<Uuid> {
         last length = text.byte_length;
         if (length == 0) {

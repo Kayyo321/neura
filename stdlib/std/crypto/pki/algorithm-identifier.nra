@@ -9,10 +9,10 @@ let writer = import:Std.Crypto.Pki.DerWriter;
 
 /// @brief The X.509 AlgorithmIdentifier and the RSASSA-PSS parameters of RFC 4055 (Stdlib.md section 21.10).
 /// @see [Std.Crypto.Pki.AlgorithmIdentifier](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-AlgorithmIdentifier)
-#Since("0.3.0")
+.Since("0.3.0")
 export let AlgorithmIdentifier = module (
     /// @brief An algorithm OID with its optional parameters, kept as DER.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let AlgorithmIdentifier = class (
         /// @brief The algorithm.
         export last oid: Oid;
@@ -40,7 +40,7 @@ export let AlgorithmIdentifier = module (
             && parameters[1] == 0;
 
         /// @brief The RSASSA-PSS parameters, when this is id-RSASSA-PSS.
-        #NoDiscard
+        .NoDiscard
         export let pss_parameters = func -> Result<RsaPssParameters> {
             if (not oid.matches(oids.RsaSsaPss)) {
                 return fail<RsaPssParameters>(0, "not an RSASSA-PSS identifier");
@@ -65,7 +65,7 @@ export let AlgorithmIdentifier = module (
     );
 
     /// @brief RSASSA-PSS-params (RFC 4055, section 3.1), with the defaults filled in.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let RsaPssParameters = class (
         /// @brief The message digest (default SHA-1).
         export last hash: Oid;
@@ -120,7 +120,7 @@ export let AlgorithmIdentifier = module (
     };
 
     /// @brief Reads an AlgorithmIdentifier: SEQUENCE { OBJECT IDENTIFIER, parameters ANY OPTIONAL }.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse = func(e: der.Element) -> Result<AlgorithmIdentifier> {
         if (not e.is_universal(der.TagSequence)) {
             return fail<AlgorithmIdentifier>(e.offset, "AlgorithmIdentifier must be a SEQUENCE");
@@ -136,12 +136,12 @@ export let AlgorithmIdentifier = module (
     };
 
     /// @brief The identifier with no parameters (EdDSA, ML-DSA, SLH-DSA, ECDSA signatures).
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let without_parameters = func(dotted: string) -> AlgorithmIdentifier =>
         new AlgorithmIdentifier(oid_module.of(dotted), new);
 
     /// @brief The identifier with NULL parameters (the RSA PKCS #1 v1.5 signatures and rsaEncryption).
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let with_null = func(dotted: string) -> AlgorithmIdentifier =>
         new AlgorithmIdentifier(oid_module.of(dotted), writer.null());
 

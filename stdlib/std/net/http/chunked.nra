@@ -15,14 +15,14 @@ let wire = import:Std.Net.Http.Wire;
 /// `Limits.max_trailer_bytes` is 431, and trailer fields are checked as header fields are
 /// (`Wire.parse_field_section`). Errors use the "http.status.NNN" codes of `Wire.rejection`.
 /// @see [Std.Net.Http.Chunked](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-Chunked)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Chunked = module (
     /// @brief An incremental decoder of one chunked body.
     ///
     /// After the last chunk and the trailer section, the decoder is done and further bytes, including those of the
     /// feed that finished it, are kept as the remainder (the next message on the connection). After an error every
     /// `feed` returns the same error.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let ChunkedDecoder = class (
         /// @brief The limits applied.
         last limits: wire.Limits;
@@ -59,7 +59,7 @@ export let Chunked = module (
         };
 
         /// @brief Decodes the next bytes of the body; Ok holds the data they completed, possibly empty.
-        #NoDiscard
+        .NoDiscard
         export let feed = func(bytes: uint8[list]) -> Result<uint8[list]> {
             if (failed_status != 0) {
                 return Result<uint8[list]>.Err(wire.rejection(failed_status, failed_message));
@@ -158,7 +158,7 @@ export let Chunked = module (
         export let data_length = func -> int64 => total - remaining;
 
         /// @brief The bytes received after the body, as a new list.
-        #NoDiscard
+        .NoDiscard
         export let remainder = func -> uint8[list] {
             last out: uint8[list] = new;
             for (let b in rest) {
@@ -244,7 +244,7 @@ export let Chunked = module (
 
     /// @brief One chunk holding `data`: its size in lowercase hex, CRLF, the data, CRLF. Empty data gives an empty
     /// list, since a zero-size chunk would end the body.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let encode_chunk = func(data: uint8[list]) -> uint8[list] {
         last out: uint8[list] = new;
         if (data.length == 0) {
@@ -262,7 +262,7 @@ export let Chunked = module (
     };
 
     /// @brief The last chunk "0" CRLF, the trailer fields as "Name: value" CRLF lines, and the final CRLF.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let last_chunk = func(trailer_fields: http_headers.Headers) -> uint8[list] {
         last out: uint8[list] = new;
         append_text(out, "0\r\n");
@@ -275,7 +275,7 @@ export let Chunked = module (
 
     /// @brief The whole chunked body of `data` in chunks of `chunk_size` bytes (the last may be shorter), then the
     /// last chunk with no trailer. Traps with "invalid argument: chunk_size" unless it is positive.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let encode = func(data: uint8[list], chunk_size: int) -> uint8[list] {
         if (chunk_size <= 0) {
             trap_with_message("invalid argument: chunk_size");
@@ -301,7 +301,7 @@ export let Chunked = module (
 
     /// @brief The data of a complete chunked body. 400 when the body ends early or bytes follow it; other errors
     /// as `ChunkedDecoder.feed`.
-    #NoDiscard
+    .NoDiscard
     export let decode = func(body: uint8[list], limits: wire.Limits) -> Result<uint8[list]> {
         last decoder = new ChunkedDecoder(limits);
         last data = decoder.feed(body)?;

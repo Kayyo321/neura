@@ -7,9 +7,9 @@ let words = import:Std.Crypto.Internal.Words;
 /// Points use the existing Edwards448 representation. Only this group's constructors supply representatives.
 /// Secret point multiplication and the element map are branch-free in source.
 /// The runtime does not guarantee constant time.
-#Since("0.3.0")
+.Since("0.3.0")
 export let Decaf448Core = module (
-    #Final
+    .Final
     export let Group = class (
         last ed: edwards.Group = new;
         last field: mp.Modulus;

@@ -5,10 +5,10 @@ let.promote _ = import:Std.Crypto.Algorithm;
 
 /// @brief The contract of a key store: local memory, TPM, PKCS#11 HSM, or cloud KMS (Stdlib.md section 21.1).
 /// @see [Std.Crypto.KeyStoreProvider](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-KeyStoreProvider)
-#Since("0.3.0")
+.Since("0.3.0")
 export let KeyStoreProvider = module (
     /// @brief Keys that never leave the store, named by handles of type `KeyHandle`.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let KeyStoreProvider = interface<KeyHandle> (
         /// @brief A short name of the backend, such as "memory" or "pkcs11".
         let provider_name = func -> string;

@@ -10,13 +10,13 @@ let hash_kernels = import:Std.Internal.Kernels.Hash;
 /// its factory fills in. Builders are made with the module function `create`; the constructor takes a token
 /// that only this module can name.
 /// @see [Std.Core.StringBuilder](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-StringBuilder)
-#Since("0.1.0")
+.Since("0.1.0")
 export let StringBuilder = module (
     /// @brief Restricts construction to the module's factories.
     let Seal = enum (Token);
 
     /// @brief Accumulates mutable UTF-8 bytes and produces immutable string snapshots.
-    #[Final, Since("0.1.0"), NotThreadSafe]
+    .[Final, Since("0.1.0"), NotThreadSafe]
     export let StringBuilder = class (
         /// @brief Stores the current UTF-8 bytes.
         let bytes: uint8[list] = new;
@@ -101,12 +101,12 @@ export let StringBuilder = module (
 
         /// @brief The number of accumulated UTF-8 bytes. The getter reads the byte list, so the field itself
         /// holds nothing.
-        #Since("0.2.0")
+        .Since("0.2.0")
         export let byte_length: int;
             | get: bytes.length;
 
         /// @brief Reports whether there are any accumulated bytes.
-        #Pure
+        .Pure
         export let is_empty = func -> bool => bytes.length == 0;
 
         /// @brief Keeps the first `new_length` bytes. The length must be between 0 and the current byte length
@@ -146,11 +146,11 @@ export let StringBuilder = module (
         };
 
         /// @brief Hashes the current text contents.
-        #Pure
+        .Pure
         export let.override hash_code = func -> uint32 => hash_kernels.list_u8(bytes);
 
         /// @brief The accumulated text. The builder stays usable.
-        #Pure
+        .Pure
         export let.override to_string = func -> string {
             let [valid, text] = string.from_utf8(bytes);
             if (not valid) {
@@ -170,7 +170,7 @@ export let StringBuilder = module (
     );
 
     /// @brief A new, empty builder.
-    #[NoDiscard, Since("0.1.0"), Pure, ThreadSafe]
+    .[NoDiscard, Since("0.1.0"), Pure, ThreadSafe]
     export let create = func -> StringBuilder {
         last owner = cell.of<StringBuilder>(nil);
         last builder: StringBuilder = new(Seal.Token, owner);

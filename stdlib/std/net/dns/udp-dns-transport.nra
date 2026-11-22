@@ -19,13 +19,13 @@ let transports = import:Std.Net.Dns.DnsTransport;
 /// `neura.net.udp.send_to`, `neura.net.udp.receive_from`, version 1). Those services do not overlap: a waiting receive
 /// blocks every task.
 /// @see [Std.Net.Dns.UdpDnsTransport](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-UdpDnsTransport)
-#Since("0.3.0")
+.Since("0.3.0")
 export let UdpDnsTransport = module (
     /// @brief The largest datagram read.
     export const MaxDatagram: int = 65535;
 
     /// @brief A DNS transport over UDP datagrams.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let UdpDnsTransport = class implements transports.DnsTransport (
         /// @brief The server.
         export last server: SocketAddr;

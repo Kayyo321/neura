@@ -7,9 +7,9 @@ let storage = import:Std.Ui.Internal.Storage;
 /// the builder and the item lists it created. A render may not write what it did not create (E1010), and the
 /// effect analysis tracks the objects a call allocates together: appending at a tail would write an object
 /// reachable from a value the caller passed, such as a child view.
-#Internal
+.Internal
 export let Build = module (
-    #NotThreadSafe
+    .NotThreadSafe
     export let Builder = class (
         /// The slot evaluated last; each slot's `next` is the one evaluated before it.
         export let last_slot: storage.Slot = nil;
@@ -18,7 +18,7 @@ export let Build = module (
         export let.override to_string = func -> string => "Builder";
     );
 
-    #NotThreadSafe
+    .NotThreadSafe
     export let Item = class (
         export last key: string;
         export last view: ui.View;
@@ -31,7 +31,7 @@ export let Build = module (
         export let.override to_string = func -> string => "Item(" .. key .. ")";
     );
 
-    #NotThreadSafe
+    .NotThreadSafe
     export let Items = class (
         /// The last item in iteration order. Walk the items in order with `items_in_order`.
         export let last_item: Item = nil;

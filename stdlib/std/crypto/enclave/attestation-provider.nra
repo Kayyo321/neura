@@ -2,15 +2,15 @@ let.promote _ = import:Std.Core.Result;
 
 /// @brief An interface for requesting signed evidence from an attestation device.
 /// @see [Std.Crypto.Enclave.AttestationProvider](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-AttestationProvider)
-#Since("0.3.0")
+.Since("0.3.0")
 export let AttestationProvider = module (
     /// @brief A source of vendor-encoded attestation evidence. The device must bind the caller's report data.
     /// @see [Std.Crypto.Enclave.AttestationProvider](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-AttestationProvider)
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let AttestationProvider = interface (
         /// @brief Requests evidence containing the specified challenge or transcript binding.
         /// @see [Std.Crypto.Enclave.AttestationProvider](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-AttestationProvider)
-        #Since("0.3.0")
+        .Since("0.3.0")
         let request = func(report_data: uint8[list]) -> Result<uint8[list]>;
     );
 );

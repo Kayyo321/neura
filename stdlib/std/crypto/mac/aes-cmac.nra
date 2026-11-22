@@ -7,11 +7,11 @@ let words = import:Std.Crypto.Internal.Words;
 
 /// @brief AES-CMAC (NIST SP 800-38B, RFC 4493) with 128-, 192- and 256-bit keys (Stdlib.md section 21.5).
 /// @see [Std.Crypto.Mac.AesCmac](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Mac-AesCmac)
-#Since("0.3.0")
+.Since("0.3.0")
 export let AesCmac = module (
     /// @brief The block doubled in GF(2^128): shifted left one bit, with 0x87 folded in when the top bit was set
     /// (by mask, not by branch). Also used by AES-SIV's S2V.
-    #[Internal, Since("0.3.0")]
+    .[Internal, Since("0.3.0")]
     export let double = func(block: uint8[list]) -> uint8[list] {
         let out: uint8[list] = new;
         for (let i in 0 .. 15) {
@@ -22,7 +22,7 @@ export let AesCmac = module (
     };
 
     /// @brief AES-CMAC under a 16-, 24- or 32-byte key, with a 16-byte tag.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let AesCmac = class implements Authenticator (
         let cipher: aes.Cipher;
         let k1: uint8[list];
@@ -84,7 +84,7 @@ export let AesCmac = module (
     );
 
     /// @brief The 16-byte AES-CMAC tag of the message under the key.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let mac = func(key: uint8[list], message: uint8[list]) -> uint8[list] {
         let cmac = new AesCmac(key);
         cmac.update(message);

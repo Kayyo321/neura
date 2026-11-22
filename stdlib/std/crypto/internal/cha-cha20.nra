@@ -2,7 +2,7 @@ let words = import:Std.Crypto.Internal.Words;
 
 /// @brief The ChaCha20 block function and HChaCha20 (RFC 8439, section 2.3; draft-irtf-cfrg-xchacha-03,
 /// section 2.2). Internal: Std.Crypto.Symmetric and Std.Crypto.Random build on it.
-#Since("0.3.0")
+.Since("0.3.0")
 export let ChaCha20 = module (
     /// @brief The quarter round on state words a, b, c, d.
     let quarter = func(s: uint32[list], a: int, b: int, c: int, d: int) {

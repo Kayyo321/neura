@@ -20,7 +20,7 @@ let strings = import:Std.Text.Strings;
 /// every request (RFC 8555 section 6.2), neither of which Neura 0.3.0 provides, so each traps. Step-ca and
 /// Let's Encrypt differ only in the directory URL given to the client.
 /// @see [Std.Net.Tls.Acme](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Tls-Acme)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Acme = module (
     /// @brief The challenge types of RFC 8555 section 8 and RFC 8737.
     export let ChallengeType = enum (Http01, Dns01, TlsAlpn01);
@@ -29,24 +29,24 @@ export let Acme = module (
     export const AcmeTlsAlpn: string = "acme-tls/1";
 
     /// @brief The wire name of a challenge type: "http-01", "dns-01" or "tls-alpn-01".
-    #Pure
+    .Pure
     export let type_name = func(challenge: ChallengeType) -> string => challenge == ChallengeType.Http01 ? "http-01"
         : challenge == ChallengeType.Dns01 ? "dns-01" : "tls-alpn-01";
 
     /// @brief The RFC 7638 thumbprint of an RSA public key given as the base64url `n` and `e` members:
     /// base64url(SHA-256 of `{"e":..,"kty":"RSA","n":..}`).
-    #NoDiscard
+    .NoDiscard
     export let rsa_thumbprint = func(modulus: string, exponent: string) -> string =>
         digest_text("{\"e\":\"" .. exponent .. "\",\"kty\":\"RSA\",\"n\":\"" .. modulus .. "\"}");
 
     /// @brief The RFC 7638 thumbprint of an EC public key given as `crv` and the base64url `x` and `y` members:
     /// base64url(SHA-256 of `{"crv":..,"kty":"EC","x":..,"y":..}`).
-    #NoDiscard
+    .NoDiscard
     export let ec_thumbprint = func(curve: string, x: string, y: string) -> string =>
         digest_text("{\"crv\":\"" .. curve .. "\",\"kty\":\"EC\",\"x\":\"" .. x .. "\",\"y\":\"" .. y .. "\"}");
 
     /// @brief The key authorization `token.thumbprint` (RFC 8555 section 8.1).
-    #NoDiscard
+    .NoDiscard
     export let key_authorization = func(token: string, thumbprint: string) -> Result<string> {
         check_token(token)?;
         return Result<string>.Ok(token .. "." .. thumbprint);
@@ -54,23 +54,23 @@ export let Acme = module (
 
     /// @brief The HTTP-01 resource path `/.well-known/acme-challenge/<token>` (RFC 8555 section 8.3); the
     /// response body is the key authorization.
-    #NoDiscard
+    .NoDiscard
     export let http01_path = func(token: string) -> Result<string> {
         check_token(token)?;
         return Result<string>.Ok("/.well-known/acme-challenge/" .. token);
     };
 
     /// @brief The DNS-01 record name `_acme-challenge.<domain>` (RFC 8555 section 8.4). A trailing dot is kept.
-    #Pure
+    .Pure
     export let dns01_record_name = func(domain: string) -> string => "_acme-challenge." .. domain;
 
     /// @brief The DNS-01 TXT value: base64url(SHA-256(key authorization)) (RFC 8555 section 8.4).
-    #NoDiscard
+    .NoDiscard
     export let dns01_txt_value = func(key_authorization: string) -> string => digest_text(key_authorization);
 
     /// @brief The DER `extnValue` of the TLS-ALPN-01 `acmeIdentifier` extension: OCTET STRING (tag 4, length
     /// 32) of SHA-256(key authorization) (RFC 8737 section 3).
-    #NoDiscard
+    .NoDiscard
     export let tls_alpn01_extension_value = func(key_authorization: string) -> uint8[list] {
         let out: uint8[list] = new([4, 32]);
         for (let b in sha256.of(strings.to_bytes(key_authorization))) {
@@ -80,7 +80,7 @@ export let Acme = module (
     };
 
     /// @brief An ACME client bound to a directory URL and an account key thumbprint. Its flows are stubs.
-    #Final
+    .Final
     export let AcmeClient = class (
         /// @brief The directory URL (for example a step-ca or Let's Encrypt directory).
         export last directory_url: string;
@@ -94,41 +94,41 @@ export let Acme = module (
         };
 
         /// @brief The key authorization for `token` with this client's account key.
-        #NoDiscard
+        .NoDiscard
         export let key_authorization_for = func(token: string) -> Result<string> =>
             key_authorization(token, account_thumbprint);
 
         /// @brief Registers or finds the account (RFC 8555 section 7.3); the account URL.
         /// @stub needs an HTTPS client and JWS request signing (RFC 8555 section 6.2)
-        #NoDiscard
+        .NoDiscard
         export let register_account = func(contacts: string[list], terms_agreed: bool) -> Result<string> {
             trap_with_message("unsupported: Std.Net.Tls.Acme.AcmeClient.register_account is not implemented in Neura 0.3.0 (needs an HTTPS client and JWS request signing (RFC 8555 section 6.2))");
         };
 
         /// @brief Places an order for DNS identifiers (section 7.4); the order URL.
         /// @stub needs an HTTPS client and JWS request signing (RFC 8555 section 6.2)
-        #NoDiscard
+        .NoDiscard
         export let new_order = func(domains: string[list]) -> Result<string> {
             trap_with_message("unsupported: Std.Net.Tls.Acme.AcmeClient.new_order is not implemented in Neura 0.3.0 (needs an HTTPS client and JWS request signing (RFC 8555 section 6.2))");
         };
 
         /// @brief Tells the server a challenge is ready (section 7.5.1).
         /// @stub needs an HTTPS client and JWS request signing (RFC 8555 section 6.2)
-        #NoDiscard
+        .NoDiscard
         export let respond_to_challenge = func(challenge_url: string) -> Result<string> {
             trap_with_message("unsupported: Std.Net.Tls.Acme.AcmeClient.respond_to_challenge is not implemented in Neura 0.3.0 (needs an HTTPS client and JWS request signing (RFC 8555 section 6.2))");
         };
 
         /// @brief Finalizes an order with a DER certificate signing request (section 7.4).
         /// @stub needs an HTTPS client and JWS request signing (RFC 8555 section 6.2)
-        #NoDiscard
+        .NoDiscard
         export let finalize = func(order_url: string, csr_der: uint8[list]) -> Result<string> {
             trap_with_message("unsupported: Std.Net.Tls.Acme.AcmeClient.finalize is not implemented in Neura 0.3.0 (needs an HTTPS client and JWS request signing (RFC 8555 section 6.2))");
         };
 
         /// @brief Downloads the issued PEM certificate chain (section 7.4.2).
         /// @stub needs an HTTPS client and JWS request signing (RFC 8555 section 6.2)
-        #NoDiscard
+        .NoDiscard
         export let download_certificate = func(certificate_url: string) -> Result<string> {
             trap_with_message("unsupported: Std.Net.Tls.Acme.AcmeClient.download_certificate is not implemented in Neura 0.3.0 (needs an HTTPS client and JWS request signing (RFC 8555 section 6.2))");
         };

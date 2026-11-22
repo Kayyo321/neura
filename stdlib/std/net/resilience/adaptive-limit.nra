@@ -10,7 +10,7 @@ let durations = import:Std.Time.Duration;
 /// sheds load as soon as downstream latency rises. `VegasLimit` and `GradientLimit` implement it, after the limits
 /// of the same names in Netflix's concurrency-limits library.
 /// @see [Std.Net.Resilience.AdaptiveLimit](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-AdaptiveLimit)
-#Since("0.3.0")
+.Since("0.3.0")
 export let AdaptiveLimit = module (
     /// @brief An adaptive concurrency limit.
     export let AdaptiveLimit = interface (

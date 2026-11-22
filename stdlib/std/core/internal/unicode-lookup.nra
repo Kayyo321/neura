@@ -7,7 +7,7 @@
 /// inversion list. Both are searched by bisection, so a lookup reads about log2(ranges) words.
 export let UnicodeLookup = module (
     /// @brief The value of the range holding a code point at most 0x10FFFF.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let range_value = func(table: string, code_point: uint32) -> int {
         last key = (code_point << 9) | 511;
         let low = 0;
@@ -24,7 +24,7 @@ export let UnicodeLookup = module (
     };
 
     /// @brief Tests membership in a boundary table: an odd number of boundaries at or below the code point.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let contains = func(table: string, code_point: uint32) -> bool {
         let low = 0;
         let high = table.byte_length / 4;
@@ -40,7 +40,7 @@ export let UnicodeLookup = module (
     };
 
     /// @brief The unsigned word of `width` digits starting at a byte offset.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let word = func(table: string, offset: int, width: int) -> uint64 {
         let value: uint64 = 0;
         for (let i in 0 .. width) {
@@ -51,13 +51,13 @@ export let UnicodeLookup = module (
 
     /// @brief Text number `index` of a joined list: `offsets` holds the three-digit start of each text and then
     /// the joined length.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let entry = func(texts: string, offsets: string, index: int) -> string =>
         texts.slice(word(offsets, index * 3, 3) as int, word(offsets, index * 3 + 3, 3) as int);
 
     /// @brief The index of the text of a sorted joined list of loose names (UAX #44 LM3: lowercase ASCII
     /// without spaces, underscores, or hyphens) that equals the loose form of `text`, or -1.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let find_loose = func(names: string, offsets: string, text: string) -> int {
         last key = loose(text);
         let low = 0;
@@ -79,7 +79,7 @@ export let UnicodeLookup = module (
 
     /// @brief The text with ASCII letters lowercased and every space, tab, LF, CR, underscore, and hyphen
     /// removed.
-    #Pure
+    .Pure
     let loose = func(text: string) -> string {
         let bytes: uint8[list] = new;
         for (let i in 0 .. text.byte_length) {
@@ -94,7 +94,7 @@ export let UnicodeLookup = module (
     };
 
     /// @brief Byte-wise order of two strings.
-    #Pure
+    .Pure
     let before = func(left: string, right: string) -> bool {
         last count = left.byte_length < right.byte_length ? left.byte_length : right.byte_length;
         for (let i in 0 .. count) {
@@ -106,14 +106,14 @@ export let UnicodeLookup = module (
     };
 
     /// @brief The five-digit word at a byte offset.
-    #Pure
+    .Pure
     let word5 = func(table: string, offset: int) -> uint32 =>
         (((table.byte_at(offset) - 48) as uint32) << 24) | (((table.byte_at(offset + 1) - 48) as uint32) << 18) |
         (((table.byte_at(offset + 2) - 48) as uint32) << 12) | (((table.byte_at(offset + 3) - 48) as uint32) << 6) |
         ((table.byte_at(offset + 4) - 48) as uint32);
 
     /// @brief The four-digit word at a byte offset.
-    #Pure
+    .Pure
     let word4 = func(table: string, offset: int) -> uint32 =>
         (((table.byte_at(offset) - 48) as uint32) << 18) | (((table.byte_at(offset + 1) - 48) as uint32) << 12) |
         (((table.byte_at(offset + 2) - 48) as uint32) << 6) | ((table.byte_at(offset + 3) - 48) as uint32);

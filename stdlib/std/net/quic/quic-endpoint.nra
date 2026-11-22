@@ -19,7 +19,7 @@ let.promote _ = import:Std.Core.Unit;
 /// that no runtime offers, so `bind`
 /// traps in Neura 0.3.0.
 /// @see [Std.Net.Quic.QuicEndpoint](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Quic-QuicEndpoint)
-#Since("0.3.0")
+.Since("0.3.0")
 export let QuicEndpoint = module (
     /// @brief A listener ID and the bound port, or a host error code.
     let ListenOutcome = enum (Ok([int64, int]), Error(uint32));
@@ -30,7 +30,7 @@ export let QuicEndpoint = module (
     let DoneOutcome = enum (Ok, Error(uint32));
 
     /// @brief A listening QUIC endpoint.
-    #[Final, NoDiscard(reason: "an endpoint must be closed"), NotThreadSafe]
+    .[Final, NoDiscard(reason: "an endpoint must be closed"), NotThreadSafe]
     export let QuicEndpoint = class implements Listener<SocketAddr, QuicConnection> (
         /// @brief The host's endpoint ID.
         last id: int64;
@@ -52,7 +52,7 @@ export let QuicEndpoint = module (
         export let address = func -> SocketAddr => bound;
 
         /// @brief Waits for the next connection and completes its handshake.
-        #NoDiscard
+        .NoDiscard
         export let accept = func -> Result<QuicConnection> {
             return Result<QuicConnection>.Err(bytes.closed("endpoint", bound.to_string())) unless open_now;
             return match (quic_accept(id, support.timeout_nanos(config.tls_config.handshake_timeout))) {
@@ -78,7 +78,7 @@ export let QuicEndpoint = module (
 
     /// @brief Listens for QUIC on `address` (port 0 asks for a free port) with a server configuration. Traps
     /// in Neura 0.3.0 (no QUIC host service).
-    #NoDiscard
+    .NoDiscard
     export let bind = func(address: SocketAddr, config: QuicConfig) -> Result<QuicEndpoint> {
         if (config.tls_config.role != tls.TlsRole.Server) {
             trap_with_message("invalid argument: a QUIC endpoint needs a server configuration");

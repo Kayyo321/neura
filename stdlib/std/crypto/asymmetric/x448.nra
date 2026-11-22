@@ -21,10 +21,10 @@ let words = import:Std.Crypto.Internal.Words;
 /// RFC requires. The ladder is branch-free in source; the runtime does not
 /// guarantee constant time.
 /// @see [Std.Crypto.Asymmetric.X448](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-X448)
-#Since("0.3.0")
+.Since("0.3.0")
 export let X448 = module (
     /// @brief The X448 key-agreement primitive, for the policy and for `PrivateKey<X448>`.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let X448 = class implements CryptographicPrimitive<X448> (
         /// @brief Checks the policy.
         export let init = func {
@@ -36,7 +36,7 @@ export let X448 = module (
 
         /// @brief The shared secret of the private key and the peer's public key; see
         /// `X448PrivateKey.diffie_hellman`.
-        #NoDiscard
+        .NoDiscard
         export let diffie_hellman = func(private_key: X448PrivateKey, peer: X448PublicKey) -> Result<SecretBytes> =>
             private_key.diffie_hellman(peer);
 
@@ -44,7 +44,7 @@ export let X448 = module (
     );
 
     /// @brief An X448 public key: 56 bytes, the u-coordinate little-endian. Equal keys have equal bytes.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let X448PublicKey = class (
         last encoded: uint8[list];
 
@@ -58,7 +58,7 @@ export let X448 = module (
         };
 
         /// @brief A copy of the 56 bytes.
-        #NoDiscard
+        .NoDiscard
         export let to_bytes = func -> uint8[list] => words.copy(encoded);
 
         export let.override equals = func(other: class) -> bool {
@@ -81,7 +81,7 @@ export let X448 = module (
 
     /// @brief An X448 private key: 56 bytes in secret memory, with its public key. `to_string` never prints
     /// it.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let X448PrivateKey = class implements PrivateKey<X448> (
         last material: SecretBytes;
         last public_encoded: uint8[list];
@@ -103,12 +103,12 @@ export let X448 = module (
         export let public_key_bytes = func -> uint8[list] => words.copy(public_encoded);
 
         /// @brief The matching public key.
-        #NoDiscard
+        .NoDiscard
         export let public_key = func -> X448PublicKey => new(public_encoded);
 
         /// @brief X448(this key, the peer's key). An all-zero result is `Custom` code `crypto.key_agreement`:
         /// the peer sent a small-order point.
-        #NoDiscard
+        .NoDiscard
         export let diffie_hellman = func(peer: X448PublicKey) -> Result<SecretBytes> {
             let shared = montgomery.x448(material.expose(), peer.to_bytes());
             if (constant_time.ct_eq(shared, words.zeros(56))) {
@@ -133,7 +133,7 @@ export let X448 = module (
 
     /// @brief A new private key from 56 bytes of `Entropy.os_bytes`, or from the given generator. Fails when
     /// the entropy source fails.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let generate_key_pair = func -> Result<X448PrivateKey> {
         match (entropy.os_bytes(56)) {
             Result.Ok(bytes) => {
@@ -153,7 +153,7 @@ export let X448 = module (
     };
 
     /// @brief A public key from outside the program. A wrong length is `Custom` code `crypto.invalid_key`.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_public_key = func(bytes: uint8[list]) -> Result<X448PublicKey> {
         if (bytes.length != 56) {
             return Result<X448PublicKey>.Err(error.custom("crypto.invalid_key", "X448 public key must be 56 bytes"));
@@ -163,7 +163,7 @@ export let X448 = module (
 
     /// @brief The X448 function of RFC 7748, section 5, on raw 56-byte strings: the scalar is clamped, the
     /// result is returned even when it is all zero. Other lengths trap.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let x448 = func(scalar: uint8[list], u: uint8[list]) -> uint8[list] {
         crypto_policy.require(Algorithm.X448);
         return montgomery.x448(scalar, u);

@@ -16,13 +16,13 @@ let strings = import:Std.Text.Strings;
 /// evaluated (Neura 0.3.0 has no POSIX ERE engine): `follow` skips rules that use a regexp instead of a
 /// replacement and says so in its error when nothing else matches.
 /// @see [Std.Net.Dns.NaptrLookup](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-NaptrLookup)
-#Since("0.3.0")
+.Since("0.3.0")
 export let NaptrLookup = module (
     /// @brief The most non-terminal rewrites `follow` makes.
     export const MaxRewrites: int = 8;
 
     /// @brief One NAPTR rule.
-    #Final
+    .Final
     export let NaptrRule = class (
         /// @brief ORDER (lower first; a different order is a different rule).
         export last order: int;
@@ -49,14 +49,14 @@ export let NaptrLookup = module (
         };
 
         /// @brief Whether the flags end the lookup ("S", "A" or "U", any case).
-        #NoDiscard
+        .NoDiscard
         export let is_terminal = func -> bool {
             last upper = strings.to_ascii_upper(flags);
             return strings.contains(upper, "S") || strings.contains(upper, "A") || strings.contains(upper, "U");
         };
 
         /// @brief Whether `service` is one of the services, '+'-separated, ignoring ASCII case.
-        #NoDiscard
+        .NoDiscard
         export let offers = func(service: string) -> bool {
             if (strings.equals_ignore_ascii_case(services, service)) {
                 return true;
@@ -88,7 +88,7 @@ export let NaptrLookup = module (
     );
 
     /// @brief NAPTR lookups through a resolver.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let NaptrLookup = class (
         /// @brief The resolver.
         last resolver: resolvers.StubResolver;
@@ -99,7 +99,7 @@ export let NaptrLookup = module (
         };
 
         /// @brief The NAPTR rules of `domain`, sorted.
-        #NoDiscard
+        .NoDiscard
         export let lookup = func(domain: string) -> Result<NaptrRule[list]> {
             last answer = resolver.lookup(domain, messages.TypeNaptr)?;
             return Result<NaptrRule[list]>.Ok(sort_rules(rules_from(answer.records)));
@@ -107,7 +107,7 @@ export let NaptrLookup = module (
 
         /// @brief Follows rules offering `service` from `domain` to a terminal rule. Err (Custom `dns.naptr`)
         /// when no rule matches, only regexp rules match, or after `MaxRewrites` rewrites.
-        #NoDiscard
+        .NoDiscard
         export let follow = func(domain: string, service: string) -> Result<NaptrRule> {
             let current = domain;
             for (let step = 0; step <= MaxRewrites; step++) {
@@ -148,7 +148,7 @@ export let NaptrLookup = module (
     );
 
     /// @brief The NAPTR rules among records, in record order.
-    #NoDiscard
+    .NoDiscard
     export let rules_from = func(records: messages.ResourceRecord[list]) -> NaptrRule[list] {
         last out: NaptrRule[list] = new;
         for (let record in records) {
@@ -164,7 +164,7 @@ export let NaptrLookup = module (
     };
 
     /// @brief The rules sorted by order, then preference (stable).
-    #NoDiscard
+    .NoDiscard
     export let sort_rules = func(rules: NaptrRule[list]) -> NaptrRule[list] {
         last out: NaptrRule[list] = new;
         for (let rule in rules) {
@@ -183,7 +183,7 @@ export let NaptrLookup = module (
     };
 
     /// @brief The sorted rules offering `service` within the lowest order that has one.
-    #NoDiscard
+    .NoDiscard
     export let select = func(rules: NaptrRule[list], service: string) -> NaptrRule[list] {
         last sorted = sort_rules(rules);
         last out: NaptrRule[list] = new;

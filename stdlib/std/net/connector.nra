@@ -6,7 +6,7 @@ let.promote _ = import:Std.Core.Result;
 /// `address` is the remote address the connector dials. Like `Listener`, the contract names the address type as
 /// well as the connection type. `Std.Net.Socket.TcpConnector` implements it over the host's TCP service.
 /// @see [Std.Net.Connector](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Connector)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Connector = module (
     /// @brief An endpoint directed at `Addr` that opens connections of type `Conn`.
     export let Connector = interface<Addr, Conn>:Endpoint<Addr> (

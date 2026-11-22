@@ -9,7 +9,7 @@ let.promote _ = import:Std.Core.Unit;
 /// request and feeds load-aware balancers. `RoundRobin`, `PowerOfTwoChoices`, and `PeakEwma` implement it. A
 /// balancer with no endpoints answers `pick` with the `Custom` error `resilience.no_endpoints`.
 /// @see [Std.Net.Resilience.LoadBalancer](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-LoadBalancer)
-#Since("0.3.0")
+.Since("0.3.0")
 export let LoadBalancer = module (
     /// @brief The error code of a pick from a balancer with no endpoints.
     export const NoEndpointsCode = "resilience.no_endpoints";
@@ -18,7 +18,7 @@ export let LoadBalancer = module (
     export let LoadBalancer = interface<Endpoint> (
         /// @brief Chooses an endpoint for one request and counts it as pending. Err when there are no endpoints or
         /// the balancer's clock fails.
-        #NoDiscard
+        .NoDiscard
         let pick = func -> Result<Selection<Endpoint>>;
         /// @brief Ends the pending request of `selection` and records its latency and outcome. Err when the
         /// balancer's clock fails.
@@ -30,7 +30,7 @@ export let LoadBalancer = module (
     );
 
     /// @brief One pick: the endpoint and its position in the balancer's list.
-    #[Final, NoDiscard]
+    .[Final, NoDiscard]
     export let Selection = class<Endpoint> (
         /// @brief The position of the endpoint in the balancer's list.
         export last index: int;

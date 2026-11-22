@@ -29,7 +29,7 @@ export let RegexParser = module (
 
     /// @brief The link from a Repeat or Group node to the node it holds. An enum value is stored inline, so a
     /// Node cannot hold another Node directly; the class holds it by reference instead.
-    #Final
+    .Final
     export let NodeLink = class (
         /// @brief The node that the Repeat or Group holds.
         export last node: Node;
@@ -61,7 +61,7 @@ export let RegexParser = module (
     /// After parse returns, `failed` says whether the pattern was rejected; otherwise `root` is the tree,
     /// `size` its instruction count, `groups` the number of capturing groups, and names[i] the name of group i
     /// + 1 or "".
-    #Final
+    .Final
     export let Parser = class (
         /// @brief The UTF-8 source pattern.
         export last pattern: string;
@@ -660,7 +660,7 @@ export let RegexParser = module (
 
     /// @brief The ranges of \d, \w, and \s (by their lowercase letter) or of their negations (by the uppercase
     /// letter, as complements); empty otherwise.
-    #Pure
+    .Pure
     export let shorthand_ranges = func(letter: uint8) -> uint32[list] {
         if (letter == 100) {
             return new([48, 57]);
@@ -688,7 +688,7 @@ export let RegexParser = module (
     ///
     /// Each optional copy of an item that can match empty also saves its entry position and checks for progress
     /// (two more instructions).
-    #Pure
+    .Pure
     export let repeat_size = func(item: int, min: int, max: int, item_nullable: bool) -> int {
         last limit = MaxInstructions + 1;
         if (max < 0) {
@@ -710,7 +710,7 @@ export let RegexParser = module (
     };
 
     /// @brief Whether the node can match the empty string.
-    #Pure
+    .Pure
     export let nullable = func(node: Node) -> bool {
         return match (node) {
             Node.Empty => true,

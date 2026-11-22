@@ -20,7 +20,7 @@ let utf8 = import:Std.Encoding.Utf8;
 /// result holds at most 64 members and 8192 bytes, and never emits a partial member. A `Baggage` is immutable;
 /// `set` and `remove` return a new one.
 /// @see [Std.Net.Mesh.Baggage](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Mesh-Baggage)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Baggage = module (
     /// @brief The most list-members `to_header` emits.
     export const MaxMembers: int = 64;
@@ -30,7 +30,7 @@ export let Baggage = module (
     export const MaxParsedMembers: int = 180;
 
     /// @brief One property of a list-member: a key with an optional decoded value.
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let Property = class (
         /// @brief The property key, a token.
         export last key: string;
@@ -47,7 +47,7 @@ export let Baggage = module (
         };
 
         /// @brief The encoded form, `key` or `key=value`.
-        #NoDiscard
+        .NoDiscard
         export let to_header = func -> string => match (value) {
             Optional.Some(text) => key .. "=" .. encode(text),
             Optional.None => key,
@@ -69,7 +69,7 @@ export let Baggage = module (
     );
 
     /// @brief One list-member: key, decoded value, and properties in order.
-    #Final
+    .Final
     export let Entry = class (
         /// @brief The key, a token.
         export last key: string;
@@ -93,15 +93,15 @@ export let Baggage = module (
         };
 
         /// @brief The number of properties.
-        #NoDiscard
+        .NoDiscard
         export let property_count = func -> int => props.length;
 
         /// @brief The property at `index`.
-        #NoDiscard
+        .NoDiscard
         export let property_at = func(index: int) -> Property => props[index];
 
         /// @brief The encoded member, `key=value;prop;prop=value`, without spaces.
-        #NoDiscard
+        .NoDiscard
         export let to_header = func -> string {
             let text = key .. "=" .. encode(value);
             for (let p in props) {
@@ -126,7 +126,7 @@ export let Baggage = module (
     );
 
     /// @brief The list-members of one baggage, in order; duplicate keys are kept as received.
-    #Final
+    .Final
     export let Baggage = class (
         /// @brief The members.
         last members: Entry[list];
@@ -140,19 +140,19 @@ export let Baggage = module (
         };
 
         /// @brief The number of list-members.
-        #NoDiscard
+        .NoDiscard
         export let size = func -> int => members.length;
 
         /// @brief Whether there are no list-members.
-        #NoDiscard
+        .NoDiscard
         export let is_empty = func -> bool => members.length == 0;
 
         /// @brief The member at `index`.
-        #NoDiscard
+        .NoDiscard
         export let entry_at = func(index: int) -> Entry => members[index];
 
         /// @brief The value of the first member named `key`.
-        #NoDiscard
+        .NoDiscard
         export let get = func(key: string) -> Optional<string> {
             for (let e in members) {
                 if (e.key == key) {
@@ -165,7 +165,7 @@ export let Baggage = module (
         /// @brief A baggage where `key` has `value` and no properties: the first member named `key` is replaced in
         /// place and later ones removed, or the member is appended. A key that is not a token traps with "invalid
         /// argument: key".
-        #NoDiscard
+        .NoDiscard
         export let set = func(key: string, value: string) -> Baggage {
             last entry = new Entry(key, value, new);
             last out: Entry[list] = new;
@@ -185,7 +185,7 @@ export let Baggage = module (
         };
 
         /// @brief A baggage without the members named `key`.
-        #NoDiscard
+        .NoDiscard
         export let remove = func(key: string) -> Baggage {
             last out: Entry[list] = new;
             for (let e in members) {
@@ -198,7 +198,7 @@ export let Baggage = module (
 
         /// @brief The header value within the propagation limits: whole members from the left while the result
         /// holds at most 64 members and 8192 bytes; members are joined by "," without spaces.
-        #NoDiscard
+        .NoDiscard
         export let to_header = func -> string {
             let text = "";
             let count = 0;
@@ -242,11 +242,11 @@ export let Baggage = module (
     );
 
     /// @brief A baggage with no members.
-    #NoDiscard
+    .NoDiscard
     export let empty = func -> Baggage => new Baggage(new);
 
     /// @brief Parses a combined `baggage` value by the rules described for the module.
-    #NoDiscard
+    .NoDiscard
     export let parse = func(text: string) -> Result<Baggage> {
         last entries: Entry[list] = new;
         let start = 0;
@@ -305,12 +305,12 @@ export let Baggage = module (
     };
 
     /// @brief Whether `b` is a baggage-octet: 0x21, 0x23-0x2B, 0x2D-0x3A, 0x3C-0x5B, 0x5D-0x7E.
-    #NoDiscard
+    .NoDiscard
     export let is_baggage_octet = func(b: uint8) -> bool =>
         b == 33 || (b >= 35 && b <= 43) || (b >= 45 && b <= 58) || (b >= 60 && b <= 91) || (b >= 93 && b <= 126);
 
     /// @brief `value` with every byte of its UTF-8 form outside `baggage-octet`, and `%`, percent-encoded.
-    #NoDiscard
+    .NoDiscard
     export let encode = func(value: string) -> string {
         last out: uint8[list] = new;
         for (let b in utf8.encode(value)) {
@@ -327,7 +327,7 @@ export let Baggage = module (
 
     /// @brief The decoded value, or None when a byte is not a baggage-octet or a `%` is not a full triplet.
     /// Decoded bytes that are not UTF-8 become U+FFFD.
-    #NoDiscard
+    .NoDiscard
     export let decode = func(text: string) -> Optional<string> {
         for (let i = 0; i < text.byte_length; i++) {
             return Optional<string>.None unless is_baggage_octet(text.byte_at(i));

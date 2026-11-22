@@ -16,7 +16,7 @@ let strings = import:Std.Text.Strings;
 /// `parse_request_head` and `parse_response_head` read and write the HTTP/1.1 head that a byte transport
 /// carries. Failures are Custom errors with the code `ws.handshake`.
 /// @see [Std.Net.Realtime.Ws.Handshake](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-Ws-Handshake)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Handshake = module (
     /// @brief The GUID a server appends to the client's key (RFC 6455 section 1.3).
     export const Guid: string = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -28,7 +28,7 @@ export let Handshake = module (
     export const ErrorCode: string = "ws.handshake";
 
     /// @brief One header field: a name and its value.
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let Header = class (
         /// @brief The field name as written.
         export last name: string;
@@ -58,7 +58,7 @@ export let Handshake = module (
     );
 
     /// @brief The opening request a client sends (RFC 6455 section 4.1).
-    #Final
+    .Final
     export let ClientRequest = class (
         /// @brief The Host header value, `host` or `host:port`.
         export last host: string;
@@ -82,7 +82,7 @@ export let Handshake = module (
         };
 
         /// @brief The request headers in the order they are written.
-        #NoDiscard
+        .NoDiscard
         export let headers = func -> Header[list] {
             last list: Header[list] = new;
             list.append(new Header("Host", host));
@@ -100,7 +100,7 @@ export let Handshake = module (
         };
 
         /// @brief The HTTP/1.1 request head, ending with the empty line.
-        #NoDiscard
+        .NoDiscard
         export let to_text = func -> string => request_text("GET", path, headers());
 
         /// @brief The host, path and offered protocols; the key is shown because it is a public nonce.
@@ -109,7 +109,7 @@ export let Handshake = module (
     );
 
     /// @brief What a server learned from a valid client request (RFC 6455 section 4.2.1).
-    #Final
+    .Final
     export let ClientOffer = class (
         /// @brief The request target.
         export last path: string;
@@ -137,7 +137,7 @@ export let Handshake = module (
 
         /// @brief The response headers that accept this offer with the chosen subprotocol and extension
         /// response (each `None` or empty to choose none), status 101.
-        #NoDiscard
+        .NoDiscard
         export let accept_headers = func(protocol: Optional<string>, extension_response: string) -> Header[list] {
             last list: Header[list] = new;
             list.append(new Header("Upgrade", "websocket"));
@@ -161,7 +161,7 @@ export let Handshake = module (
     );
 
     /// @brief What a client learned from a valid server response (RFC 6455 section 4.1).
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let ServerAcceptance = class (
         /// @brief The subprotocol the server chose, if any.
         export last protocol: Optional<string>;
@@ -197,7 +197,7 @@ export let Handshake = module (
     );
 
     /// @brief An HTTP/1.1 request head: method, target and headers.
-    #Final
+    .Final
     export let RequestHead = class (
         /// @brief The method token.
         export last method: string;
@@ -221,7 +221,7 @@ export let Handshake = module (
     );
 
     /// @brief An HTTP/1.1 response head: status, reason and headers.
-    #Final
+    .Final
     export let ResponseHead = class (
         /// @brief The three-digit status code.
         export last status: int;
@@ -245,11 +245,11 @@ export let Handshake = module (
     ///
     /// Exposed for the handshake and for tests of it. SHA-1 is not collision resistant; do not use it for new
     /// integrity or signature purposes.
-    #[NoDiscard, Pure]
+    .[NoDiscard, Pure]
     export let sha1 = func(bytes: uint8[list]) -> uint8[list] => sha1_digest.of(bytes);
 
     /// @brief The Sec-WebSocket-Accept value for a key: base64(SHA-1(key + Guid)) (RFC 6455 section 4.2.2).
-    #[NoDiscard, Pure]
+    .[NoDiscard, Pure]
     export let accept_key = func(key: string) -> string =>
         base64.encode(sha1_digest.of(strings.to_bytes(key + Guid)));
 
@@ -257,11 +257,11 @@ export let Handshake = module (
     ///
     /// RFC 6455 asks for a randomly selected nonce; pass a Random seeded from entropy in production and a
     /// seeded one in tests.
-    #NoDiscard
+    .NoDiscard
     export let generate_key = func(random: Random) -> string => base64.encode(random.fill_bytes(16));
 
     /// @brief Whether the key is base64 text that decodes to exactly 16 bytes.
-    #[NoDiscard, Pure]
+    .[NoDiscard, Pure]
     export let is_valid_key = func(key: string) -> bool => match (base64.decode(key)) {
         Result.Ok(bytes) => bytes.length == 16,
         Result.Err(_) => false,
@@ -269,13 +269,13 @@ export let Handshake = module (
 
     /// @brief A client request for `path` on `host` with a key from `random`, offering the protocols and the
     /// extension offer (empty for none).
-    #NoDiscard
+    .NoDiscard
     export let client_request = func(host: string, path: string, random: Random, protocols: string[list],
         extensions: string) -> ClientRequest => new ClientRequest(host, path, generate_key(random), protocols,
         extensions);
 
     /// @brief The comma-joined value of every header named `name` (ASCII case ignored), or `None` when absent.
-    #NoDiscard
+    .NoDiscard
     export let header_value = func(headers: Header[list], name: string) -> Optional<string> {
         let found = false;
         let joined = "";
@@ -289,7 +289,7 @@ export let Handshake = module (
     };
 
     /// @brief The trimmed, non-empty elements of a comma-separated header value.
-    #[NoDiscard, Pure]
+    .[NoDiscard, Pure]
     export let split_list = func(value: string) -> string[list] {
         last items: string[list] = new;
         for (let piece in strings.split(value, ",")) {
@@ -302,7 +302,7 @@ export let Handshake = module (
     };
 
     /// @brief Whether a comma-separated header value contains `token`, ASCII case ignored.
-    #[NoDiscard, Pure]
+    .[NoDiscard, Pure]
     export let list_contains = func(value: string, token: string) -> bool {
         for (let item in split_list(value)) {
             if (strings.equals_ignore_ascii_case(item, token)) {
@@ -318,7 +318,7 @@ export let Handshake = module (
     /// Connection list containing `Upgrade` (ASCII case ignored), a Sec-WebSocket-Key that decodes to 16 bytes,
     /// and Sec-WebSocket-Version 13. A wrong version fails with a message naming it; a server should then answer
     /// with `version_mismatch_headers` and status 426.
-    #NoDiscard
+    .NoDiscard
     export let validate_client_request = func(head: RequestHead) -> Result<ClientOffer> {
         if (head.method != "GET") {
             return fail<ClientOffer>("the method must be GET, not " .. head.method);
@@ -343,7 +343,7 @@ export let Handshake = module (
     };
 
     /// @brief The headers of a 426 response to a request with an unsupported version (RFC 6455 section 4.4).
-    #NoDiscard
+    .NoDiscard
     export let version_mismatch_headers = func -> Header[list] {
         last list: Header[list] = new;
         list.append(new Header("Sec-WebSocket-Version", Version));
@@ -352,7 +352,7 @@ export let Handshake = module (
 
     /// @brief The first of the client's protocols that the server supports, in the client's order of
     /// preference, or `None`.
-    #NoDiscard
+    .NoDiscard
     export let choose_protocol = func(offered: string[list], supported: string[list]) -> Optional<string> {
         for (let name in offered) {
             for (let mine in supported) {
@@ -369,7 +369,7 @@ export let Handshake = module (
     /// Requires status 101, an Upgrade list containing `websocket`, a Connection list containing `Upgrade`, a
     /// Sec-WebSocket-Accept equal to `accept_key(request.key)`, a Sec-WebSocket-Protocol (if any) that the
     /// request offered, and Sec-WebSocket-Extensions (if any) naming only extensions the request offered.
-    #NoDiscard
+    .NoDiscard
     export let validate_server_response = func(request: ClientRequest, head: ResponseHead) -> Result<ServerAcceptance> {
         if (head.status != 101) {
             return fail<ServerAcceptance>("the status must be 101, not " .. head.status.to_string());
@@ -413,7 +413,7 @@ export let Handshake = module (
     };
 
     /// @brief The extension names of a Sec-WebSocket-Extensions value, in order (parameters dropped).
-    #[NoDiscard, Pure]
+    .[NoDiscard, Pure]
     export let extension_names = func(value: string) -> string[list] {
         last names: string[list] = new;
         for (let element in split_list(value)) {
@@ -425,7 +425,7 @@ export let Handshake = module (
     };
 
     /// @brief An HTTP/1.1 request head: request line, header lines and the empty line, each ending in CRLF.
-    #[NoDiscard, Pure]
+    .[NoDiscard, Pure]
     export let request_text = func(method: string, target: string, headers: Header[list]) -> string {
         let text = method .. " " .. target .. " HTTP/1.1\r\n";
         for (let header in headers) {
@@ -435,7 +435,7 @@ export let Handshake = module (
     };
 
     /// @brief An HTTP/1.1 response head with the status and reason, ending with the empty line.
-    #[NoDiscard, Pure]
+    .[NoDiscard, Pure]
     export let response_text = func(status: int, reason: string, headers: Header[list]) -> string {
         let text = "HTTP/1.1 " .. status.to_string() .. " " .. reason .. "\r\n";
         for (let header in headers) {
@@ -445,7 +445,7 @@ export let Handshake = module (
     };
 
     /// @brief The byte offset just past the first CRLF CRLF in `bytes` (the end of an HTTP head), or -1.
-    #[NoDiscard, Pure]
+    .[NoDiscard, Pure]
     export let head_end = func(bytes: uint8[list]) -> int {
         for (let i = 3; i < bytes.length; i++) {
             if (bytes[i] == 10 && bytes[i - 1] == 13 && bytes[i - 2] == 10 && bytes[i - 3] == 13) {
@@ -457,7 +457,7 @@ export let Handshake = module (
 
     /// @brief Parses an HTTP/1.1 request head (request line and header lines, CRLF line ends; the final empty
     /// line may be present or not).
-    #NoDiscard
+    .NoDiscard
     export let parse_request_head = func(text: string) -> Result<RequestHead> {
         last lines = head_lines(text);
         if (lines.length == 0) {
@@ -482,7 +482,7 @@ export let Handshake = module (
     };
 
     /// @brief Parses an HTTP/1.1 response head (status line and header lines).
-    #NoDiscard
+    .NoDiscard
     export let parse_response_head = func(text: string) -> Result<ResponseHead> {
         last lines = head_lines(text);
         if (lines.length == 0) {

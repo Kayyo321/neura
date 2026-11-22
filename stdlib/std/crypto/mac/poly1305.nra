@@ -9,11 +9,11 @@ let words = import:Std.Crypto.Internal.Words;
 /// The accumulator is five 26-bit limbs in uint64 words, so every product and sum stays below 2^60, and the
 /// final reduction selects between h and h - p with a mask rather than a branch.
 /// @see [Std.Crypto.Mac.Poly1305](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Mac-Poly1305)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Poly1305 = module (
     /// @brief Poly1305 under a 32-byte one-time key (r, then s). A key must never authenticate two messages;
     /// the AEADs of Std.Crypto.Symmetric derive a fresh one per nonce.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Poly1305 = class implements Authenticator (
         let r0: uint64;
         let r1: uint64;
@@ -172,7 +172,7 @@ export let Poly1305 = module (
     );
 
     /// @brief The 16-byte Poly1305 tag of the message under the one-time key.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let mac = func(key: uint8[list], message: uint8[list]) -> uint8[list] {
         let poly = new Poly1305(key);
         poly.update(message);

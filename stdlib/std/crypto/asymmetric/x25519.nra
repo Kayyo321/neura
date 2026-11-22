@@ -21,10 +21,10 @@ let words = import:Std.Crypto.Internal.Words;
 /// above p are reduced, as the RFC requires. The ladder is branch-free in source; the runtime does not
 /// guarantee constant time.
 /// @see [Std.Crypto.Asymmetric.X25519](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-X25519)
-#Since("0.3.0")
+.Since("0.3.0")
 export let X25519 = module (
     /// @brief The X25519 key-agreement primitive, for the policy and for `PrivateKey<X25519>`.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let X25519 = class implements CryptographicPrimitive<X25519> (
         /// @brief Checks the policy.
         export let init = func {
@@ -36,7 +36,7 @@ export let X25519 = module (
 
         /// @brief The shared secret of the private key and the peer's public key; see
         /// `X25519PrivateKey.diffie_hellman`.
-        #NoDiscard
+        .NoDiscard
         export let diffie_hellman = func(private_key: X25519PrivateKey, peer: X25519PublicKey) -> Result<SecretBytes> =>
             private_key.diffie_hellman(peer);
 
@@ -44,7 +44,7 @@ export let X25519 = module (
     );
 
     /// @brief An X25519 public key: 32 bytes, the u-coordinate little-endian. Equal keys have equal bytes.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let X25519PublicKey = class (
         last encoded: uint8[list];
 
@@ -58,7 +58,7 @@ export let X25519 = module (
         };
 
         /// @brief A copy of the 32 bytes.
-        #NoDiscard
+        .NoDiscard
         export let to_bytes = func -> uint8[list] => words.copy(encoded);
 
         export let.override equals = func(other: class) -> bool {
@@ -81,7 +81,7 @@ export let X25519 = module (
 
     /// @brief An X25519 private key: 32 bytes in secret memory, with its public key. `to_string` never prints
     /// it.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let X25519PrivateKey = class implements PrivateKey<X25519> (
         last material: SecretBytes;
         last public_encoded: uint8[list];
@@ -103,12 +103,12 @@ export let X25519 = module (
         export let public_key_bytes = func -> uint8[list] => words.copy(public_encoded);
 
         /// @brief The matching public key.
-        #NoDiscard
+        .NoDiscard
         export let public_key = func -> X25519PublicKey => new(public_encoded);
 
         /// @brief X25519(this key, the peer's key). An all-zero result is `Custom` code `crypto.key_agreement`:
         /// the peer sent a small-order point.
-        #NoDiscard
+        .NoDiscard
         export let diffie_hellman = func(peer: X25519PublicKey) -> Result<SecretBytes> {
             let shared = montgomery.x25519(material.expose(), peer.to_bytes());
             if (constant_time.ct_eq(shared, words.zeros(32))) {
@@ -133,7 +133,7 @@ export let X25519 = module (
 
     /// @brief A new private key from 32 bytes of `Entropy.os_bytes`, or from the given generator. Fails when
     /// the entropy source fails.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let generate_key_pair = func -> Result<X25519PrivateKey> {
         match (entropy.os_bytes(32)) {
             Result.Ok(bytes) => {
@@ -153,7 +153,7 @@ export let X25519 = module (
     };
 
     /// @brief A public key from outside the program. A wrong length is `Custom` code `crypto.invalid_key`.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_public_key = func(bytes: uint8[list]) -> Result<X25519PublicKey> {
         if (bytes.length != 32) {
             return Result<X25519PublicKey>.Err(error.custom("crypto.invalid_key", "X25519 public key must be 32 bytes"));
@@ -163,7 +163,7 @@ export let X25519 = module (
 
     /// @brief The X25519 function of RFC 7748, section 5, on raw 32-byte strings: the scalar is clamped, the
     /// result is returned even when it is all zero. Other lengths trap.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let x25519 = func(scalar: uint8[list], u: uint8[list]) -> uint8[list] {
         crypto_policy.require(Algorithm.X25519);
         return montgomery.x25519(scalar, u);

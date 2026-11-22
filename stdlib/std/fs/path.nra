@@ -14,17 +14,17 @@ let.promote _ = import:Std.Core.Ordering;
 /// Equality, hash, ordering (by UTF-8 bytes), and text use the normalized text; roots compare by their bytes, so
 /// `C:/` and `c:/` are different roots.
 /// @see [Std.Fs.Path](https://github.com/Kayyo321/neura/wiki/Stdlib-Fs-Path)
-#Since("0.1.0")
+.Since("0.1.0")
 export let Path = module (
     /// @brief An immutable normalized path with lexical operations independent of the filesystem.
-    #[Final, Immutable, ThreadSafe]
+    .[Final, Immutable, ThreadSafe]
     export let Path = class implements Comparable<Path> (
         /// @brief The normalized slash-separated path text.
         last text: string;
 
         /// @brief Whether the path starts at a root: its text starts with `/` or with a drive root such as `C:/`.
         /// Read-only.
-        #Since("0.2.0")
+        .Since("0.2.0")
         export last is_absolute: bool;
 
         /// @brief Normalizes `raw`; Path.of is the usual spelling.
@@ -35,7 +35,7 @@ export let Path = module (
 
         /// @brief This path followed by the components of `other`; an absolute `other` (starting with `/` or a
         /// drive root) replaces it.
-        #Pure
+        .Pure
         export let join = func(other: string) -> Path {
             if (absolute_text(other)) {
                 return new(other);
@@ -48,7 +48,7 @@ export let Path = module (
         };
 
         /// @brief The path without its last component, or nil for a root, `.`, and a single relative component.
-        #Pure
+        .Pure
         export let parent = func -> Path {
             last parts = split(text);
             if (parts.length == 0) {
@@ -62,7 +62,7 @@ export let Path = module (
         };
 
         /// @brief The last component; None for a root, `.`, and a path ending in `..`.
-        #Pure
+        .Pure
         export let file_name = func -> optional.Optional<string> {
             last parts = split(text);
             if (parts.length == 0 || parts[parts.length - 1] == "..") {
@@ -72,7 +72,7 @@ export let Path = module (
         };
 
         /// @brief The file name without its extension.
-        #Pure
+        .Pure
         export let stem = func -> optional.Optional<string> {
             return match (file_name()) {
                 optional.Optional.Some(name) => optional.Optional<string>.Some(name.slice(0, stem_end(name))),
@@ -82,7 +82,7 @@ export let Path = module (
 
         /// @brief The text after the last `.` of the file name, when that dot is not the name's first
         /// character.
-        #Pure
+        .Pure
         export let extension = func -> optional.Optional<string> {
             match (file_name()) {
                 optional.Optional.Some(name) => {
@@ -100,7 +100,7 @@ export let Path = module (
 
         /// @brief The components in order, starting with the root ("/", or a drive root such as "C:/") for an
         /// absolute path. The path `.` has none.
-        #Pure
+        .Pure
         export let components = func -> string[list] {
             last parts = split(text);
             return parts unless is_absolute;
@@ -113,7 +113,7 @@ export let Path = module (
 
         /// @brief Removes each `..` together with the component before it, without consulting the file system.
         /// `..` directly below a root is removed; leading `..` of a relative path are kept.
-        #Pure
+        .Pure
         export let resolve_lexically = func -> Path {
             last kept: string[list] = new;
             for (let part in split(text)) {
@@ -132,7 +132,7 @@ export let Path = module (
 
         /// @brief True when both paths have the same root, or both are relative, and every component of `other`
         /// begins this path.
-        #Pure
+        .Pure
         export let starts_with = func(other: Path) -> bool {
             last base = other.to_string();
             if (root_of(text) != root_of(base)) {
@@ -156,7 +156,7 @@ export let Path = module (
         /// @brief A relative path that joined to `base` names this path, or nil when the two do not have the same
         /// root (one is absolute and the other relative, or their roots differ, as `C:/` and `D:/` or `/` do) or
         /// when `base` has a `..` component after the common part.
-        #Pure
+        .Pure
         export let relative_to = func(base: Path) -> Path {
             last base_text = base.to_string();
             if (root_of(text) != root_of(base_text)) {
@@ -186,7 +186,7 @@ export let Path = module (
         };
 
         /// @brief Orders paths lexicographically by their normalized UTF-8 bytes.
-        #Pure
+        .Pure
         export let compare_to = func(other: Path) -> Ordering => compare_text(text, other.to_string());
 
         /// @brief Tests equality of the normalized path text.
@@ -199,16 +199,16 @@ export let Path = module (
         };
 
         /// @brief Hashes the normalized path text.
-        #Pure
+        .Pure
         export let.override hash_code = func -> uint32 => text.hash_code();
 
         /// @brief Returns the normalized path text.
-        #Pure
+        .Pure
         export let.override to_string = func -> string => text;
     );
 
     /// @brief Constructs a path and normalizes its separators and dot components.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let of = func(text: string) -> Path => new(text);
 
     /// @brief Tests whether the raw text begins with a root: a slash or a drive root.

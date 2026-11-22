@@ -12,7 +12,7 @@ let transports = import:Std.Net.Dns.DnsTransport;
 /// protection, which this runtime does not have (`Std.Net.Quic` models the state machines but has no network or
 /// TLS 1.3 key schedule service), so the exchange is a stub.
 /// @see [Std.Net.Dns.DoqTransport](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-DoqTransport)
-#Since("0.3.0")
+.Since("0.3.0")
 export let DoqTransport = module (
     /// @brief The DoQ port (RFC 9250 section 4.1.1, "Port Selection").
     export const DoqPort: int = 853;
@@ -23,7 +23,7 @@ export let DoqTransport = module (
     let BytesOutcome = enum (Ok(uint8[list]), Error(uint32));
 
     /// @brief A DoQ transport.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let DoqTransport = class implements transports.DnsTransport (
         /// @brief The server.
         export last server: SocketAddr;
@@ -62,7 +62,7 @@ export let DoqTransport = module (
 
     /// @brief What a DoQ client writes on its stream: the query with ID 0 (RFC 9250 section 4.2.1, "DNS Message
     /// IDs") behind its two-byte length (section 4.2).
-    #NoDiscard
+    .NoDiscard
     export let stream_payload = func(query: messages.Message) -> Result<uint8[list]> {
         last bytes = messages.encode(query)?;
         bytes[0] = 0;

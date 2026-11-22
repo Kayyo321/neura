@@ -21,7 +21,7 @@ let words = import:Std.Crypto.Internal.Words;
 
 /// @brief Compact JSON Web Signatures (RFC 7515), with caller-selected signing and verification keys.
 /// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jws)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Jws = module (
     const InvalidHeader = "jws.header";
     const InvalidFormat = "jws.format";
@@ -47,7 +47,7 @@ export let Jws = module (
     /// algorithm. Unknown critical extensions, unsecured tokens, duplicate header members and noncanonical
     /// base64url fail. Header-supplied keys and key locators do not grant trust.
     /// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jws)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let verify = func<Alg>(token: string, key: jwk.VerifierKey<Alg>) -> Result<uint8[list]> {
         last parts = jose.split_dots(token);
         if (parts.length != 3) {
@@ -123,7 +123,7 @@ export let Jws = module (
     /// @brief Authenticates externally supplied bytes using a compact JWS with an empty payload segment.
     /// The compact token is limited to 1 MiB. The protected RFC 7797 b64 option requires crit containing only b64.
     /// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jws)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let verify_detached = func<Alg>(token: string, payload: uint8[list], key: jwk.VerifierKey<Alg>) -> Result<Unit> {
         if (token.byte_length > MaximumSerializationBytes) {
             return jose.fail<Unit>(InvalidFormat, "detached compact JWS exceeds the size limit");
@@ -229,7 +229,7 @@ export let Jws = module (
     /// Select an index explicitly. Signature order and unprotected headers are unauthenticated.
     /// The envelope is limited to 1 MiB and 32 signatures. The alg and any b64/crit members must be protected.
     /// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jws)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let verify_json = func<Alg>(token: string, key: jwk.VerifierKey<Alg>, signature_index: int = 0) -> Result<uint8[list]> {
         last envelope = read_json(token, signature_index)?;
         match (envelope.payload) {
@@ -257,7 +257,7 @@ export let Jws = module (
     /// @brief Verifies one signature from a JWS JSON object that omits the payload member. External bytes
     /// follow the protected b64 mode and may contain arbitrary binary content. Uses the verify_json limits.
     /// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jws)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let verify_json_detached = func<Alg>(token: string, payload: uint8[list], key: jwk.VerifierKey<Alg>,
         signature_index: int = 0) -> Result<Unit> {
         last envelope = read_json(token, signature_index)?;
@@ -274,7 +274,7 @@ export let Jws = module (
 
     /// @brief Signs a compact JWS with the caller's Ed25519 private key and a standard EdDSA protected header.
     /// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jws)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let sign_ed25519 = func(payload: uint8[list], key: ed25519.Ed25519PrivateKey) -> string {
         last signer = new ed25519.Ed25519Signer(key);
         last header = jose.encode(words.utf8("{\"alg\":\"EdDSA\"}"));
@@ -299,7 +299,7 @@ export let Jws = module (
     /// @brief Signs a compact JWS using the HMAC algorithm selected by the signing key.
     /// An empty protected argument selects the default algorithm header. Other protected JSON is validated and used byte for byte.
     /// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jws)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let sign_hmac = func(payload: uint8[list], key: jwk.HmacSigningKey, protected: string = "") -> Result<string> {
         last input = signing_input(payload, key.jose_algorithm(), protected)?;
         return Result<string>.Ok(compact(input, key.sign_input(words.utf8(input))));
@@ -339,7 +339,7 @@ export let Jws = module (
     /// PS algorithms also request a fresh salt as long as their digest. Entropy failures are returned.
     /// A wiped key or a key shorter than 2048 bits traps before entropy is requested.
     /// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jws)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let sign_rsa = func(payload: uint8[list], key: rsa.RsaPrivateKey, algorithm: jwk.RsaAlgorithm, protected: string = "")
         -> Result<string> {
         check_rsa_key(key, algorithm);
@@ -358,7 +358,7 @@ export let Jws = module (
     /// Use fresh, independent cryptographic randomness for the factor in production.
     /// A PS algorithm or a wrong factor length traps. An unusable factor returns an error.
     /// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jws)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let sign_rsa_with_factor = func(payload: uint8[list], key: rsa.RsaPrivateKey, algorithm: jwk.RsaAlgorithm,
         factor: uint8[list], protected: string = "") -> Result<string> {
         check_rsa_key(key, algorithm);
@@ -373,7 +373,7 @@ export let Jws = module (
     /// In production, draw the salt and factor independently from fresh cryptographic randomness.
     /// The salt must have the selected digest's byte length. Wrong algorithms or lengths trap.
     /// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jws)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let sign_rsa_with_salt = func(payload: uint8[list], key: rsa.RsaPrivateKey, algorithm: jwk.RsaAlgorithm,
         salt: uint8[list], factor: uint8[list], protected: string = "") -> Result<string> {
         check_rsa_key(key, algorithm);
@@ -388,7 +388,7 @@ export let Jws = module (
     /// @brief Signs for ES256, ES384, or ES512 as selected by the private key's NIST curve.
     /// The signature uses the fixed-width JOSE r || s representation. Another curve returns an error.
     /// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jws)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let sign_ec = func(payload: uint8[list], key: ecdsa.EcPrivateKey, protected: string = "") -> Result<string> {
         if (key.curve == ecdsa.Curve.Secp256k1) {
             return jose.fail<string>("jws.algorithm", "JWS EC signing requires P-256, P-384, or P-521");
@@ -401,7 +401,7 @@ export let Jws = module (
     /// @brief Signs a compact JWS with the fully specified Ed448 algorithm of RFC 9864.
     /// An empty protected argument selects the default Ed448 header.
     /// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jws)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let sign_ed448 = func(payload: uint8[list], key: ed448.Ed448PrivateKey, protected: string = "") -> Result<string> {
         last input = signing_input(payload, "Ed448", protected)?;
         return Result<string>.Ok(compact(input, new ed448.Ed448Signer(key).sign(words.utf8(input))));

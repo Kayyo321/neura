@@ -33,22 +33,22 @@ let writer = import:Std.Crypto.Pki.DerWriter;
 /// the response echoes it. Errors are `Custom` with codes ocsp.status, ocsp.no_response, ocsp.responder,
 /// ocsp.signature, ocsp.stale, ocsp.nonce; malformed DER is a `Parse` error.
 /// @see [Std.Crypto.Pki.Ocsp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Ocsp)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Ocsp = module (
     /// @brief The CertID hash.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let CertIdHash = enum (Sha1, Sha256, Sha384, Sha512);
 
     /// @brief The responseStatus values of RFC 6960, section 4.2.1 (4 is unused).
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let ResponseStatus = enum (Successful, MalformedRequest, InternalError, TryLater, SigRequired, Unauthorized);
 
     /// @brief The certStatus of a SingleResponse.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let CertStatus = enum (Good, Revoked, Unknown);
 
     /// @brief A CertID: hash algorithm, issuer name hash, issuer key hash and serial number. Compared by value.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let CertId = class (
         export last hash_algorithm: Oid;
         export last issuer_name_hash: uint8[list];
@@ -99,7 +99,7 @@ export let Ocsp = module (
     );
 
     /// @brief One SingleResponse.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let SingleResponse = class (
         export last cert_id: CertId;
         export last status: CertStatus;
@@ -139,7 +139,7 @@ export let Ocsp = module (
     );
 
     /// @brief A BasicOCSPResponse.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let BasicResponse = class (
         /// @brief The DER of ResponseData, which the signature covers.
         export last tbs_bytes: uint8[list];
@@ -198,7 +198,7 @@ export let Ocsp = module (
     );
 
     /// @brief An OCSPResponse: the status and, when successful, the basic response.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let OcspResponse = class (
         export last status: ResponseStatus;
         export last basic: Optional<BasicResponse>;
@@ -219,7 +219,7 @@ export let Ocsp = module (
     );
 
     /// @brief A parsed OCSPRequest (unsigned requests; a signature is kept but not checked).
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let OcspRequest = class (
         export last cert_ids: CertId[list];
         /// @brief The nonce, or empty.
@@ -346,14 +346,14 @@ export let Ocsp = module (
 
     /// @brief The CertID of the certificate issued by the issuer: hashes of the issuer's DER Name and of its public
     /// key's BIT STRING value (RFC 6960, section 4.1.1).
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let for_certificate = func(certificate: Certificate, issuer: Certificate, hash: CertIdHash) -> CertId =>
         new CertId(oid_module.of(hash_oid(hash)), digest(hash, issuer.subject.der_bytes),
             digest(hash, issuer.public_key.key), certificate.serial);
 
     /// @brief The DER of an unsigned OCSPRequest for the CertIDs, with the nonce extension (RFC 8954: 1 to 32
     /// bytes) when `nonce` is not empty. No CertID, or a nonce over 32 bytes, traps.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let build_request = func(ids: CertId[list], nonce: uint8[list]) -> uint8[list] {
         if (ids.length == 0 || nonce.length > 32) {
             trap_with_message("invalid argument: an OCSP request needs a CertID and a nonce of at most 32 bytes");
@@ -396,7 +396,7 @@ export let Ocsp = module (
     };
 
     /// @brief Parses an OCSPRequest.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_request = func(bytes: uint8[list]) -> Result<OcspRequest> {
         last top = der.parse(bytes)?;
         if (not top.is_universal(der.TagSequence)) {
@@ -447,7 +447,7 @@ export let Ocsp = module (
     };
 
     /// @brief Parses an OCSPResponse; a successful one must carry a BasicOCSPResponse.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_response = func(bytes: uint8[list]) -> Result<OcspResponse> {
         last top = der.parse(bytes)?;
         if (not top.is_universal(der.TagSequence)) {
@@ -621,7 +621,7 @@ export let Ocsp = module (
     /// or empty when none was. A revoked or unknown status is returned, not an error: the caller decides.
     /// Unless supplied, the verifier is the library's AlgorithmVerifier.
     /// @see [Std.Crypto.Pki.Ocsp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Ocsp)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let verify = func(response: OcspResponse, certificate: Certificate, issuer: Certificate,
         at: instant.Instant, skew_seconds: int64, nonce: uint8[list]) -> Result<SingleResponse> {
         return verify(response, certificate, issuer, new algorithm_verifier.AlgorithmVerifier(), at, skew_seconds, nonce);

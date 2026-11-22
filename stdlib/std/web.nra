@@ -10,10 +10,10 @@ let ui = import:Std.Ui;
 /// @brief Mounting components in a browser document, over the `neura.ui.*` host services of the browser
 /// runtime (docs/runtime/Providers.md, "UI services"). `mount` opens a root on an element, reconciles each turn's
 /// renders into the commit encoding and decodes the browser's events into the records of `Std.Ui`.
-#Since("0.3.0")
+.Since("0.3.0")
 export let Web = module (
     /// @brief Reads the event encoding, version 1.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     let Reader = class (
         last bytes: uint8[list];
         let at: int = 0;
@@ -87,7 +87,7 @@ export let Web = module (
     );
 
     /// @brief What the browser host keeps for one root.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     let Mounted = class (
         export last selector: string;
         /// The handle the browser issued; it changes when a reset reopens the root.
@@ -143,7 +143,7 @@ export let Web = module (
 
     // What one race saw. `posted` events or a navigation, a `completed` command ticket, a `failed` event wait or a
     // closed root, or nothing (a navigation wait that ended without a navigation): the caller races again.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     let RaceResult = class (
         export let posted: bool = false;
         export let completed: bool = false;
@@ -162,7 +162,7 @@ export let Web = module (
     /// `ui.TaskHost`: a root waits for the browser's events, the page's navigations (back, forward, an edited
     /// address) and command completions together, so neither a running command nor a pending navigation holds
     /// the others.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Host = class implements ui.Host, ui.HistoryHost, ui.FocusHost, ui.TaskHost (
         let roots: Mounted[list] = new;
         // Set when the page refused a navigation wait (no history service, or another root of the page already

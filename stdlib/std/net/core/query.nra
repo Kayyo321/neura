@@ -17,17 +17,17 @@ let.promote _ = import:Std.Core.Result;
 /// the `qs` package, not of any RFC. An empty segment `[]` appends a child named by its index (`0`, `1`, ...).
 /// A key whose brackets do not close in order (`a[b`, `a]b`, `[a]`) is a single plain name.
 /// @see [Std.Net.Core.Query](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Core-Query)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Query = module (
     /// @brief How `+` is read and how text is encoded. Rfc3986: `+` is a literal plus and is written `%2B`, a
     /// space is written `%20`, and keys and values keep the RFC 3986 query characters except `&`, `=`, `+`.
     /// Form: application/x-www-form-urlencoded, where `+` is a space and only ALPHA, DIGIT, `*-._` stay
     /// unencoded.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let QueryMode = enum (Rfc3986, Form);
 
     /// @brief One decoded key and its optional value.
-    #[Final, Immutable, Since("0.3.0")]
+    .[Final, Immutable, Since("0.3.0")]
     export let QueryPair = class (
         /// @brief The decoded key.
         export last key: string;
@@ -41,7 +41,7 @@ export let Query = module (
         };
 
         /// @brief The value, or the empty text for a flag.
-        #Pure
+        .Pure
         export let value_or_empty = func -> string => optional.value_or<string>(value, "");
 
         /// @brief Pairs are equal when keys are equal and both values are absent or equal.
@@ -53,18 +53,18 @@ export let Query = module (
         };
 
         /// @brief Combines the key and value hashes.
-        #Pure
+        .Pure
         export let.override hash_code = func -> uint32 =>
             hashing.combine(hashing.combine(17, key.hash_code()), optional.hash<string>(value));
 
         /// @brief The pair encoded in the Rfc3986 mode.
-        #Pure
+        .Pure
         export let.override to_string = func -> string =>
             encode_pair(this_key: key, this_value: value, mode: QueryMode.Rfc3986);
     );
 
     /// @brief An ordered, mutable list of query pairs.
-    #[Final, Since("0.3.0"), NotThreadSafe]
+    .[Final, Since("0.3.0"), NotThreadSafe]
     export let QueryString = class (
         /// @brief The pairs in order.
         let entries: QueryPair[list] = new;
@@ -217,7 +217,7 @@ export let Query = module (
 
     /// @brief One node of the nested-key tree: the values assigned at its path and its children in first-seen
     /// order.
-    #[Final, Since("0.3.0"), NotThreadSafe]
+    .[Final, Since("0.3.0"), NotThreadSafe]
     export let QueryNode = class (
         /// @brief The node's segment name; the root's is empty.
         export last name: string;
@@ -298,7 +298,7 @@ export let Query = module (
     ///
     /// Errors: Parse InvalidCharacter at the offset in `raw` of a `%` not followed by two hex digits; Encoding at
     /// the offset in `raw` of decoded bytes that are not UTF-8.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse = func(raw: string, mode: QueryMode) -> Result<QueryString> {
         last query = new QueryString();
         last length = raw.byte_length;
@@ -329,7 +329,7 @@ export let Query = module (
 
     /// @brief The path segments of a key under the bracket convention; a key that does not fit it is one
     /// segment.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let key_path = func(key: string) -> string[list] {
         last path: string[list] = new;
         last length = key.byte_length;

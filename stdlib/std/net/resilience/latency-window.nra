@@ -7,10 +7,10 @@ let optional = import:Std.Core.Optional;
 /// nearest-rank definition, so p95 of 20 samples is the 19th smallest and p100 the largest. `HedgingFilter` uses it
 /// to choose its hedge delay.
 /// @see [Std.Net.Resilience.LatencyWindow](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-LatencyWindow)
-#Since("0.3.0")
+.Since("0.3.0")
 export let LatencyWindow = module (
     /// @brief The last `capacity` latencies.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let LatencyWindow = class (
         /// @brief The samples in nanoseconds, a ring once full.
         last samples: int64[list] = new;
@@ -43,7 +43,7 @@ export let LatencyWindow = module (
 
         /// @brief The nearest-rank `p`-th percentile, or None when the window is empty. `p` must be from 1 through
         /// 100, else the call traps with "invalid argument: percentile".
-        #NoDiscard
+        .NoDiscard
         export let percentile = func(p: int) -> optional.Optional<durations.Duration> {
             if (p < 1 || p > 100) {
                 trap_with_message("invalid argument: percentile");
@@ -82,6 +82,6 @@ export let LatencyWindow = module (
     );
 
     /// @brief An empty window of `capacity` samples.
-    #NoDiscard
+    .NoDiscard
     export let of = func(capacity: int) -> LatencyWindow => new LatencyWindow(capacity);
 );

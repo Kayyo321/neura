@@ -9,7 +9,7 @@ let utf8 = import:Std.Encoding.Utf8;
 ///
 /// `matches` answers 1 (the name is in the subtree), 0 (it is not) or -1 (the name or the constraint is
 /// malformed, so the constraint cannot be evaluated, which validation treats as a failure).
-#Since("0.3.0")
+.Since("0.3.0")
 export let PkiNameConstraints = module (
     /// @brief Whether every name satisfies one layer of constraints: no name in an excluded subtree, and every
     /// name of a type that has permitted subtrees in one of them. A name of a type this module cannot evaluate

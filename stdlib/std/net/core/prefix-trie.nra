@@ -12,10 +12,10 @@ let.promote _ = import:Std.Core.Optional;
 /// query's zone is ignored, and an IPv4-mapped IPv6 address is looked up among the IPv6 blocks only.
 /// The table is not synchronized: share it between tasks only behind a lock.
 /// @see [Std.Net.Core.PrefixTrie](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Core-PrefixTrie)
-#Since("0.3.0")
+.Since("0.3.0")
 export let PrefixTrie = module (
     /// @brief A mutable map from `CidrBlock` keys to values of type `V`.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let PrefixTrie = class<V> (
         /// @brief The child for a 0 bit of each node, or -1.
         last zero: int[list];
@@ -79,7 +79,7 @@ export let PrefixTrie = module (
         };
 
         /// @brief The value of the longest stored block that contains `ip`, or None.
-        #NoDiscard
+        .NoDiscard
         export let longest_match = func(ip: ips.IpAddr) -> Optional<V> {
             last depth = longest_depth(ip);
             return if (depth < 0) -> Optional<V>.None
@@ -87,7 +87,7 @@ export let PrefixTrie = module (
         };
 
         /// @brief The longest stored block that contains `ip`, or None.
-        #NoDiscard
+        .NoDiscard
         export let longest_match_block = func(ip: ips.IpAddr) -> Optional<cidr.CidrBlock> {
             last depth = longest_depth(ip);
             return if (depth < 0) -> Optional<cidr.CidrBlock>.None
@@ -95,7 +95,7 @@ export let PrefixTrie = module (
         };
 
         /// @brief The value stored for exactly `block`, or None.
-        #NoDiscard
+        .NoDiscard
         export let exact = func(block: cidr.CidrBlock) -> Optional<V> {
             last node = find(block);
             return if (node < 0) -> Optional<V>.None

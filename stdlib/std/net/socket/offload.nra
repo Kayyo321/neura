@@ -10,14 +10,14 @@
 /// takes apart the same way. The NVM copies host values at the boundary, so "zero-copy" here means the kernel
 /// side only; no runtime guarantee about the Neura heap is implied.
 /// @see [Std.Net.Socket.Offload](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-Offload)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Offload = module (
     /// @brief The largest UDP payload over IPv4: 65,535 bytes minus the 8-byte UDP and 20-byte IPv4 headers.
     export const MaxUdpPayload: int = 65507;
 
     /// @brief The number of datagrams a buffer of `length` bytes becomes with segments of `segment_size`
     /// bytes. A segment size below 1 or a negative length traps with "invalid argument".
-    #Pure
+    .Pure
     export let segment_count = func(length: int, segment_size: int) -> int {
         check(length, segment_size);
         return (length + segment_size - 1) / segment_size;
@@ -25,7 +25,7 @@ export let Offload = module (
 
     /// @brief Cuts `data` into datagrams of `segment_size` bytes; the last holds the rest. An empty buffer gives
     /// no datagrams. A segment size below 1 or above `MaxUdpPayload` traps with "invalid argument".
-    #NoDiscard
+    .NoDiscard
     export let split = func(data: uint8[list], segment_size: int) -> uint8[list][list] {
         check(data.length, segment_size);
         let out: uint8[list][list] = new;

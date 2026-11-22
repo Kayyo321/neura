@@ -13,7 +13,7 @@ let.promote _ = import:Std.Core.Unit;
 /// program with tasks the host's read, write and accept services overlap, so one task waits while the others
 /// run; the runtime's driver owns the waiting (see `Std.Net.Socket.EventLoop`).
 /// @see [Std.Net.Socket.StreamSocket](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-StreamSocket)
-#Since("0.3.0")
+.Since("0.3.0")
 export let StreamSocket = module (
     /// @brief The most bytes one `receive` returns: 65,536.
     export const ReceiveChunk: int = 65536;

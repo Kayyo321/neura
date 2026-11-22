@@ -23,7 +23,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// when its KEK version changes or is unavailable, or when the caller clears it. Opening always resolves
 /// the envelope's exact KEK version, including an older version while the provider keeps it live.
 /// @see [Std.Crypto.Enclave.Envelope](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Envelope)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Envelope = module (
     const MaxKeyUses = 4096;
     const MaxDataLength = 1048576;
@@ -31,20 +31,20 @@ export let Envelope = module (
 
     /// @brief Encrypts and decrypts messages with associated data through a configured key store.
     /// @see [Std.Crypto.Enclave.Envelope](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Envelope)
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let EnvelopeCrypter = interface (
         /// @brief Seals a message, using provider and entropy services as needed.
         /// @see [Std.Crypto.Enclave.Envelope](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Envelope)
-        #Since("0.3.0")
+        .Since("0.3.0")
         let seal = func(plaintext: uint8[list], associated_data: uint8[list]) -> Result<uint8[list]>;
 
         /// @brief Authenticates and opens an envelope with its original associated data.
         /// @see [Std.Crypto.Enclave.Envelope](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Envelope)
-        #Since("0.3.0")
+        .Since("0.3.0")
         let open = func(envelope: uint8[list], associated_data: uint8[list]) -> Result<uint8[list]>;
     );
 
-    #Final
+    .Final
     let CachedKey = class (
         export last dek: secret.SecretBytes;
         export last prefix: uint8[list];
@@ -63,7 +63,7 @@ export let Envelope = module (
         export let.override to_string = func -> string => "Envelope.CachedKey(<redacted>)";
     );
 
-    #Final
+    .Final
     let Header = class (
         export last version: uint32;
         export last nonce: uint8[list];
@@ -85,7 +85,7 @@ export let Envelope = module (
 
     /// @brief An envelope engine bound to one key label and one task. Uses a single encryption DEK cache.
     /// @see [Std.Crypto.Enclave.Envelope](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Envelope)
-    #[Final, NotThreadSafe, Since("0.3.0")]
+    .[Final, NotThreadSafe, Since("0.3.0")]
     export let Envelope = class<Handle> implements EnvelopeCrypter (
         last store: VersionedKeyStore<Handle>;
         last label: string;
@@ -97,7 +97,7 @@ export let Envelope = module (
         /// @brief Sets the initial KEK version and DEK use limit (1 to 4096). A zero key version, invalid label
         /// (outside 1 to 255 UTF-8 bytes) or invalid limit traps.
         /// @see [Std.Crypto.Enclave.Envelope](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Envelope)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let init = func(provider: VersionedKeyStore<Handle>, key_label: string, version: uint32,
             uses_per_dek: int) {
             crypto_policy.require(Algorithm.Aes256Gcm);
@@ -115,7 +115,7 @@ export let Envelope = module (
         /// @brief Starts using a newer live version of this label and wipes the cached DEK. An error leaves the
         /// current encryption version in place. Older versions can still decrypt while live in the provider.
         /// @see [Std.Crypto.Enclave.Envelope](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Envelope)
-        #[NoDiscard, Since("0.3.0")]
+        .[NoDiscard, Since("0.3.0")]
         export let rotate_kek = func(version: uint32) -> Result<Unit> {
             if (version <= active_version) {
                 return failure<Unit>("crypto.key_version", "envelope rotation needs a strictly newer version");
@@ -128,7 +128,7 @@ export let Envelope = module (
 
         /// @brief Wipes the cache's DEK and discards the current nonce sequence. The next seal needs a fresh DEK.
         /// @see [Std.Crypto.Enclave.Envelope](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Envelope)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let forget_dek = func {
             match (cache) {
                 Optional.Some(key) => {
@@ -142,13 +142,13 @@ export let Envelope = module (
         /// @brief Seals under the current live KEK, using the OS to generate a DEK and nonce prefix on a cache miss.
         /// Returns provider or entropy errors. A message or associated data over 1 MiB traps.
         /// @see [Std.Crypto.Enclave.Envelope](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Envelope)
-        #[NoDiscard, Since("0.3.0")]
+        .[NoDiscard, Since("0.3.0")]
         export let seal = func(plaintext: uint8[list], associated_data: uint8[list]) -> Result<uint8[list]> =>
             seal_using(plaintext, associated_data, func -> Result<uint8[list]> => entropy.os_bytes(40));
 
         /// @brief Seals with a caller-supplied generator for a fresh DEK and nonce prefix on a cache miss.
         /// @see [Std.Crypto.Enclave.Envelope](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Envelope)
-        #[NoDiscard, Since("0.3.0")]
+        .[NoDiscard, Since("0.3.0")]
         export let seal_with_drbg = func(plaintext: uint8[list], associated_data: uint8[list],
             generator: drbg.ChaCha20Drbg) -> Result<uint8[list]> =>
                 seal_using(plaintext, associated_data, new func -> Result<uint8[list]> =>
@@ -157,7 +157,7 @@ export let Envelope = module (
         /// @brief Deterministic DEK generation for tests. The 40 bytes are DEK || nonce prefix and are used only
         /// on a cache miss. Other lengths trap. Each epoch under a repeated DEK needs a unique prefix.
         /// @see [Std.Crypto.Enclave.Envelope](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Envelope)
-        #[NoDiscard, Since("0.3.0")]
+        .[NoDiscard, Since("0.3.0")]
         export let seal_with_material = func(plaintext: uint8[list], associated_data: uint8[list],
             material: uint8[list]) -> Result<uint8[list]> {
             if (material.length != 40) {
@@ -170,7 +170,7 @@ export let Envelope = module (
         /// @brief Opens under the KEK version stated in the header. Wrong AAD, a missing key or failed
         /// authentication returns crypto.authentication. A malformed header returns crypto.envelope.
         /// @see [Std.Crypto.Enclave.Envelope](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Envelope)
-        #[NoDiscard, Since("0.3.0")]
+        .[NoDiscard, Since("0.3.0")]
         export let open = func(envelope: uint8[list], associated_data: uint8[list]) -> Result<uint8[list]> {
             check_data_length(associated_data);
             last header = parse_header(envelope, label_bytes)?;
@@ -272,7 +272,7 @@ export let Envelope = module (
 
         /// @brief A fixed placeholder that hides key and cache details.
         /// @see [Std.Crypto.Enclave.Envelope](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Envelope)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let.override to_string = func -> string => "Envelope(<redacted>)";
     );
 

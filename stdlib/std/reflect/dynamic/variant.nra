@@ -4,19 +4,19 @@ let model = import:Std.Reflect.Internal.Model;
 /// of the program's reflection universe with its type, and reads, writes, constructs and invokes through checked
 /// operations.
 /// @see [Std.Reflect.Dynamic.Variant](https://github.com/Kayyo321/neura/wiki/Stdlib-Reflect-Dynamic-Variant)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Variant = module (
     /// @brief A value with its type.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let Variant = model.Variant;
 
     /// @brief The value with its type: the dynamic class of a reference, the static type otherwise.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let of = func<T>(value: T) -> Variant => model.variant_of(value);
 
     /// @brief A new value of `type`: constructor `selector` of a class or record, variant `selector` of an enum,
     /// or an array, list or tuple of the arguments (selector 0). Each argument is checked against its parameter.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let construct = func(type: model.TypeDescriptor, selector: int, arguments: Variant[list]) -> Variant =>
         model.construct(type.ordinal, selector, arguments);
 );

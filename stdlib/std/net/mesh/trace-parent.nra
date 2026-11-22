@@ -14,7 +14,7 @@ let.promote _ = import:Std.Random.Random;
 /// always emitted as version 00, which is the downgrade the spec requires. A parse failure is an `Error.Parse`;
 /// the spec then has the receiver restart the trace and ignore `tracestate`.
 /// @see [Std.Net.Mesh.TraceParent](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Mesh-TraceParent)
-#Since("0.3.0")
+.Since("0.3.0")
 export let TraceParent = module (
     /// @brief The sampled flag (bit 0): the caller may have recorded trace data.
     export const SampledFlag: int = 1;
@@ -30,7 +30,7 @@ export let TraceParent = module (
     export const ParentIdBytes: int = 8;
 
     /// @brief One parsed or generated `traceparent` value.
-    #Final
+    .Final
     export let TraceParent = class (
         /// @brief The version the value was parsed from (0 for a value this library made). Emission always
         /// writes version 00.
@@ -64,36 +64,36 @@ export let TraceParent = module (
         };
 
         /// @brief Whether the sampled flag is set.
-        #NoDiscard
+        .NoDiscard
         export let sampled = func -> bool => (flags & SampledFlag) != 0;
 
         /// @brief Whether the random-trace-id flag is set.
-        #NoDiscard
+        .NoDiscard
         export let random_trace_id = func -> bool => (flags & RandomTraceIdFlag) != 0;
 
         /// @brief The trace id as 32 lowercase hex digits.
-        #NoDiscard
+        .NoDiscard
         export let trace_id_hex = func -> string => hex(trace_id);
 
         /// @brief The parent id as 16 lowercase hex digits.
-        #NoDiscard
+        .NoDiscard
         export let parent_id_hex = func -> string => hex(parent_id);
 
         /// @brief The version-00 header value, with the flags this version does not define cleared.
-        #NoDiscard
+        .NoDiscard
         export let to_header = func -> string =>
             "00-" .. hex(trace_id) .. "-" .. hex(parent_id) .. "-" .. hex_byte(flags & KnownFlags);
 
         /// @brief The same trace continued by a new span: the same trace id, `span_id` as the parent id, the
         /// known flags kept (the random-trace-id flag must not change while the trace id is kept). Traps like
         /// `init` on a bad `span_id`.
-        #NoDiscard
+        .NoDiscard
         export let child = func(span_id: uint8[list]) -> TraceParent =>
             new TraceParent(0, trace_id, span_id, flags & KnownFlags);
 
         /// @brief As `child` with the sampled flag set to `sample`; the spec allows changing it only together
         /// with the parent id.
-        #NoDiscard
+        .NoDiscard
         export let child_sampled = func(span_id: uint8[list], sample: bool) -> TraceParent =>
             new TraceParent(0, trace_id, span_id, (flags & RandomTraceIdFlag) + (sample ? SampledFlag : 0));
 
@@ -123,7 +123,7 @@ export let TraceParent = module (
     );
 
     /// @brief Parses a `traceparent` value by the rules described for the module.
-    #NoDiscard
+    .NoDiscard
     export let parse = func(text: string) -> Result<TraceParent> {
         if (text.byte_length < 3 || not is_hex(text.byte_at(0)) || not is_hex(text.byte_at(1)) || text.byte_at(2) != 45) {
             return fail(0, "the version is not two lowercase hex digits followed by a dash");
@@ -163,7 +163,7 @@ export let TraceParent = module (
     };
 
     /// @brief `count` random bytes from `random` that are not all zero (drawn again in the rare all-zero case).
-    #NoDiscard
+    .NoDiscard
     export let random_id = func(random: Random, count: int) -> uint8[list] {
         while (true) {
             last bytes = random.fill_bytes(count);
@@ -174,7 +174,7 @@ export let TraceParent = module (
 
     /// @brief A new trace: a random trace id (with the random-trace-id flag set), a random parent id, and the
     /// sampled flag set to `sample`.
-    #NoDiscard
+    .NoDiscard
     export let start = func(random: Random, sample: bool) -> TraceParent {
         last trace = random_id(random, TraceIdBytes);
         last parent = random_id(random, ParentIdBytes);

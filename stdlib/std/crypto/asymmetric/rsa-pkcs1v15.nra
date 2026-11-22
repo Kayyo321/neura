@@ -14,10 +14,10 @@ let rsa_core = import:Std.Crypto.Internal.RsaCore;
 /// DigestInfo of the chosen hash and compares it with the recovered block byte for byte; it never parses the
 /// block, so the forgeries against lenient parsers (Bleichenbacher 2006) do not apply.
 /// @see [Std.Crypto.Asymmetric.RsaPkcs1v15](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-RsaPkcs1v15)
-#Since("0.3.0")
+.Since("0.3.0")
 export let RsaPkcs1v15 = module (
     /// @brief Verifies RSASSA-PKCS1-v1_5 signatures under a public key with one hash.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let RsaPkcs1v15Verifier = class implements Verifier<rsa.RsaPublicKey, uint8[list]> (
         last key: rsa.RsaPublicKey;
         /// @brief The hash of the message.
@@ -51,7 +51,7 @@ export let RsaPkcs1v15 = module (
             verify_digest(asym_hash.digest(hash, message), signature);
 
         /// @brief Whether the signature is valid for a digest computed elsewhere (of the hash's length).
-        #NoDiscard
+        .NoDiscard
         export let verify_digest = func(digest: uint8[list], signature: uint8[list]) -> bool {
             last core = key.core;
             if (signature.length != core.k || digest.length != asym_hash.output_length(hash)) {

@@ -16,7 +16,7 @@ let utf8 = import:Std.Encoding.Utf8;
 /// WT_APPLICATION_ERROR range (draft section 4.4). The draft is not final; its codepoints may change. Failures
 /// are Parse errors at the offending offset.
 /// @see [Std.Net.Realtime.WebTransport.Wire](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-WebTransport-Wire)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Wire = module (
     /// @brief The largest QUIC variable-length integer, 2^62 - 1.
     export const MaxVarint: uint64 = 4611686018427387903;
@@ -43,7 +43,7 @@ export let Wire = module (
 
     /// @brief The type of a stream ID. A negative ID or one above 2^62 - 1 traps with "invalid argument: stream
     /// id".
-    #NoDiscard
+    .NoDiscard
     export let stream_type = func(id: int64) -> StreamType {
         check_stream_id(id);
         last low = id % 4;
@@ -55,25 +55,25 @@ export let Wire = module (
     };
 
     /// @brief Whether the stream ID names a bidirectional stream.
-    #NoDiscard
+    .NoDiscard
     export let is_bidirectional = func(id: int64) -> bool {
         check_stream_id(id);
         return (id / 2) % 2 == 0;
     };
 
     /// @brief Whether the client opened the stream.
-    #NoDiscard
+    .NoDiscard
     export let is_client_initiated = func(id: int64) -> bool {
         check_stream_id(id);
         return id % 2 == 0;
     };
 
     /// @brief Whether the ID can be a session ID: a client-initiated bidirectional stream.
-    #NoDiscard
+    .NoDiscard
     export let is_valid_session_id = func(id: int64) -> bool => id >= 0 && id <= (MaxVarint as int64) && id % 4 == 0;
 
     /// @brief The `index`-th stream ID (from 0) of a type: `4 * index` plus the type's low bits.
-    #NoDiscard
+    .NoDiscard
     export let nth_stream_id = func(kind: StreamType, index: int64) -> int64 {
         last low: int64 = match (kind) {
             StreamType.ClientBidirectional => 0,
@@ -113,7 +113,7 @@ export let Wire = module (
     };
 
     /// @brief The shortest encoding of the value as a new list.
-    #NoDiscard
+    .NoDiscard
     export let encode_varint = func(value: uint64) -> uint8[list] {
         last out: uint8[list] = new;
         append_varint(out, value);
@@ -121,7 +121,7 @@ export let Wire = module (
     };
 
     /// @brief Reads values from a byte list with an offset.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let WireReader = class (
         /// @brief The bytes read.
         last bytes: uint8[list];
@@ -135,12 +135,12 @@ export let Wire = module (
         };
 
         /// @brief The number of bytes not yet read.
-        #NoDiscard
+        .NoDiscard
         export let remaining = func -> int => bytes.length - offset;
 
         /// @brief The next variable-length integer; any length is accepted, as RFC 9000 allows. Fails with
         /// UnexpectedEnd when the bytes run out.
-        #NoDiscard
+        .NoDiscard
         export let read_varint = func -> Result<uint64> {
             if (offset >= bytes.length) {
                 return truncated<uint64>("expected a variable-length integer", offset);
@@ -159,7 +159,7 @@ export let Wire = module (
         };
 
         /// @brief The next 32-bit big-endian integer.
-        #NoDiscard
+        .NoDiscard
         export let read_uint32 = func -> Result<uint32> {
             if (bytes.length - offset < 4) {
                 return truncated<uint32>("expected a 32-bit integer", offset);
@@ -173,7 +173,7 @@ export let Wire = module (
         };
 
         /// @brief The next `count` bytes, as a new list.
-        #NoDiscard
+        .NoDiscard
         export let read_bytes = func(count: int) -> Result<uint8[list]> {
             if (count < 0 || bytes.length - offset < count) {
                 return truncated<uint8[list]>("expected " .. count.to_string() .. " bytes", offset);
@@ -187,7 +187,7 @@ export let Wire = module (
         };
 
         /// @brief The rest of the bytes, as a new list.
-        #NoDiscard
+        .NoDiscard
         export let read_rest = func -> uint8[list] {
             last out: uint8[list] = new;
             for (let i = offset; i < bytes.length; i++) {
@@ -204,7 +204,7 @@ export let Wire = module (
 
     /// @brief The header of a unidirectional WebTransport stream for the session: 0x54 and the session ID. An
     /// invalid session ID traps with "invalid argument: session id".
-    #NoDiscard
+    .NoDiscard
     export let uni_stream_header = func(session: int64) -> uint8[list] {
         check_session(session);
         last out = encode_varint(UniStreamType);
@@ -213,7 +213,7 @@ export let Wire = module (
     };
 
     /// @brief The header of a bidirectional WebTransport stream for the session: 0x41 and the session ID.
-    #NoDiscard
+    .NoDiscard
     export let bidi_stream_header = func(session: int64) -> uint8[list] {
         check_session(session);
         last out = encode_varint(BidiSignal);
@@ -224,7 +224,7 @@ export let Wire = module (
     /// @brief Reads the header of a unidirectional stream (`bidirectional` false) or a bidirectional one and
     /// returns the session ID; the reader is left at the stream data. Fails for another type or signal and for
     /// a session ID that is not a client-initiated bidirectional stream ID.
-    #NoDiscard
+    .NoDiscard
     export let read_stream_header = func(reader: WireReader, bidirectional: bool) -> Result<int64> {
         last start = reader.offset;
         last kind = reader.read_varint()?;
@@ -238,7 +238,7 @@ export let Wire = module (
     };
 
     /// @brief An HTTP/3 datagram for the session: the quarter stream ID (session / 4) and the payload.
-    #NoDiscard
+    .NoDiscard
     export let encode_datagram = func(session: int64, payload: uint8[list]) -> uint8[list] {
         check_session(session);
         last out = encode_varint((session / 4) as uint64);
@@ -249,7 +249,7 @@ export let Wire = module (
     };
 
     /// @brief A received HTTP/3 datagram: its session and payload.
-    #[Final]
+    .[Final]
     export let Datagram = class (
         /// @brief The session ID (4 times the quarter stream ID).
         export last session: int64;
@@ -268,7 +268,7 @@ export let Wire = module (
     );
 
     /// @brief Reads an HTTP/3 datagram. A quarter stream ID above 2^60 - 1 fails (RFC 9297 section 2.1).
-    #NoDiscard
+    .NoDiscard
     export let decode_datagram = func(bytes: uint8[list]) -> Result<Datagram> {
         last reader = new WireReader(bytes);
         last quarter = reader.read_varint()?;
@@ -277,7 +277,7 @@ export let Wire = module (
     };
 
     /// @brief The reason a session ended, as a WT_CLOSE_SESSION capsule carries it.
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let SessionClose = class (
         /// @brief The 32-bit application error code.
         export last code: uint32;
@@ -307,7 +307,7 @@ export let Wire = module (
 
     /// @brief The WT_CLOSE_SESSION capsule (type 0x2843, length, code, message). A message over 1024 bytes
     /// traps with "invalid argument: close message".
-    #NoDiscard
+    .NoDiscard
     export let encode_close_capsule = func(close: SessionClose) -> uint8[list] {
         last text = strings.to_bytes(close.message);
         if (text.length > MaxCloseMessageBytes) {
@@ -326,7 +326,7 @@ export let Wire = module (
 
     /// @brief Reads a WT_CLOSE_SESSION capsule. Fails for another capsule type, a length below 4 or past the
     /// bytes, a message over 1024 bytes, or a message that is not UTF-8.
-    #NoDiscard
+    .NoDiscard
     export let decode_close_capsule = func(bytes: uint8[list]) -> Result<SessionClose> {
         last reader = new WireReader(bytes);
         last kind = reader.read_varint()?;
@@ -345,7 +345,7 @@ export let Wire = module (
 
     /// @brief The HTTP/3 error code of a WebTransport application error code (draft section 4.4):
     /// `first + n + floor(n / 0x1e)`, skipping the reserved codepoints `0x1f * N + 0x21`.
-    #NoDiscard
+    .NoDiscard
     export let to_http3_error = func(code: uint32) -> uint64 {
         last n = code as uint64;
         return FirstApplicationError + n + n / 30;
@@ -353,7 +353,7 @@ export let Wire = module (
 
     /// @brief The WebTransport application error code of an HTTP/3 error code, or a failure when the code is
     /// outside the WT_APPLICATION_ERROR range or a reserved codepoint.
-    #NoDiscard
+    .NoDiscard
     export let from_http3_error = func(code: uint64) -> Result<uint32> {
         if (code < FirstApplicationError || code > LastApplicationError) {
             return syntax<uint32>("not a WT_APPLICATION_ERROR code", 0);

@@ -17,13 +17,13 @@ let.promote _ = import:Std.Net.Service;
 /// In-flight requests are those that entered the filter and have not returned, which includes nested calls in one
 /// task; tasks cannot share the filter (it is `#NotThreadSafe`).
 /// @see [Std.Net.Resilience.ConcurrencyLimitFilter](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-ConcurrencyLimitFilter)
-#Since("0.3.0")
+.Since("0.3.0")
 export let ConcurrencyLimitFilter = module (
     /// @brief The error code of a request shed by the limit.
     export const ExceededCode = "resilience.limit_exceeded";
 
     /// @brief Sheds load above an adaptive limit.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let ConcurrencyLimitFilter = class<Req, Resp> implements SimpleFilter<Req, Resp> (
         /// @brief The adaptive limit.
         last limit: limits.AdaptiveLimit;
@@ -76,7 +76,7 @@ export let ConcurrencyLimitFilter = module (
     );
 
     /// @brief A filter that counts every `Err` as a drop.
-    #NoDiscard
+    .NoDiscard
     export let of = func<Req, Resp>(limit: limits.AdaptiveLimit, clock: Clock) -> ConcurrencyLimitFilter<Req, Resp> =>
         new ConcurrencyLimitFilter<Req, Resp>(limit, func(outcome: Result<Resp>) -> bool => match (outcome) {
             Result.Ok(value) => false,
@@ -84,7 +84,7 @@ export let ConcurrencyLimitFilter = module (
         }, clock);
 
     /// @brief A filter with a drop classifier.
-    #NoDiscard
+    .NoDiscard
     export let classified = func<Req, Resp>(limit: limits.AdaptiveLimit, is_drop: func(Result<Resp>) -> bool,
         clock: Clock) -> ConcurrencyLimitFilter<Req, Resp> =>
             new ConcurrencyLimitFilter<Req, Resp>(limit, is_drop, clock);

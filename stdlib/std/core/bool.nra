@@ -4,18 +4,18 @@ let.promote _ = import:Std.Core.Result;
 
 /// @brief Companion functions for bool (Stdlib.md section 7.4).
 /// @see [Std.Core.Bool](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-Bool)
-#Since("0.1.0")
+.Since("0.1.0")
 export let Bool = module implements Ordered<bool>, Parseable<bool> (
     /// @brief 1 for true, 0 for false.
-    #[Inline, Pure, ThreadSafe]
+    .[Inline, Pure, ThreadSafe]
     export let to_int = func(v: bool) -> int => v ? 1 : 0;
 
     /// @brief Returns true when exactly one operand is true.
-    #[Inline, Pure, ThreadSafe]
+    .[Inline, Pure, ThreadSafe]
     export let xor = func(a: bool, b: bool) -> bool => a != b;
 
     /// @brief The natural order: false before true. Usable as a comparator.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let compare = func(a: bool, b: bool) -> Ordering {
         if (a == b) {
             return Ordering.Equal;
@@ -24,11 +24,11 @@ export let Bool = module implements Ordered<bool>, Parseable<bool> (
     };
 
     /// @brief 1231 for true and 1237 for false (section 5.2).
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let hash = func(v: bool) -> uint32 => v.hash_code();
 
     /// @brief Returns the lowercase text `true` or `false`.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let to_string = func(v: bool) -> string {
         return if (v) -> "true" else -> "false";
     };
@@ -37,7 +37,7 @@ export let Bool = module implements Ordered<bool>, Parseable<bool> (
     ///
     /// The empty text fails with Empty; a proper prefix of either word with UnexpectedEnd at its length; any
     /// other text with InvalidCharacter at the first byte that matches neither word.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let parse = func(text: string) -> Result<bool> {
         if (text == "true") {
             return Result<bool>.Ok(true);

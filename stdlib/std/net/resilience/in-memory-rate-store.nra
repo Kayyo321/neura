@@ -7,10 +7,10 @@ let.promote _ = import:Std.Core.Result;
 /// @brief A `RateStore` in a hash map of the process. Compare-and-set is atomic because one task owns the map; it
 /// never fails. Keys are kept until `remove_expired` or `clear`; the `ttl` of a write is not tracked.
 /// @see [Std.Net.Resilience.InMemoryRateStore](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-InMemoryRateStore)
-#Since("0.3.0")
+.Since("0.3.0")
 export let InMemoryRateStore = module (
     /// @brief A rate store over a hash map.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let InMemoryRateStore = class implements stores.RateStore (
         /// @brief The arrival time of each key.
         last values: hash_maps.HashMap<string, int64> = hash_maps.create<string, int64>();
@@ -61,6 +61,6 @@ export let InMemoryRateStore = module (
     );
 
     /// @brief An empty store.
-    #NoDiscard
+    .NoDiscard
     export let create = func -> InMemoryRateStore => new;
 );

@@ -14,7 +14,7 @@ let words = import:Std.Crypto.Internal.Words;
 
 /// @brief Bulletproofs range proofs for one or more values with Dalek's default ristretto255 generators and Merlin framing.
 /// @see [Std.Crypto.Advanced.Bulletproofs](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Bulletproofs)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Bulletproofs = module (
     let fail = func<T>(message: string) -> Result<T> => Result<T>.Err(error.custom("crypto.bulletproofs", message));
 
@@ -479,7 +479,7 @@ export let Bulletproofs = module (
     /// Supply one canonical 32-byte blinding scalar and 64 * (2 * bits + 4) independent unpredictable bytes.
     /// See prove_aggregate_with for the supported widths and random material requirements.
     /// @see [Std.Crypto.Advanced.Bulletproofs](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Bulletproofs)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let prove_with = func(transcript: merlin.Transcript, bits: int, value: uint64,
         blinding: uint8[list], random: uint8[list]) -> Result<[uint8[list], uint8[list]]> {
         last result = prove_aggregate_with(transcript, bits, new([value]), new([blinding]), random)?;
@@ -488,7 +488,7 @@ export let Bulletproofs = module (
 
     /// @brief Proves one value using fresh operating system randomness for the proof.
     /// @see [Std.Crypto.Advanced.Bulletproofs](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Bulletproofs)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let prove = func(transcript: merlin.Transcript, bits: int, value: uint64, blinding: uint8[list])
         -> Result<[uint8[list], uint8[list]]> {
         last result = prove_aggregate(transcript, bits, new([value]), new([blinding]))?;
@@ -497,7 +497,7 @@ export let Bulletproofs = module (
 
     /// @brief Verifies one Dalek range proof deterministically by checking both group equations.
     /// @see [Std.Crypto.Advanced.Bulletproofs](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Bulletproofs)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let verify = func(transcript: merlin.Transcript, bits: int, commitment: uint8[list],
         proof: uint8[list]) -> bool => verify_aggregate(transcript, bits, new([commitment]), proof);
 
@@ -512,7 +512,7 @@ export let Bulletproofs = module (
     /// is forked. Scalar multiplication of secret values is branch-free in source. The runtime
     /// does not guarantee constant time.
     /// @see [Std.Crypto.Advanced.Bulletproofs](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Bulletproofs)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let prove_aggregate_with = func(transcript: merlin.Transcript, bits: int, values: uint64[list],
         blindings: uint8[list][list], random: uint8[list]) -> Result<[uint8[list][list], uint8[list]]> {
         check_shape(bits, values.length, blindings.length);
@@ -537,7 +537,7 @@ export let Bulletproofs = module (
     /// @brief Produces an aggregate range proof with fresh operating system randomness.
     /// The values and caller-supplied blindings follow the same contract as prove_aggregate_with.
     /// @see [Std.Crypto.Advanced.Bulletproofs](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Bulletproofs)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let prove_aggregate = func(transcript: merlin.Transcript, bits: int, values: uint64[list],
         blindings: uint8[list][list]) -> Result<[uint8[list][list], uint8[list]]> {
         check_shape(bits, values.length, blindings.length);
@@ -553,7 +553,7 @@ export let Bulletproofs = module (
     /// An unsupported width traps. Wrong encodings, mismatched transcripts, invalid counts, and failed
     /// group equations return false. The caller's Merlin transcript is forked.
     /// @see [Std.Crypto.Advanced.Bulletproofs](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Bulletproofs)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let verify_aggregate = func(transcript: merlin.Transcript, bits: int, commitments: uint8[list][list],
         proof: uint8[list]) -> bool {
         check_bits(bits);

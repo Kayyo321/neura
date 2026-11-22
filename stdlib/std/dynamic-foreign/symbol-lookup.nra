@@ -11,10 +11,10 @@ let scopes = import:Std.DynamicForeign.Internal.Scope;
 /// A library loaded through an arena stays loaded until the arena closes; finding a symbol after that traps.
 /// Needs the native capability.
 /// @see [Std.DynamicForeign.SymbolLookup](https://github.com/Kayyo321/neura/wiki/Stdlib-DynamicForeign-SymbolLookup)
-#Since("0.1.0")
+.Since("0.1.0")
 export let SymbolLookup = module (
     /// @brief A loaded library, the process's default lookup, or the image's embedded library.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let SymbolLookup = class (
         /// @brief The provider's library identifier.
         last library: int64;
@@ -53,7 +53,7 @@ export let SymbolLookup = module (
         };
 
         /// @brief A lookup that tries this one, then `other` (Java's SymbolLookup.or).
-        #Pure
+        .Pure
         export let or_else = func(other: SymbolLookup) -> SymbolLookup {
             last chained: SymbolLookup = new(library, owner);
             chained.fallback = (fallback == nil) ? other : fallback.or_else(other);
