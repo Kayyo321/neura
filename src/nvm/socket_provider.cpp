@@ -3,8 +3,9 @@
 // resolution through the system resolver, and sending a file to a socket.
 // They share the socket ID table of neura.net.*, so neura.net.read, write,
 // accept, local_port and close work on the streams and listeners they open.
-// Stream relay, copy-avoidance send and segmented send overlap through
-// readiness waits. Other waiting calls hold the scheduler for their timeout.
+// Stream relay, file transfer, copy-avoidance send and segmented send overlap
+// through readiness waits. Other waiting calls hold the scheduler for their
+// timeout.
 
 #include "provider_internal.hpp"
 
@@ -18,6 +19,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <optional>
 
 #ifdef _WIN32
@@ -60,7 +62,6 @@
 #include <sys/syscall.h>
 #include <signal.h>
 #include <sys/mman.h>
-#include <sys/sendfile.h>
 #endif
 #if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) || defined(__DragonFly__)
 #include <sys/event.h>
@@ -123,8 +124,7 @@ HostType option_values() { return HostType(Kind::List, std::vector<HostType>{int
 #ifdef _WIN32
 
 // Winsock 2 (W14). UDP, Unix-domain streams (AF_UNIX, Windows 10 1803 and
-// later), the options of the W14 table, resolution through GetAddrInfoW, and
-// send_file through TransmitFile (a buffered copy to a Unix-domain stream).
+// later), the options of the W14 table, and resolution through GetAddrInfoW.
 // The sockets are blocking, as on POSIX. Windows AF_UNIX has stream sockets
 // only and no abstract namespace. Linux's explicit pipe and splice v1
 // services return Unsupported; splice v2 relays two streams on every host.
@@ -143,7 +143,7 @@ std::optional<std::uint32_t> start_sockets() {
 bool valid_port(std::int32_t port) { return port >= 0 && port <= 65535; }
 
 // A socket that child processes do not inherit, as FD_CLOEXEC keeps a
-// descriptor from them. Overlapped, as socket() makes it, for TransmitFile.
+// descriptor from them. Overlapped, as socket() makes it.
 // An IPv6 socket is dual-stack, as Linux and macOS make it by default
 // (IPV6_V6ONLY 0): udp.bind("::", port) also receives IPv4 datagrams.
 // Windows turns IPV6_V6ONLY on by default.
@@ -318,82 +318,6 @@ bool option_fits(NativeSocket socket, const OptionSpec& spec) {
 }
 
 bool unsupported_option_error(int error) { return error == WSAENOPROTOOPT || error == WSAEOPNOTSUPP; }
-
-// A manual-reset event for the OVERLAPPED of one call.
-struct Event {
-    Event() : handle(::CreateEventW(nullptr, TRUE, FALSE, nullptr)) {}
-    Event(const Event&) = delete;
-    Event& operator=(const Event&) = delete;
-    ~Event() {
-        if (handle != nullptr) ::CloseHandle(handle);
-    }
-    HANDLE handle;
-};
-
-OVERLAPPED at_offset(std::uint64_t position, HANDLE event) {
-    OVERLAPPED overlapped{};
-    overlapped.Offset = static_cast<DWORD>(position);
-    overlapped.OffsetHigh = static_cast<DWORD>(position >> 32);
-    overlapped.hEvent = event;
-    ::ResetEvent(event);
-    return overlapped;
-}
-
-// Sends `count` bytes of `file` from `offset` to a TCP stream with
-// TransmitFile, which reads at the offset of its OVERLAPPED. Adds what it
-// sent to `sent`. Returns 0, or the Winsock error of the call that failed.
-int transmit(NativeSocket socket, HANDLE file, std::int64_t offset, std::int64_t count, std::int64_t& sent) {
-    Event event;
-    if (event.handle == nullptr) return static_cast<int>(::GetLastError());
-    while (sent < count) {
-        // TransmitFile sends at most 2^31 - 2 bytes a call.
-        const auto chunk = static_cast<DWORD>(std::min<std::int64_t>(count - sent, 1 << 30));
-        auto overlapped = at_offset(static_cast<std::uint64_t>(offset + sent), event.handle);
-        if (!::TransmitFile(socket, file, chunk, 0, &overlapped, nullptr, 0)) {
-            const int error = ::WSAGetLastError();
-            if (error != WSA_IO_PENDING) return error;
-        }
-        DWORD done = 0;
-        DWORD flags = 0;
-        if (!::WSAGetOverlappedResult(socket, &overlapped, &done, TRUE, &flags)) return ::WSAGetLastError();
-        if (done == 0) break;
-        sent += done;
-    }
-    return 0;
-}
-
-// The same through a 64 KiB buffer, for a stream that TransmitFile does not
-// serve: on an AF_UNIX stream its transfer never completes. Returns 0, or the
-// Win32 or Winsock error of the call that failed.
-int copy(NativeSocket socket, HANDLE file, std::int64_t offset, std::int64_t count, std::int64_t& sent) {
-    Event event;
-    if (event.handle == nullptr) return static_cast<int>(::GetLastError());
-    std::string buffer(64 * 1024, '\0');
-    int error = 0;
-    while (error == 0 && sent < count) {
-        const auto want = static_cast<DWORD>(std::min<std::int64_t>(count - sent, buffer.size()));
-        auto overlapped = at_offset(static_cast<std::uint64_t>(offset + sent), event.handle);
-        DWORD got = 0;
-        if (!::ReadFile(file, buffer.data(), want, &got, &overlapped) &&
-            (::GetLastError() != ERROR_IO_PENDING || !::GetOverlappedResult(file, &overlapped, &got, TRUE))) {
-            if (::GetLastError() != ERROR_HANDLE_EOF) error = static_cast<int>(::GetLastError());
-            break;
-        }
-        if (got == 0) break;
-        DWORD done = 0;
-        while (done < got) {
-            const int wrote = ::send(socket, buffer.data() + done, static_cast<int>(got - done), 0);
-            if (wrote >= 0) {
-                done += static_cast<DWORD>(wrote);
-            } else if (::WSAGetLastError() != WSAEINTR) {
-                error = ::WSAGetLastError();
-                break;
-            }
-        }
-        if (error == 0) sent += got;
-    }
-    return error;
-}
 
 } // namespace
 
@@ -755,40 +679,6 @@ void add_socket_transport_services(const Adder& add, StandardServices::Tables& t
     add(signature("neura.net.pipe", {}, tuple({int64(), int64()})), unsupported);
     add(signature("neura.net.splice", {int64(), int64(), int64()}, int64()), unsupported);
 
-    // Sends `count` bytes of an open file from `offset` to a connected
-    // stream: TransmitFile to a TCP stream, a 64 KiB copy otherwise. Needs
-    // both the net and the fs groups. It stops at the end of the file, and
-    // the file's position does not move, as with sendfile(2) and pread.
-    add(signature("neura.net.send_file", {int64(), int64(), int64(), int64()}, int64()),
-        [=](const HostRequest& request) {
-            if (!granted->net || !granted->fs) return denied();
-            auto* socket = find(request.arguments.at(0));
-            const auto file = sockets->files.find(as_int64(request.arguments.at(1)));
-            const auto offset = as_int64(request.arguments.at(2));
-            const auto count = as_int64(request.arguments.at(3));
-            if (!socket || socket->listener || socket->datagram || file == sockets->files.end() ||
-                !file->second.readable || offset < 0 || count < 0) {
-                return fail(host_error::invalid_input);
-            }
-            // TransmitFile refuses a count past the end of the file: send what
-            // the file holds from the offset.
-            LARGE_INTEGER size{};
-            if (!::GetFileSizeEx(file->second.descriptor, &size)) return fail(host_error::from_win32(::GetLastError()));
-            const auto wanted = std::min<std::int64_t>(count, std::max<std::int64_t>(size.QuadPart - offset, 0));
-            // A read at an offset can move the position of a synchronous
-            // handle, so it is put back.
-            LARGE_INTEGER position{};
-            if (!::SetFilePointerEx(file->second.descriptor, LARGE_INTEGER{}, &position, FILE_CURRENT)) {
-                return fail(host_error::from_win32(::GetLastError()));
-            }
-            std::int64_t sent = 0;
-            const int error = protocol_of(socket->descriptor) == IPPROTO_TCP
-                ? transmit(socket->descriptor, file->second.descriptor, offset, wanted, sent)
-                : copy(socket->descriptor, file->second.descriptor, offset, wanted, sent);
-            ::SetFilePointerEx(file->second.descriptor, position, nullptr, FILE_BEGIN);
-            if (error != 0 && sent == 0) return fail(host_error::from_wsa(error));
-            return HostCompletion::ok(int64_value(sent));
-        });
 }
 
 #else
@@ -1406,58 +1296,6 @@ void add_socket_transport_services(const Adder& add, StandardServices::Tables& t
 #endif
     });
 
-    // Sends `count` bytes of an open file from `offset` to a connected
-    // stream. Needs both the net and the fs groups. Linux uses sendfile(2);
-    // elsewhere the bytes pass through a buffer in the provider.
-    add(signature("neura.net.send_file", {int64(), int64(), int64(), int64()}, int64()),
-        [=](const HostRequest& request) {
-            if (!granted->net || !granted->fs) return denied();
-            auto* socket = find(request.arguments.at(0));
-            const auto file = sockets->files.find(as_int64(request.arguments.at(1)));
-            const auto offset = as_int64(request.arguments.at(2));
-            const auto count = as_int64(request.arguments.at(3));
-            if (!socket || socket->listener || socket->datagram || file == sockets->files.end() ||
-                !file->second.readable || offset < 0 || count < 0) {
-                return fail(host_error::invalid_input);
-            }
-            std::int64_t sent = 0;
-#ifdef __linux__
-            off_t position = static_cast<off_t>(offset);
-            while (sent < count) {
-                const auto chunk = static_cast<std::size_t>(std::min<std::int64_t>(count - sent, 1 << 30));
-                const auto result = ::sendfile(socket->descriptor, file->second.descriptor, &position, chunk);
-                if (result < 0) {
-                    if (errno == EINTR) continue;
-                    if (errno == EAGAIN) {
-                        pollfd entry{socket->descriptor, POLLOUT, 0};
-                        ::poll(&entry, 1, -1);
-                        continue;
-                    }
-                    return sent > 0 ? HostCompletion::ok(int64_value(sent)) : errno_failure();
-                }
-                if (result == 0) break;
-                sent += result;
-            }
-#else
-            std::string buffer(64 * 1024, '\0');
-            while (sent < count) {
-                const auto want = static_cast<std::size_t>(std::min<std::int64_t>(count - sent, buffer.size()));
-                const auto got = ::pread(file->second.descriptor, buffer.data(), want, offset + sent);
-                if (got < 0 && errno == EINTR) continue;
-                if (got < 0) return sent > 0 ? HostCompletion::ok(int64_value(sent)) : errno_failure();
-                if (got == 0) break;
-                std::size_t done = 0;
-                while (done < static_cast<std::size_t>(got)) {
-                    const auto wrote = ::send(socket->descriptor, buffer.data() + done, got - done, 0);
-                    if (wrote < 0 && (errno == EINTR || errno == EAGAIN)) continue;
-                    if (wrote < 0) return sent > 0 ? HostCompletion::ok(int64_value(sent)) : errno_failure();
-                    done += static_cast<std::size_t>(wrote);
-                }
-                sent += got;
-            }
-#endif
-            return HostCompletion::ok(int64_value(sent));
-        });
 }
 
 #endif
@@ -1655,6 +1493,113 @@ std::optional<HostCompletion> nonblocking_failure() {
     if (error.would_block() || error.interrupted()) return std::nullopt;
     return socket_failure();
 }
+
+// Reads up to `size` bytes of `file` at `offset` without moving the file's
+// position, as pread does: the count read, 0 at the end of the file, or
+// nothing with `error` set.
+std::optional<std::size_t> read_file_at(NativeFile file, std::int64_t offset, char* data, std::size_t size,
+                                        std::uint32_t& error) {
+#ifdef _WIN32
+    // Files are opened synchronously: a read at the OVERLAPPED offset
+    // completes in the call but moves the handle's position, so restore it.
+    LARGE_INTEGER position{};
+    if (!::SetFilePointerEx(file, LARGE_INTEGER{}, &position, FILE_CURRENT)) {
+        error = host_error::from_win32(::GetLastError());
+        return std::nullopt;
+    }
+    OVERLAPPED at{};
+    at.Offset = static_cast<DWORD>(static_cast<std::uint64_t>(offset));
+    at.OffsetHigh = static_cast<DWORD>(static_cast<std::uint64_t>(offset) >> 32);
+    DWORD got = 0;
+    const bool read = ::ReadFile(file, data, static_cast<DWORD>(size), &got, &at) != 0;
+    const auto code = read ? ERROR_SUCCESS : ::GetLastError();
+    ::SetFilePointerEx(file, position, nullptr, FILE_BEGIN);
+    if (!read && code != ERROR_HANDLE_EOF) {
+        error = host_error::from_win32(code);
+        return std::nullopt;
+    }
+    return static_cast<std::size_t>(got);
+#else
+    if constexpr (sizeof(off_t) < sizeof(std::int64_t)) {
+        if (offset > static_cast<std::int64_t>(std::numeric_limits<off_t>::max())) {
+            error = host_error::invalid_input;
+            return std::nullopt;
+        }
+    }
+    for (;;) {
+        const auto got = ::pread(file, data, size, static_cast<off_t>(offset));
+        if (got >= 0) return static_cast<std::size_t>(got);
+        if (errno != EINTR) {
+            error = host_error::from_errno(errno);
+            return std::nullopt;
+        }
+    }
+#endif
+}
+
+// One neura.net.send_file request: a bounded copy from a file to a connected
+// stream. Each scheduler attempt reads at most 64 KiB at a time and sends
+// without blocking; bytes read but not yet accepted stay in `buffer`, so
+// `sent` is exactly the prefix the socket accepted. A deadline, a
+// cancellation or a failure after progress completes with that prefix.
+struct FileTransfer {
+    static constexpr std::size_t chunk = 64 * 1024;
+    // Yield to other tasks after this much in one attempt; the socket stays
+    // writable, so the readiness wait returns at once.
+    static constexpr std::int64_t attempt_budget = 1024 * 1024;
+
+    std::int64_t socket_id;
+    std::int64_t file_id;
+    SocketReference target;
+    NativeFile file;
+    std::int64_t offset;
+    std::int64_t count;
+    std::int64_t sent = 0;
+    std::string buffer{};
+    std::size_t used = 0;
+
+    HostCompletion finish(std::uint32_t error) const {
+        return sent > 0 ? HostCompletion::ok(int64_value(sent)) : fail(error);
+    }
+    HostCompletion finish(const HostCompletion& failure) const {
+        return sent > 0 ? HostCompletion::ok(int64_value(sent)) : failure;
+    }
+
+    std::optional<HostCompletion> attempt(const StandardServices::Tables& table, bool cancelled) {
+        // The IDs never recur, so a closed file or socket cannot be confused
+        // with one opened later. The socket descriptor stays held.
+        const auto held = table.files.find(file_id);
+        if (!table.sockets.contains(socket_id) || held == table.files.end() || held->second.descriptor != file) {
+            return finish(host_error::invalid_input);
+        }
+        if (cancelled) return finish(host_error::cancelled);
+        NonblockingAttempt nonblocking(target.descriptor);
+        if (!nonblocking.ready) return finish(socket_failure());
+        const auto started = sent;
+        while (sent < count) {
+            if (used == buffer.size()) {
+                buffer.resize(static_cast<std::size_t>(std::min<std::int64_t>(count - sent, chunk)));
+                std::uint32_t error = 0;
+                const auto got = read_file_at(file, offset + sent, buffer.data(), buffer.size(), error);
+                if (!got) return finish(error);
+                buffer.resize(*got);
+                used = 0;
+                if (*got == 0) break; // The end of the file.
+            }
+            if (sent - started >= attempt_budget) return std::nullopt;
+            const auto written = ::send(target.descriptor, buffer.data() + used, static_cast<int>(buffer.size() - used),
+                                        stream_send_flags | nonblocking_flags);
+            if (written < 0) {
+                if (auto failure = nonblocking_failure()) return finish(*failure);
+                return std::nullopt;
+            }
+            if (written == 0) return finish(host_error::connection_reset);
+            used += static_cast<std::size_t>(written);
+            sent += written;
+        }
+        return HostCompletion::ok(int64_value(sent));
+    }
+};
 
 // Each attempt runs on the scheduler thread without a handoff between
 // peek, send and consume. Other pending reads cannot consume the peeked
@@ -2193,6 +2138,45 @@ void add_socket_services(const Adder& add, const OverlapAdder& overlap, Standard
                 const auto started_at = socket_time_nanos();
                 return finish_socket_operation(begin_raw_read(request), started_at);
             }, begin_raw_read);
+
+    // Sends up to `count` bytes of an open file from `offset` to a connected
+    // stream through a bounded buffer; needs both the net and the fs groups.
+    // It stops at the end of the file, leaves the file position unchanged,
+    // and parks on socket readiness for at most 30 seconds in all.
+    const FunctionService::Begin begin_file_transfer = [=](const HostRequest& request)
+        -> std::variant<HostCompletion, PendingOperation> {
+        if (!granted->net || !granted->fs) return denied();
+        const auto socket_id = as_int64(request.arguments.at(0));
+        const auto file_id = as_int64(request.arguments.at(1));
+        const auto* socket = find(request.arguments.at(0));
+        const auto file = table->files.find(file_id);
+        const auto offset = as_int64(request.arguments.at(2));
+        const auto count = as_int64(request.arguments.at(3));
+        if (!connected_stream(socket) || file == table->files.end() || !file->second.readable ||
+            offset < 0 || count < 0) {
+            return fail(host_error::invalid_input);
+        }
+        // Positions past INT64_MAX cannot be named: stop the count there.
+        const auto length = std::min(count, std::numeric_limits<std::int64_t>::max() - offset);
+        if (length == 0) return HostCompletion::ok(int64_value(0));
+        const auto held = hold_socket(socket->descriptor);
+        if (!held) return socket_failure();
+        auto transfer = std::make_shared<FileTransfer>(
+            FileTransfer{socket_id, file_id, *held, file->second.descriptor, offset, length});
+        const auto attempt = [=](bool cancelled) { return transfer->attempt(*table, cancelled); };
+        if (auto done = attempt(false)) return *done;
+        PendingOperation operation;
+        operation.wait_source = PosixWait{{static_cast<std::intptr_t>(held->descriptor), PosixWait::Events::Write}};
+        operation.attempt = attempt;
+        operation.deadline = deadline_after(request.now, transfer_timeout);
+        operation.expire = [transfer] { return transfer->finish(host_error::timed_out); };
+        return operation;
+    };
+    overlap(signature("neura.net.send_file", {int64(), int64(), int64(), int64()}, int64()),
+            [=](const HostRequest& request) {
+                const auto started_at = socket_time_nanos();
+                return finish_socket_operation(begin_file_transfer(request), started_at);
+            }, begin_file_transfer);
 
     const FunctionService::Begin begin_relay = [=](const HostRequest& request)
         -> std::variant<HostCompletion, PendingOperation> {

@@ -12,7 +12,9 @@
 #endif
 #include <cassert>
 #include <chrono>
+#include <cstdio>
 #include <iostream>
+#include <thread>
 
 using namespace neura::nvm;
 using namespace neura::nvm::provider;
@@ -45,8 +47,10 @@ struct Fixture {
     std::map<std::string, FunctionService::Begin> begin;
     FunctionService::Begin begin_transfer;
     FunctionService::Handler invoke_transfer;
+    FunctionService::Handler invoke_file;
     Fixture() {
         capabilities.net = true;
+        capabilities.fs = true;
         const Adder add = [](HostSignature, FunctionService::Handler) {};
         const OverlapAdder overlap = [&](HostSignature signature, FunctionService::Handler invoke,
                                          FunctionService::Begin fn) {
@@ -54,6 +58,7 @@ struct Fixture {
                 begin_transfer = std::move(fn);
                 invoke_transfer = std::move(invoke);
             } else {
+                if (signature.name == "neura.net.send_file") invoke_file = invoke;
                 begin[signature.name] = std::move(fn);
             }
         };
@@ -283,10 +288,117 @@ void raw_read_leaves_the_scheduler_available() {
     std::cout << "PASS: raw receive readiness, cancellation, deadline and truncation\n";
 }
 
+// A Unix-domain stream with a small send buffer gives deterministic
+// backpressure for the bounded file copy.
+void file_transfer_is_bounded() {
+    Fixture f;
+    FILE* file = ::tmpfile();
+    assert(file != nullptr);
+    const int fd = ::fileno(file);
+    std::string content(3 * 1024 * 1024 + 5, '\0');
+    for (std::size_t index = 0; index < content.size(); ++index) content[index] = static_cast<char>('a' + index % 26);
+    assert(::write(fd, content.data(), content.size()) == static_cast<ssize_t>(content.size()));
+    assert(::lseek(fd, 17, SEEK_SET) == 17);
+    f.table.files[1] = {fd, true, false};
+    int stream[2] = {-1, -1};
+    assert(::socketpair(AF_UNIX, SOCK_STREAM, 0, stream) == 0);
+    f.table.sockets[1] = {stream[0]};
+    const auto args = [&](std::int64_t offset, std::int64_t count) {
+        return std::vector{int64_value(1), int64_value(1), int64_value(offset), int64_value(count)};
+    };
+
+    // Backpressure before any progress parks on writability under the
+    // 30-second transfer deadline and expires with TimedOut.
+    const auto filler = fill(stream[0]);
+    {
+        auto started = f.start("neura.net.send_file", args(123, 1000));
+        auto& operation = std::get<PendingOperation>(started);
+        assert(operation.deadline == 30'000'000'000);
+        const auto interest = std::get<PosixWait>(operation.wait_source).current();
+        assert(interest.descriptor >= 0 && interest.events == PosixWait::Events::Write);
+        assert(!operation.attempt(false));
+        const auto expired = operation.expire();
+        assert(!expired.success && expired.value.bits == host_error::timed_out);
+        const auto cancelled = operation.attempt(true);
+        assert(cancelled && !cancelled->success && cancelled->value.bits == host_error::cancelled);
+    }
+    assert(read_exact(stream[1], filler) == std::string(filler, 'f'));
+    char byte;
+    assert(::recv(stream[1], &byte, 1, MSG_DONTWAIT) < 0 && errno == EAGAIN);
+
+    // The first attempt sends what the socket accepts and parks. Expiry or
+    // cancellation then reports exactly that on-wire prefix, never the bytes
+    // read from the file but still buffered.
+    for (const bool cancel : {false, true}) {
+        auto started = f.start("neura.net.send_file", args(123, 1024 * 1024));
+        auto& operation = std::get<PendingOperation>(started);
+        pollfd readable{stream[1], POLLIN, 0};
+        assert(::poll(&readable, 1, 0) == 1);
+        assert(!operation.attempt(false));
+        const auto done = cancel ? operation.attempt(true) : std::optional(operation.expire());
+        assert(done && done->success && done->value.bits > 0 && done->value.bits < 1024 * 1024);
+        const auto accepted = static_cast<std::size_t>(done->value.bits);
+        assert(read_exact(stream[1], accepted) == content.substr(123, accepted));
+        assert(::poll(&readable, 1, 50) == 0);
+    }
+    assert(::lseek(fd, 0, SEEK_CUR) == 17);
+
+    // Synchronous callers wait on readiness: a slow reader receives every
+    // byte across many backpressured attempts and the 1 MiB attempt budget.
+    {
+        std::string received;
+        std::thread reader([&] { received = read_exact(stream[1], content.size() - 9); });
+        const auto sent = f.invoke_file(HostRequest{0, 0, args(9, static_cast<std::int64_t>(content.size()))});
+        reader.join();
+        assert(sent.success && sent.value.bits == content.size() - 9);
+        assert(received == content.substr(9));
+    }
+
+    // A count past the end of the file stops there; zero sends nothing.
+    auto sent = f.invoke_file(HostRequest{0, 0, args(static_cast<std::int64_t>(content.size()) - 32, 256)});
+    assert(sent.success && sent.value.bits == 32);
+    assert(read_exact(stream[1], 32) == content.substr(content.size() - 32));
+    sent = f.invoke_file(HostRequest{0, 0, args(static_cast<std::int64_t>(content.size()) + 10, 256)});
+    assert(sent.success && sent.value.bits == 0);
+    sent = f.invoke_file(HostRequest{0, 0, args(0, 0)});
+    assert(sent.success && sent.value.bits == 0);
+    assert(::lseek(fd, 0, SEEK_CUR) == 17);
+
+    // Closing the file ID while the transfer is parked ends it with the
+    // prefix already accepted; without progress it is InvalidInput.
+    const auto refill = fill(stream[0]);
+    {
+        auto started = f.start("neura.net.send_file", args(0, 1000));
+        auto& operation = std::get<PendingOperation>(started);
+        auto closed = f.table.files.extract(1);
+        const auto done = operation.attempt(false);
+        assert(done && !done->success && done->value.bits == host_error::invalid_input);
+        f.table.files.insert(std::move(closed));
+    }
+    assert(read_exact(stream[1], refill) == std::string(refill, 'f'));
+
+    // Rights and arguments.
+    f.capabilities.fs = false;
+    sent = f.invoke_file(HostRequest{0, 0, args(0, 1)});
+    assert(!sent.success);
+    f.capabilities.fs = true;
+    sent = f.invoke_file(HostRequest{0, 0, args(-1, 1)});
+    assert(!sent.success && sent.value.bits == host_error::invalid_input);
+    f.table.files[1].readable = false;
+    sent = f.invoke_file(HostRequest{0, 0, args(0, 1)});
+    assert(!sent.success && sent.value.bits == host_error::invalid_input);
+
+    ::close(stream[0]);
+    ::close(stream[1]);
+    ::fclose(file);
+    std::cout << "PASS: bounded file transfer: deadline, cancellation and expiry prefixes, readiness, EOF, position\n";
+}
+
 int main() {
     quiet_source_and_backpressure();
     zero_copy_backpressure();
     zero_copy_deadline_after_a_prefix();
     segmented_counts();
     raw_read_leaves_the_scheduler_available();
+    file_transfer_is_bounded();
 }

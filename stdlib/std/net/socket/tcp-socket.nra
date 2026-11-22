@@ -143,10 +143,11 @@ export let TcpSocket = module (
             return support.apply(id, options, label);
         };
 
-        /// @brief Sends up to `count` bytes of the file at `path`, from byte `offset`, straight from the file to
-        /// the socket (`sendfile(2)` on Linux); the count sent, which is short at the end of the file. Opening
-        /// the file needs the fs capability. The transfer needs the host's send-file service, which traps in
-        /// Neura 0.3.0. A negative offset or count traps with "invalid argument".
+        /// @brief Sends up to `count` bytes of the file at `path`, from byte `offset`, through a bounded buffer
+        /// and returns the count the socket accepted. The count is short at the end of the file, or when the
+        /// transfer stops after partial progress: it parks only the calling task and waits at most 30 seconds
+        /// in all. A timeout, cancellation or failure before any byte is sent returns an error. Opening the file
+        /// needs the fs capability. A negative offset or count traps with "invalid argument".
         .NoDiscard
         export let send_file = func(path: string, offset: int64, count: int64) -> Result<int64> {
             if (offset < 0 || count < 0) {
