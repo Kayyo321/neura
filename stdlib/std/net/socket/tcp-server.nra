@@ -17,11 +17,8 @@ let.promote _ = import:Std.Core.Unit;
 /// net capability.
 ///
 /// `bind` listens on a socket address; port 0 asks the host for a free port, and `address()` reports the port
-/// it chose. The base runtime always sets `SO_REUSEADDR` on a listener. A set holding an option that must be set
-/// before the socket is bound (`SO_REUSEADDR`, `SO_REUSEPORT`, `TCP_FASTOPEN`) is passed whole to a host service
-/// that creates the listener with its options, which no runtime offers yet; other options are applied with the
-/// host's option service after the listener is created. So in Neura 0.3.0 a `bind` with a set holding a
-/// before-bind option traps, as does a multipath listener. An accepted socket's peer
+/// it chose. The host applies options such as `SO_REUSEPORT` before binding when that ordering is required.
+/// Multipath TCP requires a host with the protocol enabled. An accepted socket's peer
 /// address is not reported by the host, so its `peer_address` is `None`; its `local_address` is the server's
 /// address when the server is bound to a specific address. After close, `accept` fails with Closed.
 /// @see [Std.Net.Socket.TcpServer](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-TcpServer)
@@ -80,23 +77,31 @@ export let TcpServer = module (
         export let.override to_string = func -> string => "TcpServer(" .. bound.to_string() .. ")";
     );
 
+    let mptcp_listen_options = func(address: string, port: int, settings: int[list], values: int64[list])
+        -> host.IdOutcome host("neura.net.mptcp.listen", 2);
+
+    let bind_with_settings = func(address: SocketAddr, options: SocketOptions) -> host.IdOutcome {
+        last numbers = support.numbers(options);
+        last values = support.values(options);
+        return options.multipath ? mptcp_listen_options(address.host_text(), address.port, numbers, values)
+            : host.listen_with_options(address.host_text(), address.port, numbers, values);
+    };
+
     /// @brief Listens on `address` with no options. Port 0 asks the host for a free port.
     .NoDiscard
     export let bind = func(address: SocketAddr) -> Result<TcpServer> =>
         bind_with(address, none(SocketKind.TcpListener));
 
     /// @brief Listens on `address` with an option set built for `SocketKind.TcpListener` (another kind traps
-    /// with "invalid argument"). A non-empty set or multipath traps in Neura 0.3.0 (see the module
-    /// documentation); with multipath, every option is applied after the listener is created.
+    /// with "invalid argument"). Bind-time options are applied before the host creates the listener.
     .NoDiscard
     export let bind_with = func(address: SocketAddr, options: SocketOptions) -> Result<TcpServer> {
         support.check_kind(options, SocketKind.TcpListener);
         last text = address.to_string();
         last has_settings = options.settings().length > 0;
-        last at_bind = not options.multipath && support.needs_bind_time(options);
-        last outcome = options.multipath ? host.mptcp_listen(address.host_text(), address.port)
-            : at_bind ? host.listen_with_options(address.host_text(), address.port, support.numbers(options),
-            support.values(options))
+        last at_bind = support.needs_bind_time(options);
+        last outcome = at_bind ? bind_with_settings(address, options)
+            : options.multipath ? host.mptcp_listen(address.host_text(), address.port)
             : host.listen(address.host_text(), address.port);
         let id: int64 = 0;
         match (outcome) {

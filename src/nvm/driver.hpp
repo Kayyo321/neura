@@ -23,13 +23,12 @@ namespace neura::nvm {
 std::vector<std::uint8_t> host_modes_for(const nvr::Image& image, const Bindings& bindings);
 
 // How the driver asks the operating system which descriptors are ready.
-// poll(2) everywhere on POSIX; on Linux, NEURA_IO_BACKEND=epoll or io_uring in the
-// environment selects epoll(7) when the kernel provides it, and anything
-// else, or a kernel without it, keeps poll. The choice is read once per
-// process and changes no completion order: ready operations are applied by
-// request sequence whichever backend reported them.
-enum class IoBackend { Poll, Epoll, IoUring, WaitForMultipleObjects };
+// The process default may select epoll or io_uring via NEURA_IO_BACKEND.
+// A live driver can select a supported backend for one execution. Ready
+// operations are applied in request sequence regardless of the backend.
+enum class IoBackend { Poll, Epoll, IoUring, Kqueue, WaitForMultipleObjects };
 IoBackend io_backend();
+std::optional<IoBackend> available_io_backend(std::int32_t code);
 const char* io_backend_name(IoBackend backend);
 
 // The overlapping requests a driver has started and not yet delivered.
@@ -64,6 +63,8 @@ public:
     // This is for a native run that can block. An event loop uses poll().
     std::vector<Done> wait(std::optional<std::int64_t> clock_deadline);
 
+    void set_backend(IoBackend backend) { backend_ = backend; }
+
     bool empty() const { return entries_.empty(); }
     std::size_t size() const { return entries_.size(); }
 
@@ -82,6 +83,7 @@ private:
     std::vector<Done> collect();
 
     TaskClock& clock_;
+    IoBackend backend_ = io_backend();
     std::map<std::uint64_t, Entry> entries_;
 };
 

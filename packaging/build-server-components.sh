@@ -129,6 +129,11 @@ esac
 flags="-fPIC -fvisibility=hidden -O2"
 # OpenSSL adds -fPIC and its own optimisation.
 openssl_flags="-fvisibility=hidden"
+# Linux release builds can negotiate kernel TLS only when a stream requests it.
+openssl_ktls=
+if [ "$(uname -s)" = Linux ]; then
+    openssl_ktls=enable-ktls
+fi
 
 work=$prefix/work
 rm -rf "$work" "$prefix/openssl" "$prefix/nghttp2" "$prefix/postgresql" "$prefix/licenses" "$prefix/components.txt"
@@ -150,7 +155,7 @@ tar -xzf "$openssl_archive" -C "$work"
 (
     cd "$work/openssl-$openssl_version"
     CC=$cc ./Configure --prefix=/opt/neura-openssl --libdir=lib --openssldir=/etc/ssl \
-        no-shared no-module no-engine no-tests no-docs $openssl_flags > "$work/openssl-configure.log" 2>&1 ||
+        no-shared no-module no-engine no-tests no-docs $openssl_ktls $openssl_flags > "$work/openssl-configure.log" 2>&1 ||
         { tail -n 40 "$work/openssl-configure.log" >&2; exit 1; }
     make -j "$jobs" > "$work/openssl-build.log" 2>&1 || { tail -n 60 "$work/openssl-build.log" >&2; exit 1; }
     make install_sw DESTDIR="$work/openssl-root" > "$work/openssl-install.log" 2>&1 ||

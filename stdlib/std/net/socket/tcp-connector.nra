@@ -10,7 +10,7 @@ let.promote _ = import:Std.Net.Socket.TcpSocket;
 /// capability.
 ///
 /// Each `connect` opens a new `TcpSocket` as `TcpSocket.connect_with` does: a multipath option set needs a
-/// Multipath TCP host service that no runtime offers yet and traps, and a non-empty option set is applied with the
+/// Multipath TCP host service when the host supports it, and a non-empty option set is applied with the
 /// host's option service after connecting.
 /// @see [Std.Net.Socket.TcpConnector](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-TcpConnector)
 .Since("0.3.0")

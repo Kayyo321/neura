@@ -54,7 +54,7 @@ let LogicTests = module (
         test.assert(!event_loop.is_available(event_loop.EventLoopBackend.Epoll, mac));
         test.assert(event_loop.is_available(event_loop.EventLoopBackend.Poll, mac));
         test.assert(event_loop.is_available(event_loop.EventLoopBackend.Kqueue, new event_loop.Platform("FreeBSD", 14, 1)));
-        test.assert(!event_loop.is_available(event_loop.EventLoopBackend.Poll, new event_loop.Platform("windows", 10, 0)));
+        test.assert(event_loop.is_available(event_loop.EventLoopBackend.Poll, new event_loop.Platform("windows", 10, 0)));
         test.assert_equal_string("linux 5.10", linux(5, 10).to_string());
         test.assert(linux(5, 10).equals(new event_loop.Platform("LINUX", 5, 10)));
         test.assert_equal<uint32>(linux(5, 10).hash_code(), new event_loop.Platform("linux", 5, 10).hash_code());
@@ -75,9 +75,8 @@ let LogicTests = module (
         // Kqueue is not on Linux: the next preference wins over the default order.
         test.assert(test.assert_ok<event_loop.EventLoopBackend>(event_loop.select(linux(6, 1), preference))
             == event_loop.EventLoopBackend.Poll);
-        last failure = test.assert_err<event_loop.EventLoopBackend>(event_loop.select(
-            new event_loop.Platform("windows", 10, 0), preference));
-        test.assert_equal_string("no event-loop backend is available on windows 10.0", error.message(failure));
+        test.assert(test.assert_ok<event_loop.EventLoopBackend>(event_loop.select(
+            new event_loop.Platform("windows", 10, 0), preference)) == event_loop.EventLoopBackend.Poll);
         test.assert_equal<int>(4, event_loop.default_order().length);
     };
 

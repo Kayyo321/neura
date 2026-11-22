@@ -60,6 +60,8 @@ struct StandardServices::Tables {
         bool datagram = false;
         // One end of a pipe of neura.net.pipe, for neura.net.splice.
         bool pipe = false;
+        // A raw IP socket, which only accepts raw send/receive operations.
+        bool raw = false;
     };
     std::map<std::int64_t, File> files;
     std::int64_t next_file = 1;
@@ -186,10 +188,14 @@ void* load_embedded_object(const std::string& object);
 void close_sockets(StandardServices::Tables& tables);
 // UDP, Unix-domain sockets, options, resolution and send_file, over the same
 // socket table.
+std::optional<std::uint32_t> set_socket_option(NativeSocket socket, std::int32_t option, std::int64_t value);
+std::optional<std::uint32_t> set_socket_options(NativeSocket socket, const HostValue& options, const HostValue& values);
 void add_socket_services(const Adder& add, StandardServices::Tables& tables, const Capabilities& capabilities);
 // TLS client and server streams (OpenSSL when built with NEURA_NVM_TLS).
-void add_tls_services(const Adder& add, StandardServices::Tables& tables, const Capabilities& capabilities);
+void add_tls_services(const Adder& add, StandardServices::Tables& tables, const Capabilities& capabilities,
+                      const std::vector<ResolvedPath>& prefixes);
 void close_tls(StandardServices::Tables& tables);
+void add_doq_services(const Adder& add, const Capabilities& capabilities);
 
 } // namespace provider
 } // namespace neura::nvm

@@ -36,8 +36,7 @@ export let DatagramSocket = module (
 
     /// @brief A socket that exchanges whole datagrams with addresses of type `Addr`.
     export let DatagramSocket = interface<Addr>:Closeable (
-        /// @brief The address the socket is bound to. An implementation that needs a host service to learn it may
-        /// trap in Neura 0.3.0 (see `RawSocket.local_address`).
+        /// @brief The address the socket is bound to.
         let local_address = func -> Result<Addr>;
         /// @brief Sends `data` as one datagram to `target`; the count the host sent.
         let send_to = func(data: uint8[list], target: Addr) -> Result<int>;

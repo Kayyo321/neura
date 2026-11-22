@@ -33,7 +33,14 @@ Event drive(Execution& execution, const Bindings& bindings, TaskClock& clock, Dr
         switch (event.kind) {
         case Event::Kind::HostRequest: {
             if (!event.overlapping) {
-                execution.complete(hooks.serve(event));
+                auto answer = hooks.serve(event);
+                const auto& signature = bindings.services.at(event.request.import)->signature();
+                if (answer.success && signature.name == "neura.runtime.event_loop" && signature.version == 1) {
+                    const auto backend = available_io_backend(
+                        static_cast<std::int32_t>(event.request.arguments.at(0).bits));
+                    if (backend) pending.set_backend(*backend);
+                }
+                execution.complete(answer);
                 break;
             }
             auto request = event.request;

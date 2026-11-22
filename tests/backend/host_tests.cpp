@@ -12,6 +12,7 @@
 #include "nvm/trace.hpp"
 #include "nvm/trace_file.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <chrono>
@@ -22,8 +23,14 @@
 #include <thread>
 
 #ifndef _WIN32
+#ifdef NEURA_NVM_TLS
+#include <openssl/err.h>
+#include <openssl/quic.h>
+#include <openssl/ssl.h>
+#endif
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -65,8 +72,8 @@ struct Host {
         services.register_all(registry);
     }
 
-    HostCompletion call(std::string_view name, std::vector<HostValue> arguments) {
-        auto* service = registry.find(name, 1);
+    HostCompletion call(std::string_view name, std::vector<HostValue> arguments, std::uint32_t version = 1) {
+        auto* service = registry.find(name, version);
         if (service == nullptr) fail("no service " + std::string(name));
         return service->invoke(nvm::HostRequest{0, 0, std::move(arguments)});
     }
@@ -1058,6 +1065,115 @@ NEURA_TEST(host, udp_offload_mptcp_and_splice) {
                  "MPTCP without the net group");
 }
 
+NEURA_TEST(host, socket_extensions_reject_bad_requests) {
+    Host host(everything());
+    Host denied({});
+    expect_error(host.call("neura.net.local_address", {i64(0)}), host_error::invalid_input, "unknown socket address");
+    expect_error(host.call("neura.net.shutdown", {i64(0), i32(3)}), host_error::invalid_input, "invalid shutdown");
+    expect_error(host.call("neura.net.raw.open", {i32(0), i32(256)}), host_error::invalid_input, "invalid raw family");
+    expect_error(host.call("neura.net.raw.send_to", {i64(0), text("127.0.0.1"), bytes("data")}),
+                 host_error::invalid_input, "send requires a raw socket ID");
+    expect_error(host.call("neura.net.raw.receive_from", {i64(0), i32(1), i64(0)}),
+                 host_error::invalid_input, "receive requires a raw socket ID");
+    expect_error(host.call("neura.net.mptcp.connect", {text("127.0.0.1"), i32(0), i64(-1)}),
+                 host_error::invalid_input, "negative connect timeout");
+    expect_error(host.call("neura.net.mptcp.listen", {text("127.0.0.1"), i32(-1)}),
+                 host_error::invalid_input, "invalid listen port");
+    expect_error(host.call("neura.net.splice", {i64(0), i64(0), i64(1)}, 2),
+                 host_error::invalid_input, "relay requires two connected streams");
+    expect_error(host.call("neura.net.send_zerocopy", {i64(0), bytes("data")}),
+                 host_error::invalid_input, "send requires a stream socket ID");
+    expect_error(host.call("neura.net.udp.send_segmented", {i64(0), text("127.0.0.1"), i32(1), bytes("data"), i32(0)}),
+                 host_error::invalid_input, "invalid segment size");
+    expect_error(host.call("neura.net.udp.receive_segments", {i64(0), i32(1), i64(0)}),
+                 host_error::invalid_input, "coalesced receive requires UDP");
+    expect_error(host.call("neura.runtime.event_loop", {i32(0)}), host_error::invalid_input, "invalid wait backend");
+    expect_error(denied.call("neura.runtime.event_loop", {i32(4)}), host_error::capability_denied, "wait backend denied");
+
+    HostValue option;
+    option.elements.push_back(i32(1));
+    expect_error(host.call("neura.net.listen", {text("127.0.0.1"), i32(0), option, HostValue{}}, 3),
+                 host_error::invalid_input, "parallel listen option lists");
+    expect_error(host.call("neura.net.udp.bind", {text("127.0.0.1"), i32(0), option, HostValue{}}, 2),
+                 host_error::invalid_input, "parallel UDP option lists");
+}
+
+NEURA_TEST(host, mdns_loopback_exchange_collects_only_matching_multicast) {
+    // A test-only querier and responder on the IPv4 loopback multicast group.
+    struct Socket {
+        int fd = ::socket(AF_INET, SOCK_DGRAM, 0);
+        ~Socket() { ::close(fd); }
+    } peer, other_port;
+    check(peer.fd >= 0 && other_port.fd >= 0, "open mDNS senders");
+    const int enabled = 1;
+    check(::setsockopt(peer.fd, SOL_SOCKET, SO_REUSEADDR, &enabled, sizeof enabled) == 0, "share mDNS port");
+#ifdef SO_REUSEPORT
+    check(::setsockopt(peer.fd, SOL_SOCKET, SO_REUSEPORT, &enabled, sizeof enabled) == 0, "share mDNS group");
+#endif
+    sockaddr_in group{};
+    group.sin_family = AF_INET;
+    group.sin_port = htons(5353);
+    check(::inet_pton(AF_INET, "224.0.0.251", &group.sin_addr) == 1, "mDNS IPv4 group");
+    // Only the querier's wildcard socket should receive unicast to this port.
+    check(::bind(peer.fd, reinterpret_cast<sockaddr*>(&group), sizeof group) == 0, "bind mDNS group and port");
+    const ip_mreq membership{group.sin_addr, in_addr{htonl(INADDR_LOOPBACK)}};
+    check(::setsockopt(peer.fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &membership, sizeof membership) == 0, "join group");
+    check(::setsockopt(peer.fd, IPPROTO_IP, IP_MULTICAST_IF, &membership.imr_interface,
+                       sizeof membership.imr_interface) == 0, "send via loopback");
+    check(::setsockopt(other_port.fd, IPPROTO_IP, IP_MULTICAST_IF, &membership.imr_interface,
+                       sizeof membership.imr_interface) == 0, "send noise via loopback");
+    sockaddr_in unicast = group;
+    unicast.sin_addr = membership.imr_interface;
+    sockaddr_in ephemeral = unicast;
+    ephemeral.sin_port = 0;
+    check(::bind(other_port.fd, reinterpret_cast<sockaddr*>(&ephemeral), sizeof ephemeral) == 0,
+          "bind a different source port");
+    const unsigned char ttl = 255;
+    check(::setsockopt(peer.fd, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof ttl) == 0, "mDNS outbound TTL");
+    const std::string query("\0\0\0\0\0\1\0\0\0\0\0\0\x04h3md\x05local\0\0\1\0\1", 28);
+    auto response = query;
+    response[2] = static_cast<char>(0x84);
+    auto wrong_port = response;
+    wrong_port[3] = 1;
+    auto wrong_destination = response;
+    wrong_destination[3] = 2;
+    const auto send = [](int descriptor, const std::string& message, const sockaddr_in& destination) {
+        const auto sent = ::sendto(descriptor, message.data(), message.size(), 0,
+                                   reinterpret_cast<const sockaddr*>(&destination), sizeof destination);
+        return sent >= 0 && static_cast<std::size_t>(sent) == message.size();
+    };
+    std::array<bool, 3> sent{};
+    std::jthread responder([&](std::stop_token stop) {
+        while (!stop.stop_requested()) {
+            pollfd readable{peer.fd, POLLIN, 0};
+            if (::poll(&readable, 1, 10) != 1) continue;
+            std::array<char, 128> data{};
+            const auto size = ::recv(peer.fd, data.data(), data.size(), MSG_DONTWAIT);
+            if (size < 0 || std::string_view(data.data(), static_cast<std::size_t>(size)) != query) continue;
+            sent[0] = send(other_port.fd, wrong_port, group);
+            sent[1] = send(peer.fd, wrong_destination, unicast);
+            sent[2] = send(peer.fd, response, group);
+            return;
+        }
+    });
+    Host host(everything());
+    const auto answer = host.call("neura.net.mdns.exchange", {bytes(query), i64(150'000'000), text("127.0.0.1")});
+    responder.request_stop();
+    responder.join();
+    expect_ok(answer, "mDNS query");
+    check(sent[0] && sent[1] && sent[2], "the three loopback datagrams were sent");
+    const auto contains = [&](const std::string& message) {
+        return std::any_of(answer.value.elements.begin(), answer.value.elements.end(),
+                           [&](const auto& packet) { return packet.bytes == message; });
+    };
+    check(contains(response), "received the loopback responder's exact datagram");
+    check(!contains(wrong_port), "multicast from a non-mDNS source port was discarded");
+    check(!contains(wrong_destination), "same-port unicast was discarded");
+    Host denied({});
+    expect_error(denied.call("neura.net.mdns.exchange", {bytes(query), i64(1), text("127.0.0.1")}),
+                 host_error::capability_denied, "mDNS denied");
+}
+
 NEURA_TEST(host, socket_options_resolution_and_send_file) {
     Host host(everything());
     const auto [listener, client, server] = connected(host);
@@ -1457,24 +1573,32 @@ export let Check = module:program.Entry (
 
 
 #ifdef NEURA_NVM_TLS
+// TLS tests generate a synthetic certificate used only on the loopback interface.
+struct LoopbackTlsKeys {
+    TemporaryDirectory dir{"tls"};
+    std::string certificate = (dir.path() / "cert.pem").string();
+    std::string key = (dir.path() / "key.pem").string();
+
+    LoopbackTlsKeys() {
+        const auto command = "openssl req -x509 -newkey rsa:2048 -nodes -keyout '" + key + "' -out '" + certificate +
+                             "' -days 2 -subj /CN=localhost -addext subjectAltName=IP:127.0.0.1,DNS:localhost "
+                             ">/dev/null 2>&1";
+        check(std::system(command.c_str()) == 0, "generate loopback TLS certificate with openssl");
+    }
+};
+
+HostValue tls_names(std::initializer_list<std::string_view> values) {
+    HostValue list;
+    for (const auto value : values) list.elements.push_back(text(std::string(value)));
+    return list;
+}
+
 // TLS client and server streams (src/nvm/tls_provider.cpp) against each
 // other, with a certificate the openssl command generates.
 NEURA_TEST(host, tls_streams_verify_peers_and_negotiate_alpn) {
-    TemporaryDirectory dir("tls");
-    const auto certificate = (dir.path() / "cert.pem").string();
-    const auto key = (dir.path() / "key.pem").string();
-    const auto command = "openssl req -x509 -newkey rsa:2048 -nodes -keyout '" + key + "' -out '" + certificate +
-                         "' -days 2 -subj /CN=localhost -addext subjectAltName=IP:127.0.0.1,DNS:localhost "
-                         ">/dev/null 2>&1";
-    if (std::system(command.c_str()) != 0) {
-        std::cout << "  (skipped: no openssl command)\n";
-        return;
-    }
-    const auto names = [](std::vector<std::string> values) {
-        HostValue list;
-        for (auto& value : values) list.elements.push_back(text(std::move(value)));
-        return list;
-    };
+    const LoopbackTlsKeys material;
+    const auto& certificate = material.certificate;
+    const auto& key = material.key;
     Host server(everything());
     const auto listener = server.call("neura.net.listen", {text("127.0.0.1"), i32(0)});
     expect_ok(listener, "listen");
@@ -1483,7 +1607,7 @@ NEURA_TEST(host, tls_streams_verify_peers_and_negotiate_alpn) {
     std::thread acceptor([&] {
         for (int attempt = 0; attempt < 3; ++attempt) {
             const auto accepted = server.call("neura.net.tls.accept", {listener.value, text(certificate), text(key),
-                                                                       names({"h2", "http/1.1"}), i64(10'000'000'000)});
+                                                                       tls_names({"h2", "http/1.1"}), i64(10'000'000'000)});
             if (!accepted.success) {
                 served.push_back("failed");
                 continue;
@@ -1497,7 +1621,7 @@ NEURA_TEST(host, tls_streams_verify_peers_and_negotiate_alpn) {
     });
     Host client(everything());
     const auto connected = client.call("neura.net.tls.connect", {text("127.0.0.1"), port.value, i64(10'000'000'000),
-                                                                 text(""), names({"http/1.1"}), text(certificate)});
+                                                                 text(""), tls_names({"http/1.1"}), text(certificate)});
     expect_ok(connected, "verified connect");
     check_equal(connected.value.elements.at(1).bytes, std::string("http/1.1"), "client sees the ALPN choice");
     const auto id = connected.value.elements.at(0);
@@ -1510,21 +1634,280 @@ NEURA_TEST(host, tls_streams_verify_peers_and_negotiate_alpn) {
     expect_error(client.call("neura.net.tls.close", {id}), host_error::invalid_input, "closed twice");
 
     expect_error(client.call("neura.net.tls.connect", {text("127.0.0.1"), port.value, i64(10'000'000'000), text(""),
-                                                       names({}), text("")}),
+                                                       tls_names({}), text("")}),
                  host_error::permission_denied, "a self-signed peer is not in the system store");
     expect_error(client.call("neura.net.tls.connect", {text("127.0.0.1"), port.value, i64(10'000'000'000),
-                                                       text("other.example"), names({}), text(certificate)}),
+                                                       text("other.example"), tls_names({}), text(certificate)}),
                  host_error::permission_denied, "a name the certificate does not carry");
     acceptor.join();
     check(served.size() == 3 && served[0] == "http/1.1", "the server chose http/1.1 first");
-    expect_error(client.call("neura.net.tls.connect", {text("127.0.0.1"), i32(0), i64(0), text(""), names({}),
+    expect_error(client.call("neura.net.tls.connect", {text("127.0.0.1"), i32(0), i64(0), text(""), tls_names({}),
                                                        text("")}),
                  host_error::invalid_input, "port 0");
     Host nothing({});
-    expect_error(nothing.call("neura.net.tls.connect", {text("127.0.0.1"), i32(443), i64(0), text(""), names({}),
+    expect_error(nothing.call("neura.net.tls.connect", {text("127.0.0.1"), i32(443), i64(0), text(""), tls_names({}),
                                                         text("")}),
                  host_error::capability_denied, "tls denied");
 }
+
+#if !defined(OPENSSL_NO_QUIC)
+namespace {
+
+constexpr std::string_view test_dns_query{"\0\x11\0\0\0\0\0\1\0\0\0\0\0\0\0\0\1\0\1", 19};
+
+int doq_test_alpn(SSL*, const unsigned char** out, unsigned char* out_length, const unsigned char* input,
+                  unsigned int length, void*) {
+    static constexpr unsigned char protocol[] = {3, 'd', 'o', 'q'};
+    unsigned char* selected = nullptr;
+    if (SSL_select_next_proto(&selected, out_length, protocol, sizeof protocol, input, length) !=
+        OPENSSL_NPN_NEGOTIATED) {
+        return SSL_TLSEXT_ERR_ALERT_FATAL;
+    }
+    *out = selected;
+    return SSL_TLSEXT_ERR_OK;
+}
+
+class DoqTestServer {
+public:
+    explicit DoqTestServer(const std::string& certificate, const std::string& key)
+        : descriptor_(BIO_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP, BIO_SOCK_NONBLOCK)),
+          context_(SSL_CTX_new(OSSL_QUIC_server_method()), SSL_CTX_free), listener_(nullptr, SSL_free) {
+        check(descriptor_ >= 0, "open UDP loopback listener");
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        check(::bind(descriptor_, reinterpret_cast<sockaddr*>(&address), sizeof address) == 0, "bind QUIC listener");
+        socklen_t length = sizeof address;
+        check(::getsockname(descriptor_, reinterpret_cast<sockaddr*>(&address), &length) == 0, "read bound port");
+        port = ntohs(address.sin_port);
+        check(context_ != nullptr, "create QUIC server context");
+        check(SSL_CTX_use_certificate_file(context_.get(), certificate.c_str(), SSL_FILETYPE_PEM) == 1,
+              "load QUIC fallback certificate");
+        check(SSL_CTX_use_PrivateKey_file(context_.get(), key.c_str(), SSL_FILETYPE_PEM) == 1, "load QUIC key");
+        SSL_CTX_set_alpn_select_cb(context_.get(), doq_test_alpn, nullptr);
+        listener_.reset(SSL_new_listener(context_.get(), 0));
+        check(listener_ != nullptr, "allocate QUIC listener");
+        BIO* bio = BIO_new_dgram(descriptor_, BIO_NOCLOSE);
+        check(bio != nullptr, "wrap UDP descriptor");
+        SSL_set_bio(listener_.get(), bio, bio);
+        check(SSL_set_blocking_mode(listener_.get(), 0) == 1 && SSL_listen(listener_.get()) == 1, "listen QUIC");
+    }
+
+    ~DoqTestServer() {
+        listener_.reset();
+        BIO_closesocket(descriptor_);
+    }
+
+    enum class Response { Valid, Truncated, Rejected, Close };
+
+    void serve(std::stop_token stopping, Response response, bool& exchanged) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(6);
+        const auto retry = [&] { return !stopping.stop_requested() && std::chrono::steady_clock::now() < deadline; };
+        std::unique_ptr<SSL, decltype(&SSL_free)> connection(nullptr, SSL_free);
+        while (retry() && !connection) {
+            connection.reset(SSL_accept_connection(listener_.get(), SSL_ACCEPT_CONNECTION_NO_BLOCK));
+            if (!connection) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        if (!connection) return;
+        while (retry() && !SSL_is_init_finished(connection.get())) {
+            ERR_clear_error();
+            const auto accepted = SSL_accept(connection.get());
+            if (accepted == 1) break;
+            const auto error = SSL_get_error(connection.get(), accepted);
+            if (error != SSL_ERROR_WANT_READ && error != SSL_ERROR_WANT_WRITE) return;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        if (!SSL_is_init_finished(connection.get())) return;
+        std::unique_ptr<SSL, decltype(&SSL_free)> stream(nullptr, SSL_free);
+        while (retry() && !stream) {
+            stream.reset(SSL_accept_stream(connection.get(), SSL_ACCEPT_STREAM_NO_BLOCK));
+            if (!stream) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        if (!stream || response == Response::Rejected) return;
+
+        std::string query;
+        bool finished = false;
+        while (retry() && query.size() <= test_dns_query.size()) {
+            std::array<char, 32> data{};
+            std::size_t received = 0;
+            ERR_clear_error();
+            const int status = SSL_read_ex(stream.get(), data.data(), data.size(), &received);
+            if (status == 1) {
+                query.append(data.data(), received);
+            } else if (const auto error = SSL_get_error(stream.get(), status); error == SSL_ERROR_ZERO_RETURN) {
+                finished = true;
+                break;
+            } else if (error != SSL_ERROR_WANT_READ && error != SSL_ERROR_WANT_WRITE) {
+                return;
+            } else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
+        if (!finished || query != test_dns_query) return;
+        exchanged = true;
+        if (response == Response::Close) {
+            static_cast<void>(SSL_shutdown_ex(connection.get(), SSL_SHUTDOWN_FLAG_NO_BLOCK, nullptr, 0));
+            return;
+        }
+        query[4] = static_cast<char>(0x80);
+        if (response == Response::Truncated) query.resize(8);
+        std::size_t sent = 0;
+        while (retry()) {
+            ERR_clear_error();
+            const int status = SSL_write_ex2(stream.get(), query.data(), query.size(), SSL_WRITE_FLAG_CONCLUDE, &sent);
+            if (status == 1 && sent == query.size()) break;
+            const auto error = SSL_get_error(stream.get(), status);
+            if (error != SSL_ERROR_WANT_READ && error != SSL_ERROR_WANT_WRITE) return;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        while (retry() && SSL_handle_events(connection.get())) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    int port = 0;
+
+private:
+    int descriptor_;
+    std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> context_;
+    std::unique_ptr<SSL, decltype(&SSL_free)> listener_;
+};
+
+} // namespace
+
+NEURA_TEST(host, doq_loopback_checks_identity_and_exact_stream_framing) {
+    TemporaryDirectory dir("doq");
+    const auto certificate = dir / "cert.pem";
+    const auto key = dir / "key.pem";
+    const auto command = "openssl req -x509 -newkey rsa:2048 -nodes -keyout '" + key + "' -out '" + certificate +
+                         "' -days 2 -subj /CN=localhost -addext subjectAltName=DNS:localhost >/dev/null 2>&1";
+    if (std::system(command.c_str()) != 0) {
+        std::cout << "  (skipped: no openssl command)\n";
+        return;
+    }
+    const auto configure_trust = [](const std::string& path) {
+        check(::setenv("SSL_CERT_FILE", path.c_str(), 1) == 0, "set DoQ test trust store");
+    };
+    struct RestoreTrust {
+        std::optional<std::string> saved;
+        ~RestoreTrust() {
+            if (saved) ::setenv("SSL_CERT_FILE", saved->c_str(), 1);
+            else ::unsetenv("SSL_CERT_FILE");
+        }
+    } restore;
+    if (const char* old = std::getenv("SSL_CERT_FILE")) restore.saved = old;
+    Host client(everything());
+    Host denied({});
+    const auto arguments = [](int port, std::string name, std::string payload = std::string(test_dns_query)) {
+        return std::vector<HostValue>{text("127.0.0.1"), i32(port), text(std::move(name)), bytes(std::move(payload))};
+    };
+    const auto exchange = [&](DoqTestServer::Response response, std::string name) {
+        DoqTestServer peer(certificate, key);
+        bool received_query = false;
+        std::jthread serving([&](std::stop_token stop) { peer.serve(stop, response, received_query); });
+        auto result = client.call("neura.net.quic.dns_exchange", arguments(peer.port, std::move(name)));
+        serving.request_stop();
+        serving.join();
+        if (response != DoqTestServer::Response::Rejected) check(received_query, "query and stream FIN received");
+        return result;
+    };
+    configure_trust(certificate);
+    const auto reply = exchange(DoqTestServer::Response::Valid, "localhost");
+    expect_ok(reply, "verified DNS-over-QUIC exchange");
+    auto expected = std::string(test_dns_query.substr(2));
+    expected[2] = static_cast<char>(0x80);
+    check_equal(reply.value.bytes, expected, "complete response, without the length prefix");
+    expect_error(exchange(DoqTestServer::Response::Truncated, "localhost"), host_error::unexpected_end,
+                 "stream FIN with an incomplete record");
+    expect_error(exchange(DoqTestServer::Response::Close, "localhost"), host_error::connection_reset,
+                 "peer closes the connection before responding");
+    expect_error(exchange(DoqTestServer::Response::Rejected, "somewhere.invalid"), host_error::permission_denied,
+                 "certificate hostname does not match");
+    configure_trust(dir / "untrusted.pem");
+    expect_error(exchange(DoqTestServer::Response::Rejected, "localhost"), host_error::permission_denied,
+                 "certificate is not in the configured trust store");
+    configure_trust(certificate);
+    DoqTestServer silent_peer(certificate, key);
+    expect_error(client.call("neura.net.quic.dns_exchange", arguments(silent_peer.port, "localhost")),
+                 host_error::timed_out, "loopback peer never replies");
+    expect_error(client.call("neura.net.quic.dns_exchange", arguments(silent_peer.port, "")),
+                 host_error::invalid_input, "missing server identity");
+    expect_error(client.call("neura.net.quic.dns_exchange", arguments(silent_peer.port, "localhost", "short")),
+                 host_error::invalid_input, "truncated query");
+    expect_error(denied.call("neura.net.quic.dns_exchange", arguments(silent_peer.port, "localhost")),
+                 host_error::capability_denied, "network disabled");
+}
+#endif
+
+NEURA_TEST(host, tls_v2_requires_exact_versions_and_mutual_identity) {
+    const LoopbackTlsKeys material;
+    constexpr auto wait = 2'000'000'000LL;
+    Host server(everything());
+    Host client(everything());
+    const auto listener = server.call("neura.net.listen", {text("127.0.0.1"), i32(0)});
+    expect_ok(listener, "listen");
+    const auto port = server.call("neura.net.local_port", {listener.value});
+    const auto connect = [&](int version, bool mutual) {
+        return client.call("neura.net.tls.connect", {text("127.0.0.1"), port.value, i64(wait), text("localhost"),
+            tls_names({"h2"}), text(material.certificate), i32(version), i32(version),
+            text(mutual ? material.certificate : ""), text(mutual ? material.key : ""), boolean(false)}, 2);
+    };
+    const auto accept = [&](std::int64_t timeout) {
+        return server.call("neura.net.tls.accept", {listener.value, text(material.certificate), text(material.key),
+            tls_names({"h2"}), i64(timeout), i32(13), i32(13), text(material.certificate), boolean(false)}, 2);
+    };
+    {
+        HostCompletion accepted;
+        std::jthread worker([&] { accepted = accept(wait); });
+        const auto connected = connect(13, true);
+        worker.join();
+        expect_ok(connected, "verified mutual TLS client");
+        expect_ok(accepted, "verified mutual TLS server");
+        check_equal(accepted.value.elements.at(1).bytes, std::string("h2"), "server negotiated ALPN");
+        const auto socket = connected.value.elements.at(0);
+        const auto peer = accepted.value.elements.at(0);
+        const auto local = client.call("neura.net.tls.local_address", {socket});
+        expect_ok(local, "TLS socket local address");
+        check_equal(local.value.elements.at(0).bytes, std::string("127.0.0.1"), "numeric loopback address");
+        expect_error(client.call("neura.net.tls.kernel_offload", {socket}), host_error::unsupported,
+                     "kernel offload without handshake opt-in");
+        expect_ok(client.call("neura.net.tls.shutdown_write", {socket, i64(wait)}), "send close_notify");
+        const auto ended = server.call("neura.net.tls.read", {peer, i32(64), i64(wait)});
+        expect_ok(ended, "orderly TLS shutdown");
+        check(ended.value.bytes.empty(), "close_notify is an orderly end");
+        expect_ok(server.call("neura.net.tls.close", {peer}), "server close");
+        expect_ok(client.call("neura.net.tls.close", {socket}), "client close");
+    }
+    {
+        HostCompletion accepted;
+        std::jthread worker([&] { accepted = accept(wait); });
+        const auto connected = connect(13, false);
+        worker.join();
+        expect_error(accepted, host_error::permission_denied, "required client certificate missing");
+        if (connected.success) {
+            const auto socket = connected.value.elements.at(0);
+            expect_error(client.call("neura.net.tls.read", {socket, i32(64), i64(wait)}), host_error::connection_reset,
+                         "client reads the fatal TLS alert");
+            expect_ok(client.call("neura.net.tls.close", {socket}), "rejected client close");
+        }
+    }
+    {
+        HostCompletion accepted;
+        std::jthread worker([&] { accepted = accept(wait); });
+        const auto connected = connect(12, true);
+        worker.join();
+        expect_error(connected, host_error::connection_reset, "TLS 1.2 cannot connect to a TLS 1.3-only server");
+        expect_error(accepted, host_error::connection_reset, "unsupported peer version");
+    }
+    expect_error(accept(30'000'000), host_error::timed_out, "accept waits for a peer up to the handshake deadline");
+    expect_ok(server.call("neura.net.close", {listener.value}), "listener close");
+    expect_error(connect(13, true), host_error::connection_refused, "closed port");
+    expect_error(connect(11, true), host_error::invalid_input, "minimum version is TLS 1.2");
+    auto only_net = everything();
+    only_net.fs = false;
+    Host restricted(only_net);
+    expect_error(restricted.call("neura.net.tls.connect", {text("127.0.0.1"), port.value, i64(wait), text(""),
+        tls_names({}), text(material.certificate)}), host_error::capability_denied, "explicit CA requires fs");
+}
+
 #endif
 
 #endif

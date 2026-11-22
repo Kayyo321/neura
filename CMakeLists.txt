@@ -292,6 +292,7 @@ set(neura_nvm_sources
     src/nvm/providers.cpp
     src/nvm/scalar_text.cpp
     src/nvm/socket_provider.cpp
+    src/nvm/doq_provider.cpp
     src/nvm/tls_provider.cpp
     src/nvm/schedule.cpp
     src/nvm/tier1.cpp
@@ -603,9 +604,17 @@ elseif(WIN32)
     neura_windows_hook(server_libraries)
 endif()
 
-option(NEURA_ENABLE_SERVER_TLS "Build the OpenSSL 3.5 server TLS transport" OFF)
+option(NEURA_ENABLE_SERVER_TLS "Build the OpenSSL 3.5 TLS transports" OFF)
 if(NEURA_ENABLE_SERVER_TLS AND WIN32)
-    neura_windows_required_hook(server_tls server-components.cmake)
+    # Std.Net.Tls and DoQ use the Winsock provider; the separate HTTP
+    # listener has its own platform feature gate.
+    set(OPENSSL_USE_STATIC_LIBS TRUE)
+    find_package(OpenSSL 3.5 REQUIRED COMPONENTS SSL Crypto)
+    if(NOT OPENSSL_VERSION MATCHES "^3\\.5\\.")
+        message(FATAL_ERROR "The Neura TLS provider requires OpenSSL 3.5")
+    endif()
+    target_compile_definitions(neura_nvm PRIVATE NEURA_NVM_TLS)
+    target_link_libraries(neura_nvm PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 elseif(NEURA_ENABLE_SERVER_TLS)
     if(NOT UNIX OR EMSCRIPTEN)
         message(FATAL_ERROR "The Neura server TLS transport requires POSIX sockets")
@@ -1874,6 +1883,11 @@ if(BUILD_TESTING AND NEURA_SDK)
     neura_target_defaults(neura_backend_tests)
     if(NEURA_ENABLE_SERVER_TLS)
         target_compile_definitions(neura_backend_tests PRIVATE NEURA_NVM_TLS)
+        if(WIN32)
+            target_link_libraries(neura_backend_tests PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+        else()
+            target_link_libraries(neura_backend_tests PRIVATE neura_openssl)
+        endif()
     endif()
 
     if(NEURA_HAS_GPU)
@@ -1990,6 +2004,7 @@ if(BUILD_TESTING AND NEURA_SDK)
         "-DNEURA=$<TARGET_FILE:neura>"
         "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
         "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/backend-tests"
+        "-DTLS_ENABLED=${NEURA_ENABLE_SERVER_TLS}"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/backend/cli.cmake"
     )
 

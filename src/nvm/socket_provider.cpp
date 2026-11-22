@@ -6,9 +6,13 @@
 // None of them overlaps: in an image with tasks a waiting call holds up the
 // other tasks for at most its timeout.
 
+#include "driver.hpp"
 #include "provider_internal.hpp"
 
+#include "platform/socket.hpp"
+
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <chrono>
 #include <climits>
@@ -18,11 +22,20 @@
 #include <optional>
 
 #ifdef _WIN32
-#include "platform/socket.hpp"
 #include "platform/text.hpp"
 #include "platform/windows.hpp"
 
 #include <mstcpip.h>
+
+// Windows 10 2004 winsock constants are missing from older MinGW headers.
+#ifndef UDP_SEND_MSG_SIZE
+#define UDP_SEND_MSG_SIZE 2
+#define UDP_RECV_MAX_COALESCED_SIZE 3
+#define UDP_COALESCED_INFO 3
+#endif
+#ifndef SIO_UDP_NETRESET
+#define SIO_UDP_NETRESET _WSAIOW(IOC_VENDOR, 15)
+#endif
 #include <span>
 #include <string>
 #else
@@ -38,6 +51,8 @@
 #endif
 #ifdef __linux__
 #include <linux/udp.h>
+#include <signal.h>
+#include <sys/mman.h>
 #include <sys/sendfile.h>
 #endif
 #ifndef IPPROTO_MPTCP
@@ -50,6 +65,15 @@ namespace {
 
 HostType address_result() { return tuple({byte_list(), text(), int32()}); }
 HostType segments_result() { return tuple({byte_list(), text(), int32(), int32()}); }
+using SocketClock = std::chrono::steady_clock;
+SocketClock::time_point socket_deadline(std::int64_t timeout_nanos) {
+    const auto now = SocketClock::now();
+    const auto timeout = std::chrono::duration_cast<SocketClock::duration>(std::chrono::nanoseconds(timeout_nanos));
+    return timeout > SocketClock::time_point::max() - now ? SocketClock::time_point::max() : now + timeout;
+}
+
+HostType option_numbers() { return HostType(Kind::List, std::vector<HostType>{int32()}); }
+HostType option_values() { return HostType(Kind::List, std::vector<HostType>{int64()}); }
 
 } // namespace
 
@@ -59,9 +83,8 @@ HostType segments_result() { return tuple({byte_list(), text(), int32(), int32()
 // later), the options of the W14 table, resolution through GetAddrInfoW, and
 // send_file through TransmitFile (a buffered copy to a Unix-domain stream).
 // The sockets are blocking, as on POSIX. Windows AF_UNIX has stream sockets
-// only and no abstract namespace, and there is no pipe, splice or Multipath
-// TCP: the Unix datagram services, abstract names, pipe, splice and MPTCP
-// answer 13 (Unsupported), as all but the datagram services do off Linux.
+// only and no abstract namespace. Linux's explicit pipe and splice v1
+// services return Unsupported; splice v2 relays two streams on every host.
 
 namespace {
 
@@ -81,11 +104,13 @@ bool valid_port(std::int32_t port) { return port >= 0 && port <= 65535; }
 // An IPv6 socket is dual-stack, as Linux and macOS make it by default
 // (IPV6_V6ONLY 0): udp.bind("::", port) also receives IPv4 datagrams.
 // Windows turns IPV6_V6ONLY on by default.
-NativeSocket new_socket(int family, int type) {
-    const int protocol = family == AF_UNIX ? 0 : type == SOCK_DGRAM ? IPPROTO_UDP : IPPROTO_TCP;
+NativeSocket new_socket(int family, int type, int protocol = 0) {
+    if (protocol == 0 && family != AF_UNIX && type != SOCK_RAW) {
+        protocol = type == SOCK_DGRAM ? IPPROTO_UDP : IPPROTO_TCP;
+    }
     const auto socket =
         ::WSASocketW(family, type, protocol, nullptr, 0, WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
-    if (socket != invalid_native_socket && family == AF_INET6) {
+    if (socket != invalid_native_socket && family == AF_INET6 && type != SOCK_RAW) {
         const DWORD v6_only = 0;
         ::setsockopt(socket, IPPROTO_IPV6, IPV6_V6ONLY, reinterpret_cast<const char*>(&v6_only), sizeof v6_only);
     }
@@ -96,6 +121,7 @@ NativeSocket new_socket(int family, int type) {
 // address, for binding). Names other than localhost go through
 // neura.net.resolve first, so the datagram services never block on DNS.
 bool numeric_address(const std::string& host, std::int32_t port, sockaddr_storage& out, int& length) {
+    if (host.find('\0') != std::string::npos) return false;
     std::memset(&out, 0, sizeof out);
     const std::string text = host.empty() ? "0.0.0.0" : host == "localhost" ? "127.0.0.1" : host;
     auto* v4 = reinterpret_cast<sockaddr_in*>(&out);
@@ -151,7 +177,7 @@ std::uint32_t unix_connect_error(const std::string& path, int error) {
 // limit.
 int wait_for_events(NativeSocket socket, short events, std::int64_t timeout_nanos) {
     const bool limited = timeout_nanos > 0;
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::nanoseconds(limited ? timeout_nanos : 0);
+    const auto deadline = socket_deadline(limited ? timeout_nanos : 0);
     for (;;) {
         int milliseconds = -1;
         if (limited) {
@@ -245,7 +271,7 @@ bool read_only_option(std::int32_t option) { return option == 15; }
 bool option_fits(NativeSocket socket, const OptionSpec& spec) {
     if (spec.level != IPPROTO_TCP && spec.level != IPPROTO_UDP) return true;
     const auto protocol = protocol_of(socket);
-    return !protocol || *protocol == spec.level;
+    return !protocol || *protocol == spec.level || (*protocol == IPPROTO_MPTCP && spec.level == IPPROTO_TCP);
 }
 
 bool unsupported_option_error(int error) { return error == WSAENOPROTOOPT || error == WSAEOPNOTSUPP; }
@@ -328,7 +354,7 @@ int copy(NativeSocket socket, HANDLE file, std::int64_t offset, std::int64_t cou
 
 } // namespace
 
-void add_socket_services(const Adder& add, StandardServices::Tables& tables, const Capabilities& capabilities) {
+void add_socket_transport_services(const Adder& add, StandardServices::Tables& tables, const Capabilities& capabilities) {
     auto* sockets = &tables;
     const auto* granted = &capabilities;
     const auto remember = [sockets](NativeSocket socket, bool listener, bool datagram) {
@@ -345,7 +371,7 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
         return granted->net ? fail(host_error::unsupported) : denied();
     };
 
-    add(signature("neura.net.udp.bind", {text(), int32()}, int64()), [=](const HostRequest& request) {
+    const auto udp_bind = [=](const HostRequest& request) {
         if (!granted->net) return denied();
         const auto& host = request.arguments.at(0).bytes;
         const auto port = as_int32(request.arguments.at(1));
@@ -356,6 +382,12 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
         if (full()) return fail(host_error::other);
         const auto socket = new_socket(address.ss_family, SOCK_DGRAM);
         if (socket == invalid_native_socket) return wsa_failure();
+        if (request.arguments.size() == 4) {
+            if (const auto failure = set_socket_options(socket, request.arguments.at(2), request.arguments.at(3))) {
+                platform::close_socket(socket);
+                return fail(*failure);
+            }
+        }
         if (::bind(socket, reinterpret_cast<sockaddr*>(&address), length) != 0) {
             const auto failure = wsa_failure();
             platform::close_socket(socket);
@@ -370,7 +402,9 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
             ::WSAIoctl(socket, code, &report, sizeof report, nullptr, 0, &bytes, nullptr, nullptr);
         }
         return remember(socket, false, true);
-    });
+    };
+    add(signature("neura.net.udp.bind", {text(), int32()}, int64()), udp_bind);
+    add({"neura.net.udp.bind", 2, {text(), int32(), option_numbers(), option_values()}, int64(), uint32()}, udp_bind);
 
     add(signature("neura.net.udp.send_to", {int64(), text(), int32(), byte_list()}, int32()),
         [=](const HostRequest& request) {
@@ -381,7 +415,7 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
             const auto& bytes = request.arguments.at(3).bytes;
             sockaddr_storage address{};
             int length = 0;
-            if (!socket || !socket->datagram || !valid_port(port) || !numeric_address(host, port, address, length)) {
+            if (!socket || !socket->datagram || socket->raw || !valid_port(port) || !numeric_address(host, port, address, length)) {
                 return fail(host_error::invalid_input);
             }
             const auto size = static_cast<int>(std::min<std::size_t>(bytes.size(), INT_MAX));
@@ -402,7 +436,7 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
             auto* socket = find(request.arguments.at(0));
             const auto max = as_int32(request.arguments.at(1));
             const auto timeout = as_int64(request.arguments.at(2));
-            if (!socket || !socket->datagram || max < 1 || timeout < 0) return fail(host_error::invalid_input);
+            if (!socket || !socket->datagram || socket->raw || max < 1 || timeout < 0) return fail(host_error::invalid_input);
             const int ready = wait_readable(socket->descriptor, timeout);
             if (ready == 0) return fail(host_error::timed_out);
             if (ready < 0) return wsa_failure();
@@ -475,20 +509,10 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
     add(signature("neura.net.option.set", {int64(), int32(), int64()}, void_type()), [=](const HostRequest& request) {
         if (!granted->net) return denied();
         auto* socket = find(request.arguments.at(0));
-        const auto option = as_int32(request.arguments.at(1));
-        const auto value = as_int64(request.arguments.at(2));
-        if (!socket || !known_option(option) || read_only_option(option) || value < 0 || value > INT32_MAX) {
-            return fail(host_error::invalid_input);
-        }
-        const auto spec = option_of(option);
-        if (!spec || !option_fits(socket->descriptor, *spec)) return fail(host_error::unsupported);
-        DWORD number = static_cast<DWORD>(value);
-        if (option == 14) number = value != 0 ? max_coalesced_bytes : 0;
-        if (::setsockopt(socket->descriptor, spec->level, spec->name, reinterpret_cast<const char*>(&number),
-                         sizeof number) != 0) {
-            return unsupported_option_error(::WSAGetLastError()) ? fail(host_error::unsupported) : wsa_failure();
-        }
-        return HostCompletion::ok();
+        if (!socket || socket->pipe) return fail(host_error::invalid_input);
+        const auto error = set_socket_option(socket->descriptor, as_int32(request.arguments.at(1)),
+                                             as_int64(request.arguments.at(2)));
+        return error ? fail(*error) : HostCompletion::ok();
     });
 
     add(signature("neura.net.option.get", {int64(), int32()}, int64()), [=](const HostRequest& request) {
@@ -555,7 +579,7 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
             auto* socket = find(request.arguments.at(0));
             const auto max = as_int32(request.arguments.at(1));
             const auto timeout = as_int64(request.arguments.at(2));
-            if (!socket || !socket->datagram || max < 1 || timeout < 0) return fail(host_error::invalid_input);
+            if (!socket || !socket->datagram || socket->raw || max < 1 || timeout < 0) return fail(host_error::invalid_input);
             GUID guid = WSAID_WSARECVMSG;
             LPFN_WSARECVMSG receive_message = nullptr;
             DWORD returned = 0;
@@ -606,9 +630,18 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
                                                    int32_value(port), int32_value(segment)}));
         });
 
-    // Multipath TCP is Linux's. The arguments are checked as there, and a
-    // valid request answers 13, as a kernel without MPTCP does.
-    add(signature("neura.net.mptcp.listen", {text(), int32()}, int64()), [=](const HostRequest& request) {
+    // Ask Winsock for MPTCP by protocol number. A host with no protocol
+    // provider answers Unsupported; a TCP fallback would silently ignore
+    // the caller's transport choice.
+    const auto mptcp_failure = [] {
+        const auto error = ::WSAGetLastError();
+        if (error == WSAEPROTONOSUPPORT || error == WSAESOCKTNOSUPPORT || error == WSAEPROTOTYPE ||
+            error == WSAEINVAL || error == WSAEOPNOTSUPP || error == WSAEAFNOSUPPORT) {
+            return fail(host_error::unsupported);
+        }
+        return fail(host_error::from_wsa(error));
+    };
+    const auto mptcp_listen = [=](const HostRequest& request) {
         if (!granted->net) return denied();
         const auto port = as_int32(request.arguments.at(1));
         if (const auto failure = start_sockets()) return fail(*failure);
@@ -618,8 +651,24 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
             return fail(host_error::invalid_input);
         }
         if (full()) return fail(host_error::other);
-        return fail(host_error::unsupported);
-    });
+        const auto socket = new_socket(address.ss_family, SOCK_STREAM, IPPROTO_MPTCP);
+        if (socket == invalid_native_socket) return mptcp_failure();
+        if (request.arguments.size() == 4) {
+            if (const auto failure = set_socket_options(socket, request.arguments.at(2), request.arguments.at(3))) {
+                platform::close_socket(socket);
+                return fail(*failure);
+            }
+        }
+        if (::bind(socket, reinterpret_cast<sockaddr*>(&address), length) != 0 || ::listen(socket, 128) != 0) {
+            const auto failure = wsa_failure();
+            platform::close_socket(socket);
+            return failure;
+        }
+        return remember(socket, true, false);
+    };
+    add(signature("neura.net.mptcp.listen", {text(), int32()}, int64()), mptcp_listen);
+    add({"neura.net.mptcp.listen", 2, {text(), int32(), option_numbers(), option_values()}, int64(), uint32()},
+        mptcp_listen);
 
     add(signature("neura.net.mptcp.connect", {text(), int32(), int64()}, int64()), [=](const HostRequest& request) {
         if (!granted->net) return denied();
@@ -633,7 +682,30 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
             return fail(host_error::invalid_input);
         }
         if (full()) return fail(host_error::other);
-        return fail(host_error::unsupported);
+        const auto socket = new_socket(address.ss_family, SOCK_STREAM, IPPROTO_MPTCP);
+        if (socket == invalid_native_socket) return mptcp_failure();
+        const auto close_with = [socket](HostCompletion completion) {
+            platform::close_socket(socket);
+            return completion;
+        };
+        if (!platform::set_nonblocking(socket)) return close_with(wsa_failure());
+        if (::connect(socket, reinterpret_cast<sockaddr*>(&address), length) != 0) {
+            const int error = ::WSAGetLastError();
+            if (error != WSAEWOULDBLOCK && error != WSAEINPROGRESS) {
+                return close_with(fail(host_error::from_wsa(error)));
+            }
+            const int ready = wait_for_events(socket, platform::poll_out, timeout);
+            if (ready == 0) return close_with(fail(host_error::timed_out));
+            if (ready < 0) return close_with(wsa_failure());
+            int problem = 0;
+            int size = sizeof problem;
+            if (::getsockopt(socket, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&problem), &size) != 0) {
+                return close_with(wsa_failure());
+            }
+            if (problem != 0) return close_with(fail(host_error::from_wsa(problem)));
+        }
+        if (!platform::set_nonblocking(socket, false)) return close_with(wsa_failure());
+        return remember(socket, false, false);
     });
 
     // splice(2) and its pipes are Linux's.
@@ -684,8 +756,8 @@ HostCompletion errno_failure() { return fail(host_error::from_errno(errno)); }
 
 bool valid_port(std::int32_t port) { return port >= 0 && port <= 65535; }
 
-int new_socket(int family, int type) {
-    const int descriptor = ::socket(family, type, 0);
+int new_socket(int family, int type, int protocol = 0) {
+    const int descriptor = ::socket(family, type, protocol);
     if (descriptor < 0) return descriptor;
     ::fcntl(descriptor, F_SETFD, FD_CLOEXEC);
 #ifdef SO_NOSIGPIPE
@@ -699,6 +771,7 @@ int new_socket(int family, int type) {
 // address, for binding). Names other than localhost go through
 // neura.net.resolve first, so the datagram services never block on DNS.
 bool numeric_address(const std::string& host, std::int32_t port, sockaddr_storage& out, socklen_t& length) {
+    if (host.find('\0') != std::string::npos) return false;
     std::memset(&out, 0, sizeof out);
     const std::string text = host.empty() ? "0.0.0.0" : host == "localhost" ? "127.0.0.1" : host;
     auto* v4 = reinterpret_cast<sockaddr_in*>(&out);
@@ -768,7 +841,7 @@ std::string unix_path(const sockaddr_un& address, socklen_t length) {
 // Waits for input: 1 ready, 0 timed out, -1 failed. Zero waits without limit.
 int wait_readable(int descriptor, std::int64_t timeout_nanos) {
     const bool limited = timeout_nanos > 0;
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::nanoseconds(limited ? timeout_nanos : 0);
+    const auto deadline = socket_deadline(limited ? timeout_nanos : 0);
     for (;;) {
         int milliseconds = -1;
         if (limited) {
@@ -842,7 +915,7 @@ bool read_only_option(std::int32_t option) { return option == 15; }
 // timed out, -1 failed. A zero timeout waits without limit.
 int wait_for_events(int descriptor, short events, std::int64_t timeout_nanos) {
     const bool limited = timeout_nanos > 0;
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::nanoseconds(limited ? timeout_nanos : 0);
+    const auto deadline = socket_deadline(limited ? timeout_nanos : 0);
     for (;;) {
         int milliseconds = -1;
         if (limited) {
@@ -859,7 +932,7 @@ int wait_for_events(int descriptor, short events, std::int64_t timeout_nanos) {
 
 } // namespace
 
-void add_socket_services(const Adder& add, StandardServices::Tables& tables, const Capabilities& capabilities) {
+void add_socket_transport_services(const Adder& add, StandardServices::Tables& tables, const Capabilities& capabilities) {
     auto* sockets = &tables;
     const auto* granted = &capabilities;
     const auto remember = [sockets](int descriptor, bool listener, bool datagram) {
@@ -880,7 +953,7 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
         auto* socket = find(request.arguments.at(0));
         const auto max = as_int32(request.arguments.at(1));
         const auto timeout = as_int64(request.arguments.at(2));
-        if (!socket || !socket->datagram || max < 1 || timeout < 0) return fail(host_error::invalid_input);
+        if (!socket || !socket->datagram || socket->raw || max < 1 || timeout < 0) return fail(host_error::invalid_input);
         const int ready = wait_readable(socket->descriptor, timeout);
         if (ready == 0) return fail(host_error::timed_out);
         if (ready < 0) return errno_failure();
@@ -911,7 +984,7 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
                                                int32_value(port)}));
     };
 
-    add(signature("neura.net.udp.bind", {text(), int32()}, int64()), [=](const HostRequest& request) {
+    const auto udp_bind = [=](const HostRequest& request) {
         if (!granted->net) return denied();
         const auto& host = request.arguments.at(0).bytes;
         const auto port = as_int32(request.arguments.at(1));
@@ -921,13 +994,21 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
         if (full()) return fail(host_error::other);
         const int descriptor = new_socket(address.ss_family, SOCK_DGRAM);
         if (descriptor < 0) return errno_failure();
+        if (request.arguments.size() == 4) {
+            if (const auto failure = set_socket_options(descriptor, request.arguments.at(2), request.arguments.at(3))) {
+                platform::close_socket(descriptor);
+                return fail(*failure);
+            }
+        }
         if (::bind(descriptor, reinterpret_cast<sockaddr*>(&address), length) != 0) {
             const auto failure = errno_failure();
             ::close(descriptor);
             return failure;
         }
         return remember(descriptor, false, true);
-    });
+    };
+    add(signature("neura.net.udp.bind", {text(), int32()}, int64()), udp_bind);
+    add({"neura.net.udp.bind", 2, {text(), int32(), option_numbers(), option_values()}, int64(), uint32()}, udp_bind);
 
     add(signature("neura.net.udp.send_to", {int64(), text(), int32(), byte_list()}, int32()),
         [=](const HostRequest& request) {
@@ -938,7 +1019,7 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
             const auto& bytes = request.arguments.at(3).bytes;
             sockaddr_storage address{};
             socklen_t length = 0;
-            if (!socket || !socket->datagram || !valid_port(port) || !numeric_address(host, port, address, length)) {
+            if (!socket || !socket->datagram || socket->raw || !valid_port(port) || !numeric_address(host, port, address, length)) {
                 return fail(host_error::invalid_input);
             }
             ssize_t sent;
@@ -1015,7 +1096,7 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
         auto* socket = find(request.arguments.at(0));
         sockaddr_un address{};
         socklen_t length = 0;
-        if (!socket || !socket->datagram) return fail(host_error::invalid_input);
+        if (!socket || !socket->datagram || socket->raw) return fail(host_error::invalid_input);
         if (!unix_address(request.arguments.at(1).bytes, address, length)) {
             return unix_address_failure(request.arguments.at(1).bytes);
         }
@@ -1035,18 +1116,10 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
     add(signature("neura.net.option.set", {int64(), int32(), int64()}, void_type()), [=](const HostRequest& request) {
         if (!granted->net) return denied();
         auto* socket = find(request.arguments.at(0));
-        const auto option = as_int32(request.arguments.at(1));
-        const auto value = as_int64(request.arguments.at(2));
-        if (!socket || !known_option(option) || read_only_option(option) || value < 0 || value > INT32_MAX) {
-            return fail(host_error::invalid_input);
-        }
-        const auto spec = option_of(option);
-        if (!spec) return fail(host_error::unsupported);
-        const int number = static_cast<int>(value);
-        if (::setsockopt(socket->descriptor, spec->level, spec->name, &number, sizeof number) != 0) {
-            return errno == ENOPROTOOPT || errno == EOPNOTSUPP ? fail(host_error::unsupported) : errno_failure();
-        }
-        return HostCompletion::ok();
+        if (!socket || socket->pipe) return fail(host_error::invalid_input);
+        const auto error = set_socket_option(socket->descriptor, as_int32(request.arguments.at(1)),
+                                             as_int64(request.arguments.at(2)));
+        return error ? fail(*error) : HostCompletion::ok();
     });
 
     add(signature("neura.net.option.get", {int64(), int32()}, int64()), [=](const HostRequest& request) {
@@ -1111,7 +1184,7 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
             auto* socket = find(request.arguments.at(0));
             const auto max = as_int32(request.arguments.at(1));
             const auto timeout = as_int64(request.arguments.at(2));
-            if (!socket || !socket->datagram || max < 1 || timeout < 0) return fail(host_error::invalid_input);
+            if (!socket || !socket->datagram || socket->raw || max < 1 || timeout < 0) return fail(host_error::invalid_input);
             const int ready = wait_readable(socket->descriptor, timeout);
             if (ready == 0) return fail(host_error::timed_out);
             if (ready < 0) return errno_failure();
@@ -1174,7 +1247,7 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
             ? fail(host_error::unsupported) : errno_failure();
     };
 
-    add(signature("neura.net.mptcp.listen", {text(), int32()}, int64()), [=](const HostRequest& request) {
+    const auto mptcp_listen = [=](const HostRequest& request) {
         if (!granted->net) return denied();
         const auto port = as_int32(request.arguments.at(1));
         sockaddr_storage address{};
@@ -1187,13 +1260,22 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
         if (descriptor < 0) return mptcp_failure();
         const int one = 1;
         ::setsockopt(descriptor, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+        if (request.arguments.size() == 4) {
+            if (const auto failure = set_socket_options(descriptor, request.arguments.at(2), request.arguments.at(3))) {
+                ::close(descriptor);
+                return fail(*failure);
+            }
+        }
         if (::bind(descriptor, reinterpret_cast<sockaddr*>(&address), length) != 0 || ::listen(descriptor, 128) != 0) {
             const auto failure = errno_failure();
             ::close(descriptor);
             return failure;
         }
         return remember(descriptor, true, false);
-    });
+    };
+    add(signature("neura.net.mptcp.listen", {text(), int32()}, int64()), mptcp_listen);
+    add({"neura.net.mptcp.listen", 2, {text(), int32(), option_numbers(), option_values()}, int64(), uint32()},
+        mptcp_listen);
 
     add(signature("neura.net.mptcp.connect", {text(), int32(), int64()}, int64()), [=](const HostRequest& request) {
         if (!granted->net) return denied();
@@ -1324,7 +1406,7 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
                 std::size_t done = 0;
                 while (done < static_cast<std::size_t>(got)) {
                     const auto wrote = ::send(socket->descriptor, buffer.data() + done, got - done, 0);
-                    if (wrote < 0 && retry_send(errno)) continue;
+                    if (wrote < 0 && (errno == EINTR || errno == EAGAIN)) continue;
                     if (wrote < 0) return sent > 0 ? HostCompletion::ok(int64_value(sent)) : errno_failure();
                     done += static_cast<std::size_t>(wrote);
                 }
@@ -1336,5 +1418,656 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
 }
 
 #endif
+
+std::optional<std::uint32_t> set_socket_option(NativeSocket socket, std::int32_t option, std::int64_t value) {
+    if (!known_option(option) || read_only_option(option) || value < 0 || value > INT32_MAX) {
+        return host_error::invalid_input;
+    }
+    const auto spec = option_of(option);
+    if (!spec) return host_error::unsupported;
+#ifdef _WIN32
+    if (!option_fits(socket, *spec)) return host_error::unsupported;
+    const DWORD number = option == 14 && value != 0 ? max_coalesced_bytes : static_cast<DWORD>(value);
+    if (::setsockopt(socket, spec->level, spec->name, reinterpret_cast<const char*>(&number), sizeof number) != 0) {
+        const int error = ::WSAGetLastError();
+        return unsupported_option_error(error) ? host_error::unsupported : host_error::from_wsa(error);
+    }
+#else
+    const int number = static_cast<int>(value);
+    if (::setsockopt(socket, spec->level, spec->name, &number, sizeof number) != 0) {
+        return errno == ENOPROTOOPT || errno == EOPNOTSUPP ? host_error::unsupported : host_error::from_errno(errno);
+    }
+#endif
+    return std::nullopt;
+}
+
+std::optional<std::uint32_t> set_socket_options(NativeSocket socket, const HostValue& options, const HostValue& values) {
+    if (options.elements.size() != values.elements.size() || options.elements.size() > 15) {
+        return host_error::invalid_input;
+    }
+    for (std::size_t index = 0; index < options.elements.size(); ++index) {
+        if (const auto error = set_socket_option(socket, as_int32(options.elements[index]),
+                                                 as_int64(values.elements[index]))) {
+            return error;
+        }
+    }
+    return std::nullopt;
+}
+
+namespace {
+
+#ifdef _WIN32
+using AddressLength = int;
+HostCompletion socket_failure() { return wsa_failure(); }
+#else
+using AddressLength = socklen_t;
+HostCompletion socket_failure() { return errno_failure(); }
+#endif
+
+struct ScopedSocket {
+    NativeSocket descriptor;
+    ~ScopedSocket() {
+        if (descriptor != invalid_native_socket) platform::close_socket(descriptor);
+    }
+};
+
+constexpr int stream_send_flags =
+#ifdef MSG_NOSIGNAL
+    MSG_NOSIGNAL;
+#else
+    0;
+#endif
+
+bool connected_stream(const StandardServices::Tables::Socket* socket) {
+    return socket && !socket->pipe && !socket->listener && !socket->datagram;
+}
+
+HostCompletion read_datagram(NativeSocket socket, std::size_t max, std::int64_t timeout) {
+    const int ready = wait_readable(socket, timeout);
+    if (ready == 0) return fail(host_error::timed_out);
+    if (ready < 0) return socket_failure();
+    std::string bytes(max, '\0');
+    sockaddr_storage from{};
+    AddressLength length = sizeof from;
+    decltype(::recvfrom(socket, bytes.data(), 0, 0, nullptr, nullptr)) got;
+    do {
+        length = sizeof from;
+        got = ::recvfrom(socket, bytes.data(), static_cast<int>(bytes.size()), 0,
+                         reinterpret_cast<sockaddr*>(&from), &length);
+    } while (got < 0 && platform::last_socket_error().interrupted());
+#ifdef _WIN32
+    if (got < 0 && ::WSAGetLastError() == WSAEMSGSIZE) got = static_cast<int>(bytes.size());
+#endif
+    if (got < 0) return socket_failure();
+    bytes.resize(static_cast<std::size_t>(got));
+    char address[NI_MAXHOST] = {};
+    if (::getnameinfo(reinterpret_cast<sockaddr*>(&from), length, address, sizeof address,
+                      nullptr, 0, NI_NUMERICHOST) != 0) {
+        return fail(host_error::other);
+    }
+    return HostCompletion::ok(tuple_value({bytes_value(std::move(bytes)), bytes_value(address), int32_value(0)}));
+}
+
+HostCompletion raw_open(StandardServices::Tables& table, std::int32_t family, std::int32_t protocol) {
+    if ((family != 4 && family != 6) || protocol < 0 || protocol > 255) return fail(host_error::invalid_input);
+    if (table.sockets.size() >= max_open_ids) return fail(host_error::other);
+#ifdef _WIN32
+    if (const auto failure = start_sockets()) return fail(*failure);
+#endif
+    const auto descriptor = new_socket(family == 4 ? AF_INET : AF_INET6, SOCK_RAW, protocol);
+    if (descriptor == invalid_native_socket) return socket_failure();
+#ifdef _WIN32
+    // Winsock requires a local bind before receive. It explicitly forbids
+    // binding a raw TCP socket. Preserve that socket's permitted send path.
+    if (protocol != IPPROTO_TCP) {
+        sockaddr_storage address{};
+        AddressLength size = 0;
+        numeric_address(family == 4 ? "0.0.0.0" : "::", 0, address, size);
+        if (::bind(descriptor, reinterpret_cast<sockaddr*>(&address), size) != 0) {
+            const auto failure = socket_failure();
+            platform::close_socket(descriptor);
+            return failure;
+        }
+    }
+#endif
+    const auto id = table.next_socket++;
+    table.sockets[id] = {descriptor, false, true, false, true};
+    return HostCompletion::ok(int64_value(id));
+}
+
+#ifdef __linux__
+// splice(2) has no MSG_NOSIGNAL. Block SIGPIPE only on the calling thread
+// and consume the signal raised by this call before restoring its mask.
+ssize_t splice_to_socket(int source, int target, std::size_t count) {
+    sigset_t blocked;
+    sigemptyset(&blocked);
+    sigaddset(&blocked, SIGPIPE);
+    sigset_t previous;
+    const auto mask_error = pthread_sigmask(SIG_BLOCK, &blocked, &previous);
+    if (mask_error != 0) {
+        errno = mask_error;
+        return -1;
+    }
+    sigset_t pending;
+    const bool already_pending = sigpending(&pending) == 0 && sigismember(&pending, SIGPIPE) == 1;
+    const auto moved = ::splice(source, nullptr, target, nullptr, count, SPLICE_F_MOVE);
+    const auto error = errno;
+    if (moved < 0 && error == EPIPE && !already_pending) {
+        const timespec immediate{};
+        while (sigtimedwait(&blocked, nullptr, &immediate) < 0 && errno == EINTR) {}
+    }
+    pthread_sigmask(SIG_SETMASK, &previous, nullptr);
+    errno = error;
+    return moved;
+}
+#endif
+
+// On platforms without splice, peek first and only consume the prefix the
+// destination accepted. A send error therefore leaves the source readable.
+HostCompletion relay_stream(NativeSocket from, NativeSocket to, std::int64_t count) {
+#ifdef __linux__
+    int ends[2];
+    if (::pipe2(ends, O_CLOEXEC) != 0) return socket_failure();
+    const ScopedSocket input{ends[0]};
+    const ScopedSocket output{ends[1]};
+    ssize_t moved;
+    do {
+        moved = ::splice(from, nullptr, output.descriptor, nullptr,
+                         static_cast<std::size_t>(std::min<std::int64_t>(count, 64 * 1024)), SPLICE_F_MOVE);
+    } while (moved < 0 && errno == EINTR);
+    if (moved < 0) return socket_failure();
+    ssize_t sent = 0;
+    while (sent < moved) {
+        const auto progress = splice_to_socket(input.descriptor, to, static_cast<std::size_t>(moved - sent));
+        if (progress < 0 && errno == EINTR) continue;
+        if (progress < 0) return sent > 0 ? HostCompletion::ok(int64_value(sent)) : socket_failure();
+        if (progress == 0) return HostCompletion::ok(int64_value(sent));
+        sent += progress;
+    }
+    return HostCompletion::ok(int64_value(sent));
+#else
+    const auto size = static_cast<int>(std::min<std::int64_t>(count, 64 * 1024));
+    std::string buffer(static_cast<std::size_t>(size), '\0');
+    decltype(::recv(from, buffer.data(), 0, 0)) offered;
+    do {
+        offered = ::recv(from, buffer.data(), size, MSG_PEEK);
+    } while (offered < 0 && platform::last_socket_error().interrupted());
+    if (offered < 0) return socket_failure();
+    if (offered == 0) return HostCompletion::ok(int64_value(0));
+    decltype(offered) sent;
+    do {
+        sent = ::send(to, buffer.data(), static_cast<int>(offered), stream_send_flags);
+    } while (sent < 0 && platform::last_socket_error().interrupted());
+    if (sent < 0) return socket_failure();
+    decltype(sent) consumed = 0;
+    while (consumed < sent) {
+        const auto got = ::recv(from, buffer.data(), static_cast<int>(sent - consumed), 0);
+        if (got < 0 && platform::last_socket_error().interrupted()) continue;
+        if (got <= 0) return fail(host_error::connection_reset);
+        consumed += got;
+    }
+    return HostCompletion::ok(int64_value(sent));
+#endif
+}
+
+HostCompletion send_zerocopy(NativeSocket descriptor, const std::string& bytes) {
+    if (bytes.empty()) return HostCompletion::ok(int32_value(0));
+    if (bytes.size() > INT32_MAX) return fail(host_error::invalid_input);
+#ifdef _WIN32
+    GUID guid = WSAID_TRANSMITPACKETS;
+    LPFN_TRANSMITPACKETS transmit_packets = nullptr;
+    DWORD returned = 0;
+    if (::WSAIoctl(descriptor, SIO_GET_EXTENSION_FUNCTION_POINTER, &guid, sizeof guid, &transmit_packets,
+                   sizeof transmit_packets, &returned, nullptr, nullptr) != 0) {
+        return socket_failure();
+    }
+    if (transmit_packets == nullptr) return fail(host_error::unsupported);
+    Event done;
+    if (done.handle == nullptr) return fail(host_error::from_win32(::GetLastError()));
+    OVERLAPPED operation{};
+    operation.hEvent = done.handle;
+    TRANSMIT_PACKETS_ELEMENT packet{};
+    packet.dwElFlags = TP_ELEMENT_MEMORY;
+    packet.cLength = static_cast<ULONG>(bytes.size());
+    packet.pBuffer = const_cast<char*>(bytes.data());
+    if (!transmit_packets(descriptor, &packet, 1, 0, &operation, 0) &&
+        ::WSAGetLastError() != WSA_IO_PENDING) {
+        return socket_failure();
+    }
+    DWORD sent = 0;
+    DWORD flags = 0;
+    if (!::WSAGetOverlappedResult(descriptor, &operation, &sent, TRUE, &flags)) return socket_failure();
+    if (sent > INT32_MAX) return fail(host_error::other);
+    return HostCompletion::ok(int32_value(static_cast<std::int32_t>(sent)));
+#elif defined(__linux__) && defined(MSG_ZEROCOPY) && defined(SO_ZEROCOPY)
+    const int enable = 1;
+    if (::setsockopt(descriptor, SOL_SOCKET, SO_ZEROCOPY, &enable, sizeof enable) != 0) {
+        return errno == ENOPROTOOPT || errno == EOPNOTSUPP ? fail(host_error::unsupported) : socket_failure();
+    }
+    // Drain previous completion notices. Unmapping this private, immutable
+    // staging range after send cannot overwrite pages the kernel still pins.
+    // No Neura heap allocation is shared with the network stack.
+    alignas(cmsghdr) std::array<char, 256> control{};
+    msghdr notice{};
+    notice.msg_control = control.data();
+    while (true) {
+        notice.msg_controllen = control.size();
+        if (::recvmsg(descriptor, &notice, MSG_ERRQUEUE | MSG_DONTWAIT) < 0) break;
+    }
+    void* staging = ::mmap(nullptr, bytes.size(), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (staging == MAP_FAILED) return socket_failure();
+    std::memcpy(staging, bytes.data(), bytes.size());
+    ssize_t sent;
+    do {
+        sent = ::send(descriptor, staging, bytes.size(), MSG_ZEROCOPY | stream_send_flags);
+    } while (sent < 0 && errno == EINTR);
+    const auto error = errno;
+    ::munmap(staging, bytes.size());
+    if (sent < 0) return fail(host_error::from_errno(error));
+    return HostCompletion::ok(int32_value(static_cast<std::int32_t>(sent)));
+#else
+    // The send contract remains usable when the platform has no copy-avoidance hint.
+    decltype(::send(descriptor, bytes.data(), 0, 0)) sent;
+    do {
+        sent = ::send(descriptor, bytes.data(), static_cast<int>(bytes.size()), stream_send_flags);
+    } while (sent < 0 && platform::last_socket_error().interrupted());
+    if (sent < 0) return socket_failure();
+    return HostCompletion::ok(int32_value(static_cast<std::int32_t>(sent)));
+#endif
+}
+
+// A typed setsockopt wrapper for the multicast configuration. Winsock
+// declares optval as const char*, POSIX as const void*.
+template<typename Value>
+bool set_native_option(NativeSocket socket, int level, int option, const Value& value) {
+    return ::setsockopt(socket, level, option, reinterpret_cast<const char*>(&value), sizeof value) == 0;
+}
+
+HostCompletion send_segments(NativeSocket descriptor, sockaddr_storage& target, AddressLength length,
+                             const std::string& bytes, int segment) {
+    if (bytes.empty()) return HostCompletion::ok(int32_value(0));
+    auto* address = reinterpret_cast<sockaddr*>(&target);
+#if defined(_WIN32) || defined(UDP_SEGMENT)
+    if (bytes.size() <= 65507) {
+#ifdef _WIN32
+        DWORD original = 0;
+        int size = sizeof original;
+        const DWORD segment_size = static_cast<DWORD>(segment);
+        if (::getsockopt(descriptor, IPPROTO_UDP, UDP_SEND_MSG_SIZE, reinterpret_cast<char*>(&original), &size) == 0 &&
+            set_native_option(descriptor, IPPROTO_UDP, UDP_SEND_MSG_SIZE, segment_size)) {
+            int sent;
+            do {
+                sent = ::sendto(descriptor, bytes.data(), static_cast<int>(bytes.size()), 0, address, length);
+            } while (sent < 0 && platform::last_socket_error().interrupted());
+            const int error = sent < 0 ? ::WSAGetLastError() : 0;
+            if (!set_native_option(descriptor, IPPROTO_UDP, UDP_SEND_MSG_SIZE, original)) return socket_failure();
+            if (sent >= 0) return HostCompletion::ok(int32_value(sent));
+            if (error != WSAEINVAL && error != WSAEMSGSIZE) return fail(host_error::from_wsa(error));
+        }
+#else
+        alignas(cmsghdr) std::array<char, CMSG_SPACE(sizeof(std::uint16_t))> control{};
+        iovec data{const_cast<char*>(bytes.data()), bytes.size()};
+        msghdr message{};
+        message.msg_name = address;
+        message.msg_namelen = length;
+        message.msg_iov = &data;
+        message.msg_iovlen = 1;
+        message.msg_control = control.data();
+        message.msg_controllen = control.size();
+        auto* header = CMSG_FIRSTHDR(&message);
+        header->cmsg_level = IPPROTO_UDP;
+        header->cmsg_type = UDP_SEGMENT;
+        header->cmsg_len = CMSG_LEN(sizeof(std::uint16_t));
+        const auto segment_size = static_cast<std::uint16_t>(segment);
+        std::memcpy(CMSG_DATA(header), &segment_size, sizeof segment_size);
+        ssize_t sent;
+        do {
+            sent = ::sendmsg(descriptor, &message, 0);
+        } while (sent < 0 && errno == EINTR);
+        if (sent >= 0) return HostCompletion::ok(int32_value(static_cast<std::int32_t>(sent)));
+        if (errno != EINVAL && errno != EMSGSIZE && errno != ENOPROTOOPT && errno != EOPNOTSUPP) {
+            return socket_failure();
+        }
+#endif
+    }
+#endif
+    std::size_t total = 0;
+    while (total < bytes.size()) {
+        const auto count = std::min<std::size_t>(static_cast<std::size_t>(segment), bytes.size() - total);
+        const auto sent = ::sendto(descriptor, bytes.data() + total, static_cast<int>(count), 0, address, length);
+        if (sent < 0 && platform::last_socket_error().interrupted()) continue;
+        if (sent < 0) return total == 0 ? socket_failure() : HostCompletion::ok(int32_value(static_cast<int>(total)));
+        if (static_cast<std::size_t>(sent) != count) return fail(host_error::other);
+        total += count;
+    }
+    return HostCompletion::ok(int32_value(static_cast<std::int32_t>(total)));
+}
+
+constexpr std::uint16_t mdns_port = 5353;
+
+// The wildcard bind also admits unicast traffic. Read the IP destination
+// from the ancillary data, since this querier requests multicast replies.
+class MdnsReceiver {
+public:
+    explicit MdnsReceiver(NativeSocket socket) : socket_(socket) {}
+
+    std::optional<HostCompletion> enable() {
+#ifdef _WIN32
+        const DWORD enabled = 1;
+        if (!set_native_option(socket_, IPPROTO_IP, IP_PKTINFO, enabled)) return socket_failure();
+        GUID guid = WSAID_WSARECVMSG;
+        DWORD returned = 0;
+        if (::WSAIoctl(socket_, SIO_GET_EXTENSION_FUNCTION_POINTER, &guid, sizeof guid, &receive_message_,
+                       sizeof receive_message_, &returned, nullptr, nullptr) != 0) return socket_failure();
+        if (!receive_message_) return fail(host_error::unsupported);
+#elif defined(IP_RECVDSTADDR)
+        const int enabled = 1;
+        if (!set_native_option(socket_, IPPROTO_IP, IP_RECVDSTADDR, enabled)) return socket_failure();
+#elif defined(IP_PKTINFO)
+        const int enabled = 1;
+        if (!set_native_option(socket_, IPPROTO_IP, IP_PKTINFO, enabled)) return socket_failure();
+#else
+        return fail(host_error::unsupported);
+#endif
+#if defined(__linux__) && defined(IP_MULTICAST_ALL)
+        const int only_joined_groups = 0;
+        if (!set_native_option(socket_, IPPROTO_IP, IP_MULTICAST_ALL, only_joined_groups) && errno != ENOPROTOOPT) {
+            return socket_failure();
+        }
+#endif
+        return std::nullopt;
+    }
+
+    // A discarded datagram leaves the buffer empty. Incomplete ancillary or
+    // payload data cannot prove the datagram is an intact multicast response.
+    std::optional<HostCompletion> receive(in_addr group, std::string& bytes) const {
+        sockaddr_in source{};
+        std::size_t size = 0;
+        bool multicast = false;
+#ifdef _WIN32
+        WSABUF data{static_cast<ULONG>(bytes.size()), bytes.data()};
+        alignas(WSACMSGHDR) char control[WSA_CMSG_SPACE(sizeof(IN_PKTINFO))] = {};
+        WSAMSG message{};
+        message.name = reinterpret_cast<sockaddr*>(&source);
+        message.namelen = sizeof source;
+        message.lpBuffers = &data;
+        message.dwBufferCount = 1;
+        message.Control = WSABUF{sizeof control, control};
+        DWORD got = 0;
+        if (receive_message_(socket_, &message, &got, nullptr, nullptr) != 0) {
+            const auto error = ::WSAGetLastError();
+            if (error != WSAEINTR && error != WSAEMSGSIZE) return fail(host_error::from_wsa(error));
+            bytes.clear();
+            return std::nullopt;
+        }
+        size = got;
+        if ((message.dwFlags & (MSG_TRUNC | MSG_CTRUNC)) == 0 && message.namelen >= sizeof source) {
+            for (auto* header = WSA_CMSG_FIRSTHDR(&message); header; header = WSA_CMSG_NXTHDR(&message, header)) {
+                if (header->cmsg_level == IPPROTO_IP && header->cmsg_type == IP_PKTINFO &&
+                    header->cmsg_len >= WSA_CMSG_LEN(sizeof(IN_PKTINFO))) {
+                    IN_PKTINFO info{};
+                    std::memcpy(&info, WSA_CMSG_DATA(header), sizeof info);
+                    multicast = info.ipi_addr.s_addr == group.s_addr;
+                    break;
+                }
+            }
+        }
+#elif defined(IP_RECVDSTADDR) || defined(IP_PKTINFO)
+#ifdef IP_RECVDSTADDR
+        using Destination = in_addr;
+        constexpr int message_type = IP_RECVDSTADDR;
+#else
+        using Destination = in_pktinfo;
+        constexpr int message_type = IP_PKTINFO;
+#endif
+        iovec data{bytes.data(), bytes.size()};
+        alignas(cmsghdr) char control[CMSG_SPACE(sizeof(Destination))] = {};
+        msghdr message{};
+        message.msg_name = &source;
+        message.msg_namelen = sizeof source;
+        message.msg_iov = &data;
+        message.msg_iovlen = 1;
+        message.msg_control = control;
+        message.msg_controllen = sizeof control;
+        const auto got = ::recvmsg(socket_, &message, 0);
+        if (got < 0) {
+            if (errno != EINTR) return socket_failure();
+            bytes.clear();
+            return std::nullopt;
+        }
+        size = static_cast<std::size_t>(got);
+        if ((message.msg_flags & (MSG_TRUNC | MSG_CTRUNC)) == 0 && message.msg_namelen >= sizeof source) {
+            for (auto* header = CMSG_FIRSTHDR(&message); header; header = CMSG_NXTHDR(&message, header)) {
+                if (header->cmsg_level == IPPROTO_IP && header->cmsg_type == message_type &&
+                    header->cmsg_len >= CMSG_LEN(sizeof(Destination))) {
+                    Destination info{};
+                    std::memcpy(&info, CMSG_DATA(header), sizeof info);
+#ifdef IP_RECVDSTADDR
+                    multicast = info.s_addr == group.s_addr;
+#else
+                    multicast = info.ipi_addr.s_addr == group.s_addr;
+#endif
+                    break;
+                }
+            }
+        }
+#else
+        (void)group;
+#endif
+        if (multicast && source.sin_family == AF_INET && source.sin_port == htons(mdns_port)) {
+            bytes.resize(size);
+        } else {
+            bytes.clear();
+        }
+        return std::nullopt;
+    }
+
+private:
+    NativeSocket socket_;
+#ifdef _WIN32
+    LPFN_WSARECVMSG receive_message_ = nullptr;
+#endif
+};
+
+HostCompletion multicast_exchange(const std::string& bytes, std::int64_t window, const std::string& interface) {
+    if (window <= 0 || bytes.size() < 12 || bytes.size() > 9000 ||
+        (!interface.empty() && !usable_text(interface))) {
+        return fail(host_error::invalid_input);
+    }
+#ifdef _WIN32
+    if (const auto error = start_sockets()) return fail(*error);
+#endif
+    ip_mreq group{};
+    ::inet_pton(AF_INET, "224.0.0.251", &group.imr_multiaddr);
+    if (!interface.empty() && ::inet_pton(AF_INET, interface.c_str(), &group.imr_interface) != 1) {
+        return fail(host_error::invalid_input);
+    }
+    const ScopedSocket socket{new_socket(AF_INET, SOCK_DGRAM)};
+    if (socket.descriptor == invalid_native_socket) return socket_failure();
+    MdnsReceiver receiver(socket.descriptor);
+    if (const auto failure = receiver.enable()) return *failure;
+    const int enabled = 1;
+    if (!set_native_option(socket.descriptor, SOL_SOCKET, SO_REUSEADDR, enabled)) return socket_failure();
+#if defined(SO_REUSEPORT) && !defined(_WIN32)
+    if (!set_native_option(socket.descriptor, SOL_SOCKET, SO_REUSEPORT, enabled)) return socket_failure();
+#endif
+    sockaddr_in bound{};
+    bound.sin_family = AF_INET;
+    bound.sin_port = htons(mdns_port);
+    if (::bind(socket.descriptor, reinterpret_cast<sockaddr*>(&bound), sizeof bound) != 0) return socket_failure();
+    if (!set_native_option(socket.descriptor, IPPROTO_IP, IP_ADD_MEMBERSHIP, group)) return socket_failure();
+    if (!interface.empty() && !set_native_option(socket.descriptor, IPPROTO_IP, IP_MULTICAST_IF, group.imr_interface)) {
+        return socket_failure();
+    }
+#ifdef _WIN32
+    const DWORD ttl = 255;
+#else
+    const unsigned char ttl = 255;
+#endif
+    if (!set_native_option(socket.descriptor, IPPROTO_IP, IP_MULTICAST_TTL, ttl)) return socket_failure();
+    auto target = bound;
+    target.sin_addr = group.imr_multiaddr;
+    decltype(::sendto(socket.descriptor, bytes.data(), 0, 0, nullptr, 0)) sent;
+    do {
+        sent = ::sendto(socket.descriptor, bytes.data(), static_cast<int>(bytes.size()), 0,
+                        reinterpret_cast<sockaddr*>(&target), sizeof target);
+    } while (sent < 0 && platform::last_socket_error().interrupted());
+    if (sent < 0) return socket_failure();
+    if (static_cast<std::size_t>(sent) != bytes.size()) return fail(host_error::other);
+
+    using Clock = std::chrono::steady_clock;
+    const auto start = Clock::now();
+    HostValue packets;
+    std::size_t remaining = 1 << 20;
+    while (packets.elements.size() < 256 && remaining >= 12) {
+        const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count();
+        const auto left = window - elapsed;
+        if (left <= 0) break;
+        const int ready = wait_readable(socket.descriptor, left);
+        if (ready == 0) break;
+        if (ready < 0) return socket_failure();
+        std::string received(std::min<std::size_t>(9000, remaining), '\0');
+        if (const auto failure = receiver.receive(group.imr_multiaddr, received)) return *failure;
+        if (received.size() < 12 || received[0] != 0 || received[1] != 0 ||
+            (static_cast<unsigned char>(received[2]) & 0x80) == 0) {
+            continue;
+        }
+        remaining -= received.size();
+        packets.elements.push_back(bytes_value(std::move(received)));
+    }
+    return HostCompletion::ok(std::move(packets));
+}
+
+} // namespace
+
+void add_socket_services(const Adder& add, StandardServices::Tables& tables, const Capabilities& capabilities) {
+    add_socket_transport_services(add, tables, capabilities);
+    auto* table = &tables;
+    const auto* granted = &capabilities;
+    const auto find = [table](const HostValue& id) -> StandardServices::Tables::Socket* {
+        const auto found = table->sockets.find(as_int64(id));
+        return found == table->sockets.end() ? nullptr : &found->second;
+    };
+
+    add(signature("neura.net.shutdown", {int64(), int32()}, void_type()), [=](const HostRequest& request) {
+        if (!granted->net) return denied();
+        const auto* socket = find(request.arguments.at(0));
+        const auto how = as_int32(request.arguments.at(1));
+        if (!connected_stream(socket) || how < 0 || how > 2) return fail(host_error::invalid_input);
+#ifdef _WIN32
+        constexpr int directions[] = {SD_RECEIVE, SD_SEND, SD_BOTH};
+#else
+        constexpr int directions[] = {SHUT_RD, SHUT_WR, SHUT_RDWR};
+#endif
+        if (::shutdown(socket->descriptor, directions[how]) != 0) return socket_failure();
+        return HostCompletion::ok();
+    });
+
+    add(signature("neura.net.local_address", {int64()}, tuple({text(), int32()})), [=](const HostRequest& request) {
+        if (!granted->net) return denied();
+        const auto* socket = find(request.arguments.at(0));
+        if (!socket || socket->pipe) return fail(host_error::invalid_input);
+        sockaddr_storage bound{};
+        AddressLength length = sizeof bound;
+        if (::getsockname(socket->descriptor, reinterpret_cast<sockaddr*>(&bound), &length) != 0) {
+            return socket_failure();
+        }
+        if (bound.ss_family == AF_UNIX) {
+            const auto& address = reinterpret_cast<const sockaddr_un&>(bound);
+#ifdef _WIN32
+            auto path = std::string(address.sun_path, strnlen(address.sun_path, sizeof address.sun_path));
+#else
+            auto path = unix_path(address, length);
+#endif
+            return HostCompletion::ok(tuple_value({bytes_value(std::move(path)), int32_value(0)}));
+        }
+        char address[NI_MAXHOST] = {};
+        char port[NI_MAXSERV] = {};
+        if (::getnameinfo(reinterpret_cast<sockaddr*>(&bound), length, address, sizeof address, port, sizeof port,
+                          NI_NUMERICHOST | NI_NUMERICSERV) != 0) {
+            return fail(host_error::other);
+        }
+        return HostCompletion::ok(tuple_value({bytes_value(address), int32_value(std::atoi(port))}));
+    });
+
+    add(signature("neura.net.raw.open", {int32(), int32()}, int64()), [=](const HostRequest& request) {
+        if (!granted->net) return denied();
+        return raw_open(*table, as_int32(request.arguments.at(0)), as_int32(request.arguments.at(1)));
+    });
+    add(signature("neura.net.raw.send_to", {int64(), text(), byte_list()}, int32()), [=](const HostRequest& request) {
+        if (!granted->net) return denied();
+        const auto* socket = find(request.arguments.at(0));
+        const auto& text = request.arguments.at(1).bytes;
+        const auto& bytes = request.arguments.at(2).bytes;
+        sockaddr_storage to{};
+        AddressLength length = 0;
+        if (!socket || !socket->raw || !usable_text(text) || !numeric_address(text, 0, to, length) ||
+            bytes.size() > 65535) {
+            return fail(host_error::invalid_input);
+        }
+        decltype(::sendto(socket->descriptor, bytes.data(), 0, 0, nullptr, 0)) sent;
+        do {
+            sent = ::sendto(socket->descriptor, bytes.data(), static_cast<int>(bytes.size()), 0,
+                             reinterpret_cast<sockaddr*>(&to), length);
+        } while (sent < 0 && platform::last_socket_error().interrupted());
+        return sent < 0 ? socket_failure() : HostCompletion::ok(int32_value(static_cast<std::int32_t>(sent)));
+    });
+    add(signature("neura.net.raw.receive_from", {int64(), int32(), int64()}, address_result()),
+        [=](const HostRequest& request) {
+            if (!granted->net) return denied();
+            const auto* socket = find(request.arguments.at(0));
+            const auto max = as_int32(request.arguments.at(1));
+            const auto timeout = as_int64(request.arguments.at(2));
+            if (!socket || !socket->raw || max < 1 || timeout < 0) return fail(host_error::invalid_input);
+            return read_datagram(socket->descriptor, std::min<std::size_t>(max, max_read_bytes), timeout);
+        });
+
+    add({"neura.net.splice", 2, {int64(), int64(), int64()}, int64(), uint32()}, [=](const HostRequest& request) {
+        if (!granted->net) return denied();
+        const auto* from = find(request.arguments.at(0));
+        const auto* to = find(request.arguments.at(1));
+        const auto count = as_int64(request.arguments.at(2));
+        if (!connected_stream(from) || !connected_stream(to) || from == to || count < 0) {
+            return fail(host_error::invalid_input);
+        }
+        if (count == 0) return HostCompletion::ok(int64_value(0));
+        return relay_stream(from->descriptor, to->descriptor, count);
+    });
+    add(signature("neura.net.send_zerocopy", {int64(), byte_list()}, int32()), [=](const HostRequest& request) {
+        if (!granted->net) return denied();
+        const auto* socket = find(request.arguments.at(0));
+        if (!connected_stream(socket)) return fail(host_error::invalid_input);
+        return send_zerocopy(socket->descriptor, request.arguments.at(1).bytes);
+    });
+    add(signature("neura.net.udp.send_segmented", {int64(), text(), int32(), byte_list(), int32()}, int32()),
+        [=](const HostRequest& request) {
+            if (!granted->net) return denied();
+            const auto* socket = find(request.arguments.at(0));
+            const auto& text = request.arguments.at(1).bytes;
+            const auto port = as_int32(request.arguments.at(2));
+            const auto& bytes = request.arguments.at(3).bytes;
+            const auto segment = as_int32(request.arguments.at(4));
+            sockaddr_storage target{};
+            AddressLength length = 0;
+            if (!socket || !socket->datagram || socket->raw || !usable_text(text) || !valid_port(port) ||
+                !numeric_address(text, port, target, length) || segment < 1 || segment > 65507 ||
+                bytes.size() > INT32_MAX) {
+                return fail(host_error::invalid_input);
+            }
+            return send_segments(socket->descriptor, target, length, bytes, segment);
+        });
+    add(signature("neura.runtime.event_loop", {int32()}, void_type()), [=](const HostRequest& request) {
+        if (!granted->net) return denied();
+        const auto code = as_int32(request.arguments.at(0));
+        if (code < 1 || code > 4) return fail(host_error::invalid_input);
+        return available_io_backend(code) ? HostCompletion::ok() : fail(host_error::unsupported);
+    });
+    add(signature("neura.net.mdns.exchange", {byte_list(), int64(), text()},
+                  HostType(Kind::List, std::vector<HostType>{byte_list()})), [=](const HostRequest& request) {
+        if (!granted->net) return denied();
+        return multicast_exchange(request.arguments.at(0).bytes, as_int64(request.arguments.at(1)),
+                                  request.arguments.at(2).bytes);
+    });
+}
 
 } // namespace neura::nvm::provider

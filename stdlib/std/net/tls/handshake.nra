@@ -1,35 +1,209 @@
 let.promote _ = import:Std.Net.Socket.DatagramSocket;
+let.promote _ = import:Std.Core.Optional;
 let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
 let.promote _ = import:Std.Net.Core.SocketAddr;
 let.promote _ = import:Std.Net.Socket.StreamSocket;
 let.promote _ = import:Std.Net.Tls.TlsConfig;
 let.promote _ = import:Std.Net.Transport;
+let bytes = import:Std.Io.Internal.Bytes;
+let duration = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let host_error = import:Std.Core.Internal.HostError;
+let system_clock = import:Std.Time.SystemClock;
 
-/// @brief The pure-Neura TLS 1.3 (RFC 8446) and DTLS 1.3 (RFC 9147) handshake and record engines: planned, not
-/// part of Neura 0.3.0.
+/// @brief A TLS 1.3 record transport over a caller-supplied connected stream.
 ///
-/// In 0.3.0 the TLS provider is the host's OpenSSL (`TlsConnector`, `TlsAcceptor`, `TlsStream`, in builds configured
-/// with `NEURA_ENABLE_SERVER_TLS`). A memory-safe engine in Neura needs the TLS 1.3 key schedule over HKDF, AEAD
-/// record protection, X.25519/P-256 key exchange and certificate verification in the standard library, and
-/// none of these is qualified for 0.3.0; both entry points trap. Kernel TLS offload of a host stream is
-/// `TlsStream.enable_kernel_offload`.
+/// `tls13` wraps the stream using a host OpenSSL TLS 1.3 engine. The host consumes and produces TLS records;
+/// the library sends and receives them through the caller's stream and owns that stream after starting a
+/// handshake. The net capability is required, and explicit credentials require the fs capability. A nonzero
+/// handshake timeout also uses the clock capability.
 /// @see [Std.Net.Tls.Handshake](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Tls-Handshake)
 .Since("0.3.0")
 export let Handshake = module (
-    /// @brief Runs a TLS 1.3 handshake in Neura over a connected stream and returns the protected transport.
-    /// @stub no pure-Neura TLS 1.3 engine in 0.3.0; the host's OpenSSL is the provider
+    let IdOutcome = enum (Ok(int64), Error(uint32));
+    let StepOutcome = enum (Ok([int, uint8[list], uint8[list], uint32]), Error(uint32));
+    let DoneOutcome = enum (Ok, Error(uint32));
+    let engine_open = func(server: bool, name: string, alpn: string[list], ca: string, certificate: string,
+        key: string) -> IdOutcome host("neura.net.tls.engine.open", 1);
+
+    let engine_exchange = func(engine: int64, operation: int, inbound: uint8[list], message: uint8[list])
+        -> StepOutcome host("neura.net.tls.engine.exchange", 1);
+
+    let engine_release = func(engine: int64) -> DoneOutcome host("neura.net.tls.engine.release", 1);
+    const HandshakeStep: int = 0;
+    const ReadStep: int = 1;
+    const WriteStep: int = 2;
+    const CloseStep: int = 3;
+    const WantsInput: int = 0;
+    const PeerClosed: int = 2;
+    const RecordSize: int = 16384;
+
+    .[Final, NotThreadSafe]
+    let RecordTransport = class implements Transport<uint8[list], uint8[list]> (
+        last id: int64;
+        last wire: StreamSocket<SocketAddr>;
+        let opened: bool = true;
+
+        export let init = func(handle: int64, stream: StreamSocket<SocketAddr>) {
+            id = handle;
+            wire = stream;
+        };
+
+        export let handshake = func(timeout: duration.Duration) -> Result<Unit> {
+            last original = wire.read_timeout();
+            wire.set_read_timeout(duration.of_nanos(0));
+            last outcome = process(HandshakeStep, new, timeout);
+            wire.set_read_timeout(original);
+            return match (outcome) {
+                Result.Ok(_) => bytes.ok(),
+                Result.Err(e) => Result<Unit>.Err(e),
+            };
+        };
+
+        export let receive = func -> Result<Optional<uint8[list]>> {
+            if (not opened) {
+                return Result<Optional<uint8[list]>>.Err(bytes.closed("TLS stream", ""));
+            }
+            return process(ReadStep, new, duration.of_nanos(0));
+        };
+
+        export let send = func(data: uint8[list]) -> Result<Unit> {
+            if (not opened) {
+                return Result<Unit>.Err(bytes.closed("TLS stream", ""));
+            }
+            let from = 0;
+            while (from < data.length) {
+                last remaining = data.length - from;
+                last length = remaining < RecordSize ? remaining : RecordSize;
+                last chunk: uint8[list] = new;
+                for (let i in 0 .. length) {
+                    chunk.append(data[from + i]);
+                }
+                process(WriteStep, chunk, duration.of_nanos(0))?;
+                from += length;
+            }
+            return bytes.ok();
+        };
+
+        export let close = func -> Result<Unit> {
+            return bytes.ok() unless opened;
+            last notified = process(CloseStep, new, duration.of_nanos(0));
+            last released = abort();
+            return match (notified) {
+                Result.Ok(_) => released,
+                Result.Err(e) => Result<Unit>.Err(e),
+            };
+        };
+
+        export let abort = func -> Result<Unit> {
+            opened = false;
+            last released = engine_release(id);
+            last closed = wire.close();
+            return match (released) {
+                DoneOutcome.Ok => closed,
+                DoneOutcome.Error(code) => Result<Unit>.Err(host_error.io(code, "TLS engine release failed", "")),
+            };
+        };
+
+        let process = func(operation: int, message: uint8[list], timeout: duration.Duration)
+            -> Result<Optional<uint8[list]>> {
+            last limit = timeout.to_nanos();
+            last clock = system_clock.create();
+            let start: int64 = 0;
+            if (limit > 0) {
+                start = (clock.monotonic()?).to_nanos();
+            }
+            let inbound: uint8[list] = new;
+            while (true) {
+                match (engine_exchange(id, operation, inbound, message)) {
+                    StepOutcome.Error(code) => {
+                        return Result<Optional<uint8[list]>>.Err(host_error.io(code, "TLS record processing failed", ""));
+                    },
+                    StepOutcome.Ok(exchange) => {
+                        let [status, outgoing, received, failure] = exchange;
+                        if (failure != 0) {
+                            if (outgoing.length != 0) {
+                                let _ = wire.write(outgoing);
+                            }
+                            return Result<Optional<uint8[list]>>.Err(host_error.io(failure,
+                                "TLS record processing failed", ""));
+                        }
+                        if (outgoing.length != 0) {
+                            wire.write(outgoing)?;
+                        }
+                        if (status == PeerClosed || operation == CloseStep) {
+                            return Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.None);
+                        }
+                        if (status != WantsInput) {
+                            return Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.Some(received));
+                        }
+                    },
+                }
+                if (limit > 0) {
+                    last elapsed = (clock.monotonic()?).to_nanos() - start;
+                    if (elapsed >= limit) {
+                        return Result<Optional<uint8[list]>>.Err(host_error.io(12, "TLS handshake timed out", ""));
+                    }
+                    wire.set_read_timeout(duration.of_nanos(limit - elapsed));
+                }
+                inbound = wire.read(65536)?;
+                if (inbound.length == 0) {
+                    return Result<Optional<uint8[list]>>.Err(host_error.io(11, "TLS peer closed without close_notify", ""));
+                }
+            }
+        };
+    );
+
+    /// @brief Completes a TLS 1.3 handshake over `stream` as the configured client or server. A client verifies
+    /// the configured server name, or the peer's numeric address when the name is empty. Once the engine starts,
+    /// this call owns the supplied stream, including closing it on handshake failure.
     .NoDiscard
     export let tls13 = func(config: TlsConfig, stream: StreamSocket<SocketAddr>)
         -> Result<Transport<uint8[list], uint8[list]>> {
-        trap_with_message("unsupported: Std.Net.Tls.Handshake.tls13 is not implemented in Neura 0.3.0 (no pure-Neura TLS 1.3 engine in 0.3.0; the host's OpenSSL is the provider)");
+        if (config.max_version != TlsVersion.Tls13 || config.kernel_offload) {
+            return Result<Transport<uint8[list], uint8[list]>>.Err(errors.custom("tls.config",
+                "stream TLS requires version 1.3 and does not use kernel offload"));
+        }
+        last server = config.role == TlsRole.Server;
+        let name = config.server_name;
+        if (not server && name.byte_length == 0) {
+            match (stream.peer_address()) {
+                Optional.Some(peer) => {
+                    name = peer.host_text();
+                },
+                Optional.None => {
+                    return Result<Transport<uint8[list], uint8[list]>>.Err(errors.custom("tls.config",
+                        "a verified TLS client needs a server name or a numeric peer address"));
+                },
+            }
+        }
+        last ca = server ? config.client_ca_file : config.ca_file;
+        match (engine_open(server, name, config.alpn(), ca, config.certificate_file, config.key_file)) {
+            IdOutcome.Error(code) => {
+                return Result<Transport<uint8[list], uint8[list]>>.Err(host_error.io(code, "TLS engine initialization failed", name));
+            },
+            IdOutcome.Ok(id) => {
+                last transport = new RecordTransport(id, stream);
+                match (transport.handshake(config.handshake_timeout)) {
+                    Result.Ok(_) => {
+                        return Result<Transport<uint8[list], uint8[list]>>.Ok(transport);
+                    },
+                    Result.Err(e) => {
+                        transport.abort();
+                        return Result<Transport<uint8[list], uint8[list]>>.Err(e);
+                    },
+                }
+            },
+        }
     };
 
-    /// @brief Runs a DTLS 1.3 handshake in Neura with `peer` over a datagram socket and returns the protected
-    /// transport.
-    /// @stub no pure-Neura DTLS 1.3 engine in 0.3.0 and no host DTLS service
+    /// @brief Runs a DTLS 1.3 handshake with `peer` over a datagram socket.
+    /// @stub the linked OpenSSL provider supports DTLS 1.2 only
     .NoDiscard
     export let dtls13 = func(config: TlsConfig, socket: DatagramSocket<SocketAddr>, peer: SocketAddr)
         -> Result<Transport<uint8[list], uint8[list]>> {
-        trap_with_message("unsupported: Std.Net.Tls.Handshake.dtls13 is not implemented in Neura 0.3.0 (no pure-Neura DTLS 1.3 engine in 0.3.0 and no host DTLS service)");
+        return Result<Transport<uint8[list], uint8[list]>>.Err(host_error.io(13, "the TLS provider does not support DTLS 1.3",
+            peer.to_string()));
     };
 );

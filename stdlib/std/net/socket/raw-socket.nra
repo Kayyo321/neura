@@ -15,8 +15,8 @@ let.promote _ = import:Std.Core.Unit;
 /// that sends and receives whole IP payloads (ICMP echo, for example). Needs the net capability and, on most
 /// systems, privileges the runtime does not grant on its own.
 ///
-/// The checks are real; opening the socket needs a raw-socket host service that no runtime offers yet, so
-/// `open` traps in Neura 0.3.0. On IPv4 a received payload starts with the IP header, as the kernel delivers it.
+/// Opening a raw socket is subject to host privilege and protocol checks. On IPv4 a received payload starts
+/// with the IP header where the kernel includes it.
 /// @see [Std.Net.Socket.RawSocket](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-RawSocket)
 .Since("0.3.0")
 export let RawSocket = module (
@@ -41,7 +41,7 @@ export let RawSocket = module (
             protocol = protocol_number;
         };
 
-        /// @brief The local address, from the host; traps in Neura 0.3.0 (no local-address service).
+        /// @brief The local address reported by the host.
         .NoDiscard
         export let local_address = func -> Result<ips.IpAddr> {
             return Result<ips.IpAddr>.Err(bytes.closed("socket", to_string())) unless open_now;
@@ -103,8 +103,7 @@ export let RawSocket = module (
     );
 
     /// @brief A raw socket for `family` (Ipv4 or Ipv6; Unix traps with "invalid argument: address family") and
-    /// IP protocol number `protocol` (0 through 255, else "invalid argument: protocol"). Traps in Neura 0.3.0 (no
-    /// raw-socket host service).
+    /// IP protocol number `protocol` (0 through 255, else "invalid argument: protocol").
     .NoDiscard
     export let open = func(family: AddressFamily, protocol: int) -> Result<RawSocket> {
         if (family == AddressFamily.Unix) {

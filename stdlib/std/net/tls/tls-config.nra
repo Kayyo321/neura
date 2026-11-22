@@ -58,10 +58,14 @@ export let TlsConfig = module (
         export last client_ca_file: string;
         /// @brief The longest a handshake may take; zero waits without limit.
         export last handshake_timeout: Duration;
+        /// @brief Whether the socket provider should request kernel TLS during the handshake.
+        .Since("0.3.1")
+        export last kernel_offload: bool;
 
         /// @brief Use `TlsConfigBuilder`.
         export let init = func(for_role: TlsRole, lowest: TlsVersion, highest: TlsVersion, alpn: string[list],
-            name: string, ca: string, certificate: string, key: string, client_ca: string, timeout: Duration) {
+            name: string, ca: string, certificate: string, key: string, client_ca: string, timeout: Duration,
+            offload: bool = false) {
             role = for_role;
             min_version = lowest;
             max_version = highest;
@@ -72,6 +76,7 @@ export let TlsConfig = module (
             key_file = key;
             client_ca_file = client_ca;
             handshake_timeout = timeout;
+            kernel_offload = offload;
         };
 
         /// @brief The ALPN protocols, most preferred first. A copy.
@@ -102,7 +107,7 @@ export let TlsConfig = module (
             return role == that.role && min_version == that.min_version && max_version == that.max_version
                 && same_names(protocols, that.protocols) && server_name == that.server_name
                 && ca_file == that.ca_file && certificate_file == that.certificate_file && key_file == that.key_file
-                && client_ca_file == that.client_ca_file
+                && client_ca_file == that.client_ca_file && kernel_offload == that.kernel_offload
                 && handshake_timeout.to_nanos() == that.handshake_timeout.to_nanos();
         };
 
@@ -117,7 +122,8 @@ export let TlsConfig = module (
             h = hashing.combine(h, ca_file.hash_code());
             h = hashing.combine(h, certificate_file.hash_code());
             h = hashing.combine(h, key_file.hash_code());
-            return hashing.combine(h, client_ca_file.hash_code());
+            h = hashing.combine(h, client_ca_file.hash_code());
+            return hashing.combine(h, kernel_offload ? 1 : 0);
         };
 
         /// @brief Text such as "TlsConfig(Client, Tls12..Tls13, alpn h2,http/1.1, sni example.com)". File
@@ -133,6 +139,9 @@ export let TlsConfig = module (
             }
             if (is_mutual()) {
                 text ..= ", mutual";
+            }
+            if (kernel_offload) {
+                text ..= ", kTLS";
             }
             return text .. ")";
         };
@@ -160,6 +169,7 @@ export let TlsConfig = module (
         let client_ca: string = "";
         /// @brief The handshake timeout.
         let timeout: Duration = of_nanos(0);
+        let offload: bool = false;
 
         /// @brief The versions accepted, from `lowest` through `highest` (default TLS 1.2 through 1.3).
         export let set_versions = func(lowest_version: TlsVersion, highest_version: TlsVersion) {
@@ -198,6 +208,13 @@ export let TlsConfig = module (
             client_ca = path;
         };
 
+        /// @brief Requests kernel record processing during network handshakes where OpenSSL supports it.
+        /// Check `TlsStream.enable_kernel_offload()` to require actual offload after the handshake.
+        .Since("0.3.1")
+        export let set_kernel_offload = func(enabled: bool) {
+            offload = enabled;
+        };
+
         /// @brief The longest a handshake may take; zero waits without limit.
         export let set_handshake_timeout = func(limit: Duration) {
             timeout = limit;
@@ -214,7 +231,7 @@ export let TlsConfig = module (
                 check_server_name(name)?;
             }
             return Result<TlsConfig>.Ok(new TlsConfig(TlsRole.Client, lowest, highest, protocols, name, ca,
-                certificate, key, client_ca, timeout));
+                certificate, key, client_ca, timeout, offload));
         };
 
         /// @brief A validated server configuration, or a `tls.config` error.
@@ -228,7 +245,7 @@ export let TlsConfig = module (
                 return invalid("a server configuration has no server name");
             }
             return Result<TlsConfig>.Ok(new TlsConfig(TlsRole.Server, lowest, highest, protocols, name, ca,
-                certificate, key, client_ca, timeout));
+                certificate, key, client_ca, timeout, offload));
         };
 
         /// @brief Text such as "TlsConfigBuilder".

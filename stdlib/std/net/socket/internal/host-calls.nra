@@ -3,8 +3,8 @@
 /// The first group binds the base runtime's TCP services (`neura.net.connect`, `listen`, `local_port`,
 /// `accept`, `close`); reading and writing go through `Std.Net.TcpStream`. The second group binds the socket
 /// services that `Std.Net.Internal.Sockets` also binds (UDP, Unix-domain sockets, options, TLS streams,
-/// `send_file`), with the same parameters and outcome shapes. The third group names operations that no runtime
-/// offers yet; each traps, and its runtime need is recorded in the design note.
+/// `send_file`), with the same parameters and outcome shapes. The third group binds additional socket and
+/// TLS operations.
 .Since("0.3.0")
 export let HostCalls = module (
     /// @brief A socket or other ID, or an unsigned host error code.
@@ -118,121 +118,67 @@ export let HostCalls = module (
     export let send_file = func(socket: int64, file: int64, offset: int64, count: int64) -> LongOutcome
         host("neura.net.send_file", 1);
 
-    // Group 3: operations no runtime offers yet.
-    /// @brief Ends reading (0), writing (1) or both (2) of a stream. Needed service: neura.net.shutdown.
-    /// @stub no host service for shutdown(2)
-    export let shutdown = func(socket: int64, how: int) -> DoneOutcome {
-        trap_with_message("unsupported: Std.Net.Socket.Internal.HostCalls.shutdown is not implemented in Neura 0.3.0 (no host service for shutdown(2))");
-    };
+    // Group 3: additional socket and TLS operations.
+    /// @brief Ends reading (0), writing (1) or both (2) of a stream. Host service: neura.net.shutdown.
+    export let shutdown = func(socket: int64, how: int) -> DoneOutcome host("neura.net.shutdown", 1);
 
-    /// @brief The numeric local address and port (getsockname). Needed service: neura.net.local_address.
-    /// @stub no host service reports a socket's local address
-    export let local_address = func(socket: int64) -> AddressOutcome {
-        trap_with_message("unsupported: Std.Net.Socket.Internal.HostCalls.local_address is not implemented in Neura 0.3.0 (no host service reports a socket's local address)");
-    };
+    /// @brief The numeric local address and port (getsockname). Host service: neura.net.local_address.
+    export let local_address = func(socket: int64) -> AddressOutcome host("neura.net.local_address", 1);
 
-    /// @brief A Multipath TCP stream (IPPROTO_MPTCP). Needed service: neura.net.mptcp.connect.
-    /// @stub no MPTCP host service; it is a stub on the runtime-services branch too
-    export let mptcp_connect = func(host: string, port: int, timeout_nanos: int64) -> IdOutcome {
-        trap_with_message("unsupported: Std.Net.Socket.Internal.HostCalls.mptcp_connect is not implemented in Neura 0.3.0 (no MPTCP host service; it is a stub on the runtime-services branch too)");
-    };
+    /// @brief A Multipath TCP stream (IPPROTO_MPTCP). Host service: neura.net.mptcp.connect.
+    export let mptcp_connect = func(host: string, port: int, timeout_nanos: int64) -> IdOutcome host("neura.net.mptcp.connect", 1);
 
-    /// @brief A Multipath TCP listener. Needed service: neura.net.mptcp.listen.
-    /// @stub no MPTCP host service; it is a stub on the runtime-services branch too
-    export let mptcp_listen = func(host: string, port: int) -> IdOutcome {
-        trap_with_message("unsupported: Std.Net.Socket.Internal.HostCalls.mptcp_listen is not implemented in Neura 0.3.0 (no MPTCP host service; it is a stub on the runtime-services branch too)");
-    };
+    /// @brief A Multipath TCP listener. Host service: neura.net.mptcp.listen.
+    export let mptcp_listen = func(host: string, port: int) -> IdOutcome host("neura.net.mptcp.listen", 1);
 
     /// @brief A raw IP socket (SOCK_RAW) for family 4 or 6 and an IP protocol number. Needed service:
     /// neura.net.raw.open.
-    /// @stub no raw-socket host service
-    export let raw_open = func(family: int, protocol: int) -> IdOutcome {
-        trap_with_message("unsupported: Std.Net.Socket.Internal.HostCalls.raw_open is not implemented in Neura 0.3.0 (no raw-socket host service)");
-    };
+    export let raw_open = func(family: int, protocol: int) -> IdOutcome host("neura.net.raw.open", 1);
 
-    /// @brief Sends one raw datagram to a numeric address. Needed service: neura.net.raw.send_to.
-    /// @stub no raw-socket host service
-    export let raw_send_to = func(socket: int64, host: string, bytes: uint8[list]) -> CountOutcome {
-        trap_with_message("unsupported: Std.Net.Socket.Internal.HostCalls.raw_send_to is not implemented in Neura 0.3.0 (no raw-socket host service)");
-    };
+    /// @brief Sends one raw datagram to a numeric address. Host service: neura.net.raw.send_to.
+    export let raw_send_to = func(socket: int64, host: string, bytes: uint8[list]) -> CountOutcome host("neura.net.raw.send_to", 1);
 
-    /// @brief Receives one raw datagram with its sender. Needed service: neura.net.raw.receive_from.
-    /// @stub no raw-socket host service
-    export let raw_receive_from = func(socket: int64, max: int, timeout_nanos: int64) -> DatagramOutcome {
-        trap_with_message("unsupported: Std.Net.Socket.Internal.HostCalls.raw_receive_from is not implemented in Neura 0.3.0 (no raw-socket host service)");
-    };
+    /// @brief Receives one raw datagram with its sender. Host service: neura.net.raw.receive_from.
+    export let raw_receive_from = func(socket: int64, max: int, timeout_nanos: int64) -> DatagramOutcome host("neura.net.raw.receive_from", 1);
 
-    /// @brief Moves bytes between two descriptors through a pipe. Needed service: neura.net.splice.
-    /// @stub no splice host service; the providers have no pipe handles
-    export let splice = func(source: int64, target: int64, count: int64) -> LongOutcome {
-        trap_with_message("unsupported: Std.Net.Socket.Internal.HostCalls.splice is not implemented in Neura 0.3.0 (no splice host service; the providers have no pipe handles)");
-    };
+    /// @brief Moves bytes between two streams. Host service: neura.net.splice version 2.
+    export let splice = func(source: int64, target: int64, count: int64) -> LongOutcome host("neura.net.splice", 2);
 
-    /// @brief Sends with MSG_ZEROCOPY. Needed service: neura.net.send_zerocopy.
-    /// @stub no MSG_ZEROCOPY host service; host values are copied at the boundary
-    export let send_zerocopy = func(socket: int64, bytes: uint8[list]) -> CountOutcome {
-        trap_with_message("unsupported: Std.Net.Socket.Internal.HostCalls.send_zerocopy is not implemented in Neura 0.3.0 (no MSG_ZEROCOPY host service; host values are copied at the boundary)");
-    };
+    /// @brief Sends with MSG_ZEROCOPY. Host service: neura.net.send_zerocopy.
+    export let send_zerocopy = func(socket: int64, bytes: uint8[list]) -> CountOutcome host("neura.net.send_zerocopy", 1);
 
     /// @brief Sends a buffer as datagrams of segment_size bytes with UDP_SEGMENT. Needed service:
     /// neura.net.udp.send_segmented.
-    /// @stub no UDP GSO host service
     export let udp_send_segmented = func(socket: int64, host: string, port: int, bytes: uint8[list],
-        segment_size: int) -> CountOutcome {
-        trap_with_message("unsupported: Std.Net.Socket.Internal.HostCalls.udp_send_segmented is not implemented in Neura 0.3.0 (no UDP GSO host service)");
-    };
+        segment_size: int) -> CountOutcome host("neura.net.udp.send_segmented", 1);
 
-    /// @brief Receives coalesced datagrams with UDP_GRO and their segment size. Needed service:
-    /// neura.net.udp.receive_coalesced.
-    /// @stub no UDP GRO host service
-    export let udp_receive_coalesced = func(socket: int64, max: int, timeout_nanos: int64) -> CoalescedOutcome {
-        trap_with_message("unsupported: Std.Net.Socket.Internal.HostCalls.udp_receive_coalesced is not implemented in Neura 0.3.0 (no UDP GRO host service)");
-    };
+    /// @brief Receives coalesced datagrams and their segment size. Host service: neura.net.udp.receive_segments.
+    export let udp_receive_coalesced = func(socket: int64, max: int, timeout_nanos: int64) -> CoalescedOutcome host("neura.net.udp.receive_segments", 1);
 
     /// @brief Asks the driver to wait with backend 1 io_uring, 2 epoll, 3 kqueue or 4 poll. Needed service:
     /// neura.runtime.event_loop.
-    /// @stub the runtime driver waits with poll(2) only
-    export let select_event_loop = func(backend: int) -> DoneOutcome {
-        trap_with_message("unsupported: Std.Net.Socket.Internal.HostCalls.select_event_loop is not implemented in Neura 0.3.0 (the runtime driver waits with poll(2) only)");
-    };
+    export let select_event_loop = func(backend: int) -> DoneOutcome host("neura.runtime.event_loop", 1);
 
-    /// @brief A TLS client stream with a version range (12 or 13) and an optional client certificate. Needed service:
-    /// neura.net.tls.connect version 2.
-    /// @stub neura.net.tls.connect takes no version range or client certificate
+    /// @brief A verified TLS client with an exact version range, optional client certificate and kTLS request.
     export let tls_connect_extended = func(host: string, port: int, timeout_nanos: int64, server_name: string,
         alpn: string[list], ca_file: string, min_version: int, max_version: int, certificate_file: string,
-        key_file: string) -> TlsOutcome {
-        trap_with_message("unsupported: Std.Net.Socket.Internal.HostCalls.tls_connect_extended is not implemented in Neura 0.3.0 (neura.net.tls.connect takes no version range or client certificate)");
-    };
+        key_file: string, kernel_offload: bool) -> TlsOutcome host("neura.net.tls.connect", 2);
 
-    /// @brief A TLS server stream that requires and verifies a client certificate against client_ca_file. Needed
-    /// service: neura.net.tls.accept version 2.
-    /// @stub neura.net.tls.accept requests no client certificate
+    /// @brief A TLS server with an exact version range. A non-empty client CA file requires mutual TLS.
     export let tls_accept_mutual = func(listener: int64, certificate_file: string, key_file: string, alpn: string[list],
-        timeout_nanos: int64, min_version: int, max_version: int, client_ca_file: string) -> TlsOutcome {
-        trap_with_message("unsupported: Std.Net.Socket.Internal.HostCalls.tls_accept_mutual is not implemented in Neura 0.3.0 (neura.net.tls.accept requests no client certificate)");
-    };
+        timeout_nanos: int64, min_version: int, max_version: int, client_ca_file: string,
+        kernel_offload: bool) -> TlsOutcome host("neura.net.tls.accept", 2);
 
-    /// @brief Moves the record layer of a TLS stream into the kernel (kTLS). Needed service:
-    /// neura.net.tls.kernel_offload.
-    /// @stub kTLS is a stub on the runtime-services branch
-    export let tls_enable_kernel_offload = func(stream: int64) -> DoneOutcome {
-        trap_with_message("unsupported: Std.Net.Socket.Internal.HostCalls.tls_enable_kernel_offload is not implemented in Neura 0.3.0 (kTLS is a stub on the runtime-services branch)");
-    };
+    /// @brief Checks whether kTLS is active in both directions after negotiating with kTLS enabled.
+    export let tls_enable_kernel_offload = func(stream: int64) -> DoneOutcome host("neura.net.tls.kernel_offload", 1);
 
     /// @brief A TCP listener whose options (numbers as for set_option) are set before bind(2) and listen(2), as
-    /// SO_REUSEADDR, SO_REUSEPORT and TCP_FASTOPEN need. Needed service: neura.net.listen version 3.
-    /// @stub no host service sets options before bind; neura.net.listen binds at once
+    /// SO_REUSEADDR, SO_REUSEPORT and TCP_FASTOPEN need. Host service: neura.net.listen version 3.
     export let listen_with_options = func(host: string, port: int, options: int[list],
-        values: int64[list]) -> IdOutcome {
-        trap_with_message("unsupported: Std.Net.Socket.Internal.HostCalls.listen_with_options is not implemented in Neura 0.3.0 (no host service sets options before bind; neura.net.listen binds at once)");
-    };
+        values: int64[list]) -> IdOutcome host("neura.net.listen", 3);
 
     /// @brief A UDP socket whose options are set before bind(2), as SO_REUSEADDR and SO_REUSEPORT need. Needed service:
     /// neura.net.udp.bind version 2.
-    /// @stub no host service sets options before bind; neura.net.udp.bind binds at once
     export let udp_bind_with_options = func(host: string, port: int, options: int[list],
-        values: int64[list]) -> IdOutcome {
-        trap_with_message("unsupported: Std.Net.Socket.Internal.HostCalls.udp_bind_with_options is not implemented in Neura 0.3.0 (no host service sets options before bind; neura.net.udp.bind binds at once)");
-    };
+        values: int64[list]) -> IdOutcome host("neura.net.udp.bind", 2);
 );

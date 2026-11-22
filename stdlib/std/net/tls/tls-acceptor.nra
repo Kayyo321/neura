@@ -18,8 +18,8 @@ let.promote _ = import:Std.Core.Unit;
 ///
 /// `bind` listens with the base runtime's TCP service and works today; the server picks the first of its ALPN
 /// protocols that the client offers. Each `accept` uses the host's `neura.net.tls.accept`, which a build
-/// configured with `NEURA_ENABLE_SERVER_TLS` has; in another build it fails with Unsupported. Requiring client certificates (a client-CA file) or a
-/// narrower version range needs an extended host service that no runtime offers yet. For certificate rotation,
+/// configured with `NEURA_ENABLE_SERVER_TLS` has. The extended service supports client certificate requirements,
+/// exact version ranges and a kernel TLS request. For certificate rotation,
 /// build a new acceptor from `DynamicCertResolver.current()`; streams already accepted keep their certificate.
 /// @see [Std.Net.Tls.TlsAcceptor](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Tls-TlsAcceptor)
 .Since("0.3.0")
@@ -52,10 +52,10 @@ export let TlsAcceptor = module (
         export let accept = func -> Result<TlsStream> {
             return Result<TlsStream>.Err(bytes.closed("listener", bound.to_string())) unless open_now;
             last nanos = support.timeout_nanos(config.handshake_timeout);
-            last outcome = config.is_mutual() || not config.allows_both_versions()
+            last outcome = config.is_mutual() || not config.allows_both_versions() || config.kernel_offload
                 ? host.tls_accept_mutual(id, config.certificate_file, config.key_file, config.alpn(), nanos,
                 tls_connector.version_code(config.min_version), tls_connector.version_code(config.max_version),
-                config.client_ca_file)
+                config.client_ca_file, config.kernel_offload)
                 : host.tls_accept(id, config.certificate_file, config.key_file, config.alpn(), nanos);
             return match (outcome) {
                 host.TlsOutcome.Ok(opened) => Result<TlsStream>.Ok(stream_of(opened, bound)),

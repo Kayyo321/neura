@@ -402,7 +402,7 @@ void add_net_services(const Adder& add, const OverlapAdder& overlap, StandardSer
     // would let another socket take over the bound port. An IPv6 listener is
     // dual-stack (new_socket), so the empty host, for which GetAddrInfoW
     // gives "::" first, and an explicit "::" also accept IPv4.
-    add(signature("neura.net.listen", {text(), int32()}, int64()), [=](const HostRequest& request) {
+    const auto listen = [=](const HostRequest& request) {
         if (!granted->net) return denied();
         const auto& host = request.arguments.at(0).bytes;
         const auto port = as_int32(request.arguments.at(1));
@@ -420,6 +420,13 @@ void add_net_services(const Adder& add, const OverlapAdder& overlap, StandardSer
             const BOOL exclusive = TRUE;
             ::setsockopt(socket, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, reinterpret_cast<const char*>(&exclusive),
                          sizeof exclusive);
+            if (request.arguments.size() == 4) {
+                if (const auto failure = set_socket_options(socket, request.arguments.at(2), request.arguments.at(3))) {
+                    platform::close_socket(socket);
+                    error = *failure;
+                    continue;
+                }
+            }
             if (::bind(socket, address->ai_addr, static_cast<int>(address->ai_addrlen)) == 0 &&
                 ::listen(socket, 128) == 0) {
                 return remember(socket, true);
@@ -428,7 +435,10 @@ void add_net_services(const Adder& add, const OverlapAdder& overlap, StandardSer
             platform::close_socket(socket);
         }
         return fail(error);
-    });
+    };
+    add(signature("neura.net.listen", {text(), int32()}, int64()), listen);
+    add({"neura.net.listen", 3, {text(), int32(), HostType(Kind::List, std::vector<HostType>{int32()}),
+                                  HostType(Kind::List, std::vector<HostType>{int64()})}, int64(), uint32()}, listen);
 
     add(signature("neura.net.local_port", {int64()}, int32()), [=](const HostRequest& request) {
         if (!granted->net) return denied();
@@ -1016,7 +1026,7 @@ void add_net_services(const Adder& add, const OverlapAdder& overlap, StandardSer
         return fail(error);
     };
 
-    add(signature("neura.net.listen", {text(), int32()}, int64()), [=](const HostRequest& request) {
+    const auto listen = [=](const HostRequest& request) {
         if (!granted->net) return denied();
         const auto& host = request.arguments.at(0).bytes;
         const auto port = as_int32(request.arguments.at(1));
@@ -1031,8 +1041,15 @@ void add_net_services(const Adder& add, const OverlapAdder& overlap, StandardSer
                 error = host_error::from_errno(errno);
                 continue;
             }
-            int one = 1;
+            const int one = 1;
             ::setsockopt(descriptor, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+            if (request.arguments.size() == 4) {
+                if (const auto failure = set_socket_options(descriptor, request.arguments.at(2), request.arguments.at(3))) {
+                    ::close(descriptor);
+                    error = *failure;
+                    continue;
+                }
+            }
             if (::bind(descriptor, address->ai_addr, address->ai_addrlen) == 0 && ::listen(descriptor, 128) == 0) {
                 return remember(descriptor, true);
             }
@@ -1040,7 +1057,10 @@ void add_net_services(const Adder& add, const OverlapAdder& overlap, StandardSer
             ::close(descriptor);
         }
         return fail(error);
-    });
+    };
+    add(signature("neura.net.listen", {text(), int32()}, int64()), listen);
+    add({"neura.net.listen", 3, {text(), int32(), HostType(Kind::List, std::vector<HostType>{int32()}),
+                                  HostType(Kind::List, std::vector<HostType>{int64()})}, int64(), uint32()}, listen);
 
     add(signature("neura.net.local_port", {int64()}, int32()), [=](const HostRequest& request) {
         if (!granted->net) return denied();

@@ -15,12 +15,10 @@ let.promote _ = import:Std.Core.Unit;
 /// offload. Needs the net capability.
 ///
 /// `bind` calls the host's `neura.net.udp.bind`.
-/// Options are given at bind, because `SO_REUSEADDR` and `SO_REUSEPORT` must precede bind(2): a set holding either
-/// is passed to a host service that binds with options, which no runtime offers yet; other options (broadcast,
-/// buffers) are applied after the bind with the host's option service. `send_segmented` (GSO) and
-/// `receive_coalesced` (GRO) need host services that no runtime offers yet; `Std.Net.Socket.Offload` holds their
-/// pure rules. The host takes and reports numeric addresses only. After close every operation except close fails
-/// with Closed.
+/// The host applies `SO_REUSEADDR` and `SO_REUSEPORT` before bind when requested. Other options may be applied
+/// after bind. `send_segmented` uses kernel segmentation when available. To receive datagrams as coalesced
+/// groups, enable receive coalescing and use `receive_coalesced`. Addresses are numeric. After close every
+/// operation except close fails with Closed.
 /// @see [Std.Net.Socket.UdpSocket](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-UdpSocket)
 .Since("0.3.0")
 export let UdpSocket = module (
@@ -69,9 +67,8 @@ export let UdpSocket = module (
             };
         };
 
-        /// @brief Sends `data` to `target` as datagrams of `segment_size` bytes in one call with UDP GSO
-        /// (`UDP_SEGMENT`); the count sent. The cut is `Offload.split`. A segment size below 1 or above
-        /// `Offload.MaxUdpPayload` traps. Traps in Neura 0.3.0: no runtime offers a GSO service.
+        /// @brief Sends `data` to `target` as datagrams of `segment_size` bytes using kernel segmentation
+        /// when available. Returns the count sent. A segment size below 1 or above `Offload.MaxUdpPayload` traps.
         .NoDiscard
         export let send_segmented = func(data: uint8[list], segment_size: int, target: SocketAddr) -> Result<int> {
             offload.segment_count(data.length, segment_size);
@@ -80,8 +77,19 @@ export let UdpSocket = module (
                 target.to_string());
         };
 
-        /// @brief Receives datagrams the kernel coalesced with UDP GRO, split back into datagrams with
-        /// `Offload.split`. Traps in Neura 0.3.0: no runtime offers a GRO service.
+        /// @brief Enables or disables UDP receive coalescing. On hosts without this socket option it returns
+        /// Unsupported. When enabled, use `receive_coalesced` to retain datagram boundaries.
+        .NoDiscard
+        export let set_receive_coalescing = func(enabled: bool) -> Result<Unit> {
+            return Result<Unit>.Err(bytes.closed("socket", bound.to_string())) unless open_now;
+            return match (host.set_option(id, 14, enabled ? 1 : 0)) {
+                host.DoneOutcome.Ok => bytes.ok(),
+                host.DoneOutcome.Error(code) => Result<Unit>.Err(
+                    host_error.io(code, "setting receive coalescing failed", bound.to_string())),
+            };
+        };
+
+        /// @brief Receives one datagram or group of coalesced datagrams and returns the individual payloads.
         .NoDiscard
         export let receive_coalesced = func(max: int) -> Result<uint8[list][list]> {
             bytes.check_maximum(max);
@@ -174,6 +182,11 @@ export let UdpSocket = module (
     /// @brief The datagrams of a coalesced receive.
     let split_coalesced = func(received: [uint8[list], string, int, int]) -> uint8[list][list] {
         let [data, text, port, segment_size] = received;
+        if (data.length == 0) {
+            let datagrams: uint8[list][list] = new;
+            datagrams.append(data);
+            return datagrams;
+        }
         return offload.split(data, segment_size);
     };
 );

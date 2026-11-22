@@ -8,13 +8,13 @@ let messages = import:Std.Net.Dns.Message;
 let names = import:Std.Net.Dns.Name;
 let.promote _ = import:Std.Core.Result;
 
-/// @brief Multicast DNS (RFC 6762) message specifics, and a querier whose multicast networking is a stub.
+/// @brief Multicast DNS (RFC 6762) messages and a querier on the local IPv4 link.
 ///
-/// Real: the `.local` and link-local reverse names (sections 3 and 4), the unicast-response bit, the top
+/// Includes the `.local` and link-local reverse names (sections 3 and 4), the unicast-response bit, the top
 /// bit of a question's class (section 5.4), the cache-flush bit, the top bit of a record's class (section
 /// 10.2), the group addresses and port (224.0.0.251 and ff02::fb, port 5353), and query and response building
-/// with ID 0, opcode 0 and RD clear (section 18). A stub: sending to and listening on the multicast group, which
-/// needs a UDP socket that joins a multicast group (IP_ADD_MEMBERSHIP); no host service offers that.
+/// with ID 0, opcode 0 and RD clear (section 18). The querier joins and sends to the IPv4 multicast group.
+/// It accepts responses sent to that group from UDP port 5353.
 /// @see [Std.Net.Dns.Mdns](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-Mdns)
 .Since("0.3.0")
 export let Mdns = module (
@@ -127,7 +127,17 @@ export let Mdns = module (
         /// @brief Sends a query to the group and returns every response received within the window.
         .NoDiscard
         export let query_all = func(name: names.DnsName, qtype: int) -> Result<messages.Message[list]> {
-            return match (multicast_exchange(messages.encode(query(name, qtype, false))?, window.to_nanos())) {
+            return query_on(name, qtype, "");
+        };
+
+        /// @brief Sends a query through the network interface with the given IPv4 address.
+        .NoDiscard
+        export let query_all_on = func(name: names.DnsName, qtype: int, address: Ipv4Addr)
+            -> Result<messages.Message[list]> => query_on(name, qtype, address.to_string());
+
+        let query_on = func(name: names.DnsName, qtype: int, address: string) -> Result<messages.Message[list]> {
+            last encoded = messages.encode(query(name, qtype, false))?;
+            return match (multicast_exchange(encoded, window.to_nanos(), address)) {
                 DatagramsOutcome.Ok(datagrams) => Result<messages.Message[list]>.Ok(responses_in(datagrams)),
                 DatagramsOutcome.Error(code) => Result<messages.Message[list]>.Err(host_error.io(code,
                     "mDNS query failed", "224.0.0.251:5353")),
@@ -156,10 +166,7 @@ export let Mdns = module (
         return out;
     };
 
-    /// @brief Joins 224.0.0.251 on port 5353, sends `query`, and collects datagrams for `window_nanos`. Needed
-    /// service: neura.net.udp.join_multicast version 1 (group, interface) plus udp.send_to and receive_from.
-    /// @stub no host service joins a UDP multicast group
-    let multicast_exchange = func(query: uint8[list], window_nanos: int64) -> DatagramsOutcome {
-        trap_with_message("unsupported: Std.Net.Dns.Mdns.multicast_exchange is not implemented in Neura 0.3.0 (no host service joins a UDP multicast group)");
-    };
+    /// @brief Joins 224.0.0.251 on port 5353, sends the query and collects replies for a positive window.
+    let multicast_exchange = func(query: uint8[list], window_nanos: int64, address: string) -> DatagramsOutcome
+        host("neura.net.mdns.exchange", 1);
 );

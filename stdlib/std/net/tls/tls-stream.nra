@@ -17,11 +17,14 @@ let.promote _ = import:Std.Core.Unit;
 /// `TlsConnector` and `TlsAcceptor` open streams. The record layer runs in the host's TLS library (OpenSSL 3.5 in
 /// builds configured with `NEURA_ENABLE_SERVER_TLS`): Neura 0.3.0 has no pure-Neura TLS (see
 /// `Std.Net.Tls.Handshake`). Reading, writing and close call the host's `neura.net.tls.*` services. `close` sends `close_notify`.
-/// `shutdown`, `local_address` and kernel TLS offload need host services that no runtime offers yet and trap.
+/// Shutdown sends TLS `close_notify` on the write side. `local_address` reports the underlying socket address.
 /// After close every operation except close fails with Closed.
 /// @see [Std.Net.Tls.TlsStream](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Tls-TlsStream)
 .Since("0.3.0")
 export let TlsStream = module (
+    let tls_local_address = func(stream: int64) -> host.AddressOutcome host("neura.net.tls.local_address", 1);
+    let tls_shutdown_write = func(stream: int64, timeout: int64) -> host.DoneOutcome host("neura.net.tls.shutdown_write", 1);
+
     /// @brief One TLS stream.
     .[Final, NoDiscard(reason: "a stream must be closed"), NotThreadSafe]
     export let TlsStream = class implements StreamSocket<SocketAddr> (
@@ -37,6 +40,8 @@ export let TlsStream = module (
         let timeout_nanos: int64 = 0;
         /// @brief Tracks whether the stream may still use the host ID.
         let open_now: bool = true;
+        let read_closed: bool = false;
+        let write_closed: bool = false;
 
         /// @brief Use `TlsConnector` or `TlsAcceptor`; the handle comes from the library.
         export let init = func(opened: socket.Handle, dialed: Optional<SocketAddr>, selected: string) {
@@ -51,7 +56,7 @@ export let TlsStream = module (
         .NoDiscard
         export let read = func(max: int) -> Result<uint8[list]> {
             bytes.check_maximum(max);
-            return Result<uint8[list]>.Err(bytes.closed("stream", label)) unless open_now;
+            return Result<uint8[list]>.Err(bytes.closed("stream", label)) unless open_now && not read_closed;
             return match (host.tls_read(id, max, timeout_nanos)) {
                 host.BytesOutcome.Ok(chunk) => Result<uint8[list]>.Ok(chunk),
                 host.BytesOutcome.Error(code) => Result<uint8[list]>.Err(host_error.io(code, host_error.kind_of(code) == IoErrorKind.Unsupported
@@ -63,7 +68,7 @@ export let TlsStream = module (
         /// @brief Encrypts and writes every byte, repeating partial host writes.
         .NoDiscard
         export let write = func(data: uint8[list]) -> Result<Unit> {
-            return Result<Unit>.Err(bytes.closed("stream", label)) unless open_now;
+            return Result<Unit>.Err(bytes.closed("stream", label)) unless open_now && not write_closed;
             let remaining = data;
             while (remaining.length > 0) {
                 match (host.tls_write(id, remaining)) {
@@ -107,31 +112,39 @@ export let TlsStream = module (
         /// @brief The dialed peer, or `None` for an accepted stream (not reported by the host).
         export let peer_address = func -> Optional<SocketAddr> => peer;
 
-        /// @brief The local address, from the host; traps in Neura 0.3.0 (no local-address service).
+        /// @brief The underlying socket's local address.
         .NoDiscard
         export let local_address = func -> Result<SocketAddr> {
             return Result<SocketAddr>.Err(bytes.closed("stream", label)) unless open_now;
-            return match (host.local_address(id)) {
+            return match (tls_local_address(id)) {
                 host.AddressOutcome.Ok(reported) => support.reported_address(reported),
                 host.AddressOutcome.Error(code) => Result<SocketAddr>.Err(
                     host_error.io(code, "local address failed", label)),
             };
         };
 
-        /// @brief Ends reading, writing or both of the underlying TCP connection. Traps in Neura 0.3.0: the
-        /// runtime has no shutdown service. `close` sends `close_notify`.
+        /// @brief Ends reading or sends an authenticated `close_notify` to end writing. The socket stays open.
         .NoDiscard
         export let shutdown = func(how: Shutdown) -> Result<Unit> {
             return Result<Unit>.Err(bytes.closed("stream", label)) unless open_now;
-            last code = how == Shutdown.Read ? 0 : how == Shutdown.Write ? 1 : 2;
-            return match (host.shutdown(id, code)) {
-                host.DoneOutcome.Ok => bytes.ok(),
-                host.DoneOutcome.Error(failure) => Result<Unit>.Err(host_error.io(failure, "shutdown failed", label)),
-            };
+            if (how != Shutdown.Read && not write_closed) {
+                match (tls_shutdown_write(id, timeout_nanos)) {
+                    host.DoneOutcome.Ok => {
+                        write_closed = true;
+                    },
+                    host.DoneOutcome.Error(failure) => {
+                        return Result<Unit>.Err(host_error.io(failure, "TLS write shutdown failed", label));
+                    },
+                }
+            }
+            if (how != Shutdown.Write) {
+                read_closed = true;
+            }
+            return bytes.ok();
         };
 
-        /// @brief Moves symmetric record encryption into the kernel (kTLS, and the NIC where it supports it).
-        /// Traps in Neura 0.3.0: no runtime offers kTLS.
+        /// @brief Requires kernel record processing in both directions. Set `TlsConfigBuilder.set_kernel_offload`
+        /// before the handshake. Returns Unsupported when the build, OS or negotiated cipher cannot offload.
         .NoDiscard
         export let enable_kernel_offload = func -> Result<Unit> {
             return Result<Unit>.Err(bytes.closed("stream", label)) unless open_now;

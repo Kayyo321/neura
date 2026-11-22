@@ -1,0 +1,37 @@
+// test-options: --allow-net
+let doq = import:Std.Net.Dns.DoqTransport;
+let duration = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let ipv4 = import:Std.Net.Core.Ipv4Addr;
+let mdns = import:Std.Net.Dns.Mdns;
+let messages = import:Std.Net.Dns.Message;
+let names = import:Std.Net.Dns.Name;
+let socket_addr = import:Std.Net.Core.SocketAddr;
+let test = import:Std.Test;
+
+let DnsHostExtensions = module (
+    let kind_of = func(error: errors.Error) -> errors.IoErrorKind => match (error) {
+        errors.Error.Io { kind, message, path } => kind,
+        _ => errors.IoErrorKind.Other,
+    };
+
+    export let test_multicast_querier_on_loopback = func {
+        last querier = new mdns.MdnsQuerier(duration.of_millis(25));
+        test.assert_ok<messages.Message[list]>(querier.query_all_on(names.root(), messages.TypeA, ipv4.localhost()));
+    };
+
+    export let test_multicast_rejects_zero_window = func {
+        last querier = new mdns.MdnsQuerier(duration.of_nanos(0));
+        last failure = test.assert_err<messages.Message[list]>(
+            querier.query_all_on(names.root(), messages.TypeA, ipv4.localhost()));
+        test.assert(kind_of(failure) == errors.IoErrorKind.InvalidInput);
+        test.assert_equal_string("InvalidInput: mDNS query failed (224.0.0.251:5353)", errors.message(failure));
+    };
+
+    export let test_doq_rejects_missing_identity_or_build_support = func {
+        last transport = new doq.DoqTransport(socket_addr.of_v4(ipv4.localhost(), 1), "");
+        last failure = test.assert_err<messages.Message>(transport.exchange(
+            messages.query(12, names.root(), messages.TypeA)));
+        test.assert(kind_of(failure) == errors.IoErrorKind.InvalidInput || kind_of(failure) == errors.IoErrorKind.Unsupported);
+    };
+);

@@ -25,6 +25,11 @@
 #include <poll.h>
 #include <string_view>
 #include <unistd.h>
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) || defined(__DragonFly__)
+#include <fcntl.h>
+#include <sys/event.h>
+#define NEURA_HAS_KQUEUE 1
+#endif
 #ifdef __linux__
 #include <linux/io_uring.h>
 #include <linux/time_types.h>
@@ -99,7 +104,7 @@ public:
         return slots_.size() - 1;
     }
 
-    void wait(int timeout_ms) {
+    void wait(int timeout_ms, IoBackend) {
         socket_ready_.assign(sockets_.size(), 0);
         handle_ready_.assign(handles_.size(), false);
         if (handles_.empty()) {
@@ -589,6 +594,51 @@ private:
 };
 #endif
 
+#ifdef NEURA_HAS_KQUEUE
+// Register only this wait's descriptors. Readiness (including EOF) still
+// goes to the caller in its original order, including duplicate interests.
+bool wait_kqueue(std::vector<pollfd>& descriptors, int timeout_ms) {
+    const int queue = ::kqueue();
+    if (queue < 0) return false;
+    ::fcntl(queue, F_SETFD, FD_CLOEXEC);
+    std::vector<struct kevent> interests;
+    for (const auto& item : descriptors) {
+        struct kevent event;
+        if ((item.events & POLLIN) != 0) {
+            EV_SET(&event, item.fd, EVFILT_READ, EV_ADD, 0, 0, nullptr);
+            interests.push_back(event);
+        }
+        if ((item.events & POLLOUT) != 0) {
+            EV_SET(&event, item.fd, EVFILT_WRITE, EV_ADD, 0, 0, nullptr);
+            interests.push_back(event);
+        }
+    }
+    if (interests.empty()) {
+        ::close(queue);
+        return false;
+    }
+    std::vector<struct kevent> ready(interests.size());
+    timespec timeout{timeout_ms / 1000, (timeout_ms % 1000) * 1'000'000L};
+    const int found = ::kevent(queue, interests.data(), static_cast<int>(interests.size()), ready.data(),
+                               static_cast<int>(ready.size()), timeout_ms < 0 ? nullptr : &timeout);
+    ::close(queue);
+    if (found < 0) return false;
+    for (int index = 0; index < found; ++index) {
+        if ((ready[index].flags & EV_ERROR) != 0) return false;
+    }
+    for (int index = 0; index < found; ++index) {
+        auto& event = ready[index];
+        const short flag = event.filter == EVFILT_WRITE ? POLLOUT : POLLIN;
+        for (auto& item : descriptors) {
+            if (static_cast<std::uintptr_t>(item.fd) == event.ident && (item.events & flag) != 0) {
+                item.revents |= flag;
+            }
+        }
+    }
+    return true;
+}
+#endif
+
 class NativeWaits {
 public:
     std::size_t add(PosixWait::Interest source) {
@@ -601,16 +651,19 @@ public:
         throw std::logic_error("a Windows handle wait needs Win32");
     }
 
-    void wait(int timeout_ms) {
+    void wait(int timeout_ms, [[maybe_unused]] IoBackend backend) {
         if (descriptors_.empty()) return;
 #ifdef __linux__
-        if (io_backend() == IoBackend::Epoll) {
+        if (backend == IoBackend::Epoll) {
             thread_local EpollSet set;
             if (set.usable() && set.wait(descriptors_, timeout_ms)) return;
-        } else if (io_backend() == IoBackend::IoUring) {
+        } else if (backend == IoBackend::IoUring) {
             thread_local UringSet ring;
             if (ring.usable() && ring.wait(descriptors_, timeout_ms)) return;
         }
+#endif
+#ifdef NEURA_HAS_KQUEUE
+        if (backend == IoBackend::Kqueue && wait_kqueue(descriptors_, timeout_ms)) return;
 #endif
         const int count = ::poll(descriptors_.data(), static_cast<nfds_t>(descriptors_.size()), timeout_ms);
         if (count < 0) {
@@ -629,35 +682,57 @@ private:
 
 } // namespace
 
+std::optional<IoBackend> available_io_backend(std::int32_t code) {
+    if (code == 4) {
+#ifdef _WIN32
+        return IoBackend::WaitForMultipleObjects;
+#else
+        return IoBackend::Poll;
+#endif
+    }
+#ifdef __linux__
+    if (code == 2) {
+        const int probe = ::epoll_create1(EPOLL_CLOEXEC);
+        if (probe >= 0) {
+            ::close(probe);
+            return IoBackend::Epoll;
+        }
+    }
+    if (code == 1) {
+        io_uring_params parameters{};
+        const long probe = ::syscall(__NR_io_uring_setup, 2, &parameters);
+        if (probe >= 0) {
+            ::close(static_cast<int>(probe));
+            return IoBackend::IoUring;
+        }
+    }
+#endif
+#ifdef NEURA_HAS_KQUEUE
+    if (code == 3) {
+        const int probe = ::kqueue();
+        if (probe >= 0) {
+            ::close(probe);
+            return IoBackend::Kqueue;
+        }
+    }
+#endif
+    return std::nullopt;
+}
+
 IoBackend io_backend() {
-#if defined(__linux__)
     static const IoBackend chosen = [] {
+#ifdef __linux__
         const char* text = std::getenv("NEURA_IO_BACKEND");
         if (text && std::string_view(text) == "epoll") {
-            const int probe = ::epoll_create1(EPOLL_CLOEXEC);
-            if (probe >= 0) {
-                ::close(probe);
-                return IoBackend::Epoll;
-            }
+            if (const auto backend = available_io_backend(2)) return *backend;
         }
         if (text && std::string_view(text) == "io_uring") {
-            // A kernel without io_uring, or with it disabled
-            // (kernel.io_uring_disabled), keeps poll.
-            io_uring_params parameters{};
-            const long probe = ::syscall(__NR_io_uring_setup, 2, &parameters);
-            if (probe >= 0) {
-                ::close(static_cast<int>(probe));
-                return IoBackend::IoUring;
-            }
+            if (const auto backend = available_io_backend(1)) return *backend;
         }
-        return IoBackend::Poll;
+#endif
+        return *available_io_backend(4);
     }();
     return chosen;
-#elif defined(_WIN32)
-    return IoBackend::WaitForMultipleObjects;
-#else
-    return IoBackend::Poll;
-#endif
 }
 
 const char* io_backend_name(IoBackend backend) {
@@ -665,6 +740,7 @@ const char* io_backend_name(IoBackend backend) {
     case IoBackend::Poll: return "poll";
     case IoBackend::Epoll: return "epoll";
     case IoBackend::IoUring: return "io_uring";
+    case IoBackend::Kqueue: return "kqueue";
     // WSAPoll for sockets and WaitForMultipleObjects for handles (W14).
     case IoBackend::WaitForMultipleObjects: return "wsapoll+waitformultipleobjects";
     }
@@ -733,7 +809,7 @@ void PendingRequests::check(int timeout_ms, std::optional<std::uint64_t> only) {
             check.external = external->signal.get();
         }
     }
-    native.wait(timeout_ms);
+    native.wait(timeout_ms, backend_);
     for (auto& check : checks) {
         check.ready = check.native_index ? native.ready(*check.native_index) : !check.external || check.external->take();
     }

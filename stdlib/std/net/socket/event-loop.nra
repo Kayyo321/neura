@@ -1,4 +1,3 @@
-let errors = import:Std.Core.Error;
 let hashing = import:Std.Core.Hash;
 let host = import:Std.Net.Socket.Internal.HostCalls;
 let host_error = import:Std.Core.Internal.HostError;
@@ -13,11 +12,9 @@ let.promote _ = import:Std.Core.Unit;
 /// Sockets do not wait themselves: in a program with tasks the host's overlapping services park the calling
 /// task and the runtime's driver waits for every parked operation, so blocking code and tasks use the same
 /// socket objects. The choice is real and tested: a backend is available when the platform has it (`io_uring`
-/// on Linux 5.1 and later, `epoll` on Linux, `kqueue` on macOS and the BSDs, `poll` everywhere except
-/// Windows, whose driver waits with its own interface), and `select` takes the first available backend of a
-/// preference list, falling back to the default order `IoUring`, `Epoll`, `Kqueue`, `Poll`. `install` is the
-/// hook: the driver waits with `poll(2)` only, so it needs a runtime service that no runtime offers yet and
-/// traps in Neura 0.3.0.
+/// on Linux 5.1 and later when enabled, `epoll` on Linux, `kqueue` on macOS and the BSDs, and `poll` or
+/// `WSAPoll` everywhere). `select` takes the first available backend of a preference list, falling back to
+/// `IoUring`, `Epoll`, `Kqueue`, `Poll`. `install` selects a backend for the current native execution.
 /// @see [Std.Net.Socket.EventLoop](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-EventLoop)
 .Since("0.3.0")
 export let EventLoop = module (
@@ -82,11 +79,11 @@ export let EventLoop = module (
             return linux;
         }
         return if (backend == EventLoopBackend.Kqueue) -> platform.system == "macos" or "freebsd" or "openbsd" or "netbsd" or "dragonfly"
-            else -> platform.system != "windows";
+            else -> true;
     };
 
     /// @brief The first backend of `preference` that `platform` has, else the first of the default order it
-    /// has. Err (a Custom error with the code `socket.event_loop`) when it has none, as on Windows.
+    /// has. The portable backend on Windows waits with WSAPoll and Win32 handle events.
     .NoDiscard
     export let select = func(platform: Platform, preference: EventLoopBackend[list]) -> Result<EventLoopBackend> {
         for (let backend in preference) {
@@ -99,12 +96,10 @@ export let EventLoop = module (
                 return Result<EventLoopBackend>.Ok(backend);
             }
         }
-        return Result<EventLoopBackend>.Err(errors.custom("socket.event_loop",
-            "no event-loop backend is available on " .. platform.to_string()));
+        return Result<EventLoopBackend>.Ok(EventLoopBackend.Poll);
     };
 
-    /// @brief Asks the runtime's driver to wait with `backend`. Traps in Neura 0.3.0: the driver waits with
-    /// `poll(2)` only and no runtime offers a service to switch.
+    /// @brief Selects the runtime wait backend in this execution. Returns Unsupported if the provider lacks it.
     .NoDiscard
     export let install = func(backend: EventLoopBackend) -> Result<Unit> {
         last code = backend == EventLoopBackend.IoUring ? 1 : backend == EventLoopBackend.Epoll ? 2

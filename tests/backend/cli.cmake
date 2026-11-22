@@ -115,10 +115,12 @@ set(hello "${SOURCE_DIR}/examples/hello-world/hello-world.nra")
 if(CMAKE_HOST_WIN32)
     expect_build_failure("Windows native launcher" "Windows has no native launcher in 0[.]3[.]0"
         "${TEST_DIR}/native.exe" --native "${hello}")
-    set(tls_refusal "${TEST_DIR}/windows-tls-refusal.nvr")
-    build_image("${tls_refusal}" "${tests}/windows-tls-refusal.nra")
-    expect_run("Windows TLS provider" "${tls_refusal}"
-        "Unsupported: TLS operation is unavailable in this runtime (127.0.0.1:443)\n" 0 "" --allow-net)
+    if(NOT TLS_ENABLED)
+        set(tls_refusal "${TEST_DIR}/windows-tls-refusal.nvr")
+        build_image("${tls_refusal}" "${tests}/windows-tls-refusal.nra")
+        expect_run("TLS-disabled runtime" "${tls_refusal}"
+            "Unsupported: TLS operation is unavailable in this runtime (127.0.0.1:443)\n" 0 "" --allow-net)
+    endif()
 endif()
 build_image("${TEST_DIR}/hello.nvr" "${hello}")
 neura(emit "${TEST_DIR}" emit-ir "${hello}" -o "${TEST_DIR}/hello.nir")
