@@ -3,5 +3,7 @@ error[E0403]: expected bool or a class or interface reference, got int32
   |
 3 | let negated = not count;
   |                   ^^^^^ expected bool or a class or interface reference
+  |
+  = note: 'not' requires a bool or a class or interface reference operand, as '!' does
 
 For more information about this error, try `neura explain E0403`.

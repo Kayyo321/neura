@@ -40,18 +40,21 @@ let read = func(val: Item) -> int {
         explicit = neura("emit-ir", *flags, source.name).stdout
         assert implicit == explicit, flags
 
-    for marked in (
-        "if ([7]) {}",
-        "while ([text]) {}",
-        "if ([State.On]) {}",
-        "if ([Error.Failed(1)]) {}",
-        "if ([dynamic]) {}",
-        "let _ = ![7];",
-        "let _ = not [text];",
-        "let _ = not [State.On];",
-        "if ([item] && true) {}",
-        "if (false || [item]) {}",
-        "return true unless [item];",
+    not_note = "'not' requires a bool or a class or interface reference operand, as '!' does"
+    for marked, has_not_note in (
+        ("if ([7]) {}", False),
+        ("while ([text]) {}", False),
+        ("if ([State.On]) {}", False),
+        ("if ([Error.Failed(1)]) {}", False),
+        ("if ([dynamic]) {}", False),
+        ("let _ = ![7];", False),
+        ("let _ = not [text];", True),
+        ("let _ = not [State.On];", True),
+        ("let _ = not (true ? [7] : 8);", True),
+        ("let _ = not (true && [7]);", False),
+        ("if ([item] && true) {}", False),
+        ("if (false || [item]) {}", False),
+        ("return true unless [item];", False),
     ):
         line = "    " + marked
         start = line.index("[")
@@ -71,6 +74,7 @@ let condition = func(item: Item, dynamic: any, text: string) -> bool {
         )
         detail = neura("check", "--error-format=json", source.name, success=False)
         diagnostic = json.loads(detail.stderr.splitlines()[0])
+        assert (not_note in diagnostic["notes"]) == has_not_note, (marked, diagnostic["notes"])
         primary = next(span for span in diagnostic["spans"] if span["primary"])
         assert (primary["line"], primary["column"], primary["length"]) == (5, start + 1, end - start - 1), (
             marked, primary,

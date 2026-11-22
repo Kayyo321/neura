@@ -189,7 +189,7 @@ std::vector<ReferenceFieldInitialization> reference_fields(const Declaration& de
 struct ClosureEnvironment;
 
 // Bool remains an inference hint for truth-test operands.
-enum class ValueUse { Ordinary, TruthOperand };
+enum class ValueUse { Ordinary, TruthOperand, NotOperand };
 
 struct Context {
     SymbolId owner;
@@ -3471,7 +3471,7 @@ IrNode Lowering::conditional(const Expr& expr, Context& context, const IrType* e
     const auto& no = expr.operands[2];
     auto result = node(IrOp::SelectValue, expr.span);
     result.operands.push_back(std::move(condition));
-    const auto* required = use == ValueUse::TruthOperand ? nullptr : expected;
+    const auto* required = use == ValueUse::Ordinary ? expected : nullptr;
     if (!required && ((contextual_number(yes) && !contextual_number(no)) || yes.kind == ExprKind::Nil)) {
         auto when_false = value(no, context, expected, false, use);
         result.type = when_false.type;
@@ -3944,7 +3944,7 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
         return result;
     }
     case ExprKind::Nil: {
-        if (use == ValueUse::TruthOperand) expected = nullptr;
+        if (use != ValueUse::Ordinary) expected = nullptr;
         if (expected && !class_reference(*expected))
             throw Diagnostic(expr.span, "nil requires a class reference type").with_code("E0425");
         const auto target = expected ? *expected : symbol(root_class()).type;
@@ -3961,8 +3961,10 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
             return number(child, expected, &expr.span);
         const bool logical = expr.text == "!";
         // The synthetic negation in a guarded return takes a bool guard.
-        auto input = logical ? value(child, context, &bool_type, false,
-                                     expr.implicit ? ValueUse::Ordinary : ValueUse::TruthOperand)
+        const auto operand_use = expr.implicit ? ValueUse::Ordinary
+                               : expr.spelled_not && !expr.is_not ? ValueUse::NotOperand
+                                                                : ValueUse::TruthOperand;
+        auto input = logical ? value(child, context, &bool_type, false, operand_use)
                              : value(child, context, expected);
         if (logical && class_reference(input.type)) return nil_test(std::move(input), expr.span, true);
         if (expr.text == "~" && input.type.kind != TypeKind::Integer)
@@ -4147,10 +4149,14 @@ IrNode Lowering::value(const Expr& expr, Context& context, const IrType* expecte
          (result.symbol == no_symbol || symbol(result.symbol).kind != SymbolKind::Variant))) {
         throw Diagnostic(expr.span, "expected a value").with_code("E0422");
     }
-    if (use == ValueUse::TruthOperand) {
+    if (use != ValueUse::Ordinary) {
         if (!assignable(result.type, bool_type) && !class_reference(result.type)) {
-            throw Diagnostic(expr.span, "expected bool or a class or interface reference, got " + describe(result.type))
+            auto error = Diagnostic(expr.span, "expected bool or a class or interface reference, got " +
+                                                   describe(result.type))
                 .with_code("E0403").label("expected bool or a class or interface reference");
+            if (use == ValueUse::NotOperand)
+                error.note("'not' requires a bool or a class or interface reference operand, as '!' does");
+            throw error;
         }
         return result;
     }
