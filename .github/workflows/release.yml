@@ -161,7 +161,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
-            gcc-14 g++-14 libffi-dev libclang1-19 libclang-common-19-dev
+            gcc-14 g++-14 libffi-dev libclang1-19 libclang-common-19-dev gnupg
           echo "CC=gcc-14" >> "$GITHUB_ENV"
           echo "CXX=g++-14" >> "$GITHUB_ENV"
           echo "JOBS=$(nproc)" >> "$GITHUB_ENV"
@@ -174,7 +174,7 @@ jobs:
           HOMEBREW_NO_AUTO_UPDATE: "1"
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
         run: |
-          brew install libffi pkgconf gnu-tar
+          brew install libffi pkgconf gnu-tar gnupg
           echo "PKG_CONFIG_PATH=$(brew --prefix libffi)/lib/pkgconfig" >> "$GITHUB_ENV"
           echo "JOBS=$(sysctl -n hw.ncpu)" >> "$GITHUB_ENV"
 
@@ -206,7 +206,7 @@ jobs:
         id: server-key
         if: ${{ runner.os != 'Windows' && github.event_name == 'workflow_dispatch' }}
         env:
-          RECIPE: ${{ hashFiles('packaging/server-components.lock.toml', 'packaging/build-server-components.sh') }}
+          RECIPE: ${{ hashFiles('packaging/server-components.lock.toml', 'packaging/build-server-components.sh', 'packaging/server-component-keys/*.asc') }}
         run: |
           compiler=$("${CC:-cc}" --version 2> /dev/null | head -n 1 | tr -c 'A-Za-z0-9.\n' '-')
           key="server-built-$TRIPLE-${ImageOS:-unknown}-${ImageVersion:-unknown}-$compiler-$RECIPE"
