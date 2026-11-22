@@ -38,11 +38,11 @@ Release build, which with eight decompiles each does not fit the job's six
 hours when sanitized. The decompiler runs under the sanitizers in the
 decompiler-* entries, and this check runs in full everywhere else.
 
-Then each program's `.nir` is checked: a program that uses `defer`,
-`using` or a generator is written as NeuraIR 1.14 (nir_lifetime_minor),
-and the same file marked as an older minor is rejected by the reader. A
-program with `<name>.plain` uses none of them, and is written as an older
-minor.
+Then each program's `.nir` is checked for the lifetime instructions and
+generator attributes introduced in NeuraIR 1.14. A `<name>.plain` fixture
+must contain none. The minor can be higher when it includes expression
+operations or nil metadata from the program or its library imports. The
+reader must reject a file marked as older than the features it contains.
 
 Usage: programs.py <neura> <directory>
 """
@@ -61,6 +61,11 @@ LIFETIME_MINOR = 14
 # modernization (Std.Core.Error.message and others): a program that links one
 # is written as 1.15 whatever else it uses.
 EXPRESSIONS_MINOR = 15
+NIL_METADATA_MINOR = 16
+EXPRESSIONS = re.compile(r'^[ \t]+(?:concat_text|type_of)\b', re.MULTILINE)
+LIFETIME = re.compile(r'^[ \t]+(?:cleanup|pending|yield)\b| @generator\.resume\(', re.MULTILINE)
+NIL_VERSION_ERRORS = ('nil summaries require NeuraIR format 1.16',
+                      'nil-narrowing facts require NeuraIR format 1.16')
 GENERATOR_STATE = 'inferred from provenance names, not from the circuit: generator state; resume index'
 YIELD = re.compile(r'^\s*yield\b', re.MULTILINE)
 
@@ -96,6 +101,43 @@ def run(arguments, environment=None):
     env = dict(BASE)
     env.update(environment or {})
     return subprocess.run([str(NEURA), *arguments], capture_output=True, text=True, timeout=TIMEOUT, env=env, encoding='utf-8')
+
+
+def check_minor(module, plain, failures):
+    data = bytearray(module.read_bytes())
+    minor = int.from_bytes(data[6:8], 'little')
+    listing = run(['emit-ir', '--no-optimize', str(module)])
+    if listing.returncode != 0:
+        failures.append(f'{module.stem}: reading the emitted NeuraIR failed\n{listing.stderr}')
+        return
+    has_lifetime = LIFETIME.search(listing.stdout) is not None
+    if has_lifetime == plain:
+        expected = 'no lifetime instructions' if plain else 'a lifetime instruction or generator attribute'
+        failures.append(f'{module.stem}: expected {expected} in the emitted NeuraIR')
+
+    older = module.with_suffix('.older.nir')
+    if minor == NIL_METADATA_MINOR:
+        data[6:8] = EXPRESSIONS_MINOR.to_bytes(2, 'little')
+        older.write_bytes(data)
+        downgraded = run(['emit-ir', '--no-optimize', str(older)])
+        if downgraded.returncode == 0 or not any(error in downgraded.stderr for error in NIL_VERSION_ERRORS):
+            failures.append(f'{module.stem}: expected 1.16 nil metadata to require its minor\n{downgraded.stderr}')
+    elif EXPRESSIONS.search(listing.stdout):
+        if minor != EXPRESSIONS_MINOR:
+            failures.append(f'{module.stem}: NeuraIR 1.{minor}, expected 1.{EXPRESSIONS_MINOR}')
+    elif plain:
+        if minor >= LIFETIME_MINOR:
+            failures.append(f'{module.stem}: NeuraIR 1.{minor}, expected a minor below 1.{LIFETIME_MINOR}')
+    elif minor != LIFETIME_MINOR:
+        failures.append(f'{module.stem}: NeuraIR 1.{minor}, expected 1.{LIFETIME_MINOR}')
+
+    if not plain:
+        unsupported_minor = LIFETIME_MINOR - 2
+        data[6:8] = unsupported_minor.to_bytes(2, 'little')
+        older.write_bytes(data)
+        result = run(['build', str(older), '-o', str(older.with_suffix('.nvr'))])
+        if result.returncode == 0:
+            failures.append(f'{module.stem}: the file marked NeuraIR 1.{unsupported_minor} was accepted')
 
 
 def main():
@@ -206,22 +248,7 @@ def main():
                                         f'{value}, tier 0 gives {reference}')
             if len({counts.get(build) for build in ('source', 'nir', 'stripped')}) != 1:
                 failures.append(f'{source.name}: steps and peak cells differ between builds: {counts}')
-            data = bytearray(module.read_bytes())
-            minor = data[6] | (data[7] << 8)
-            chained = 'concat_text' in run(['emit-ir', str(module)]).stdout
-            if expected_path.with_suffix('.plain').exists():
-                if minor >= LIFETIME_MINOR and not (chained and minor == EXPRESSIONS_MINOR):
-                    failures.append(f'{source.name}: NeuraIR 1.{minor}, expected a minor below 1.{LIFETIME_MINOR}')
-                continue
-            expected_minor = EXPRESSIONS_MINOR if chained else LIFETIME_MINOR
-            if minor != expected_minor:
-                failures.append(f'{source.name}: NeuraIR 1.{minor}, expected 1.{expected_minor}')
-            data[6], data[7] = LIFETIME_MINOR - 2, 0
-            older = scratch / (source.name + '.older.nir')
-            older.write_bytes(data)
-            result = run(['build', str(older), '-o', str(scratch / 'older.nvr')])
-            if result.returncode == 0:
-                failures.append(f'{source.name}: the file marked NeuraIR 1.{LIFETIME_MINOR - 2} was accepted')
+            check_minor(module, expected_path.with_suffix('.plain').exists(), failures)
     for failure in failures:
         print(failure, file=sys.stderr)
     print(f'{len(programs)} programs, {len(failures)} failures')
