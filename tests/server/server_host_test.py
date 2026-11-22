@@ -760,7 +760,9 @@ def test_process_bound(args, image):
             stop.set()
             sampler.join()
             check(statuses.count(200) == 300, f"bounded load ({start}): {sorted(set(statuses))} {len(statuses)}")
-            check(0 < peak[0] <= 3, f"workers at the peak ({start}): {peak[0]}, the bound is 3")
+            # S-1 + S-2 = 3; on Windows S-1 + S-2 + 1 (docs/runtime/ServerHost.md).
+            bound = 4 if WINDOWS else 3
+            check(0 < peak[0] <= bound, f"workers at the peak ({start}): {peak[0]}, the bound is {bound}")
             check(len(host.children(zygote=True)) == (1 if start == "zygote" else 0), f"zygote count ({start})")
         finally:
             stop.set()
