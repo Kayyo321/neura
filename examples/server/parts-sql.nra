@@ -40,7 +40,7 @@ let PartsSql = module:program.Entry (
     };
 
     /// @brief One stored part.
-    #Final
+    .Final
     let Part = class (
         /// @brief The database's identifier.
         export last id: int64;
@@ -78,7 +78,7 @@ let PartsSql = module:program.Entry (
     );
 
     /// @brief The SQL of the parts; the only place that knows the table.
-    #Final
+    .Final
     let PartRepository = class (
         /// @brief The host's pool.
         last pool: sql.Pool;
