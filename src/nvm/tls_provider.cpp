@@ -8,6 +8,7 @@
 #include "provider_internal.hpp"
 #include "client_socket.hpp"
 #include "platform/socket.hpp"
+#include "tls_internal.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -38,6 +39,21 @@
 #include "sigpipe_guard.hpp"
 #include "tls_material.hpp"
 #endif
+
+namespace neura::nvm::tls_internal {
+namespace {
+std::atomic<std::int64_t> handshake_bound{0};
+} // namespace
+
+std::int64_t accept_handshake_bound() {
+    const auto bound = handshake_bound.load(std::memory_order_relaxed);
+    return bound > 0 ? bound : default_transfer_timeout;
+}
+
+void set_accept_handshake_bound_for_testing(std::int64_t nanos) {
+    handshake_bound.store(nanos, std::memory_order_relaxed);
+}
+} // namespace neura::nvm::tls_internal
 
 namespace neura::nvm::provider {
 
@@ -126,7 +142,7 @@ HostSignature engine_release() {
 // OpenSSL's socket BIO can raise SIGPIPE on a closed socket: TLS writes run
 // under SocketWrites (sigpipe_guard.hpp).
 
-constexpr std::int64_t default_transfer_timeout = 30'000'000'000LL;
+constexpr std::int64_t default_transfer_timeout = tls_internal::default_transfer_timeout;
 
 struct TlsIo;
 
@@ -678,7 +694,8 @@ void add_tls_services(const Adder& add, const OverlapAdder& cancellable, Standar
         if (!attach_socket(*stream)) return fail(host_error::other);
         // Zero waits for a client without limit, but a connected peer that
         // stalls the handshake is still bounded by the transfer default.
-        const auto handshake_deadline = timeout == 0 ? deadline_of(default_transfer_timeout) : deadline;
+        const auto handshake_deadline = tls_internal::accepted_handshake_deadline(
+            timeout, deadline, Clock::now(), tls_internal::accept_handshake_bound());
         std::uint32_t error = 0;
         if (drive(stream->ssl, stream->descriptor, handshake_deadline, error,
                   [&] { return SSL_accept(stream->ssl); }) <= 0) {

@@ -8,6 +8,7 @@
 #include "fixtures.hpp"
 #include "nvm/app_services.hpp"
 #include "nvm/dtls_internal.hpp"
+#include "nvm/tls_internal.hpp"
 #include "nvm/generation_internal.hpp"
 #include "nvm/secret_services.hpp"
 #include "nvm/providers.hpp"
@@ -2641,8 +2642,32 @@ NEURA_TEST(host, tls_v2_requires_exact_versions_and_mutual_identity) {
         tls_names({}), text(material.certificate)}), host_error::capability_denied, "explicit CA requires fs");
 }
 
+// The handshake deadline of a connection accepted with timeout zero.
+NEURA_TEST(host, tls_accept_handshake_deadline_is_bounded_for_timeout_zero) {
+    using nvm::tls_internal::accepted_handshake_deadline;
+    using Point = std::chrono::steady_clock::time_point;
+    const auto now = std::chrono::steady_clock::now();
+    const auto accept_deadline = now + std::chrono::seconds(5);
+    const auto bound = nvm::tls_internal::default_transfer_timeout;
+    check(accepted_handshake_deadline(0, Point::max(), now, bound) == now + std::chrono::seconds(30),
+          "timeout zero bounds the handshake by 30 seconds from the accept");
+    check(accepted_handshake_deadline(5'000'000'000, accept_deadline, now, bound) == accept_deadline,
+          "a positive timeout keeps the accept deadline for the handshake");
+    const auto late = Point::max() - std::chrono::seconds(1);
+    check(accepted_handshake_deadline(0, Point::max(), late, bound) == Point::max(),
+          "the bound saturates at the end of the clock");
+    check(nvm::tls_internal::accept_handshake_bound() == bound, "the provider uses the 30-second default");
+}
+
+// A silent TCP peer of an accept with timeout zero is cut off by the bound,
+// shortened here to 200 ms; an unbounded handshake would leave the peer's
+// read to time out at 1.5 seconds instead of seeing the close.
 NEURA_TEST(host, tls_accept_default_bounds_a_stalled_handshake) {
     const LoopbackTlsKeys material;
+    struct Bound {
+        Bound() { nvm::tls_internal::set_accept_handshake_bound_for_testing(200'000'000); }
+        ~Bound() { nvm::tls_internal::set_accept_handshake_bound_for_testing(0); }
+    } bound;
     Host server(everything());
     Host silent(everything());
     const auto listener = server.call("neura.net.listen", {text("127.0.0.1"), i32(0)});
@@ -2652,18 +2677,20 @@ NEURA_TEST(host, tls_accept_default_bounds_a_stalled_handshake) {
     const auto peer = silent.call("neura.net.connect", {text("127.0.0.1"), port.value, i64(1'000'000'000)});
     expect_ok(peer, "TCP peer connects without speaking TLS");
     HostCompletion accepted;
+    const auto started = std::chrono::steady_clock::now();
     std::jthread worker([&] {
         accepted = server.call("neura.net.tls.accept", {listener.value, text(material.certificate), text(material.key),
             tls_names({}), i64(0)});
     });
     // Close at this outer bound even on a regression so the accept can finish.
-    const auto ended = silent.call("neura.net.read", {peer.value, i32(1), i64(35'000'000'000)});
+    const auto ended = silent.call("neura.net.read", {peer.value, i32(1), i64(1'500'000'000)});
     const auto closed = silent.call("neura.net.close", {peer.value});
     worker.join();
     expect_ok(closed, "close silent peer");
-    expect_ok(ended, "default TLS handshake deadline closed the socket");
-    check(ended.value.bytes.empty(), "silent peer gets EOF after timeout");
+    expect_ok(ended, "the handshake bound closed the socket");
+    check(ended.value.bytes.empty(), "silent peer gets EOF after the bound");
     expect_error(accepted, host_error::timed_out, "TLS accept reports TimedOut");
+    check(std::chrono::steady_clock::now() - started < std::chrono::milliseconds(1500), "the bound ends the wait early");
 }
 
 #endif
