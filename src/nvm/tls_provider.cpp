@@ -639,6 +639,11 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
         stream->context = SSL_CTX_new(server ? DTLS_server_method() : DTLS_client_method());
         if (!stream->context || SSL_CTX_set_min_proto_version(stream->context, DTLS1_3_VERSION) != 1 ||
             SSL_CTX_set_max_proto_version(stream->context, DTLS1_3_VERSION) != 1) return fail(host_error::unsupported);
+        // No public DTLS resumption API exists. Do not create outstanding ticket
+        // flights that an unrelated KeyUpdate can clear in OpenSSL 4.1.0 (#32878).
+        SSL_CTX_set_session_cache_mode(stream->context, SSL_SESS_CACHE_OFF);
+        SSL_CTX_set_options(stream->context, SSL_OP_NO_TICKET);
+        if (SSL_CTX_set_num_tickets(stream->context, 0) != 1) return fail(host_error::other);
         if (!server || !ca.empty()) {
             SSL_CTX_set_verify(stream->context, server ? SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT
                                                        : SSL_VERIFY_PEER, nullptr);
