@@ -58,29 +58,29 @@ The following public declarations are taken from the module source; each links t
   The request associated with the descriptor.
 - **Masque.Tunnel** · [`export let init = func(opening: ConnectRequest)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L125)
   Records a request only; this value owns no native tunnel.
-- **Masque.Tunnel** · [`export let send_datagram = func(datagram: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L131)
+- **Masque.Tunnel** · [`export let send_datagram = func(datagram: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L132)
   Returns `Io(Unsupported)` because MASQUE QUIC DATAGRAM transport is unavailable. Tagged `#NoDiscard`. Since 0.3.1.
-- **Masque.Tunnel** · [`export let receive_datagram = func -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L136)
+- **Masque.Tunnel** · [`export let receive_datagram = func -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L138)
   Returns `Io(Unsupported)` because MASQUE QUIC DATAGRAM transport is unavailable. Tagged `#NoDiscard`. Since 0.3.1.
-- **Masque.Tunnel** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L141)
+- **Masque.Tunnel** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L144)
   Returns `Io(Unsupported)` because this value owns no native MASQUE tunnel to close. Tagged `#NoDiscard`. Since 0.3.1.
-- **Masque.Tunnel** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L145)
+- **Masque.Tunnel** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L148)
   The protocol and path.
-- **Masque** · [`export let udp_path = func(target_host: string, target_port: int) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L151)
+- **Masque** · [`export let udp_path = func(target_host: string, target_port: int) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L154)
   The default CONNECT-UDP path for a target (RFC 9298 section 2), for example `/.well-known/masque/udp/192.0.2.6/443/`. Tagged `#NoDiscard`.
-- **Masque** · [`export let ip_path = func(target: string, ipproto: string) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L163)
+- **Masque** · [`export let ip_path = func(target: string, ipproto: string) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L166)
   The default CONNECT-IP path (RFC 9484 section 3), for example `/.well-known/masque/ip/*/*/`. `target` is `*`, a host, or an address with an optional `/length`; `ipproto` is `*` or 0 through 255. Tagged `#NoDiscard`.
-- **Masque** · [`export let udp_request = func(proxy_authority: string, target_host: string, target_port: int) -> Result<ConnectRequest>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L172)
+- **Masque** · [`export let udp_request = func(proxy_authority: string, target_host: string, target_port: int) -> Result<ConnectRequest>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L175)
   The extended CONNECT request for UDP proxying to `target_host`:`target_port` through the proxy at `proxy_authority`, with the default template (RFC 9298 section 3.4). Errors are those of `udp_path`. Tagged `#NoDiscard`.
-- **Masque** · [`export let ip_request = func(proxy_authority: string, target: string, ipproto: string) -> Result<ConnectRequest>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L181)
+- **Masque** · [`export let ip_request = func(proxy_authority: string, target: string, ipproto: string) -> Result<ConnectRequest>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L184)
   The extended CONNECT request for IP proxying through the proxy at `proxy_authority`, with the default template (RFC 9484 section 4.4). Errors are those of `ip_path`. Tagged `#NoDiscard`.
-- **Masque** · [`export let expand = func(value: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L188)
+- **Masque** · [`export let expand = func(value: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L191)
   RFC 6570 simple string expansion of one variable value, with `*` alone kept as the wildcard. Tagged `#Pure`, `#ThreadSafe`.
-- **Masque** · [`export let encode_udp_datagram = func(payload: uint8[list]) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L216)
+- **Masque** · [`export let encode_udp_datagram = func(payload: uint8[list]) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L219)
   An HTTP Datagram payload carrying a UDP payload: Context ID 0, then the bytes (RFC 9298 section 5). Tagged `#NoDiscard`.
-- **Masque** · [`export let decode_udp_datagram = func(datagram: uint8[list]) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L228)
+- **Masque** · [`export let decode_udp_datagram = func(datagram: uint8[list]) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L231)
   The UDP payload of an HTTP Datagram payload with Context ID 0 (RFC 9298 section 5). Err (UnexpectedEnd) without a complete Context ID; Err (Syntax) for another Context ID, which the receiver drops or buffers. Tagged `#NoDiscard`.
-- **Masque** · [`export let open = func(request: ConnectRequest) -> Result<Tunnel>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L243)
+- **Masque** · [`export let open = func(request: ConnectRequest) -> Result<Tunnel>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L247)
   Returns `Io(Unsupported)` because MASQUE needs HTTP/3 request streams and QUIC DATAGRAM transport. The DNS-over-QUIC provider supplies neither; no proxy connection is opened. Tagged `#NoDiscard`. Since 0.3.1.
 <!-- END SOURCE API -->
 

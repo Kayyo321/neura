@@ -28,23 +28,23 @@ The following public declarations are taken from the module source; each links t
   Sends `data` as one datagram to `target`; the count the host sent. Tagged `#NoDiscard`.
 - **UdpSocket.UdpSocket** · [`export let receive_from = func(max: int) -> Result<Datagram<SocketAddr>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/udp-socket.nra#L60)
   One datagram of at most `max` bytes (longer ones are truncated), waiting up to the read timeout; TimedOut when none arrives. A maximum below 1 traps. Tagged `#NoDiscard`.
-- **UdpSocket.UdpSocket** · [`export let send_segmented = func(data: uint8[list], segment_size: int, target: SocketAddr) -> Result<int>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/udp-socket.nra#L73)
-  Sends `data` to `target` as datagrams of `segment_size` bytes using kernel segmentation when available. Returns the count sent. A segment size below 1 or above `Offload.MaxUdpPayload` traps. Tagged `#NoDiscard`.
-- **UdpSocket.UdpSocket** · [`export let set_receive_coalescing = func(enabled: bool) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/udp-socket.nra#L84)
+- **UdpSocket.UdpSocket** · [`export let send_segmented = func(data: uint8[list], segment_size: int, target: SocketAddr) -> Result<int>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/udp-socket.nra#L74)
+  Sends `data` to `target` as datagrams of `segment_size` bytes using kernel segmentation when available. Returns the count accepted, which may cover only a prefix of complete datagrams. A segment size below 1 or above `Offload.MaxUdpPayload` traps. Tagged `#NoDiscard`.
+- **UdpSocket.UdpSocket** · [`export let set_receive_coalescing = func(enabled: bool) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/udp-socket.nra#L85)
   Enables or disables UDP receive coalescing. On hosts without this socket option it returns Unsupported. When enabled, use `receive_coalesced` to retain datagram boundaries. Tagged `#NoDiscard`. Since 0.3.1.
-- **UdpSocket.UdpSocket** · [`export let receive_coalesced = func(max: int) -> Result<uint8[list][list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/udp-socket.nra#L95)
+- **UdpSocket.UdpSocket** · [`export let receive_coalesced = func(max: int) -> Result<uint8[list][list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/udp-socket.nra#L96)
   Receives one datagram or group of coalesced datagrams and returns the individual payloads. Tagged `#NoDiscard`.
-- **UdpSocket.UdpSocket** · [`export let read_timeout = func -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/udp-socket.nra#L106)
+- **UdpSocket.UdpSocket** · [`export let read_timeout = func -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/udp-socket.nra#L107)
   The longest a receive waits; zero waits without limit.
-- **UdpSocket.UdpSocket** · [`export let set_read_timeout = func(timeout: Duration)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/udp-socket.nra#L109)
+- **UdpSocket.UdpSocket** · [`export let set_read_timeout = func(timeout: Duration)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/udp-socket.nra#L110)
   Sets the read timeout. A negative timeout traps with "invalid argument: negative timeout".
-- **UdpSocket.UdpSocket** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/udp-socket.nra#L114)
+- **UdpSocket.UdpSocket** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/udp-socket.nra#L115)
   Releases the socket. Closing again returns Ok.
-- **UdpSocket.UdpSocket** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/udp-socket.nra#L125)
+- **UdpSocket.UdpSocket** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/udp-socket.nra#L126)
   Text such as "UdpSocket(127.0.0.1:5353)".
-- **UdpSocket** · [`export let bind = func(address: SocketAddr) -> Result<UdpSocket>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/udp-socket.nra#L130)
+- **UdpSocket** · [`export let bind = func(address: SocketAddr) -> Result<UdpSocket>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/udp-socket.nra#L131)
   Binds a UDP socket to `address` (port 0 asks for a free port) with no options. Tagged `#NoDiscard`.
-- **UdpSocket** · [`export let bind_with = func(address: SocketAddr, options: SocketOptions) -> Result<UdpSocket>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/udp-socket.nra#L134)
+- **UdpSocket** · [`export let bind_with = func(address: SocketAddr, options: SocketOptions) -> Result<UdpSocket>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/udp-socket.nra#L135)
   Binds with an option set built for `SocketKind.Udp` (another kind traps with "invalid argument"). Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

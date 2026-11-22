@@ -17,7 +17,7 @@ A reference into a table is its zero-based `u32` index. `0xffffffff` marks absen
 | --- | --- | --- |
 | Magic | 4 bytes | ASCII `NEUR` |
 | Major | u16 | 1 |
-| Minor | u16 | 0 through 8 |
+| Minor | u16 | 0 through 10 |
 | Graph profile | u32 | 1 for checked integer identity and ReLU graphs |
 | Section count | u32 | Number of directory records |
 | File size | u64 | Total size in bytes, including the header and directory |
@@ -28,8 +28,12 @@ The section directory immediately follows the header. Each directory record is `
 
 Minor version 1 adds float and bfloat type kinds (tags 9 and 10), the read-version state operation (code 14), and trap reason 5. Minor version 2 adds an interface vector to each layout record, a nil object constant, a message-trap exit, and state operations 15 through 22. Minor version 3 adds the repeated collection allocation state operation (code 23). Minor version 4 adds the `CALB` callback table and the `NATV` embedded native library. Minor version 5 adds scheduler exits, polls, and the `TRNS` transferable-layout table. Minor version 6 adds the kernel state operation (code 24) and the `KERN` kernel table ([Kernels](#kernels-16)). Minor version 7 adds multi-word function results (a list of further result word types in every function record, and the return and call rules in [Multi-word results](#multi-word-results-17)) aggregate elements (the type kind 11 and the state operations 25 and 26, [Aggregate elements](#aggregate-elements-17)), storage regions (the state operations 27 through 32, [Storage regions](#storage-regions-17)), and the nil collection constant ([Types, constants, and storage](#types-constants-and-storage)). Minor version 8 adds the class hook operations 33 and 34 ([Class hooks](#class-hooks-18)). Minor version 9 adds the text concatenation operation 35 ([Text concatenation](#text-concatenation-19)). The graph profile remains 1.
 
+### Version 1.10
+
+Minor version 10 adds the managed-list append-run operation 36 ([Managed list runs](#managed-list-runs-110)). The graph profile remains 1.
+
 - A writer emits the lowest minor version whose features the image uses. A writer that re-encodes a loaded image keeps at least the minor version the image declared.
-- The loader accepts major version 1 with minor versions 0 through 9. A feature newer than the version declared by the image makes the image malformed.
+- The loader accepts major version 1 with minor versions 0 through 10. A feature newer than the version declared by the image makes the image malformed.
 - An unknown required section or graph profile produces an unsupported-image error. A recognized version can carry unknown optional sections. The loader keeps their bytes so that re-encoding the image reproduces them; execution ignores them. A known section must carry the required flag given in the table below. Executable sections never reference optional sections.
 
 | Tag | Contents | Required |
@@ -274,6 +278,7 @@ The state-operation exit provides checked storage primitives. Its immediate is z
 | 33 (1.8) | Hook enter | 0 for a get, 1 for a set | A `uint32` policy word, a class reference | Void ([Class hooks](#class-hooks-18)) |
 | 34 (1.8) | Hook leave | Zero | None | Void |
 | 35 (1.9) | Concatenate text | Zero | Two or more text references | New text holding the arguments' bytes in order ([Text concatenation](#text-concatenation-19)) |
+| 36 (1.10) | Append run | Run kind, 0 through 4 | List, `int32` index, `int32` exclusive end, element words, and a source in byte runs | `int32` index before the loop increment ([Managed list runs](#managed-list-runs-110)) |
 
 Text operations address UTF-8 bytes at the VM boundary. Constructing text checks UTF-8 validity before publishing the result. Operation 13 accepts a byte list, which can grow as text is assembled. Language text indexing can have its own rules implemented above these byte operations. Arrays have fixed length after allocation. List removal shifts later elements left. Every list carries a structural version that starts at zero when the list is allocated and grows by one, modulo 2^64, with each successful append or removal; writing an element does not change it. A for-each loop compares versions to detect modification. Reads and writes check indices and types before accessing storage. Allocation and growth check size arithmetic and run limits before committing. Operation 23 checks the requested length against storage and heap limits before allocating. Freeing an object invalidates its handle after language cleanup has completed.
 
@@ -349,6 +354,14 @@ Ordinary reads of hooked storage are strict. Only the hidden previous-value read
 - **Loader.** The immediate is zero, there are at least two arguments, each of kind text, and the result slot has a text type. An image that declares a version before 1.9 and uses the operation is malformed.
 - **Tiers.** No tier inlines it: tiers 2 and 3 run it through the state-operation helper, and an exit with more arguments than a tier-2 operation holds (255) runs on tier 1.
 - **Writer and assembler.** The writer selects 1.9 only for an image with the operation, so every other image keeps its version and bytes. The assembly text spells it `concat-text`; text that declares a version before 1.9 and uses it is an assembler error. `neura decompile` writes `concat_text(a, b, ...)`.
+
+### Managed list runs (1.10)
+
+Minor version 10 adds state operation 36, `append-run`, with the same state exit record and graph profile 1. The first argument is a list. The next two are the `int32` loop index and exclusive end. In the repeat form (0) the remaining arguments are one element's words, assignable to the element type or its components as in `append-element`. The byte forms take a `uint8` list, an already evaluated `uint8` byte as their fourth argument, and a source as their fifth. Kind 1 reads a `uint8` list. Kinds 2, 3, and 4 read text. Kind 2 handles one byte per iteration, kind 3 also accounts for a backing-list field read, and kind 4 handles a group of four bytes and starts on its final append. All forms require an `int32` result slot. The result is the last iteration's index, which the loop's continuation increments before the next test.
+
+The runtime can charge only consecutive additional iterations whose checks and heap growth can all succeed. Otherwise the operation appends the supplied element and returns the given index, with the usual `append-element` semantics. [Managed list runs in the NVM](NVM#managed-list-runs)
+
+The writer selects 1.10 for an image using `append-run`. The loader and assembler reject it in an image declaring an earlier version. Images without it keep their earlier version and bytes. The decompiler shows `append_repeat(...)`, `append_byte_range(...)`, `append_text_range(...)`, `append_text_field_range(...)`, and `append_text_quad_range(...)` for the five forms.
 
 ### Kernels (1.6)
 

@@ -150,17 +150,17 @@ The following public declarations are taken from the module source; each links t
   The authority recorded by the descriptor.
 - **H3.H3Connection** · [`export let init = func(target: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L323)
   Records an authority only; this value owns no native connection.
-- **H3.H3Connection** · [`export let send_frame = func(stream_id: uint64, frame_type: uint64, payload: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L329)
+- **H3.H3Connection** · [`export let send_frame = func(stream_id: uint64, frame_type: uint64, payload: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L330)
   Returns `Io(Unsupported)` because general HTTP/3 QUIC stream I/O is unavailable. Tagged `#NoDiscard`. Since 0.3.1.
-- **H3.H3Connection** · [`export let close = func(error_code: uint64) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L334)
+- **H3.H3Connection** · [`export let close = func(error_code: uint64) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L336)
   Returns `Io(Unsupported)` because this value owns no native QUIC connection to close. Tagged `#NoDiscard`. Since 0.3.1.
-- **H3.H3Connection** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L338)
+- **H3.H3Connection** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L340)
   The authority.
-- **H3** · [`export let connect = func(authority: string, settings: Settings) -> Result<H3Connection>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L345)
+- **H3** · [`export let connect = func(authority: string, settings: Settings) -> Result<H3Connection>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L348)
   Returns `Io(Unsupported)` because HTTP/3 connection establishment, control streams and QPACK state are unavailable. The DNS-over-QUIC provider is not a general HTTP/3 transport. No connection is opened and no request leaves the process. Tagged `#NoDiscard`. Since 0.3.1.
-- **H3** · [`export let encode_field_section = func(fields: header_map.Headers) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L352)
+- **H3** · [`export let encode_field_section = func(fields: header_map.Headers) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L356)
   Returns `Io(Unsupported)` because QPACK field compression is unavailable. Since 0.3.1 this returns `Result<uint8[list]>` so callers can handle unavailable compression without trapping; the former unwrapped byte-list result never produced a value. Tagged `#NoDiscard`. Since 0.3.1.
-- **H3** · [`export let decode_field_section = func(encoded: uint8[list]) -> Result<header_map.Headers>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L357)
+- **H3** · [`export let decode_field_section = func(encoded: uint8[list]) -> Result<header_map.Headers>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L362)
   Returns `Io(Unsupported)` because QPACK field decompression is unavailable. Tagged `#NoDiscard`. Since 0.3.1.
 <!-- END SOURCE API -->
 

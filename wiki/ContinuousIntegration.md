@@ -68,6 +68,8 @@ The runs share one concurrency group and a run is not cancelled once it has star
 
 From the repository root, with the [build dependencies](https://github.com/Kayyo321/neura/blob/main/CONTRIBUTING.md#set-up-a-checkout) installed:
 
+The script needs GnuPG: it verifies the release signatures of OpenSSL and nghttp2 against the keys in `packaging/server-component-keys/`, as well as every archive's SHA-256.
+
 ```sh
 python3 scripts/test-checks.py
 python3 scripts/check-workflows.py
