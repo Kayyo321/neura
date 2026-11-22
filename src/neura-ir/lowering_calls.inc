@@ -493,10 +493,19 @@ void Lowering::prepare_nil_defaults(SymbolId method) {
             inherit_nil_defaults(method, base);
         }
     }
-    if (!class_or_interface(kind)) return;
-    for (const auto& view : nominal_views(program_, symbol(owner).type)) {
-        if (view.symbol == owner || symbol(view.symbol).kind != SymbolKind::Interface) continue;
-        const auto required = own_member(view.symbol, decl.name);
+    if (class_or_interface(kind)) inherit_interface_nil_defaults(method, symbol(owner).type);
+}
+
+void Lowering::inherit_interface_nil_defaults(SymbolId method, const IrType& receiver) {
+    if (receiver.kind != TypeKind::Object || static_member(method) ||
+        std::ranges::none_of(symbol(method).parameters, [&](SymbolId parameter) {
+            return class_reference(symbol(parameter).type) && !has_default(parameter);
+        })) return;
+    const auto name = symbol(method).name;
+    for (const auto& view : nominal_views(program_, receiver)) {
+        if (view.symbol == receiver.symbol || symbol(view.symbol).kind != SymbolKind::Interface) continue;
+        const auto required = own_member(view.symbol, name);
+        if (required == method) continue;
         if (required == no_symbol || static_member(required) ||
             entries_[required].resolution == Resolution::Resolving) continue;
         resolve(required);

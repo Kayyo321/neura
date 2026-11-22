@@ -7,6 +7,7 @@ let Entry = class (
 
 let call_derived = func(value: Derived) -> bool => value.find();
 let call_implementation = func(value: Implementation) -> bool => value.find();
+let call_inherited = func(value: InheritedImplementation) -> bool => value.find();
 
 let Base = class (
     export let find = func(key: Entry = nil) -> bool => key == nil;
@@ -28,15 +29,24 @@ let Implementation = class implements Finder (
     export let find = func(key: Entry) -> bool => key == nil;
 );
 
+let ExistingImplementation = class (
+    export let find = func(key: Entry) -> bool => key == nil;
+);
+
+let InheritedImplementation = class : ExistingImplementation implements Finder ();
+
 let App = module : program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         let derived: Derived = new Repeated();
         let base: Base = derived;
         let implementation: Implementation = new;
         let interface_view: Finder = implementation;
+        let inherited: InheritedImplementation = new;
+        let inherited_view: Finder = inherited;
         let umbrella: class = derived;
         if (base.find() && call_derived(derived) && interface_view.find() &&
-            call_implementation(implementation) && !derived.equals(nil) &&
+            call_implementation(implementation) && call_inherited(inherited) &&
+            inherited_view.find() && !derived.equals(nil) &&
             !derived.equals() && !umbrella.equals()) {
             console.println("inherited nil");
         }

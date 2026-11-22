@@ -670,6 +670,7 @@ private:
     void check_parameter_names(SymbolId method, SymbolId base);
     void prepare_nil_defaults(SymbolId method);
     void inherit_nil_defaults(SymbolId method, SymbolId base);
+    void inherit_interface_nil_defaults(SymbolId method, const IrType& receiver);
     Diagnostic ambiguous_overload(const Expr& expr, std::size_t first, SymbolId group, SymbolId one, SymbolId other,
                                   const std::map<SymbolId, ArgumentMap>& maps) const;
     bool has_default(SymbolId parameter) const;
@@ -3124,6 +3125,8 @@ IrNode Lowering::call(const Expr& expr, Context& context, const IrType* expected
         }
         return finish_call(std::move(result));
     }
+    if (!callee.operands.empty() && symbol(target).owner != callee.operands.front().type.symbol)
+        inherit_interface_nil_defaults(target, callee.operands.front().type);
     auto qualifier = static_qualifier(callee);
     auto replacements = callee.operands.empty() ? Substitution{}
         : receiver_arguments(callee.operands.front().type, symbol(target).owner);
