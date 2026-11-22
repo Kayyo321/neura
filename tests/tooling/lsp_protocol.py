@@ -159,10 +159,11 @@ class LanguageServerTests(unittest.TestCase):
 
     def test_nil_warnings_offer_quick_fixes(self):
         path = self.root / 'nil-warning.nra'
-        source = ('let Entry = class ( export let ready = true; );\n'
+        source = ('let Entry = class ( export let ready = true; export let refresh = func {}; );\n'
                   'let required = func(value: Entry) -> bool => value.ready;\n'
                   'let maybe = func(entry: Entry = nil) -> bool {\n'
                   '    let state = required(nil);\n'
+                  '    entry.refresh();\n'
                   '    return entry.ready;\n'
                   '};\n')
         self.client.open(path, source)
@@ -179,7 +180,12 @@ class LanguageServerTests(unittest.TestCase):
             return {action['title'] for action in actions if action['kind'] == 'quickfix'}
 
         self.assertIn('provide a non-nil value', fixes(3, 25))
-        self.assertTrue({'use optional access', 'narrow the reference with an if condition'} <= fixes(4, 12))
+        guard = 'narrow the reference with an if condition'
+        optional = 'use optional access'
+        self.assertTrue({optional, guard} <= fixes(4, 4))
+        returned = fixes(5, 12)
+        self.assertIn(guard, returned)
+        self.assertNotIn(optional, returned)
 
     def test_unsaved_import_definition_references_and_rename(self):
         module = self.root / 'math.nra'

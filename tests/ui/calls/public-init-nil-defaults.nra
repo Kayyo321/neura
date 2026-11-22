@@ -1,0 +1,9 @@
+let fs = import:Std.Fs.Fs;
+let log = import:Std.Log.Logger;
+
+let make_metadata = func -> fs.FileMetadata => new fs.FileMetadata(fs.FileKind.Other, 0);
+
+let make_logger = func -> log.Logger {
+    let sink = func(message: string) {};
+    return new log.Logger("example", sink, log.LogLevel.Info);
+};

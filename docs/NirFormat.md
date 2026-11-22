@@ -299,7 +299,7 @@ The optional `NILS` table precedes `NNIL` and is available from revision 1.16. I
 | Declaration | `binding:u32`, `initialized_nil:u8` (0 or 1), `initializer:Span` |
 | Result | `function:u32`, `state:u8`, `nil_return:Span` |
 
-Result state is 0 for non-nil, 1 for possibly nil, and 2 for unknown. A possibly nil result carries the source span of a return that can yield nil, when available. The declaration and function references are remapped by the linker. The compiler uses these summaries when checking source that imports a prebuilt artifact. Circuits execute the same operations whether the summaries are present or absent.
+Result state is 3 for `proved_non_nil`, 4 for `contract_non_nil`, 5 for `unknown`, and 6 for `maybe_nil`. A `maybe_nil` result carries the source span of a return that can yield nil. The reader validates the prerelease encodings 0–2 and treats their results as unknown because they lack proof provenance. The declaration and function references are remapped by the linker. The compiler uses these summaries when checking source that imports a prebuilt artifact. Circuits execute the same operations whether the summaries are present or absent.
 
 ### Nil-narrowing facts
 

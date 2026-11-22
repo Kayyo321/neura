@@ -26,15 +26,10 @@ export let BinaryTrees = module:program.Entry (
     };
 
     let check = func(node: TreeNode) -> int {
-        last left = node.left;
-        if (not left) {
+        if (node.left == nil) {
             return 1;
         }
-        last right = node.right;
-        if (not right) {
-            trap_with_message("expected both children");
-        }
-        return 1 + check(left) + check(right);
+        return 1 + check(node.left) + check(node.right);
     };
 
     export let.override main = func(args: string[]) -> program.ExitCode {

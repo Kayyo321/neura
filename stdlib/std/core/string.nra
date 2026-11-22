@@ -34,7 +34,7 @@ export let String = module:strings (
     .[Pure, ThreadSafe]
     export let content_equals = func(s: string, other: string) -> bool => s == other
         /// @brief Tests against a builder's current text. A nil builder compares unequal.
-        or func(s: string, other: string_builder.StringBuilder = nil) -> bool =>
+        or func(s: string, other: string_builder.StringBuilder) -> bool =>
             other != nil && s == other.to_string();
 
     /// @brief Compares UTF-8 bytes lexicographically and returns -1, 0, or 1.

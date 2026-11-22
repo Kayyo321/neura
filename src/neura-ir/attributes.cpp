@@ -211,6 +211,41 @@ const AttributeInfo& attribute_info(AttributeId id) {
     return *find_attribute_info(static_cast<std::uint16_t>(id));
 }
 
+namespace {
+
+const IrAttributeValue& nil_default_payload() {
+    static const auto value = attribute_list({attribute_unsigned(5), attribute_bool(false)});
+    return value;
+}
+
+} // namespace
+
+const IrAttributeValue* literal_parameter_default(const IrProgram& program, SymbolId id) {
+    const auto& parameter = program.symbols[id];
+    if (const auto* recorded = find_attribute(parameter, AttributeId::ParameterDefault))
+        return &recorded->value;
+
+    // The built-in class signature is known to the compiler. Keeping its
+    // default implicit preserves the wire format for programs that do not
+    // declare a default or an override of equals.
+    if (parameter.kind != SymbolKind::Parameter || parameter.name != "other" ||
+        parameter.owner >= program.symbols.size()) return nullptr;
+    const auto& method = program.symbols[parameter.owner];
+    if (method.name != "equals" || method.owner >= program.symbols.size()) return nullptr;
+    const auto& owner = program.symbols[method.owner];
+    return owner.kind == SymbolKind::Class && owner.name == "$class" && owner.owner == no_symbol
+        ? &nil_default_payload() : nullptr;
+}
+
+bool has_nil_parameter_default(const IrProgram& program, SymbolId id) {
+    const auto* value = literal_parameter_default(program, id);
+    return value && value->items.size() == 2 && value->items.front().integer == 5;
+}
+
+void set_nil_parameter_default(IrSymbol& parameter) {
+    set_attribute(parameter, AttributeId::ParameterDefault, nil_default_payload());
+}
+
 IrAttributeValue attribute_bool(bool value) {
     IrAttributeValue result;
     result.kind = AttributeValueKind::Bool;

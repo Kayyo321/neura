@@ -4,6 +4,7 @@
 #include "class_hooks.hpp"
 #include "hook_arguments.hpp"
 #include "host_binding.hpp"
+#include "module_dispatch.hpp"
 #include "nominal.hpp"
 #include "reference_storage.hpp"
 #include "tags.hpp"
@@ -37,9 +38,7 @@ struct ValueState {
 };
 
 ValueState merge(ValueState first, ValueState second) {
-    if (first.state == NilState::MaybeNil) return first;
-    if (second.state == NilState::MaybeNil || first.state == NilState::NonNil) return second;
-    return first;
+    return first.state >= second.state ? first : second;
 }
 
 struct Path {
@@ -166,18 +165,12 @@ const IrNode* checked_resource(const IrNode& branch) {
 class Analysis {
 public:
     Analysis(const IrProgram& program, const HookIndex& hooks, const std::map<SymbolId, IrNilResult>& summaries)
-        : program_(program), hooks_(hooks), summaries_(summaries) {
+        : program_(program), hooks_(hooks), modules_(program), summaries_(summaries) {
         for (const auto& contract : program.nil_bindings) contracts_.emplace(contract.binding, &contract);
-        for (SymbolId id = 0; id < program.symbols.size(); ++id) {
-            const auto& symbol = program.symbols[id];
-            if (symbol.kind != SymbolKind::Function || symbol.owner >= program.symbols.size() ||
-                program.symbols[symbol.owner].kind != SymbolKind::Class) continue;
-            for (auto base = symbol.overrides; base != no_symbol; base = program.symbols[base].overrides)
-                overrides_[base].push_back(id);
-        }
     }
 
     void run(const IrBody& body, Scan scan) {
+        loop_transfers_.clear();
         owner_ = body.owner;
         Paths input(1);
         if (program_.symbols[owner_].kind == SymbolKind::Function) {
@@ -190,10 +183,10 @@ public:
     }
 
     IrNilResult summarize(const IrBody& body) {
-        returned_ = NilState::NonNil;
+        returned_.reset();
         nil_return_ = {};
         run(body, Scan::Summary);
-        return {body.owner, returned_, std::move(nil_return_)};
+        return {body.owner, returned_.value_or(NilState::Unknown), std::move(nil_return_)};
     }
 
     void append_facts(IrProgram& program) const {
@@ -205,12 +198,12 @@ public:
 private:
     const IrProgram& program_;
     const HookIndex& hooks_;
+    ModuleDispatch modules_;
     const std::map<SymbolId, IrNilResult>& summaries_;
     std::map<SymbolId, const IrNilBinding*> contracts_;
-    std::map<SymbolId, std::vector<SymbolId>> overrides_;
     SymbolId owner_ = no_symbol;
-    const Span* statement_ = nullptr;
-    NilState returned_ = NilState::NonNil;
+    const IrNode* statement_ = nullptr;
+    std::optional<NilState> returned_;
     Span nil_return_;
     std::map<Use, bool> observed_;
     std::map<SymbolId, bool> eligible_;
@@ -274,10 +267,9 @@ private:
         if (id >= program_.symbols.size()) return {};
         const auto& parameter = program_.symbols[id];
         if (!class_reference(parameter.type)) return {};
-        const auto* written = find_attribute(parameter, AttributeId::ParameterDefault);
-        if (written && !written->value.items.empty() && written->value.items.front().integer == 5)
+        if (has_nil_parameter_default(program_, id))
             return {NilState::MaybeNil, "nil-default", &parameter.span, id};
-        return {NilState::NonNil};
+        return {NilState::ContractNonNil};
     }
 
     ValueState field_contract(SymbolId id) const {
@@ -285,7 +277,7 @@ private:
         if (found == contracts_.end()) return {};
         const auto& contract = *found->second;
         if (contract.initialized_nil) return {NilState::MaybeNil, "initialized-nil", &contract.initializer, id};
-        return {NilState::NonNil};
+        return {NilState::ContractNonNil};
     }
 
     ValueState function_result(SymbolId id) const {
@@ -297,39 +289,56 @@ private:
         return {summary.state};
     }
 
+    SymbolId fixed_virtual_target(const IrNode& call) const {
+        if (call.operands.empty() || call.symbol >= program_.symbols.size()) return no_symbol;
+        const auto& receiver = call.operands.front();
+        const auto& declaration = program_.symbols[call.symbol];
+        if (receiver.type.kind == TypeKind::Object && receiver.type.symbol < program_.symbols.size()) {
+            const auto& type = program_.symbols[receiver.type.symbol];
+            if (type.kind == SymbolKind::Class && has_tag(type, TagId::Final)) return call.symbol;
+        }
+        if (declaration.owner < program_.symbols.size() &&
+            program_.symbols[declaration.owner].kind != SymbolKind::Interface &&
+            has_tag(declaration, TagId::Final)) return call.symbol;
+        // A written module qualifier names an exact module. An implicit
+        // receiver may acquire an override when an importing module derives
+        // from it, unless the module is closed to inheritance.
+        if (receiver.type.kind == TypeKind::Module &&
+            (receiver.op == IrOp::Reference ||
+             (receiver.symbol < program_.symbols.size() && program_.symbols[receiver.symbol].constant)))
+            return modules_.target(call);
+        return no_symbol;
+    }
+
     ValueState value_at(const IrNode& node, const Path& path) {
         if (!class_reference(node.type) && !optional_reference(node.type)) return {};
         switch (node.op) {
         case IrOp::Nil: return {NilState::MaybeNil, "literal-nil", &node.span};
         case IrOp::Receiver:
-        case IrOp::Allocate: return {NilState::NonNil};
+        case IrOp::Allocate: return {NilState::ProvedNonNil};
         case IrOp::Load: {
             const auto subject = binding(node, path);
             if (const auto fact = path.facts.find(subject); fact != path.facts.end()) {
-                if (fact->second == Nullability::NonNil) return {NilState::NonNil};
+                if (fact->second == Nullability::NonNil) return {NilState::ProvedNonNil};
                 return {NilState::MaybeNil, "guarded-nil", &node.span, subject};
             }
             if (const auto found = path.values.find(node.symbol); found != path.values.end()) return found->second;
             return field_contract(node.symbol);
         }
         case IrOp::Field: return field_contract(node.symbol);
+        case IrOp::ClassCast:
+            // Keep nil evidence for a stable binding through a class cast.
+            // A different target type can fail even for a non-nil input.
+            return path.result.state == NilState::MaybeNil && binding(node.operands.front(), path) != no_symbol
+                ? path.result : ValueState{};
         case IrOp::EnumConstruct:
             // None cannot contribute a nil payload. Some retains the state
             // of its wrapped reference, including Some(nil).
-            return node.operands.empty() ? ValueState{NilState::NonNil} : path.result;
+            return node.operands.empty() ? ValueState{NilState::ProvedNonNil} : path.result;
         case IrOp::EnumProject:
             return optional_reference(node.operands.front().type) ? path.result : ValueState{};
         case IrOp::Call: return function_result(node.symbol);
-        case IrOp::VirtualCall: {
-            auto result = function_result(node.symbol);
-            const auto& declaration = program_.symbols[node.symbol];
-            if (!declaration.has_body) return {};
-            if (const auto found = overrides_.find(node.symbol); found != overrides_.end()) {
-                for (const auto override_id : found->second)
-                    result = merge(result, function_result(override_id));
-            }
-            return result;
-        }
+        case IrOp::VirtualCall: return function_result(fixed_virtual_target(node));
         default: return {};
         }
     }
@@ -342,12 +351,21 @@ private:
         return found->result;
     }
 
-    std::string source_name(const IrNode& node) const {
+    std::pair<std::string_view, std::string> source_receiver(const IrNode& node) const {
+        const bool call = node.op == IrOp::Call || node.op == IrOp::VirtualCall;
+        std::string_view kind = call ? "result of" : "reference";
         if (node.symbol < program_.symbols.size()) {
-            const auto& name = program_.symbols[node.symbol].name;
-            if (!name.starts_with('$') && !name.empty()) return name;
+            const auto& target = program_.symbols[node.symbol];
+            if (const auto* accessor = find_attribute(target, AttributeId::AccessorOf);
+                call && accessor && accessor->value.items[1].integer == 0) {
+                const auto field = accessor->value.items[0].symbol;
+                if (field < program_.symbols.size()) return {"field", program_.symbols[field].name};
+            }
+            if (target.kind == SymbolKind::Field) kind = "field";
+            const auto& name = target.name;
+            if (!name.starts_with('$') && !name.empty()) return {kind, name};
         }
-        return source_text(node.span).value_or("reference");
+        return {kind, source_text(node.span).value_or("reference")};
     }
 
     std::optional<Span> written_access(const IrNode& use, const Span& receiver, std::string_view token) const {
@@ -412,25 +430,29 @@ private:
             const auto tokens = written_tokens(use.span);
             if (tokens.empty() || tokens.front().kind != TokenKind::Keyword || tokens.front().text != "destroy") return;
         }
-        const auto name = source_name(receiver);
-        auto warning = Diagnostic::warning(receiver.span, "nil-access", "reference '" + name + "' may be nil")
+        const auto [kind, name] = source_receiver(receiver);
+        auto warning = Diagnostic::warning(receiver.span, "nil-access", std::string(kind) + " '" + name + "' may be nil")
             .with_code("W0006").label("may be nil at this access").arg("binding", name).arg("use", std::move(category));
         explain_cause(warning, *evidence, receiver.span);
-        if (dot)
+        // Optional access changes the result type. This edit is safe only when
+        // nothing uses that result, including an enclosing access or argument.
+        if (dot && statement_ && statement_->op == IrOp::Discard && statement_->operands.size() == 1 &&
+            &statement_->operands.front() == &use)
             warning.suggest("use optional access", *dot, "?.", Applicability::MaybeIncorrect);
         const auto text = source_text(receiver.span).value_or(name);
         const bool copy = use.op == IrOp::Branch || receiver.op != IrOp::Load || !stable(receiver.symbol);
         const auto test = copy ? "let guarded_value = " + text + "; guarded_value" : text;
         warning.help("guard the access with 'if (" + test + ") { ... }'");
-        if (statement_ && statement_->file == receiver.span.file && statement_->offset <= receiver.span.offset &&
-            receiver.span.offset + receiver.span.length <= statement_->offset + statement_->length) {
-            if (auto statement = source_text(*statement_); statement && statement->ends_with(';')) {
-                if (copy) statement->replace(receiver.span.offset - statement_->offset, receiver.span.length,
-                                             "guarded_value");
-                const std::string indent(statement_->column - 1, ' ');
+        // A declaration must keep its binding in the surrounding scope.
+        if (statement_ && statement_->op != IrOp::Initialize && contains(statement_->span, receiver.span)) {
+            const auto& span = statement_->span;
+            if (auto statement = source_text(span); statement && statement->ends_with(';') &&
+                (!copy || statement->find("guarded_value") == std::string::npos)) {
+                if (copy) statement->replace(receiver.span.offset - span.offset, receiver.span.length, "guarded_value");
+                const std::string indent(span.column - 1, ' ');
                 const auto replacement = "if (" + test + ") {\n" + indent + "    " + *statement + "\n" + indent +
                     "} else {\n" + indent + "    <handle nil>\n" + indent + "}";
-                warning.suggest("narrow the reference with an if condition", *statement_, replacement,
+                warning.suggest("narrow the reference with an if condition", span, replacement,
                                 Applicability::HasPlaceholders);
             }
         }
@@ -442,7 +464,7 @@ private:
             ? program_.symbols[input.symbol].span : input.span;
         if (target >= program_.symbols.size() || input.text == default_argument_nil) return;
         const auto contract = assignment ? field_contract(target) : parameter_contract(target);
-        if (contract.state != NilState::NonNil) return;
+        if (contract.state != NilState::ContractNonNil) return;
         const auto evidence = possible_nil(paths);
         if (!evidence || !written_transfer(site, target, use, assignment)) return;
         const auto& destination = program_.symbols[target];
@@ -541,7 +563,7 @@ private:
             if (node.op == IrOp::Initialize) locals.push_back(node.symbol);
             const auto* outer_statement = statement_;
             if (node.op == IrOp::Return || node.op == IrOp::Discard || node.op == IrOp::Store ||
-                node.op == IrOp::Initialize || node.op == IrOp::Destroy) statement_ = &node.span;
+                node.op == IrOp::Initialize || node.op == IrOp::Destroy) statement_ = &node;
             auto step = visit(node, std::move(total.next), scan);
             statement_ = outer_statement;
             total.next = std::move(step.next);
@@ -559,7 +581,7 @@ private:
         // The guard and an ordinary non-nil assignment can meet at a join.
         // The diagnostic value stays NonNil when both paths establish it,
         // even though the written narrowing ends at the assignment.
-        if (value == Nullability::NonNil) path.values[id] = {NilState::NonNil};
+        if (value == Nullability::NonNil) path.values[id] = {NilState::ProvedNonNil};
         return true;
     }
 
@@ -633,9 +655,25 @@ private:
         return result;
     }
 
+    struct LoopTransfer {
+        Paths entry;
+        Paths head;
+        Paths exit;
+    };
+
+    std::map<const IrNode*, std::vector<LoopTransfer>> loop_transfers_;
+
+    static bool same_loop_entry(const Path& first, const Path& second) {
+        // Fixed-point equality ignores warning provenance. Cache it as well
+        // so a reused transfer still points to the same reason for nil.
+        return first == second && std::ranges::equal(first.values, second.values, [](const auto& a, const auto& b) {
+            const auto& left = a.second;
+            const auto& right = b.second;
+            return left.cause == right.cause && left.evidence == right.evidence && left.origin == right.origin;
+        });
+    }
+
     Flow loop(const IrNode& node, Paths input, Scan scan) {
-        // A loop head can receive the entry state and any back edge.
-        // Derive a fixed point before reporting uses inside the loop.
         const auto iteration = [&](Paths head, Scan body_scan) {
             auto predicate = condition(node.operands.front(), std::move(head), body_scan);
             auto body = region(node.body, std::move(predicate.yes), body_scan);
@@ -643,15 +681,30 @@ private:
             return std::pair{std::move(latch.next), unite(std::move(predicate.no), std::move(body.breaks))};
         };
         for (auto& path : input) path.result = {};
-        auto head = input;
-        for (;;) {
-            auto latch = iteration(head, Scan::Flow).first;
-            for (auto& path : latch) path.result = {};
-            auto next = unite(input, std::move(latch));
-            if (next == head) break;
-            head = std::move(next);
+
+        // Outer fixpoint iterations can revisit the same inner loop with the
+        // same entry. Compute its transfer only once per function scan.
+        auto& transfers = loop_transfers_[&node];
+        auto prior = std::ranges::find_if(transfers, [&](const LoopTransfer& transfer) {
+            return std::ranges::equal(input, transfer.entry, same_loop_entry);
+        });
+        if (prior == transfers.end()) {
+            auto head = input;
+            for (;;) {
+                auto [latch, exit] = iteration(head, Scan::Flow);
+                for (auto& path : latch) path.result = {};
+                auto next = unite(input, std::move(latch));
+                if (next == head) {
+                    transfers.push_back({std::move(input), std::move(head), std::move(exit)});
+                    prior = std::prev(transfers.end());
+                    break;
+                }
+                head = std::move(next);
+            }
         }
-        return {iteration(std::move(head), scan).second};
+        if (scan == Scan::Flow) return {prior->exit};
+        // Record diagnostics and returns once, using the stabilized head.
+        return {iteration(prior->head, scan).second};
     }
 
     void operand_warnings(const IrNode& node, std::size_t index, const Paths& paths) {
@@ -688,12 +741,9 @@ private:
 
     void return_value(const IrNode& node, const Paths& paths) {
         for (const auto& path : paths) {
-            if (path.result.state == NilState::MaybeNil) {
-                if (returned_ != NilState::MaybeNil) nil_return_ = node.span;
-                returned_ = NilState::MaybeNil;
-            } else if (path.result.state == NilState::Unknown && returned_ == NilState::NonNil) {
-                returned_ = NilState::Unknown;
-            }
+            if (path.result.state == NilState::MaybeNil && returned_ != NilState::MaybeNil)
+                nil_return_ = node.span;
+            returned_ = std::max(returned_.value_or(NilState::ProvedNonNil), path.result.state);
         }
     }
 
@@ -764,7 +814,8 @@ void analyze_nil_references(IrProgram& program, std::size_t first_body) {
     for (const auto& body : source_bodies) {
         const auto& symbol = program.symbols[body.owner];
         if (symbol.kind != SymbolKind::Function || !analysis.class_reference(symbol.type) || symbol.external) continue;
-        summaries.emplace(body.owner, IrNilResult{body.owner, NilState::NonNil, {}});
+        // A recursive call alone is not evidence of a proved result.
+        summaries.emplace(body.owner, IrNilResult{body.owner, NilState::Unknown, {}});
         functions.push_back(&body);
     }
     bool changed;

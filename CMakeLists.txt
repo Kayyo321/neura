@@ -1712,6 +1712,14 @@ if(BUILD_TESTING AND NEURA_SDK)
     add_test(NAME expressions-nil-narrowing COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressions/nil-narrowing.py" "$<TARGET_FILE:neura>"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressions/nil-narrowing.nra")
+    add_test(NAME expressions-nil-dispatch COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressions/nil-dispatch.py" "$<TARGET_FILE:neura>")
+    add_test(NAME expressions-nil-summary-kinds COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressions/nil-summary-kinds.py" "$<TARGET_FILE:neura>")
+    add_test(NAME expressions-nil-override-defaults COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressions/nil-override-defaults.py" "$<TARGET_FILE:neura>")
+    add_test(NAME expressions-nil-loop-scaling COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressions/nil-loop-scaling.py" "$<TARGET_FILE:neura>")
     add_test(NAME expressions-nil-warnings COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressions/nil-warnings.py" "$<TARGET_FILE:neura>"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressions/nil-warnings.nra")

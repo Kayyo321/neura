@@ -1,0 +1,3 @@
+let text = import:Std.Core.String;
+
+let same = text.content_equals("example");

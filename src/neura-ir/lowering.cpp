@@ -668,6 +668,8 @@ private:
     IrNode finish_call(IrNode call);
     std::vector<IrNode> named_call_prelude(IrNode& invocation);
     void check_parameter_names(SymbolId method, SymbolId base);
+    void prepare_nil_defaults(SymbolId method);
+    void inherit_nil_defaults(SymbolId method, SymbolId base);
     Diagnostic ambiguous_overload(const Expr& expr, std::size_t first, SymbolId group, SymbolId one, SymbolId other,
                                   const std::map<SymbolId, ArgumentMap>& maps) const;
     bool has_default(SymbolId parameter) const;
@@ -2317,6 +2319,7 @@ void Lowering::resolve(SymbolId id) {
         resolve_binding(id, decl);
     }
     entries_[id].resolution = Resolution::Resolved;
+    if (decl.kind == DeclKind::Function) prepare_nil_defaults(id);
 }
 
 void Lowering::check_overloads(SymbolId id) {

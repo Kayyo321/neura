@@ -357,8 +357,13 @@ void print_ir(std::ostream& output, const IrProgram& program) {
     if (!program.nil_results.empty()) {
         output << "nil_results {\n";
         for (const auto& summary : program.nil_results) {
-            const auto state = summary.state == NilState::NonNil ? "non_nil" :
-                summary.state == NilState::MaybeNil ? "maybe_nil" : "unknown";
+            std::string_view state;
+            switch (summary.state) {
+            case NilState::ProvedNonNil: state = "proved_non_nil"; break;
+            case NilState::ContractNonNil: state = "contract_non_nil"; break;
+            case NilState::Unknown: state = "unknown"; break;
+            case NilState::MaybeNil: state = "maybe_nil"; break;
+            }
             output << "  result %" << summary.function << ' ' << state;
             print_span(output, summary.nil_return);
             output << '\n';

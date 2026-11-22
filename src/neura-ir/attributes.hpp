@@ -64,6 +64,10 @@ const AttributeInfo* find_attribute_info(std::uint16_t id);
 const AttributeInfo& attribute_info(AttributeId id);
 
 // Payload values.
+const IrAttributeValue* literal_parameter_default(const IrProgram& program, SymbolId parameter);
+bool has_nil_parameter_default(const IrProgram& program, SymbolId parameter);
+void set_nil_parameter_default(IrSymbol& parameter);
+
 IrAttributeValue attribute_bool(bool value);
 IrAttributeValue attribute_signed(std::int64_t value);
 IrAttributeValue attribute_unsigned(std::uint64_t value);

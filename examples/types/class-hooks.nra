@@ -1,6 +1,6 @@
 // Class hook clauses (docs/design/Hooks030.md, Class hook clauses): a rule
 // about every reference of a class, where an accessor is a rule about one
-// field. The administrator's nil keeps its policy in a Session binding.
+// field. The administrator's nil keeps its policy when stored in Desk.current.
 let console = import:Std.Io.Console;
 let failure = import:Std.Core.Failure;
 let program = import:Std.Program;
@@ -28,16 +28,22 @@ let Admin = class:Session (
 );
 
 let Desk = class (
-    export let current: Session = new Session("guest");
+    export let current: class = nil;
+
+    export let init = func {
+        current = new Session("guest");
+    };
 );
 
 let App = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         let desk: Desk = new;
-        console.print_line(desk.current.user);
+        if (desk.current is guest: Session) {
+            console.print_line(guest.user);
+        }
         let admin: Admin = nil;
-        last current: Session = admin;
-        if (current == nil) {
+        desk.current = admin;
+        if (desk.current == nil) {
             console.print_line("no administrator");
         }
         return program.ExitCode.Ok;

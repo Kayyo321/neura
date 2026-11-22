@@ -348,7 +348,8 @@ struct IrBundleFile {
     std::string contents;
 };
 
-enum class NilState : std::uint8_t { NonNil, MaybeNil, Unknown };
+// The order is the join priority for flow and return summaries.
+enum class NilState : std::uint8_t { ProvedNonNil = 3, ContractNonNil, Unknown, MaybeNil };
 
 struct IrNilBinding {
     SymbolId binding;

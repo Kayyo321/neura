@@ -78,7 +78,8 @@ bool valid_nil_binding(const IrProgram& program, const IrNilBinding& record) {
 bool valid_nil_result(const IrProgram& program, const IrNilResult& record) {
     if (record.function >= program.symbols.size()) return false;
     const auto& symbol = program.symbols[record.function];
-    return symbol.kind == SymbolKind::Function && !symbol.external && symbol.has_body &&
+    return record.state >= NilState::ProvedNonNil && record.state <= NilState::MaybeNil &&
+        symbol.kind == SymbolKind::Function && !symbol.external && symbol.has_body &&
         (symbol.type.kind == TypeKind::Object || symbol.type.kind == TypeKind::TypeParameter) &&
         (record.state == NilState::MaybeNil ? !record.nil_return.file.empty() : record.nil_return.file.empty());
 }
@@ -800,10 +801,16 @@ public:
             seen.clear();
             for (std::uint32_t i = 0; i < results; ++i) {
                 const auto function = required_reference();
-                const auto state = static_cast<NilState>(tag(static_cast<std::uint8_t>(NilState::Unknown), "nil result"));
+                const auto kind = tag(static_cast<std::uint8_t>(NilState::MaybeNil), "nil result");
+                const bool legacy = kind < static_cast<std::uint8_t>(NilState::ProvedNonNil);
+                const auto state = legacy ? (kind == 1 ? NilState::MaybeNil : NilState::Unknown)
+                                          : static_cast<NilState>(kind);
                 IrNilResult record{function, state, span()};
                 if (!valid_nil_result(program, record) || !seen.insert(record.function).second)
                     fail("invalid or repeated nil result summary");
+                // Older summaries conflated proof with contracts and
+                // assumed a closed set of dispatch targets.
+                if (legacy) record = {function, NilState::Unknown, {}};
                 program.nil_results.push_back(std::move(record));
             }
         }

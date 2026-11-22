@@ -1,0 +1,55 @@
+let Item = class (
+    export last ready: bool = true;
+    export let refresh = func {};
+);
+
+let Holder = class (
+    export let next: Item = nil;
+);
+
+.Final
+let PropertyHolder = class (
+    export let next: Item = nil;
+        | get: nil;
+);
+
+.Final
+let Factory = class (
+    export let make = func -> Item => nil;
+);
+
+let inferred_binding = func(entry: Item = nil) -> bool {
+    let state = entry.ready;  // W0006 entry nil-default
+    return state;
+};
+
+let typed_binding = func(entry: Item = nil) -> bool {
+    let state: bool = entry.ready;  // W0006 entry nil-default
+    return state;
+};
+
+let typed_return = func(entry: Item = nil) -> bool {
+    return entry.ready;  // W0006 entry nil-default
+};
+
+let use = func(value: bool) -> bool => value;
+
+let typed_argument = func(entry: Item = nil) -> bool {
+    return use(entry.ready);  // W0006 entry nil-default
+};
+
+let discard_access = func(entry: Item = nil) {
+    entry.refresh();  // W0006 entry nil-default
+};
+
+let read_field = func(holder: Holder) -> bool {
+    return holder.next.ready;  // W0006 holder.next initialized-nil
+};
+
+let read_method_result = func(factory: Factory) -> bool {
+    return factory.make().ready;  // W0006 factory.make() inferred-return
+};
+
+let read_property = func(property: PropertyHolder) -> bool {
+    return property.next.ready;  // W0006 property.next inferred-return
+};

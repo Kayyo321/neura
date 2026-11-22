@@ -385,7 +385,7 @@ void Lowering::record_defaults(SymbolId function, const Declaration& decl, Conte
 
 bool Lowering::has_default(SymbolId parameter) const {
     const auto& item = symbol(parameter);
-    return has_attribute(item, AttributeId::ParameterDefault) || has_attribute(item, AttributeId::ParameterDefaultVariant);
+    return literal_parameter_default(program_, parameter) || has_attribute(item, AttributeId::ParameterDefaultVariant);
 }
 
 IrNode Lowering::default_value(SymbolId parameter, const IrType& type, const Span& span) {
@@ -396,11 +396,11 @@ IrNode Lowering::default_value(SymbolId parameter, const IrType& type, const Spa
         if (has_enum_payload(program_, symbol(result.symbol).owner)) result.op = IrOp::EnumConstruct;
         return result;
     }
-    const auto* recorded = find_attribute(item, AttributeId::ParameterDefault);
-    if (!recorded || recorded->value.items.size() != 2)
+    const auto* recorded = literal_parameter_default(program_, parameter);
+    if (!recorded || recorded->items.size() != 2)
         throw Diagnostic(span, "parameter '" + item.name + "' has no default").with_code("E0899");
-    const auto& literal = recorded->value.items[1];
-    switch (recorded->value.items[0].integer) {
+    const auto& literal = recorded->items[1];
+    switch (recorded->items[0].integer) {
     case 0: {
         auto result = node(IrOp::Boolean, span, type);
         result.text = literal.integer != 0 ? "true" : "false";
@@ -409,7 +409,7 @@ IrNode Lowering::default_value(SymbolId parameter, const IrType& type, const Spa
     case 1:
     case 2: {
         auto result = node(IrOp::Integer, span, type);
-        result.text = recorded->value.items[0].integer == 1 ? std::to_string(attribute_signed_value(literal))
+        result.text = recorded->items[0].integer == 1 ? std::to_string(attribute_signed_value(literal))
                                                             : std::to_string(literal.integer);
         return result;
     }
@@ -459,6 +459,51 @@ Diagnostic Lowering::ambiguous_overload(const Expr& expr, std::size_t first, Sym
     return error;
 }
 
+void Lowering::inherit_nil_defaults(SymbolId method, SymbolId base) {
+    if (symbol(base).kind != SymbolKind::Function) return;
+    const auto& ours = symbol(method).parameters;
+    const auto& theirs = symbol(base).parameters;
+    if (ours.size() != theirs.size()) return;
+    for (std::size_t i = 0; i < ours.size(); ++i) {
+        if (!has_default(ours[i]) && class_reference(symbol(ours[i]).type) &&
+            has_nil_parameter_default(program_, theirs[i])) {
+            set_nil_parameter_default(symbol(ours[i]));
+        }
+    }
+}
+
+void Lowering::prepare_nil_defaults(SymbolId method) {
+    const auto& decl = *entries_[method].declaration;
+    const auto owner = symbol(method).owner;
+    const auto kind = symbol(owner).kind;
+    if (decl.cast_target || decl.static_member || decl.name == "init" || decl.name == "deinit" ||
+        (!class_or_interface(kind) && kind != SymbolKind::Module) ||
+        std::ranges::none_of(symbol(method).parameters, [&](SymbolId parameter) {
+            return class_reference(symbol(parameter).type) && !has_default(parameter);
+        })) return;
+
+    // Calls can resolve a method before its declaration's body is lowered.
+    // Prepare inherited nil defaults at signature resolution for those calls.
+    if (entries_[owner].resolution == Resolution::Resolving) return;
+    resolve(owner);
+    if (decl.override_member && symbol(owner).base != no_symbol) {
+        const auto base = member(symbol(owner).base, decl.name, true);
+        if (base != no_symbol && !static_member(base) && entries_[base].resolution != Resolution::Resolving) {
+            resolve(base);
+            inherit_nil_defaults(method, base);
+        }
+    }
+    if (!class_or_interface(kind)) return;
+    for (const auto& view : nominal_views(program_, symbol(owner).type)) {
+        if (view.symbol == owner || symbol(view.symbol).kind != SymbolKind::Interface) continue;
+        const auto required = own_member(view.symbol, decl.name);
+        if (required == no_symbol || static_member(required) ||
+            entries_[required].resolution == Resolution::Resolving) continue;
+        resolve(required);
+        inherit_nil_defaults(method, required);
+    }
+}
+
 // The parameter names of an override, or of an implementation of an
 // interface method, are those of the method it replaces, position by
 // position: a label means one parameter whatever the receiver's static type.
@@ -483,15 +528,15 @@ void Lowering::check_parameter_names(SymbolId method, SymbolId base) {
             error.help("rename it to '" + expected + "'");
         throw error;
     }
-    // The defaults too: a caller inserts the default of the method it names,
-    // so an override that changed one would mean a different call through a
-    // base reference.
+    // A missing literal nil default is inherited. Every other written
+    // default still has to match the one selected through the base type.
+    inherit_nil_defaults(method, base);
     for (std::size_t i = 0; i < ours.size() && i < theirs.size(); ++i) {
         const auto describe_default = [&](SymbolId parameter) -> std::optional<IrAttributeValue> {
             if (const auto* variant = find_attribute(symbol(parameter), AttributeId::ParameterDefaultVariant))
                 return variant->value;
-            if (const auto* literal = find_attribute(symbol(parameter), AttributeId::ParameterDefault))
-                return literal->value;
+            if (const auto* literal = literal_parameter_default(program_, parameter))
+                return *literal;
             return std::nullopt;
         };
         const auto mine = describe_default(ours[i]);

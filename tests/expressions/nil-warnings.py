@@ -53,8 +53,8 @@ def check_suggestions(values):
         replacements = [edit["replacement"] for suggestion in value["suggestions"] for edit in suggestion["edits"]]
         use = value["args"]["use"]
         if code == "W0006" and use in {"field", "method"}:
-            if "?." not in replacements:
-                raise AssertionError(f"missing optional access suggestion on line {line}")
+            if "?." in replacements:
+                raise AssertionError(f"optional access would change a used result on line {line}")
             if not any(replacement.startswith("if (") for replacement in replacements):
                 raise AssertionError(f"missing narrowing suggestion on line {line}")
         if use == "field" and value["args"]["binding"] == "maybe":
@@ -64,6 +64,43 @@ def check_suggestions(values):
             raise AssertionError(f"missing non-nil argument or assignment suggestion on line {line}")
         if cause == "inferred-return" and not any("can return nil here" in (s["label"] or "") for s in value["spans"]):
             raise AssertionError(f"missing cause at the inferred nil return for line {line}")
+
+
+def check_nil_fixes(neura, source, directory):
+    source_bytes = source.read_bytes()
+    lines = source.read_text(encoding="utf-8").splitlines()
+    values = warnings(neura, source)
+    assert sorted(map(key, values)) == expected_warnings(source)
+
+    guard = "narrow the reference with an if condition"
+    optional = "use optional access"
+    cases = {
+        "let state = entry.ready;": ("reference 'entry' may be nil", set()),
+        "let state: bool = entry.ready;": ("reference 'entry' may be nil", set()),
+        "return entry.ready;": ("reference 'entry' may be nil", {guard}),
+        "return use(entry.ready);": ("reference 'entry' may be nil", {guard}),
+        "entry.refresh();": ("reference 'entry' may be nil", {guard, optional}),
+        "return holder.next.ready;": ("field 'next' may be nil", {guard}),
+        "return factory.make().ready;": ("result of 'make' may be nil", {guard}),
+        "return property.next.ready;": ("field 'next' may be nil", {guard}),
+    }
+    for value in values:
+        line = lines[primary(value)["line"] - 1].split("//", 1)[0].strip()
+        message, expected_suggestions = cases.pop(line)
+        assert value["message"] == message, value
+        assert {item["message"] for item in value["suggestions"]} == expected_suggestions, value
+        assert any(help_text.startswith("guard the access") for help_text in value["help"]), value
+        for suggestion in value["suggestions"]:
+            edit, = suggestion["edits"]
+            fallback = "return;" if line == "entry.refresh();" else "return false;"
+            replacement = edit["replacement"].replace("<handle nil>", fallback).encode("utf-8")
+            start, length = edit["offset"], edit["length"]
+            fixed = directory / "fixed.nra"
+            fixed.write_bytes(source_bytes[:start] + replacement + source_bytes[start + length:])
+            remaining = warnings(neura, fixed)
+            assert len(remaining) == len(values) - 1, (suggestion, remaining)
+    assert not cases, cases
+    return len(values)
 
 
 def check_summaries(neura, directory):
@@ -90,6 +127,8 @@ let maybe = func() -> bool => library.absent().ready;
     values = warnings(neura, consumer)
     if len(values) != 1 or key(values[0]) != ("W0006", 3, 31, 16, "inferred-return"):
         raise AssertionError(f"imported return summary vanished or had the wrong span: {[key(v) for v in values]}")
+    if values[0]["message"] != "result of 'absent' may be nil":
+        raise AssertionError("a warning on an imported call must name its result")
     if not any(s["line"] == 4 and s["file"].endswith("library.nra") and "return nil" in (s["label"] or "")
                for s in values[0]["spans"]):
         raise AssertionError("an imported summary lost the original return location")
@@ -113,6 +152,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="neura-nil-warnings-") as directory:
         output = pathlib.Path(directory)
         check_summaries(neura, output)
+        fixes = check_nil_fixes(neura, source.with_name("nil-fixits.nra"), output)
         denied = output / "denied.nra"
         denied.write_text("""let Entity = class ( export let ready = true; );
 
@@ -122,7 +162,7 @@ let read = func(item: Entity = nil) -> bool => item.ready;
         values = warnings(neura, denied, "-Wno-nil-access", status=1)
         if len(values) != 1 or values[0]["severity"] != "error":
             raise AssertionError("a declaration's Deny must override -Wno-nil-access")
-    print(f"{len(expected)} use spans, warning controls, quick fixes, and imported summaries verified")
+    print(f"{len(expected)} use spans, {fixes} fix-it cases, warning controls, and imported summaries verified")
 
 
 if __name__ == "__main__":

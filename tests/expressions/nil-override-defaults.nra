@@ -1,0 +1,45 @@
+let program = import:Std.Program;
+let console = import:Std.Io.Console;
+
+let Entry = class (
+    export last ready = true;
+);
+
+let call_derived = func(value: Derived) -> bool => value.find();
+let call_implementation = func(value: Implementation) -> bool => value.find();
+
+let Base = class (
+    export let find = func(key: Entry = nil) -> bool => key == nil;
+);
+
+let Derived = class : Base (
+    export let.override find = func(key: Entry) -> bool => key == nil;
+);
+
+let Repeated = class : Derived (
+    export let.override find = func(key: Entry = nil) -> bool => key == nil;
+);
+
+let Finder = interface (
+    export let find = func(key: Entry = nil) -> bool;
+);
+
+let Implementation = class implements Finder (
+    export let find = func(key: Entry) -> bool => key == nil;
+);
+
+let App = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let derived: Derived = new Repeated();
+        let base: Base = derived;
+        let implementation: Implementation = new;
+        let interface_view: Finder = implementation;
+        let umbrella: class = derived;
+        if (base.find() && call_derived(derived) && interface_view.find() &&
+            call_implementation(implementation) && !derived.equals(nil) &&
+            !derived.equals() && !umbrella.equals()) {
+            console.println("inherited nil");
+        }
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,14 @@
+error[E0408]: no matching overload of 'content_equals'
+  --> $DIR/content-equals-missing-other.nra:3:12
+   |
+ 3 | let same = text.content_equals("example");
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ no alternative of 'content_equals' accepts this argument
+  ::: $ROOT/stdlib/std/core/string.nra:35:16
+   |
+35 |     export let content_equals = func(s: string, other: string) -> bool => s == other
+   |                -------------- this alternative takes (string, string)
+36 |         /// @brief Tests against a builder's current text. A nil builder compares unequal.
+37 |         or func(s: string, other: string_builder.StringBuilder) -> bool =>
+   |            ---- this alternative takes (string, StringBuilder)
+
+For more information about this error, try `neura explain E0408`.
