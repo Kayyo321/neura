@@ -20,6 +20,37 @@ This page specifies Neura's integer and floating-point types: their representati
 
 A literal is a sequence of decimal digits. It takes the integer type that its context expects. With no expected type it is `int32`. A [character literal](CoreLanguage#character-literals), such as `'A'`, is an integer literal of its byte's value with the same contextual typing, except that with no expected type it is `byte`. A literal outside its type's range is a compile-time error at the literal. A leading `-` belongs to the literal, so `-128` is a valid `int8` and `-9223372036854775808` a valid `int64`. A minus applied to an unsigned literal other than zero is out of range.
 
+### Digit separators and type suffixes
+
+A numeric literal may group its digits with `'` and may end in a suffix that names its type.
+
+<!-- example: check -->
+```neura
+let population = 120'000'000u64;
+let offset = 64'000s32;
+let level = 100s16;
+let ratio = 13.885f64;
+let unit = 1f32;
+```
+
+| Suffix | Type |
+| --- | --- |
+| `s8`, `s16`, `s32`, `s64` | `int8`, `int16`, `int32`, `int64` |
+| `u8`, `u16`, `u32`, `u64` | `uint8`, `uint16`, `uint32`, `uint64` |
+| `f16`, `bf16`, `f32`, `f64` | `float16`, `bfloat16`, `float32`, `float64` |
+
+A suffix names a width, so `s32` is `int32` and therefore also `int`. No suffix means the names `int`, `byte`, or `float` by themselves.
+
+- A suffixed literal has its suffix's type whatever the context expects. `let small: uint8 = 1u32;` is a type error, and in `1 + 2u8` the unsuffixed `1` takes `uint8` from the other operand.
+- An integer suffix applies to a literal written with integer digits only. On a literal with a fraction or an exponent it is [E0107](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0107.md).
+- A float suffix applies to a float literal and to a literal written with integer digits only, so `1f32` is the `float32` value 1.
+- A suffix that is not in the table is [E0105](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0105.md).
+- The range and rounding rules above still apply: `300u8` and `-1u32` are out of range, and a float literal is rounded once into its suffix's format.
+
+`'` is ignored when the compiler reads the value, so `120'000'000` is 120000000. A separator sits between two digits of the same part of the number: the integer part, the fraction, or the exponent. A separator that starts or ends a part, repeats (`1''0`), or touches `.`, `e`, a sign, or the suffix is [E0106](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0106.md).
+
+A literal with no suffix keeps the contextual typing described above.
+
 ### Integer arithmetic
 
 `+`, `-`, `*`, `/`, `%`, and unary `-` take two operands of the same integer type and produce that type. There are no implicit conversions between integer types. A literal operand takes the other operand's type.

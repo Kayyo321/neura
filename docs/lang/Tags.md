@@ -1,21 +1,21 @@
 # Tags
 
-A tag tells the compiler how to treat the declaration below it: that a function is deprecated, that a class may not be extended, that a call's result must be used, or that the optimizer should inline a function. Tags are written with `#` on the lines before the declaration.
+A tag tells the compiler how to treat the declaration below it: that a function is deprecated, that a class may not be extended, that a call's result must be used, or that the optimizer should inline a function. Tags are written with `.` or `#` on the lines before the declaration. The two sigils mean the same thing, and this page writes `.`.
 
 <!-- example: check -->
 ```neura
 let Shapes = module (
-    #Deprecated(as_of: "0.2.0", use_instead: area, reason: "it rounds the result")
+    .Deprecated(as_of: "0.2.0", use_instead: area, reason: "it rounds the result")
     export let rough_area = func(width: int32) -> int32 {
         return width * width;
     };
 
-    #[Inline(always: true), Since("0.2.0")]
+    .[Inline(always: true), Since("0.2.0")]
     export let area = func(width: int32) -> int32 {
         return width * width;
     };
 
-    #Internal
+    .Internal
     export let cache_size: int32 = 64;
 );
 ```
@@ -25,12 +25,13 @@ let Shapes = module (
 ## Syntax
 
 ```text
-tags := ( '#' tag | '#' '[' tag (',' tag)* [','] ']' )+
-tag  := Name [ '(' [ arg (',' arg)* [','] ] ')' ]
-arg  := [ident ':'] literal
+tags  := ( sigil tag | sigil '[' tag (',' tag)* [','] ']' )+
+sigil := '.' | '#'
+tag   := Name [ '(' [ arg (',' arg)* [','] ] ')' ]
+arg   := [ident ':'] literal
 ```
 
-A literal is a string, an integer or floating-point number (with an optional `-`), `true` or `false`, a qualified name such as `area` or `Shapes.area`, or a bracketed list of those. Tag names are PascalCase. `#[A, B]` is a group of tags on one line; several tag lines and groups may stack, and their tags apply together. Tags belong to the declaration that follows them:
+A literal is a string, an integer or floating-point number (with an optional `-`), `true` or `false`, a qualified name such as `area` or `Shapes.area`, or a bracketed list of those. Tag names are PascalCase. `.[A, B]` is a group of tags on one line; several tag lines and groups may stack, and their tags apply together. Tags belong to the declaration that follows them:
 
 - a `let`, `const`, or `last` declaration, with or without `export` and `static`, including functions, overload groups (the tags apply to every alternative), classes, interfaces, modules, enums, and singletons, at the top of a file, inside a module, class, interface, or [anonymous class](Types.md#anonymous-classes) body, or as a local binding inside a function body;
 - an enum variant, written before the variant's name: `#Likely Ready,`;
@@ -42,11 +43,11 @@ A field's [accessor clauses](Types.md#accessors) are part of its declaration: ta
 ```neura
 let Ticket = class (
     /// The code printed on the ticket.
-    #Deprecated(as_of: "0.2.0", reason: "print the label")
+    .Deprecated(as_of: "0.2.0", reason: "print the label")
     export let code = "T-1";
         | get: code;
 
-    #Note("set once by the constructor")
+    .Note("set once by the constructor")
     export last label: string;
 
     export let init = func(text: string) -> void {
@@ -59,9 +60,33 @@ let Ticket = class (
 
 A tag on a member of an anonymous class makes that body a class of its own where it is written, as a method or an accessor does, so two bodies whose fields differ only in their tags are never the same type ([Types](Types.md#anonymous-classes)).
 
+### Dot and hash sigils
+
+`.Pure` is the same tag as `#Pure`, and `.[Final, Since("0.3.1")]` is the same group as `#[Final, Since("0.3.1")]`. The compiler records no difference between them: a program builds to the same image whichever sigil it uses, and one file may use both.
+
+<!-- example: check -->
+```neura
+let Limits = module (
+    .Internal
+    export let cache_size: int32 = 64;
+
+    #Internal
+    export let page_size: int32 = 4096;
+
+    .[Inline(always: true), Since("0.3.1")]
+    export let pages = func(bytes: int32) -> int32 {
+        return bytes / page_size;
+    };
+);
+```
+
+A `.` starts a tag only where a declaration, an enum variant, or a parameter may begin. After an expression it is still member access, so a call chain continued on the next line with `.method()` is unchanged. A `.` in tag position that is not followed by a tag name or `[` is [E0271](../diagnostics/E0271.md).
+
+The standard library and the examples use dot tags. Diagnostics, `neura tags`, and generated documentation print a tag as `#Name` in this release, whichever sigil the source used. [`neura fmt --tag-style`](Tooling.md#editor-tooling) converts a file between the two.
+
 Tags cannot precede a statement such as a loop, a destructuring declaration, or the discard binding `_`; each is error `E0909`. A documentation comment may stand before the tags, among them, or between them and the declaration; the comment closest to the declaration documents it.
 
-An argument is positional, in the order of the tag's signature, or named, `name: value`; a positional argument cannot follow a named one. An argument without a default must be given. A parameter written `...` in the signature takes any number of positional values, and also accepts a list, so `#Allow(deprecated, experimental)` and `#Allow([deprecated, experimental])` are the same. A name argument (`name` in a signature) accepts a qualified name or a string. A warning argument accepts a warning's name, with `_` for `-` (`unused_result`), or its code (`W0003`), as a name or a string.
+An argument is positional, in the order of the tag's signature, or named, `name: value`; a positional argument cannot follow a named one. An argument without a default must be given. A parameter written `...` in the signature takes any number of positional values, and also accepts a list, so `.Allow(deprecated, experimental)` and `.Allow([deprecated, experimental])` are the same. A name argument (`name` in a signature) accepts a qualified name or a string. A warning argument accepts a warning's name, with `_` for `-` (`unused_result`), or its code (`W0003`), as a name or a string.
 
 ## How the compiler treats a tag
 
@@ -97,7 +122,7 @@ Every accepted tag is stored on its symbol as a NeuraIR `tag` attribute ([NeuraI
 <!-- example: warning: W0001 -->
 ```neura
 let Shapes = module (
-    #Deprecated(as_of: "0.2.0", use_instead: area)
+    .Deprecated(as_of: "0.2.0", use_instead: area)
     export let rough_area = func(width: int32) -> int32 {
         return width * width;
     };
@@ -130,7 +155,7 @@ A use of a deprecated declaration of the standard library warns in a user progra
 
 <!-- example: warning: W0003 -->
 ```neura
-#NoDiscard(reason: "the result says whether the write happened")
+.NoDiscard(reason: "the result says whether the write happened")
 let write = func(text: string) -> bool {
     return text.byte_length > 0;
 };
@@ -160,7 +185,7 @@ A generic function is checked with each set of type arguments it is used with, a
 
 <!-- example: check -->
 ```neura
-#Pure
+.Pure
 let squares = func(count: int32) -> int64[list] {
     let result: int64[list] = new;
     for (let i = 0; i < count; i++) {
@@ -197,7 +222,7 @@ Both tags are persisted in `.nir` files, so they hold for the programs that impo
 
 <!-- example: check -->
 ```neura
-#Synchronized
+.Synchronized
 let Tally = class (
     let count: int64 = 0;
 
@@ -228,13 +253,13 @@ let Tally = class (
 <!-- example: check -->
 ```neura
 let Api = module (
-    #Deprecated
+    .Deprecated
     export let old = func() -> int32 {
         return 1;
     };
 );
 
-#Allow(deprecated)
+.Allow(deprecated)
 let Compatibility = module (
     export let read = func() -> int32 {
         return Api.old();

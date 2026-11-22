@@ -65,8 +65,11 @@ SymbolId Lowering::hidden_local(const std::string& name, const IrType& type, con
     auto owner = context.owner;
     if (symbol(owner).kind == SymbolKind::Global || symbol(owner).kind == SymbolKind::Field)
         owner = symbol(owner).owner;
+    // `type` may be another symbol's type, which add() can move when the
+    // table grows: copy it first.
+    auto copied = type;
     const auto id = add(SymbolKind::Local, name, span, owner);
-    symbol(id).type = type;
+    symbol(id).type = std::move(copied);
     symbol(id).constant = true;
     return id;
 }
