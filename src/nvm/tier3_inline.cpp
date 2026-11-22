@@ -207,50 +207,17 @@ public:
         limit_ = std::min<std::uint64_t>(max_growth * own.ops, max_total_ops);
         total_ = own.ops;
         std::vector<std::uint32_t> chain{root.function};
-        inline_function(root, chain, 0, own);
+        inline_into(root, chain, 0, own);
         detail::remove_unreachable(root);
         detail::compact(root);
         detail::compute_budgets(root);
     }
 
 private:
-    struct KernelCounters {
-        bool requested = false;
-        bool inlined = false;
-    };
-
-    // A callee that charges K needs its caller to carry K through entries,
-    // calls, merges and frame states. Let the builder produce that SSA
-    // graph, then make the same inlining choices with the original budget.
-    Size inline_function(Function& f, std::vector<std::uint32_t>& chain, std::uint32_t level, Size base) {
-        const auto starting_total = total_;
-        KernelCounters first;
-        const auto own = inline_into(f, chain, level, base, first);
-        if (!first.requested) return own;
-        auto promoted = build(image_, *f.region, false, f.variant, true);
-        if (!promoted.program) return own;
-
-        const auto original_total = total_;
-        total_ = starting_total;
-        auto& ir = promoted.program->ir;
-        ir.variant = f.variant;
-        KernelCounters retry;
-        const auto grown = inline_into(ir, chain, level, base, retry);
-        // A dispatch profile may have changed before the second pass.
-        // Keep the original if the promoted graph never took a sqrt callee.
-        if (!retry.inlined) {
-            total_ = original_total;
-            return own;
-        }
-        f = std::move(ir);
-        return grown;
-    }
-
     // Inlines what the rules allow into `f`, at `level` below the root, with
     // the functions of `chain` (f's included) above it. Returns f's size
     // after its own inlining, starting from `own`.
-    Size inline_into(Function& f, std::vector<std::uint32_t>& chain, std::uint32_t level, Size own,
-                     KernelCounters& kernels) {
+    Size inline_into(Function& f, std::vector<std::uint32_t>& chain, std::uint32_t level, Size own) {
         if (level >= max_depth) return own;
         // The blocks that are exits of a Dispatch, and the Dispatch blocks.
         std::vector<std::uint8_t> dispatch_exit(f.blocks.size(), 0);
@@ -281,22 +248,16 @@ private:
             const auto& call = f.insts[site.call];
             const auto callee = prepare(static_cast<std::uint32_t>(call.imm), chain, level + 1, max_callee_blocks);
             if (!callee || !room(callee->size) || !compatible(f, site, *callee->ir)) continue;
-            const auto tracks_kernel = callee->ir->inline_kernels;
-            if (tracks_kernel && !f.inline_kernels) {
-                kernels.requested = true;
-                continue;
-            }
             splice(f, site, *callee->ir);
-            kernels.inlined = kernels.inlined || tracks_kernel;
             grow(callee->size);
         }
-        for (const auto d : dispatches) inline_dispatch(f, d, chain, level, room, grow, kernels);
+        for (const auto d : dispatches) inline_dispatch(f, d, chain, level, room, grow);
         return own;
     }
 
     template <typename Room, typename Grow>
     void inline_dispatch(Function& f, std::uint32_t d, std::vector<std::uint32_t>& chain, std::uint32_t level,
-                         const Room& room, const Grow& grow, KernelCounters& kernels) {
+                         const Room& room, const Grow& grow) {
         const auto dispatch = f.blocks[d].insts.back();
         const auto table_index = static_cast<std::uint32_t>(f.insts[dispatch].imm);
         if (table_index >= f.dispatch_tables.size() || table_index >= f.dispatch_origins.size()) return;
@@ -337,18 +298,10 @@ private:
             chosen.emplace_back(*site, *callee);
         }
         if (!room(added)) return;
-        const bool tracks_kernel = std::any_of(chosen.begin(), chosen.end(), [](const auto& choice) {
-            return choice.second.ir->inline_kernels;
-        });
-        if (tracks_kernel && !f.inline_kernels) {
-            kernels.requested = true;
-            return;
-        }
         for (const auto& [site, callee] : chosen) {
             splice(f, site, *callee.ir);
             grow(callee.size);
         }
-        kernels.inlined = kernels.inlined || tracks_kernel;
         if (!tests.empty()) {
             class_tests(f, d, tests);
             ++f.class_tested_dispatches;
@@ -385,7 +338,7 @@ private:
         if (!built.program) return std::nullopt;
         auto& ir = built.program->ir;
         chain.push_back(function);
-        const auto own = inline_function(ir, chain, level, base);
+        const auto own = inline_into(ir, chain, level, base);
         chain.pop_back();
         if (own.blocks > max_callee_blocks || own.ops > max_callee_ops || !inlinable(ir)) return std::nullopt;
         // Only entry 0 is ever entered in a caller.
@@ -440,9 +393,11 @@ private:
     }
 
     // The call's arguments fit the callee's parameters and its returned
-    // values fit the call's result.
+    // values fit the call's result; a callee with inline kernels goes only
+    // into a caller that has them (whose K is an SSA value).
     static bool compatible(const Function& f, const CallSite& site, const Function& g) {
         const auto& call = f.insts[site.call];
+        if (g.inline_kernels && !f.inline_kernels) return false;
         if (call.count != g.parameter_count || g.parameter_count > g.slot_types.size()) return false;
         for (std::uint32_t i = 0; i < call.count; ++i) {
             const auto& argument = f.insts[f.extras[call.extra + i]];

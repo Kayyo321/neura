@@ -187,8 +187,8 @@ constexpr std::size_t max_instructions = std::size_t{1} << 21;
 
 class Builder {
 public:
-    Builder(const nvr::Image& image, const tier2::Region& region, Variant variant, bool force_kernel_counter)
-        : image_(image), region_(region), variant_(variant), force_kernel_counter_(force_kernel_counter) {}
+    Builder(const nvr::Image& image, const tier2::Region& region, Variant variant)
+        : image_(image), region_(region), variant_(variant) {}
 
     BuildResult run(bool check) {
         BuildResult result;
@@ -251,7 +251,6 @@ private:
         f_->parameter_count = region_.parameter_count;
         f_->uses_float = region_.uses_float;
         f_->enters_region = region_.enters_region;
-        f_->inline_kernels = force_kernel_counter_;
         // A function with an inline kernel keeps K as an SSA value, and its
         // native code depends on the floating-point environment.
         for (const auto& op : region_.code) {
@@ -1751,7 +1750,6 @@ private:
     const nvr::Image& image_;
     const tier2::Region& region_;
     const Variant variant_;
-    const bool force_kernel_counter_;
     nvr::TypeSystem types_{image_};
     Function* f_ = nullptr;
     std::string error_;
@@ -1784,9 +1782,8 @@ private:
 
 } // namespace
 
-BuildResult build(const nvr::Image& image, const tier2::Region& program, bool check, Variant variant,
-                  bool force_kernel_counter) {
-    return Builder(image, program, variant, force_kernel_counter).run(check);
+BuildResult build(const nvr::Image& image, const tier2::Region& program, bool check, Variant variant) {
+    return Builder(image, program, variant).run(check);
 }
 
 namespace {

@@ -375,10 +375,10 @@ struct Function {
     // What the passes did, by kind (tier3_passes.cpp lists the names), for
     // the tests and for NEURA_TIER_DUMP.
     std::map<std::string, std::uint64_t> pass_counts;
-    // Whether K is an SSA value, for an inline kernel (a Sqrt) in this
-    // function or a callee being inlined. Budget, Helper, Call, Return and
-    // Leave name it and every frame state holds it. Otherwise the context's
-    // K stays what the activation chain has charged.
+    // Whether the function has inline kernels (a Sqrt): its K is an SSA
+    // value, which Budget, Helper, Call, Return and Leave name and every
+    // frame state holds. Without them K is not an SSA value at all, and the
+    // context's K stays what the activation chain has charged.
     bool inline_kernels = false;
     // Whether the function has an EnterRegion exit (NVR 1.7; from the image,
     // lifted or not, tier2::Region::enters_region): its frame may own storage
@@ -485,7 +485,7 @@ struct BuildResult {
 // Builds the IR of `program` (a function program of `image`) and verifies it
 // when `verify` is set (NEURA_TIER3_VERIFY=1, and debug builds).
 BuildResult build(const nvr::Image& image, const tier2::Region& program, bool verify,
-                  Variant variant = Variant::Standard, bool force_kernel_counter = false);
+                  Variant variant = Variant::Standard);
 
 // The violations of the verifier's rules (V1-V10) in `function`; empty when
 // it is well formed. Each message starts with the rule's name.
