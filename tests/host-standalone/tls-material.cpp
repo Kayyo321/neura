@@ -26,14 +26,22 @@ int fifo_reads = 0;
 int reopens = 0;
 // Simulates openat2 missing (ENOSYS), as before Linux 5.6.
 bool openat2_missing = false;
-// After the check's stat of this path, replace `swapped` with a link to `swap_target`.
-std::string swap_after_stat;
+// When the provider first opens this path, after its checks, replace
+// `swapped` with a link to `swap_target` just before the open runs.
+std::string swap_at_open;
 fs::path swapped, swap_target;
+void swap_if_watched(const char* name) {
+    if (swap_at_open.empty() || swap_at_open != name) return;
+    swap_at_open.clear();
+    fs::rename(swapped, fs::path(swapped) += ".checked");
+    fs::create_directory_symlink(swap_target, swapped);
+}
 }
 extern "C" int __real_open(const char* name, int flags, ...);
 extern "C" int __wrap_open(const char* name, int flags, ...) {
     if (watched_path == name) ++watched_opens;
     if (std::string_view(name).starts_with("/proc/self/fd/")) ++reopens;
+    swap_if_watched(name);
     int opened = 0;
     if (!(flags & O_CREAT) && (flags & O_TMPFILE) != O_TMPFILE) {
         opened = __real_open(name, flags);
@@ -55,24 +63,18 @@ extern "C" long __wrap_syscall(long number, ...) {
     long values[6];
     for (auto& value : values) value = va_arg(arguments, long);
     va_end(arguments);
+#ifdef SYS_openat2
     if (number == SYS_openat2) {
-        if (watched_path == reinterpret_cast<const char*>(values[1])) ++watched_opens;
+        const auto* name = reinterpret_cast<const char*>(values[1]);
+        if (watched_path == name) ++watched_opens;
+        swap_if_watched(name);
         if (openat2_missing) {
             errno = ENOSYS;
             return -1;
         }
     }
+#endif
     return __real_syscall(number, values[0], values[1], values[2], values[3], values[4], values[5]);
-}
-extern "C" int __real_stat(const char* name, struct stat* info);
-extern "C" int __wrap_stat(const char* name, struct stat* info) {
-    const auto result = __real_stat(name, info);
-    if (!swap_after_stat.empty() && swap_after_stat == name) {
-        swap_after_stat.clear();
-        fs::rename(swapped, fs::path(swapped) += ".checked");
-        fs::create_directory_symlink(swap_target, swapped);
-    }
-    return result;
 }
 extern "C" ssize_t __real_readlink(const char* name, char* bytes, size_t size);
 extern "C" ssize_t __wrap_readlink(const char* name, char* bytes, size_t size) {
@@ -190,7 +192,8 @@ int main() {
     assert(tls_material::read(capabilities, prefixes, path) == 0 && path == material);
 
     // A directory inside the prefix swapped for a link to an outside one
-    // after the path was checked cannot make the open follow it. With
+    // after the path was checked, just before the open, cannot make the open
+    // follow it. With
     // openat2 the open refuses the link; without it, the O_PATH handle is
     // checked before anything is opened for reading. Either way the outside
     // FIFO is never opened and an outside file is never opened for reading.
@@ -218,14 +221,14 @@ int main() {
                              Race{fifo_directory, true, host_error::invalid_input},
                              Race{file_directory, true, host_error::capability_denied}}) {
         path = path_text(directory / "credential.pem");
-        swap_after_stat = path;
+        swap_at_open = path;
         swapped = directory;
         swap_target = race.target;
         openat2_missing = race.without_openat2;
         fifo_reads = 0;
         reopens = 0;
         const auto result = tls_material::read(capabilities, prefixes, path);
-        assert(swap_after_stat.empty()); // The swap happened between the check and the open.
+        assert(swap_at_open.empty()); // The swap happened between the checks and the open.
         assert(fifo_reads == 0);
         assert(result == race.expected && reopens == 0);
         fs::remove(directory);

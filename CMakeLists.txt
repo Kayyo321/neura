@@ -2208,7 +2208,7 @@ if(BUILD_TESTING AND NEURA_SDK)
         neura_target_defaults(neura_tls_material_test)
         if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             target_link_options(neura_tls_material_test PRIVATE "LINKER:--wrap=open" "LINKER:--wrap=readlink"
-                "LINKER:--wrap=syscall" "LINKER:--wrap=stat")
+                "LINKER:--wrap=syscall")
         endif()
         add_test(NAME tls-material COMMAND neura_tls_material_test)
         set(h2_loopback_options)
