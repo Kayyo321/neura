@@ -325,11 +325,13 @@ export let H3 = module (
         };
 
         /// @brief Returns `Io(Unsupported)` because general HTTP/3 QUIC stream I/O is unavailable.
+        /// @stub needs general HTTP/3 QUIC stream I/O
         .[NoDiscard, Since("0.3.1")]
         export let send_frame = func(stream_id: uint64, frame_type: uint64, payload: uint8[list]) -> Result<Unit> =>
             Result<Unit>.Err(unavailable("HTTP/3 request streams are unavailable"));
 
         /// @brief Returns `Io(Unsupported)` because this value owns no native QUIC connection to close.
+        /// @stub needs general QUIC connection close
         .[NoDiscard, Since("0.3.1")]
         export let close = func(error_code: uint64) -> Result<Unit> =>
             Result<Unit>.Err(unavailable("HTTP/3 connection close is unavailable"));
@@ -341,6 +343,7 @@ export let H3 = module (
     /// @brief Returns `Io(Unsupported)` because HTTP/3 connection establishment, control streams and QPACK
     /// state are unavailable. The DNS-over-QUIC provider is not a general HTTP/3 transport. No connection is
     /// opened and no request leaves the process.
+    /// @stub needs general QUIC transport, HTTP/3 control streams and QPACK state
     .[NoDiscard, Since("0.3.1")]
     export let connect = func(authority: string, settings: Settings) -> Result<H3Connection> =>
         Result<H3Connection>.Err(unavailable("HTTP/3 connection establishment is unavailable"));
@@ -348,11 +351,13 @@ export let H3 = module (
     /// @brief Returns `Io(Unsupported)` because QPACK field compression is unavailable.
     /// Since 0.3.1 this returns `Result<uint8[list]>` so callers can handle unavailable compression without
     /// trapping; the former unwrapped byte-list result never produced a value.
+    /// @stub QPACK field compression is unavailable
     .[NoDiscard, Since("0.3.1")]
     export let encode_field_section = func(fields: header_map.Headers) -> Result<uint8[list]> =>
         Result<uint8[list]>.Err(unavailable("QPACK field compression is unavailable"));
 
     /// @brief Returns `Io(Unsupported)` because QPACK field decompression is unavailable.
+    /// @stub QPACK field decompression is unavailable
     .[NoDiscard, Since("0.3.1")]
     export let decode_field_section = func(encoded: uint8[list]) -> Result<header_map.Headers> =>
         Result<header_map.Headers>.Err(unavailable("QPACK field decompression is unavailable"));

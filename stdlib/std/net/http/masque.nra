@@ -127,16 +127,19 @@ export let Masque = module (
         };
 
         /// @brief Returns `Io(Unsupported)` because MASQUE QUIC DATAGRAM transport is unavailable.
+        /// @stub needs HTTP/3 datagrams over QUIC
         .[NoDiscard, Since("0.3.1")]
         export let send_datagram = func(datagram: uint8[list]) -> Result<Unit> =>
             Result<Unit>.Err(unavailable("MASQUE datagram transport is unavailable"));
 
         /// @brief Returns `Io(Unsupported)` because MASQUE QUIC DATAGRAM transport is unavailable.
+        /// @stub needs HTTP/3 datagrams over QUIC
         .[NoDiscard, Since("0.3.1")]
         export let receive_datagram = func -> Result<uint8[list]> =>
             Result<uint8[list]>.Err(unavailable("MASQUE datagram transport is unavailable"));
 
         /// @brief Returns `Io(Unsupported)` because this value owns no native MASQUE tunnel to close.
+        /// @stub needs HTTP/3 request stream close
         .[NoDiscard, Since("0.3.1")]
         export let close = func -> Result<Unit> =>
             Result<Unit>.Err(unavailable("MASQUE tunnel close is unavailable"));
@@ -239,6 +242,7 @@ export let Masque = module (
 
     /// @brief Returns `Io(Unsupported)` because MASQUE needs HTTP/3 request streams and QUIC DATAGRAM
     /// transport. The DNS-over-QUIC provider supplies neither; no proxy connection is opened.
+    /// @stub needs HTTP/3 request streams and QUIC DATAGRAM transport
     .[NoDiscard, Since("0.3.1")]
     export let open = func(request: ConnectRequest) -> Result<Tunnel> =>
         Result<Tunnel>.Err(unavailable("MASQUE connection establishment is unavailable"));
