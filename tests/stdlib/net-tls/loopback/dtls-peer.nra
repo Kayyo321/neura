@@ -1,5 +1,6 @@
 let config = import:Std.Net.Tls.TlsConfig;
 let console = import:Std.Io.Console;
+let datagram = import:Std.Net.Socket.DatagramSocket;
 let duration = import:Std.Time.Duration;
 let errors = import:Std.Core.Error;
 let handshake = import:Std.Net.Tls.Handshake;
@@ -15,6 +16,37 @@ let unit = import:Std.Core.Unit;
 // dtls-loopback.py controls the application phase through stdin, after both
 // endpoints report READY. A relay never guesses when a handshake has finished.
 export let DtlsPeer = module:program.Entry (
+    // Inject a one-shot receive failure while leaving the underlying socket usable.
+    let FaultingDatagram = class implements datagram.DatagramSocket<socket_addr.SocketAddr> (
+        last wire: udp.UdpSocket;
+        let fail_next_read = false;
+
+        export let init = func(socket: udp.UdpSocket) {
+            wire = socket;
+        };
+
+        export let fail_read = func {
+            fail_next_read = true;
+        };
+
+        export let local_address = func -> result.Result<socket_addr.SocketAddr> => wire.local_address();
+        export let read_timeout = func -> duration.Duration => wire.read_timeout();
+        export let set_read_timeout = func(timeout: duration.Duration) => wire.set_read_timeout(timeout);
+        export let send_to = func(data: uint8[list], target: socket_addr.SocketAddr) -> result.Result<int> =>
+            wire.send_to(data, target);
+        export let close = func -> result.Result<unit.Unit> => wire.close();
+
+        export let receive_from = func(max: int) -> result.Result<datagram.Datagram<socket_addr.SocketAddr>> {
+            if (fail_next_read) {
+                fail_next_read = false;
+                return result.Result<datagram.Datagram<socket_addr.SocketAddr>>.Err(errors.Error.Io {
+                    kind: errors.IoErrorKind.ConnectionReset, message: "injected read failure", path: "",
+                });
+            }
+            return wire.receive_from(max);
+        };
+    );
+
     export let.override main = func(args: string[]) -> program.ExitCode {
         match (exercise(args)) {
             result.Result.Ok(text) => {
@@ -57,7 +89,12 @@ export let DtlsPeer = module:program.Entry (
             builder.set_server_name(args[5]);
             settings = builder.build_client()?;
         }
-        last opened = handshake.dtls13(settings, wire, socket_addr.parse(args[1])?);
+        last faulting_wire = new FaultingDatagram(wire);
+        let supplied: datagram.DatagramSocket<socket_addr.SocketAddr> = wire;
+        if (args[6] == "receive-error") {
+            supplied = faulting_wire;
+        }
+        last opened = handshake.dtls13(settings, supplied, socket_addr.parse(args[1])?);
         match (opened) {
             result.Result.Err(failure) => {
                 let _ = wire.close();
@@ -65,11 +102,38 @@ export let DtlsPeer = module:program.Entry (
             },
             result.Result.Ok(stream) => {
                 console.print_line("READY");
-                last outcome = exchange(stream, server, args[6]);
+                last outcome = exercise_open(stream, server, args[6], args[4], wire, faulting_wire);
                 let _ = stream.close();
                 return outcome;
             },
         }
+    };
+
+    let exercise_open = func(stream: transport.Transport<uint8[list], uint8[list]>, server: bool, scenario: string, ca: string,
+        wire: udp.UdpSocket, faulting_wire: FaultingDatagram) -> result.Result<string> {
+        if (not server && (scenario == "idle-read" || scenario == "receive-error")) {
+            last idle = scenario == "idle-read";
+            if (idle) {
+                wire.set_read_timeout(duration.of_millis(100));
+            } else {
+                faulting_wire.fail_read();
+            }
+            last attempted = stream.receive();
+            wire.set_read_timeout(duration.of_seconds(5));
+            last expected = idle ? errors.IoErrorKind.TimedOut : errors.IoErrorKind.ConnectionReset;
+            match (attempted) {
+                result.Result.Err(errors.Error.Io { kind, message, path }) => {
+                    if (kind != expected) {
+                        return result.Result<string>.Err(errors.custom("test.dtls.read", $"unexpected read error {kind}"));
+                    }
+                },
+                _ => {
+                    return result.Result<string>.Err(errors.custom("test.dtls.read", "expected an I/O error"));
+                },
+            }
+            console.print_line($"READ {expected.to_string()}");
+        }
+        return exchange(stream, server, scenario);
     };
 
     let barrier = func -> result.Result<unit.Unit> {

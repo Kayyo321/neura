@@ -34,6 +34,7 @@ import time
 WAIT = 15
 CASES = ("round-trip", "mutual", "wrong-hostname", "wrong-ca", "missing-client-certificate",
          "handshake-drop", "handshake-reorder", "duplicate", "truncate", "loss-reorder",
+         "idle-read", "receive-error",
          "client-timeout", "server-timeout", "denied-net", "openssl-server", "openssl-client",
          "key-update", "key-update-drop", "key-update-reorder")
 
@@ -322,7 +323,8 @@ def pair(runner, root, certificates, case, record=False):
                             client_cert if case == "mutual" else "", client_key if case == "mutual" else "",
                             wrong_ca if case == "wrong-ca" else cert,
                             "wrong.test" if case == "wrong-hostname" else "localhost",
-                            "loss-reorder" if case == "loss-reorder" else "round-trip", options)
+                            case if case in {"loss-reorder", "idle-read", "receive-error"}
+                            else "round-trip", options)
         if case in {"wrong-hostname", "wrong-ca"}:
             client.expect("ERROR PermissionDenied")
             client.finish()
@@ -332,6 +334,8 @@ def pair(runner, root, certificates, case, record=False):
         else:
             client.expect("READY")
             server.expect("READY")
+            if case in {"idle-read", "receive-error"}:
+                client.expect("READ TimedOut" if case == "idle-read" else "READ ConnectionReset")
             relay.arm(case if case in {"duplicate", "truncate", "loss-reorder"} else "plain")
             complete_pair(client, server, case)
             expected = ["RECEIVED second", "RECEIVED first"] if case == "loss-reorder" else [

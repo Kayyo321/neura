@@ -378,6 +378,11 @@ bool same_datagram_address(const BIO_ADDR* left, const BIO_ADDR* right) {
 
 // Zero is bounded as well: a quiet/lost peer cannot retain the scheduler indefinitely.
 constexpr std::int64_t dtls_default_timeout = 30000000000LL;
+constexpr int dtls_read_step = 1;
+// Abandons the pending operation after a failure outside the host (a socket
+// receive or send error): a read leaves the association usable; any other
+// unfinished operation may hold partial engine state and ends the engine.
+constexpr int dtls_abandon_step = 5;
 
 std::int64_t datagram_wait(TlsStream& stream) {
     auto wait = std::max<std::int64_t>(1,
@@ -603,11 +608,20 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
         const auto& inbound = args.at(2).bytes;
         const auto& message = args.at(5).bytes;
         const auto timeout = as_int64(args.at(6));
-        if (found == state->tls.end() || !found->second->datagram || operation < 0 || operation > 4 ||
+        if (found == state->tls.end() || !found->second->datagram || operation < 0 || operation > dtls_abandon_step ||
             inbound.size() > 65535 || message.size() > 16384 || timeout < 0 ||
             (operation != 2 && !message.empty())) return fail(host_error::invalid_input);
         auto& stream = *found->second;
         if (stream.terminal_error) return fail(stream.terminal_error);
+        if (operation == dtls_abandon_step) {
+            if (!inbound.empty()) return fail(host_error::invalid_input);
+            if (stream.pending_operation != -1 && stream.pending_operation != dtls_read_step)
+                stream.terminal_error = host_error::connection_reset;
+            stream.pending_operation = -1;
+            stream.key_update_started = false;
+            return HostCompletion::ok(tuple_value({int32_value(1), tuple_value({}), bytes_value({}), int64_value(0),
+                                                   scalar(stream.terminal_error)}));
+        }
         // DTLS application records are not fragmented like handshake messages.
         // Reject an oversized message before changing the pending operation.
         if (operation == 2 && (!stream.ssl || !stream.datagram_handshake_complete ||
@@ -618,17 +632,21 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
             stream.deadline = deadline_of(timeout ? timeout : dtls_default_timeout);
         }
         if (stream.pending_operation != operation) return fail(host_error::invalid_input);
-        if (Clock::now() >= stream.deadline) {
-            stream.terminal_error = host_error::timed_out;
-            return fail(stream.terminal_error);
-        }
         // Compare parsed numeric addresses, so IPv6 spelling cannot bypass filtering.
-        if (!inbound.empty()) {
-            auto sender = datagram_address(args.at(3).bytes, as_int32(args.at(4)));
-            if (same_datagram_address(sender.get(), stream.datagram_peer) &&
-                BIO_write(stream.datagram_wire, inbound.data(), static_cast<int>(inbound.size())) !=
-                    static_cast<int>(inbound.size())) return fail(host_error::other);
+        auto sender = inbound.empty() ? DatagramAddress(nullptr, BIO_ADDR_free)
+                                      : datagram_address(args.at(3).bytes, as_int32(args.at(4)));
+        const bool admitted = sender && same_datagram_address(sender.get(), stream.datagram_peer);
+        const bool expired = Clock::now() >= stream.deadline;
+        // A read that expires leaves the association usable; an unfinished
+        // handshake, write, close or key update does not. A peer datagram
+        // that arrived by the deadline is still given to the read once.
+        if (expired && (operation != dtls_read_step || !admitted)) {
+            if (operation == dtls_read_step) stream.pending_operation = -1;
+            else stream.terminal_error = host_error::timed_out;
+            return fail(host_error::timed_out);
         }
+        if (admitted && BIO_write(stream.datagram_wire, inbound.data(), static_cast<int>(inbound.size())) !=
+                            static_cast<int>(inbound.size())) return fail(host_error::other);
         ERR_clear_error();
         std::uint32_t failure = 0;
         int status = 0;
@@ -657,7 +675,7 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
             if (!failure) {
                 switch (operation) {
                 case 0: result = SSL_do_handshake(ssl); break;
-                case 1:
+                case dtls_read_step:
                     plaintext.resize(16384);
                     result = SSL_read(ssl, plaintext.data(), static_cast<int>(plaintext.size()));
                     plaintext.resize(result > 0 ? static_cast<std::size_t>(result) : 0);
@@ -686,7 +704,7 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
                     if (ERR_peek_error() == 0 && (reason == SSL_ERROR_WANT_READ || write_retry)) {
                         status = 0;
                         retry_output = write_retry;
-                    } else if (reason == SSL_ERROR_ZERO_RETURN && operation == 1) status = 2;
+                    } else if (reason == SSL_ERROR_ZERO_RETURN && operation == dtls_read_step) status = 2;
                     else if (SSL_get_verify_result(ssl) != X509_V_OK ||
                              ERR_GET_REASON(ERR_peek_last_error()) == SSL_R_PEER_DID_NOT_RETURN_A_CERTIFICATE)
                         failure = host_error::permission_denied;
@@ -696,7 +714,7 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
                 // A requested reciprocal update may be queued while read asks
                 // for application input. Flush it now instead of waiting for
                 // an application write. The read itself still needs input.
-                if (!failure && operation == 1 && status == 0 &&
+                if (!failure && operation == dtls_read_step && status == 0 &&
                     SSL_get_key_update_type(ssl) != SSL_KEY_UPDATE_NONE) {
                     const auto updated = SSL_do_handshake(ssl);
                     if (updated <= 0) {
@@ -729,6 +747,10 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
         else if (status != 0) {
             stream.pending_operation = -1;
             stream.key_update_started = false;
+        } else if (expired) {
+            // The late datagram completed no message (an ACK, a retransmission).
+            stream.pending_operation = -1;
+            return fail(host_error::timed_out);
         }
         return HostCompletion::ok(tuple_value({int32_value(status), tuple_value(std::move(outgoing)),
                                                bytes_value(std::move(plaintext)), int64_value(wait), scalar(failure)}));
