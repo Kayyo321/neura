@@ -239,7 +239,7 @@ export let Spiffe = module (
         return workload(jose.required_text(claims, "sub", "spiffe.claims")?, trust_domain);
     };
 
-    let source = func(clock: Clock) -> Clock {
+    let source = func(clock: Clock = nil) -> Clock {
         return clock unless clock == nil;
         return system_clock.create();
     };

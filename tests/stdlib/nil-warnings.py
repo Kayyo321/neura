@@ -12,10 +12,7 @@ import sys
 def main():
     neura = Path(sys.argv[1]).resolve()
     stdlib = Path(sys.argv[2]).resolve()
-    # The lead removes these exclusions after cleaning up Std.Net and Std.Crypto.
-    excluded = (stdlib / "std/net", stdlib / "std/crypto")
-    sources = sorted(source for source in stdlib.rglob("*.nra")
-                     if not any(source.is_relative_to(directory) for directory in excluded))
+    sources = sorted(stdlib.rglob("*.nra"))
     if not sources:
         raise SystemExit(f"no Neura standard-library sources under {stdlib}")
     environment = os.environ | {"NEURA_GPU": "off", "NO_COLOR": "1"}

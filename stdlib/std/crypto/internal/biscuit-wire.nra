@@ -797,10 +797,11 @@ export let BiscuitWire = module (
             blocks.append(decoded);
             last_block = block;
         }
-        if (not verify_proof(proof, last_block)) {
+        last final_block = last_block;
+        if (not final_block || not verify_proof(proof, final_block)) {
             return datalog.fail<Verified>("biscuit.proof", "Biscuit proof does not match the last block");
         }
-        return Result<Verified>.Ok(new Verified(blocks, wire_blocks, custom, scope_keys, used, last_block, key_id, proof));
+        return Result<Verified>.Ok(new Verified(blocks, wire_blocks, custom, scope_keys, used, final_block, key_id, proof));
     };
 
     /// @brief Reads an authenticated v3 token, resolving symbols only through the current block.
