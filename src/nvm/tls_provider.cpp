@@ -37,6 +37,7 @@
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 #include <openssl/x509v3.h>
+#include "dtls_internal.hpp"
 #include "tls_material.hpp"
 #endif
 
@@ -160,6 +161,7 @@ struct TlsStream {
     std::uint32_t terminal_error = 0;
     bool key_update_started = false;
     bool datagram_handshake_complete = false;
+    int datagram_write_retries = 0;
     bool write_closed = false;
     std::int64_t write_timeout = default_transfer_timeout;
     ~TlsStream() {
@@ -630,6 +632,7 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
         if (stream.pending_operation == -1) {
             stream.pending_operation = operation;
             stream.deadline = deadline_of(timeout ? timeout : dtls_default_timeout);
+            stream.datagram_write_retries = 0;
         }
         if (stream.pending_operation != operation) return fail(host_error::invalid_input);
         // Compare parsed numeric addresses, so IPv6 spelling cannot bypass filtering.
@@ -740,9 +743,15 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
             total += size;
             outgoing.push_back(bytes_value(std::move(packet)));
         }
-        // Draining output freed BIO capacity: resume a parked write before
-        // waiting for network input. Zero is an immediate retry, never infinity.
-        const auto wait = retry_output ? 0 : datagram_wait(stream);
+        // Draining output freed BIO capacity: resume a parked write at once.
+        // When OpenSSL keeps asking to retry, wait on the socket with backoff.
+        auto wait = datagram_wait(stream);
+        if (retry_output) {
+            wait = dtls_internal::write_retry_wait(stream.datagram_write_retries, !outgoing.empty(), wait);
+            stream.datagram_write_retries = std::min(stream.datagram_write_retries + 1, 1000);
+        } else {
+            stream.datagram_write_retries = 0;
+        }
         if (failure) stream.terminal_error = failure;
         else if (status != 0) {
             stream.pending_operation = -1;

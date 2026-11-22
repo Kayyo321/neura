@@ -7,6 +7,7 @@
 #include "cli/source_loader.hpp"
 #include "fixtures.hpp"
 #include "nvm/app_services.hpp"
+#include "nvm/dtls_internal.hpp"
 #include "nvm/generation_internal.hpp"
 #include "nvm/secret_services.hpp"
 #include "nvm/providers.hpp"
@@ -1288,6 +1289,24 @@ NEURA_TEST(host, socket_options_resolution_and_send_file) {
     }
     expect_error(nothing.call("neura.net.option.set", {i64(1), i32(3), i64(1)}), host_error::capability_denied,
                  "option denied");
+}
+
+// OpenSSL's repeated write-retry answer cannot be induced through the
+// provider, which drains its BIO on every call; check the schedule itself.
+NEURA_TEST(host, dtls_write_retry_waits_on_the_socket) {
+    using nvm::dtls_internal::write_retry_wait;
+    constexpr std::int64_t ms = 1'000'000;
+    check_equal(write_retry_wait(0, true, 30'000 * ms), std::int64_t{0}, "first retry after a drain is immediate");
+    check_equal(write_retry_wait(0, false, 30'000 * ms), ms, "a retry without drained output waits");
+    check_equal(write_retry_wait(1, true, 30'000 * ms), 2 * ms, "a repeated retry waits even after a drain");
+    check_equal(write_retry_wait(3, false, 30'000 * ms), 8 * ms, "the wait doubles");
+    check_equal(write_retry_wait(6, false, 30'000 * ms), 64 * ms, "the wait reaches 64 ms");
+    check_equal(write_retry_wait(999, false, 30'000 * ms), 64 * ms, "and stays there");
+    check_equal(write_retry_wait(5, false, 3 * ms), 3 * ms, "the protocol timer or deadline caps the wait");
+    check_equal(write_retry_wait(5, false, 1), std::int64_t{1}, "a nearly expired deadline is still a wait");
+    for (int retries = 1; retries < 50; ++retries) {
+        check(write_retry_wait(retries, true, 30'000 * ms) > 0, "only the first drained retry is immediate");
+    }
 }
 
 NEURA_TEST(host, entropy_comes_from_the_system_generator) {
