@@ -1489,6 +1489,9 @@ if(BUILD_TESTING AND NEURA_SDK)
     add_test(NAME parser-dot-tags COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/tags/dot_tags.py" "$<TARGET_FILE:neura>")
 
+    add_test(NAME source-tag-style COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check-tag-style.py" --neura "$<TARGET_FILE:neura>")
+
     add_test(NAME source-docs COMMAND "${CMAKE_COMMAND}"
         "-DNEURA=$<TARGET_FILE:neura>"
         "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/source-docs-tests"

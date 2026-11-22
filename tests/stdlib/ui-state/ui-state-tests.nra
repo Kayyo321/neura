@@ -4,7 +4,7 @@ let result = import:Std.Core.Result;
 let test = import:Std.Test;
 let ui = import:Std.Ui;
 
-#Immutable
+.Immutable
 let Stock = class (
     export last name: string;
     export last count: int32;

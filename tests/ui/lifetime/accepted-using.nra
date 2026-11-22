@@ -14,7 +14,7 @@ let first_bytes = func(path: paths.Path) -> Result<int> {
     }
 };
 
-#Synchronized
+.Synchronized
 let Log = class implements closeable.Closeable (
     let lines: int = 0;
     export let write = func(line: string) -> void {

@@ -4,7 +4,7 @@ error[E0608]: #ThreadSafe function 'clamp' is not task-safe: it reaches 'current
  6 |     return limit;
    |            ----- uses the reassignable binding 'limit' here
 ...
- 9 | #ThreadSafe
+ 9 | .ThreadSafe
    | ^^^^^^^^^^^ #ThreadSafe promises task safety
 10 | let clamp = func(value: int32) -> int32 {
 11 |     let most = current_limit();

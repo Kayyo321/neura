@@ -4,7 +4,7 @@ error[E0917]: #Pure function 'describe' is not pure: it reaches 'to_string', whi
  8 |         calls = calls + 1;
    |         ----- assigns the binding 'calls' here
 ...
-13 | #Pure
+13 | .Pure
    | ^^^^^ the function is marked #Pure here
 14 | let describe = func(tags: Tag[list]) -> string {
 15 |     return tags.to_string();

@@ -1,7 +1,7 @@
 // An instance of a class that extends a #NotThreadSafe class, given to a
 // spawned task (E0602): the instances stay in the task that holds them. The
 // label is at the tag on the base class.
-#NotThreadSafe
+.NotThreadSafe
 let Cursor = class (
     export let position: int64 = 0;
 );

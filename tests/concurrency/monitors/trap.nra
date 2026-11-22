@@ -5,7 +5,7 @@
 let console = import:Std.Io.Console;
 let program = import:Std.Program;
 
-#Synchronized
+.Synchronized
 let Budget = class (
     let left: int8 = 120;
 

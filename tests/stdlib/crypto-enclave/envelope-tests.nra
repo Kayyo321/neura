@@ -13,7 +13,7 @@ let vectors = import:EnvelopeVectors;
 let versioned = import:Std.Crypto.Enclave.VersionedKeyStore;
 
 let EnvelopeTests = module (
-    #NotThreadSafe
+    .NotThreadSafe
     let CountingStore = class implements versioned.VersionedKeyStore<memory.MemoryKeyHandle> (
         export last inner: memory.MemoryKeyStore = new;
         export let wraps: int = 0;

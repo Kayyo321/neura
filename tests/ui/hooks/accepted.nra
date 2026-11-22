@@ -78,7 +78,7 @@ let Linked = class (
     };
 );
 
-#Final
+.Final
 let Token = class (
     | get: new Token();
 );

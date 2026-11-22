@@ -3,7 +3,7 @@
 let Worker = class (
     let value: int64 = 0;
 
-    #Isolated
+    .Isolated
     export let increment = func() -> void {
         value += 1;
     };

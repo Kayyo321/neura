@@ -1,6 +1,6 @@
 // Overriding a #Final method (E0913).
 let Shape = class (
-    #Final
+    .Final
     export let sides = func() -> int32 {
         return 0;
     };

@@ -8,7 +8,7 @@ let mixed = func(a: int, b, c: string) -> string {
 let nested = func(
     // a comment before the first group
     first, second: [int, string][],
-    #Note("callbacks") f, g: func(int, int) -> int, // after a group
+    .Note("callbacks") f, g: func(int, int) -> int, // after a group
     rest: ...string
 ) -> int {
     return f(1, 2);

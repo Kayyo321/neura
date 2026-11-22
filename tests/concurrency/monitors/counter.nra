@@ -9,7 +9,7 @@ let console = import:Std.Io.Console;
 let program = import:Std.Program;
 
 /// One contribution: immutable, so tasks may share it.
-#Immutable
+.Immutable
 let Share = class (
     export last owner: string;
     export last amount: int64;
@@ -21,7 +21,7 @@ let Share = class (
 );
 
 /// A running total that tasks share.
-#Synchronized
+.Synchronized
 let Tally = class (
     let count: int64 = 0;
     let calls: int64 = 0;
@@ -54,7 +54,7 @@ let Tally = class (
     };
 );
 
-#ThreadSafe
+.ThreadSafe
 let contribute = func(tally: Tally, share: Share) -> int64 => tally.add_twice(share);
 
 let Main = module:program.Entry (

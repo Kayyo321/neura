@@ -1,5 +1,5 @@
 // Extending a #Final class (E0912).
-#Final
+.Final
 let Point = class (
     export let x: int32 = 0;
 );

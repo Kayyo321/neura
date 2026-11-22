@@ -1,7 +1,7 @@
 error[E0903]: #Since needs the argument 'version'
  --> $DIR/missing-argument.nra:2:1
   |
-2 | #Since
+2 | .Since
   | ^^^^^^ missing 'version'
   |
   = help: the signature is #Since(version: string)

@@ -11,7 +11,7 @@ let Entry = module:program.Entry (
 
     export let.override main = func(args: string[]) -> program.ExitCode {
         last value: int;
-        if (#Note("Count once") let value = next(); value == 1) {
+        if (.Note("Count once") let value = next(); value == 1) {
             console.print_line(value.to_string());
         }
 

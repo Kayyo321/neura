@@ -6,7 +6,7 @@ let result = import:Std.Core.Result;
 let test = import:Std.Test;
 let ui = import:Std.Ui;
 
-#Immutable
+.Immutable
 let Part = class (
     export last id: string;
     export last name: string;

@@ -2,7 +2,7 @@
 let console = import:Std.Io.Console;
 let program = import:Std.Program;
 let log: string = "";
-#Immutable
+.Immutable
 let Session = class (
     | set: { log += "s"; return value; };
 

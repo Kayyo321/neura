@@ -2,7 +2,7 @@ let console = import:Std.Io.Console;
 let program = import:Std.Program;
 
 let App = module:program.Entry (
-    #NoInline
+    .NoInline
     let calculate = func(zero: float64, rounds: int) -> int {
         let checked = 0;
         for (let i = 0; i < rounds; i = i + 1) {

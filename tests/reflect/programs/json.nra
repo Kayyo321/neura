@@ -15,11 +15,11 @@ let Account = class (
     export let owner: string = "";
     export let notes: string[list] = new;
     export let balance: int64 = 0;
-    #Sensitive
+    .Sensitive
     export let pin: string = "0000";
-    #Skip
+    .Skip
     export let cache: int32 = 9;
-    #SerialName("kind")
+    .SerialName("kind")
     export let shape: Shape = Shape.Dot;
     export let init = func { };
 );

@@ -3,7 +3,7 @@
 let Account = class (
     let balance: int64 = 0;
 
-    #Synchronized
+    .Synchronized
     export let deposit = func(amount: int64) -> int64 {
         balance = balance + amount;
         return balance;

@@ -21,11 +21,11 @@ let Account = class (
     export let owner: string = "";
     export let notes: string[list] = new;
     export let balance: int64 = 0;
-    #Sensitive
+    .Sensitive
     export let pin: string = "0000";
-    #Skip
+    .Skip
     export let cache: int32 = 9;
-    #SerialName("kind")
+    .SerialName("kind")
     export let shape: Shape = Shape.Dot;
     export let small: uint8 = 0;
     export let init = func { };
@@ -37,11 +37,11 @@ let Order = class (
     export let id: int64 = 0;
     export let items: string[list] = new;
     export let discount: Optional<float64> = Optional<float64>.None;
-    #SerialName("ship_to")
+    .SerialName("ship_to")
     export let address: Address = nil;
     export let status: Status = Status.Open;
     export let small: uint8 = 0;
-    #Skip
+    .Skip
     export let cache: int32 = 0;
 );
 
@@ -55,21 +55,21 @@ let policies = import:Std.Reflect.Core.ReflectPolicy;
 
 let Vault = class implements policies.Layout (
     export let name: string = "v";
-    #Sensitive
+    .Sensitive
     export let key: string = "k";
     let hidden: int32 = 3;
     export let init = func { };
 );
 
-let Login = record (user: string, #Sensitive password: string);
+let Login = record (user: string, .Sensitive password: string);
 
-#Sensitive
+.Sensitive
 let Token = class (
     export let raw: string = "t";
     export let init = func { };
 );
 
-let Mode = enum (#SerialName("fast") Quick, Slow);
+let Mode = enum (.SerialName("fast") Quick, Slow);
 
 let Session = class (
     export let user: string = "u";

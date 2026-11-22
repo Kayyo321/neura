@@ -2,13 +2,13 @@ let console = import:Std.Io.Console;
 let program = import:Std.Program;
 
 let App = module:program.Entry (
-    #NoInline
+    .NoInline
     let unpack = func(value: any) -> int => match.is (value) {
         number: int32 => number,
         _ => -100000,
     };
 
-    #NoInline
+    .NoInline
     let sum = func(
         v00: any,
         v01: any,

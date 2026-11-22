@@ -3,7 +3,7 @@
 let Counter = class (
     let count: int64 = 0;
 
-    #Synchronized
+    .Synchronized
     export let init = func(start: int64) {
         count = start;
     };

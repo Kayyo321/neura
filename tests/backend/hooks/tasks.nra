@@ -2,13 +2,13 @@ let program = import:Std.Program;
 let channels = import:Std.Concurrent.Channel;
 let guarded = import:Std.Concurrent.Guarded;
 
-#Immutable
+.Immutable
 let Session = class(
     | get: instance;
     | set: value;
 );
 
-#[Final, Immutable]
+.[Final, Immutable]
 let Token = class:Session();
 
 let nil_session = func -> Session {
