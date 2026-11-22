@@ -1134,10 +1134,10 @@ private:
                 if (in.state == none || in.state >= f_.states.size()) continue;
                 // The values the state writes into the frames.
                 std::vector<std::uint32_t> named;
-                for (std::uint32_t s = in.state, depth = 0; s != none && depth < 64; s = f_.states[s].caller, ++depth) {
+                for (std::uint32_t s = in.state, depth = 0; s < f_.states.size() && depth < 64; s = f_.states[s].caller, ++depth) {
                     const auto& state = f_.states[s];
                     for (std::uint32_t r = 0; r < state.slots.size(); ++r) {
-                        if (state.slots[r].kind == StateSlot::Kind::Value) {
+                        if (state.slots[r].kind == StateSlot::Kind::Value && state.slots[r].value < f_.insts.size()) {
                             named.push_back(static_cast<std::uint32_t>(state.slots[r].value));
                         }
                     }
@@ -1154,7 +1154,7 @@ private:
                 // A phi whose operands are one value (or itself) is that value
                 // (inlining leaves such phis for the passes to remove).
                 const auto same_value = [&](std::uint32_t v) {
-                    for (std::uint32_t depth = 0; depth < 64 && f_.insts[v].op == Op::Phi; ++depth) {
+                    for (std::uint32_t depth = 0; depth < 64 && v < f_.insts.size() && f_.insts[v].op == Op::Phi; ++depth) {
                         const auto& phi = f_.insts[v];
                         std::uint32_t only = none;
                         for (std::uint32_t j = 0; j < phi.count; ++j) {
@@ -1168,13 +1168,19 @@ private:
                     }
                     return v;
                 };
+                std::vector<std::uint32_t> canonical_named;
                 for (const auto v : live_after(live, b, k)) {
                     if (std::find(named.begin(), named.end(), v) != named.end()) continue;
-                    const auto source = same_value(v);
                     // An inlined frame can name an earlier phi on the same
-                    // chain, while a later self phi supplies the live value.
-                    if (std::any_of(named.begin(), named.end(), [&](auto id) { return same_value(id) == source; })) {
-                        continue;
+                    // chain. Canonicalize its values on the first alias check
+                    // and reuse them for the rest of this safepoint.
+                    if (!named.empty()) {
+                        if (canonical_named.empty()) {
+                            canonical_named.reserve(named.size());
+                            for (const auto id : named) canonical_named.push_back(same_value(id));
+                            std::sort(canonical_named.begin(), canonical_named.end());
+                        }
+                        if (std::binary_search(canonical_named.begin(), canonical_named.end(), same_value(v))) continue;
                     }
                     // The frame already holds an unchanged slot's value.
                     const auto written = written_before_.find(insts[k]);
