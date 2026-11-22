@@ -3,8 +3,8 @@
 // resolution through the system resolver, and sending a file to a socket.
 // They share the socket ID table of neura.net.*, so neura.net.read, write,
 // accept, local_port and close work on the streams and listeners they open.
-// None of them overlaps: in an image with tasks a waiting call holds up the
-// other tasks for at most its timeout.
+// Stream relay, copy-avoidance send and segmented send overlap through
+// readiness waits. Other waiting calls hold the scheduler for their timeout.
 
 #include "provider_internal.hpp"
 
@@ -1510,6 +1510,46 @@ constexpr int stream_send_flags =
     0;
 #endif
 
+constexpr int nonblocking_flags =
+#ifdef MSG_DONTWAIT
+    MSG_DONTWAIT;
+#else
+    0;
+#endif
+
+// Winsock has no MSG_DONTWAIT. Switch only for the duration of one scheduler
+// attempt, as neura.net.read/write do; no outstanding operation owns a buffer.
+struct NonblockingAttempt {
+    explicit NonblockingAttempt(NativeSocket socket) : descriptor(socket) {
+#ifdef _WIN32
+        ready = platform::set_nonblocking(descriptor);
+#endif
+    }
+    ~NonblockingAttempt() {
+#ifdef _WIN32
+        if (ready) platform::set_nonblocking(descriptor, false);
+#endif
+    }
+    NativeSocket descriptor;
+    bool ready = true;
+};
+
+// Adapt a nonblocking attempt for programs without tasks. Task images use
+// begin() directly, so waiting here never blocks their scheduler.
+HostCompletion finish_socket_operation(std::variant<HostCompletion, PendingOperation> started) {
+    if (auto* done = std::get_if<HostCompletion>(&started)) return std::move(*done);
+    auto& operation = std::get<PendingOperation>(started);
+    for (;;) {
+        const auto interest = std::get<PosixWait>(operation.wait_source).current();
+        const short events = interest.events == PosixWait::Events::Read ? platform::poll_in : platform::poll_out;
+        platform::PollItem item{static_cast<NativeSocket>(interest.descriptor), events, 0};
+        if (platform::poll(std::span(&item, 1), -1) < 0 && !platform::last_socket_error().interrupted()) {
+            return socket_failure();
+        }
+        if (auto done = operation.attempt(false)) return std::move(*done);
+    }
+}
+
 bool connected_stream(const StandardServices::Tables::Socket* socket) {
     return socket && !socket->pipe && !socket->listener && !socket->datagram;
 }
@@ -1567,143 +1607,78 @@ HostCompletion raw_open(StandardServices::Tables& table, std::int32_t family, st
     return HostCompletion::ok(int64_value(id));
 }
 
-#ifdef __linux__
-// splice(2) has no MSG_NOSIGNAL. Block SIGPIPE only on the calling thread
-// and consume the signal raised by this call before restoring its mask.
-ssize_t splice_to_socket(int source, int target, std::size_t count) {
-    sigset_t blocked;
-    sigemptyset(&blocked);
-    sigaddset(&blocked, SIGPIPE);
-    sigset_t previous;
-    const auto mask_error = pthread_sigmask(SIG_BLOCK, &blocked, &previous);
-    if (mask_error != 0) {
-        errno = mask_error;
-        return -1;
-    }
-    sigset_t pending;
-    const bool already_pending = sigpending(&pending) == 0 && sigismember(&pending, SIGPIPE) == 1;
-    const auto moved = ::splice(source, nullptr, target, nullptr, count, SPLICE_F_MOVE);
-    const auto error = errno;
-    if (moved < 0 && error == EPIPE && !already_pending) {
-        const timespec immediate{};
-        while (sigtimedwait(&blocked, nullptr, &immediate) < 0 && errno == EINTR) {}
-    }
-    pthread_sigmask(SIG_SETMASK, &previous, nullptr);
-    errno = error;
-    return moved;
+// Preserve the native distinction between EAGAIN and an actual ETIMEDOUT:
+// both map to typed TimedOut, but only readiness backpressure should park.
+std::optional<HostCompletion> nonblocking_failure() {
+    const auto error = platform::last_socket_error();
+    if (error.would_block() || error.interrupted()) return std::nullopt;
+    return socket_failure();
 }
-#endif
 
-// On platforms without splice, peek first and only consume the prefix the
-// destination accepted. A send error therefore leaves the source readable.
-HostCompletion relay_stream(NativeSocket from, NativeSocket to, std::int64_t count) {
-#ifdef __linux__
-    int ends[2];
-    if (::pipe2(ends, O_CLOEXEC) != 0) return socket_failure();
-    const ScopedSocket input{ends[0]};
-    const ScopedSocket output{ends[1]};
-    ssize_t moved;
-    do {
-        moved = ::splice(from, nullptr, output.descriptor, nullptr,
-                         static_cast<std::size_t>(std::min<std::int64_t>(count, 64 * 1024)), SPLICE_F_MOVE);
-    } while (moved < 0 && errno == EINTR);
-    if (moved < 0) return socket_failure();
-    ssize_t sent = 0;
-    while (sent < moved) {
-        const auto progress = splice_to_socket(input.descriptor, to, static_cast<std::size_t>(moved - sent));
-        if (progress < 0 && errno == EINTR) continue;
-        if (progress < 0) return sent > 0 ? HostCompletion::ok(int64_value(sent)) : socket_failure();
-        if (progress == 0) return HostCompletion::ok(int64_value(sent));
-        sent += progress;
-    }
-    return HostCompletion::ok(int64_value(sent));
-#else
+// Each attempt runs on the scheduler thread without a handoff between
+// peek, send and consume. Other pending reads cannot consume the peeked
+// prefix in the middle of an attempt. Holding references also prevents close
+// from recycling a descriptor. Embedders must not concurrently read the
+// runtime-owned descriptors (the same rule as neura.net.read).
+// Linux's private splice pipe cannot be cancelled safely after consuming
+// input: an unsent suffix would disappear when that pipe closes. Use the
+// bounded copy path until stream state can retain that suffix across calls.
+std::optional<HostCompletion> relay_stream(NativeSocket from, NativeSocket to, std::int64_t count) {
     const auto size = static_cast<int>(std::min<std::int64_t>(count, 64 * 1024));
     std::string buffer(static_cast<std::size_t>(size), '\0');
-    decltype(::recv(from, buffer.data(), 0, 0)) offered;
-    do {
-        offered = ::recv(from, buffer.data(), size, MSG_PEEK);
-    } while (offered < 0 && platform::last_socket_error().interrupted());
-    if (offered < 0) return socket_failure();
+    const auto offered = ::recv(from, buffer.data(), size, MSG_PEEK | nonblocking_flags);
+    if (offered < 0) return nonblocking_failure();
     if (offered == 0) return HostCompletion::ok(int64_value(0));
-    decltype(offered) sent;
-    do {
-        sent = ::send(to, buffer.data(), static_cast<int>(offered), stream_send_flags);
-    } while (sent < 0 && platform::last_socket_error().interrupted());
-    if (sent < 0) return socket_failure();
-    decltype(sent) consumed = 0;
+    const auto sent = ::send(to, buffer.data(), static_cast<int>(offered), stream_send_flags | nonblocking_flags);
+    if (sent < 0) return nonblocking_failure();
+    // Exactly this prefix remains readable: no scheduler operation or other
+    // runtime descriptor consumer runs between the peek and this receive.
+    std::int64_t consumed = 0;
     while (consumed < sent) {
-        const auto got = ::recv(from, buffer.data(), static_cast<int>(sent - consumed), 0);
+        const auto got = ::recv(from, buffer.data(), static_cast<int>(sent - consumed), nonblocking_flags);
         if (got < 0 && platform::last_socket_error().interrupted()) continue;
         if (got <= 0) return fail(host_error::connection_reset);
         consumed += got;
     }
     return HostCompletion::ok(int64_value(sent));
-#endif
 }
 
-HostCompletion send_zerocopy(NativeSocket descriptor, const std::string& bytes) {
+std::optional<HostCompletion> send_zerocopy(NativeSocket descriptor, const std::string& bytes) {
     if (bytes.empty()) return HostCompletion::ok(int32_value(0));
     if (bytes.size() > INT32_MAX) return fail(host_error::invalid_input);
 #ifdef _WIN32
-    GUID guid = WSAID_TRANSMITPACKETS;
-    LPFN_TRANSMITPACKETS transmit_packets = nullptr;
-    DWORD returned = 0;
-    if (::WSAIoctl(descriptor, SIO_GET_EXTENSION_FUNCTION_POINTER, &guid, sizeof guid, &transmit_packets,
-                   sizeof transmit_packets, &returned, nullptr, nullptr) != 0) {
-        return socket_failure();
-    }
-    if (transmit_packets == nullptr) return fail(host_error::unsupported);
-    Event done;
-    if (done.handle == nullptr) return fail(host_error::from_win32(::GetLastError()));
-    OVERLAPPED operation{};
-    operation.hEvent = done.handle;
-    TRANSMIT_PACKETS_ELEMENT packet{};
-    packet.dwElFlags = TP_ELEMENT_MEMORY;
-    packet.cLength = static_cast<ULONG>(bytes.size());
-    packet.pBuffer = const_cast<char*>(bytes.data());
-    if (!transmit_packets(descriptor, &packet, 1, 0, &operation, 0) &&
-        ::WSAGetLastError() != WSA_IO_PENDING) {
-        return socket_failure();
-    }
-    DWORD sent = 0;
-    DWORD flags = 0;
-    if (!::WSAGetOverlappedResult(descriptor, &operation, &sent, TRUE, &flags)) return socket_failure();
-    if (sent > INT32_MAX) return fail(host_error::other);
-    return HostCompletion::ok(int32_value(static_cast<std::int32_t>(sent)));
+    // A readiness-driven send has no outstanding OVERLAPPED referencing a
+    // caller buffer when cancellation destroys the pending operation.
+    // Copy avoidance is a hint; keep the send/count contract on Winsock.
+    const int sent = ::send(descriptor, bytes.data(), static_cast<int>(bytes.size()), 0);
+    if (sent < 0) return nonblocking_failure();
+    return HostCompletion::ok(int32_value(sent));
 #elif defined(__linux__) && defined(MSG_ZEROCOPY) && defined(SO_ZEROCOPY)
     const int enable = 1;
     if (::setsockopt(descriptor, SOL_SOCKET, SO_ZEROCOPY, &enable, sizeof enable) != 0) {
         return errno == ENOPROTOOPT || errno == EOPNOTSUPP ? fail(host_error::unsupported) : socket_failure();
     }
-    // Drain previous completion notices. Unmapping this private, immutable
-    // staging range after send cannot overwrite pages the kernel still pins.
-    // No Neura heap allocation is shared with the network stack.
-    alignas(cmsghdr) std::array<char, 256> control{};
-    msghdr notice{};
-    notice.msg_control = control.data();
-    while (true) {
-        notice.msg_controllen = control.size();
-        if (::recvmsg(descriptor, &notice, MSG_ERRQUEUE | MSG_DONTWAIT) < 0) break;
-    }
+    // The private immutable range can be unmapped after send: the kernel
+    // retains pinned pages, and no mutable Neura heap storage is shared.
     void* staging = ::mmap(nullptr, bytes.size(), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (staging == MAP_FAILED) return socket_failure();
     std::memcpy(staging, bytes.data(), bytes.size());
-    ssize_t sent;
-    do {
-        sent = ::send(descriptor, staging, bytes.size(), MSG_ZEROCOPY | stream_send_flags);
-    } while (sent < 0 && errno == EINTR);
+    const auto sent = ::send(descriptor, staging, bytes.size(), MSG_ZEROCOPY | stream_send_flags | nonblocking_flags);
     const auto error = errno;
     ::munmap(staging, bytes.size());
-    if (sent < 0) return fail(host_error::from_errno(error));
+    if (sent < 0) {
+        errno = error;
+        if (platform::last_socket_error().would_block() || platform::last_socket_error().interrupted()) {
+            return std::nullopt;
+        }
+        return fail(host_error::from_errno(error));
+    }
     return HostCompletion::ok(int32_value(static_cast<std::int32_t>(sent)));
 #else
     // The send contract remains usable when the platform has no copy-avoidance hint.
-    decltype(::send(descriptor, bytes.data(), 0, 0)) sent;
-    do {
-        sent = ::send(descriptor, bytes.data(), static_cast<int>(bytes.size()), stream_send_flags);
-    } while (sent < 0 && platform::last_socket_error().interrupted());
-    if (sent < 0) return socket_failure();
+    const auto sent = ::send(descriptor, bytes.data(), static_cast<int>(bytes.size()),
+                             stream_send_flags | nonblocking_flags);
+    if (sent < 0) return nonblocking_failure();
     return HostCompletion::ok(int32_value(static_cast<std::int32_t>(sent)));
 #endif
 }
@@ -1715,7 +1690,7 @@ bool set_native_option(NativeSocket socket, int level, int option, const Value& 
     return ::setsockopt(socket, level, option, reinterpret_cast<const char*>(&value), sizeof value) == 0;
 }
 
-HostCompletion send_segments(NativeSocket descriptor, sockaddr_storage& target, AddressLength length,
+std::optional<HostCompletion> send_segments(NativeSocket descriptor, sockaddr_storage& target, AddressLength length,
                              const std::string& bytes, int segment) {
     if (bytes.empty()) return HostCompletion::ok(int32_value(0));
     auto* address = reinterpret_cast<sockaddr*>(&target);
@@ -1727,14 +1702,15 @@ HostCompletion send_segments(NativeSocket descriptor, sockaddr_storage& target, 
         const DWORD segment_size = static_cast<DWORD>(segment);
         if (::getsockopt(descriptor, IPPROTO_UDP, UDP_SEND_MSG_SIZE, reinterpret_cast<char*>(&original), &size) == 0 &&
             set_native_option(descriptor, IPPROTO_UDP, UDP_SEND_MSG_SIZE, segment_size)) {
-            int sent;
-            do {
-                sent = ::sendto(descriptor, bytes.data(), static_cast<int>(bytes.size()), 0, address, length);
-            } while (sent < 0 && platform::last_socket_error().interrupted());
+            const int sent = ::sendto(descriptor, bytes.data(), static_cast<int>(bytes.size()),
+                                      nonblocking_flags, address, length);
             const int error = sent < 0 ? ::WSAGetLastError() : 0;
             if (!set_native_option(descriptor, IPPROTO_UDP, UDP_SEND_MSG_SIZE, original)) return socket_failure();
             if (sent >= 0) return HostCompletion::ok(int32_value(sent));
-            if (error != WSAEINVAL && error != WSAEMSGSIZE) return fail(host_error::from_wsa(error));
+            if (error != WSAEINVAL && error != WSAEMSGSIZE) {
+                ::WSASetLastError(error);
+                return nonblocking_failure();
+            }
         }
 #else
         alignas(cmsghdr) std::array<char, CMSG_SPACE(sizeof(std::uint16_t))> control{};
@@ -1752,23 +1728,22 @@ HostCompletion send_segments(NativeSocket descriptor, sockaddr_storage& target, 
         header->cmsg_len = CMSG_LEN(sizeof(std::uint16_t));
         const auto segment_size = static_cast<std::uint16_t>(segment);
         std::memcpy(CMSG_DATA(header), &segment_size, sizeof segment_size);
-        ssize_t sent;
-        do {
-            sent = ::sendmsg(descriptor, &message, 0);
-        } while (sent < 0 && errno == EINTR);
+        const auto sent = ::sendmsg(descriptor, &message, nonblocking_flags);
         if (sent >= 0) return HostCompletion::ok(int32_value(static_cast<std::int32_t>(sent)));
         if (errno != EINVAL && errno != EMSGSIZE && errno != ENOPROTOOPT && errno != EOPNOTSUPP) {
-            return socket_failure();
+            return nonblocking_failure();
         }
 #endif
     }
 #endif
     std::size_t total = 0;
-    while (total < bytes.size()) {
+    while (total < bytes.size() && total / static_cast<std::size_t>(segment) < 64) {
         const auto count = std::min<std::size_t>(static_cast<std::size_t>(segment), bytes.size() - total);
-        const auto sent = ::sendto(descriptor, bytes.data() + total, static_cast<int>(count), 0, address, length);
-        if (sent < 0 && platform::last_socket_error().interrupted()) continue;
-        if (sent < 0) return total == 0 ? socket_failure() : HostCompletion::ok(int32_value(static_cast<int>(total)));
+        const auto sent = ::sendto(descriptor, bytes.data() + total, static_cast<int>(count), nonblocking_flags, address, length);
+        if (sent < 0) {
+            if (total > 0) return HostCompletion::ok(int32_value(static_cast<int>(total)));
+            return nonblocking_failure();
+        }
         if (static_cast<std::size_t>(sent) != count) return fail(host_error::other);
         total += count;
     }
@@ -1972,7 +1947,8 @@ HostCompletion multicast_exchange(const std::string& bytes, std::int64_t window,
 
 } // namespace
 
-void add_socket_services(const Adder& add, StandardServices::Tables& tables, const Capabilities& capabilities) {
+void add_socket_services(const Adder& add, const OverlapAdder& overlap, StandardServices::Tables& tables,
+                         const Capabilities& capabilities) {
     add_socket_transport_services(add, tables, capabilities);
     auto* table = &tables;
     const auto* granted = &capabilities;
@@ -2058,8 +2034,11 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
             return read_datagram(socket->descriptor, std::min<std::size_t>(max, max_read_bytes), timeout);
         });
 
-    add({"neura.net.splice", 2, {int64(), int64(), int64()}, int64(), uint32()}, [=](const HostRequest& request) {
+    const FunctionService::Begin begin_relay = [=](const HostRequest& request)
+        -> std::variant<HostCompletion, PendingOperation> {
         if (!granted->net) return denied();
+        const auto from_id = as_int64(request.arguments.at(0));
+        const auto to_id = as_int64(request.arguments.at(1));
         const auto* from = find(request.arguments.at(0));
         const auto* to = find(request.arguments.at(1));
         const auto count = as_int64(request.arguments.at(2));
@@ -2067,31 +2046,99 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
             return fail(host_error::invalid_input);
         }
         if (count == 0) return HostCompletion::ok(int64_value(0));
-        return relay_stream(from->descriptor, to->descriptor, count);
-    });
-    add(signature("neura.net.send_zerocopy", {int64(), byte_list()}, int32()), [=](const HostRequest& request) {
-        if (!granted->net) return denied();
-        const auto* socket = find(request.arguments.at(0));
-        if (!connected_stream(socket)) return fail(host_error::invalid_input);
-        return send_zerocopy(socket->descriptor, request.arguments.at(1).bytes);
-    });
-    add(signature("neura.net.udp.send_segmented", {int64(), text(), int32(), byte_list(), int32()}, int32()),
-        [=](const HostRequest& request) {
-            if (!granted->net) return denied();
-            const auto* socket = find(request.arguments.at(0));
-            const auto& text = request.arguments.at(1).bytes;
-            const auto port = as_int32(request.arguments.at(2));
-            const auto& bytes = request.arguments.at(3).bytes;
-            const auto segment = as_int32(request.arguments.at(4));
-            sockaddr_storage target{};
-            AddressLength length = 0;
-            if (!socket || !socket->datagram || socket->raw || !usable_text(text) || !valid_port(port) ||
-                !numeric_address(text, port, target, length) || segment < 1 || segment > 65507 ||
-                bytes.size() > INT32_MAX) {
+        const auto input = hold_socket(from->descriptor);
+        const auto output = hold_socket(to->descriptor);
+        if (!input || !output) return socket_failure();
+        auto interest = std::make_shared<PosixWait::Interest>();
+        const auto attempt = [=](bool cancelled) -> std::optional<HostCompletion> {
+            if (!table->sockets.contains(from_id) || !table->sockets.contains(to_id)) {
                 return fail(host_error::invalid_input);
             }
-            return send_segments(socket->descriptor, target, length, bytes, segment);
-        });
+            if (cancelled) return cancelled_answer();
+            NonblockingAttempt source(input->descriptor), target(output->descriptor);
+            if (!source.ready || !target.ready) return socket_failure();
+            // Probe source first to choose the wait that can make progress.
+            char byte;
+            const auto available = ::recv(input->descriptor, &byte, 1, MSG_PEEK | nonblocking_flags);
+            *interest = {static_cast<std::intptr_t>(input->descriptor), PosixWait::Events::Read};
+            if (available < 0) {
+                if (platform::last_socket_error().would_block() || platform::last_socket_error().interrupted()) {
+                    return std::nullopt;
+                }
+                return socket_failure();
+            }
+            if (available == 0) return HostCompletion::ok(int64_value(0));
+            *interest = {static_cast<std::intptr_t>(output->descriptor), PosixWait::Events::Write};
+            return relay_stream(input->descriptor, output->descriptor, count);
+        };
+        if (auto done = attempt(false)) return *done;
+        PendingOperation operation;
+        operation.wait_source = PosixWait{{}, [interest] { return *interest; }};
+        operation.attempt = attempt;
+        return operation;
+    };
+    overlap({"neura.net.splice", 2, {int64(), int64(), int64()}, int64(), uint32()},
+            [=](const HostRequest& request) { return finish_socket_operation(begin_relay(request)); }, begin_relay);
+
+    const FunctionService::Begin begin_zerocopy = [=](const HostRequest& request)
+        -> std::variant<HostCompletion, PendingOperation> {
+        if (!granted->net) return denied();
+        const auto id = as_int64(request.arguments.at(0));
+        const auto* socket = find(request.arguments.at(0));
+        if (!connected_stream(socket)) return fail(host_error::invalid_input);
+        const auto held = hold_socket(socket->descriptor);
+        if (!held) return socket_failure();
+        if (request.arguments.at(1).bytes.size() > INT32_MAX) return fail(host_error::invalid_input);
+        const auto data = std::make_shared<const std::string>(request.arguments.at(1).bytes);
+        const auto attempt = [=](bool cancelled) -> std::optional<HostCompletion> {
+            if (!table->sockets.contains(id)) return fail(host_error::invalid_input);
+            if (cancelled) return cancelled_answer();
+            NonblockingAttempt nonblocking(held->descriptor);
+            if (!nonblocking.ready) return socket_failure();
+            return send_zerocopy(held->descriptor, *data);
+        };
+        if (auto done = attempt(false)) return *done;
+        PendingOperation operation;
+        operation.wait_source = PosixWait{{static_cast<std::intptr_t>(held->descriptor), PosixWait::Events::Write}};
+        operation.attempt = attempt;
+        return operation;
+    };
+    overlap(signature("neura.net.send_zerocopy", {int64(), byte_list()}, int32()),
+            [=](const HostRequest& request) { return finish_socket_operation(begin_zerocopy(request)); }, begin_zerocopy);
+
+    const FunctionService::Begin begin_segments = [=](const HostRequest& request)
+        -> std::variant<HostCompletion, PendingOperation> {
+        if (!granted->net) return denied();
+        const auto id = as_int64(request.arguments.at(0));
+        const auto* socket = find(request.arguments.at(0));
+        const auto& text = request.arguments.at(1).bytes;
+        const auto port = as_int32(request.arguments.at(2));
+        const auto& bytes = request.arguments.at(3).bytes;
+        const auto segment = as_int32(request.arguments.at(4));
+        sockaddr_storage target{};
+        AddressLength length = 0;
+        if (!socket || !socket->datagram || socket->raw || !usable_text(text) || !valid_port(port) ||
+            !numeric_address(text, port, target, length) || segment < 1 || segment > 65507 || bytes.size() > INT32_MAX) {
+            return fail(host_error::invalid_input);
+        }
+        const auto held = hold_socket(socket->descriptor);
+        if (!held) return socket_failure();
+        const auto data = std::make_shared<const std::string>(bytes);
+        auto attempt = [=](bool cancelled) mutable -> std::optional<HostCompletion> {
+            if (!table->sockets.contains(id)) return fail(host_error::invalid_input);
+            if (cancelled) return cancelled_answer();
+            NonblockingAttempt nonblocking(held->descriptor);
+            if (!nonblocking.ready) return socket_failure();
+            return send_segments(held->descriptor, target, length, *data, segment);
+        };
+        if (auto done = attempt(false)) return *done;
+        PendingOperation operation;
+        operation.wait_source = PosixWait{{static_cast<std::intptr_t>(held->descriptor), PosixWait::Events::Write}};
+        operation.attempt = attempt;
+        return operation;
+    };
+    overlap(signature("neura.net.udp.send_segmented", {int64(), text(), int32(), byte_list(), int32()}, int32()),
+            [=](const HostRequest& request) { return finish_socket_operation(begin_segments(request)); }, begin_segments);
     add(signature("neura.runtime.event_loop", {int32()}, void_type()), [=](const HostRequest& request) {
         if (!granted->net) return denied();
         return select_event_loop(as_int32(request.arguments.at(0)));

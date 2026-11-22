@@ -165,7 +165,7 @@ std::uint32_t windows_path_error(std::string_view path);
 #endif
 
 using Adder = std::function<void(HostSignature, FunctionService::Handler)>;
-// Adds version 1 and the cancellable version 2 of an overlapping service.
+// Adds version 1 and cancellable version 2, or an existing version 2 alone.
 using OverlapAdder = std::function<void(HostSignature, FunctionService::Handler, FunctionService::Begin)>;
 
 // The task clock reading `nanos` after `now`, without overflow.
@@ -190,7 +190,14 @@ void close_sockets(StandardServices::Tables& tables);
 // socket table.
 std::optional<std::uint32_t> set_socket_option(NativeSocket socket, std::int32_t option, std::int64_t value);
 std::optional<std::uint32_t> set_socket_options(NativeSocket socket, const HostValue& options, const HostValue& values);
-void add_socket_services(const Adder& add, StandardServices::Tables& tables, const Capabilities& capabilities);
+// A pending socket operation owns a descriptor/reference through its last attempt.
+struct SocketReference {
+    NativeSocket descriptor;
+    std::shared_ptr<void> owner;
+};
+std::optional<SocketReference> hold_socket(NativeSocket descriptor);
+void add_socket_services(const Adder& add, const OverlapAdder& overlap, StandardServices::Tables& tables,
+                         const Capabilities& capabilities);
 // TLS client and server streams (OpenSSL when built with NEURA_NVM_TLS).
 void add_tls_services(const Adder& add, StandardServices::Tables& tables, const Capabilities& capabilities,
                       const std::vector<ResolvedPath>& prefixes);

@@ -362,6 +362,11 @@ Started start_next(Connecting& connecting) {
 
 } // namespace
 
+std::optional<SocketReference> hold_socket(NativeSocket descriptor) {
+    auto owner = std::make_shared<HeldSocket>(descriptor);
+    return SocketReference{descriptor, std::move(owner)};
+}
+
 void add_net_services(const Adder& add, const OverlapAdder& overlap, StandardServices::Tables& tables,
                       const Capabilities& capabilities) {
     auto* sockets = &tables;
@@ -990,6 +995,12 @@ Started start_next(Connecting& connecting) {
 
 
 } // namespace
+
+std::optional<SocketReference> hold_socket(NativeSocket descriptor) {
+    auto owner = duplicate(descriptor);
+    if (!owner) return std::nullopt;
+    return SocketReference{owner->fd, std::move(owner)};
+}
 
 void add_net_services(const Adder& add, const OverlapAdder& overlap, StandardServices::Tables& tables,
                       const Capabilities& capabilities) {

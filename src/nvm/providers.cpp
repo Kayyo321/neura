@@ -1312,7 +1312,7 @@ StandardServices::StandardServices(ConsoleSink& output, ConsoleSink& error, Cons
         add_overlapping(std::move(signature), std::move(handler), std::move(begin));
     };
     add_net_services(adder, overlap, *tables_, capabilities_);
-    add_socket_services(adder, *tables_, capabilities_);
+    add_socket_services(adder, overlap, *tables_, capabilities_);
     add_tls_services(adder, *tables_, capabilities_, prefixes_);
     add_doq_services(adder, capabilities_, prefixes_);
     add_ffi_services(adder, *tables_, capabilities_);
@@ -1331,6 +1331,11 @@ void StandardServices::add(HostSignature signature, FunctionService::Handler han
 
 void StandardServices::add_overlapping(HostSignature signature, FunctionService::Handler handler,
                                        FunctionService::Begin begin) {
+    if (signature.version == 2) {
+        services_.push_back(std::make_unique<FunctionService>(std::move(signature), std::move(handler),
+                                                               std::move(begin), true));
+        return;
+    }
     auto cancellable = signature;
     cancellable.version = 2;
     services_.push_back(std::make_unique<FunctionService>(std::move(signature), handler, begin, false));
