@@ -108,6 +108,14 @@ let BigIntegerTests = module (
         check("2", b);
     };
 
+    let check_inverse = func(expected: string, value: big.BigInteger, modulus: big.BigInteger) -> void {
+        let inverse = value.mod_inverse(modulus);
+        if (inverse == nil) {
+            trap_with_message("expected a modular inverse");
+        }
+        check(expected, inverse);
+    };
+
     export let test_pow_gcd_mod = func() -> void {
         check("1", big.Zero.pow(0));
         check("0", big.Zero.pow(3));
@@ -121,9 +129,9 @@ let BigIntegerTests = module (
         check("0", of("4").mod_pow(of("13"), big.One));
         check("1", of("4").mod_pow(big.Zero, of("497")));
         check("6", of("-1").mod_pow(of("3"), of("7")));
-        check("5", of("3").mod_inverse(of("7")));
-        check("2", of("-3").mod_inverse(of("7")));
-        check("0", of("3").mod_inverse(big.One));
+        check_inverse("5", of("3"), of("7"));
+        check_inverse("2", of("-3"), of("7"));
+        check_inverse("0", of("3"), big.One);
         test.assert(of("2").mod_inverse(of("4")) == nil);
         test.assert(big.Zero.mod_inverse(of("5")) == nil);
     };

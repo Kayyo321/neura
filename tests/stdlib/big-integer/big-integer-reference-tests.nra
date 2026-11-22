@@ -182,7 +182,9 @@ let BigIntegerReferenceTests = module (
             let expected = reader.next();
             let inverse = a.mod_inverse(m);
             if (exists) {
-                test.assert(inverse != nil);
+                if (inverse == nil) {
+                    trap_with_message("expected a modular inverse from the reference vectors");
+                }
                 same("mod_inverse", expected, inverse);
             } else {
                 test.assert(inverse == nil);

@@ -108,7 +108,11 @@ let CoreTests = module (
         last circle = types.of_value(shape);
         test.assert_equal_string("Circle", circle.name);
         test.assert(circle.kind == kinds.TypeKind.Class);
-        test.assert_equal_string("Base", circle.base().name);
+        last base = circle.base();
+        if (not base) {
+            trap_with_message("Circle is missing its base descriptor");
+        }
+        test.assert_equal_string("Base", base.name);
         test.assert_equal_int32(1, circle.interfaces.length);
         test.assert(circle.derives_from(types.of<Shape>()));
         test.assert(circle.derives_from(types.of<Base>()));
@@ -117,16 +121,28 @@ let CoreTests = module (
         test.assert_equal_string("id", circle.fields[0].name);
         test.assert_equal_string("radius", circle.fields[1].name);
         last width = circle.field("width");
+        last label = circle.field("label");
+        if (not width || not label) {
+            trap_with_message("Circle is missing a field descriptor");
+        }
         test.assert(width.is_property());
         test.assert(members.flags(width).property);
-        test.assert_equal_string("px", test.assert_some(attributes.find(width.attributes, "Unit").argument("name")));
+        last unit = attributes.find(width.attributes, "Unit");
+        if (not unit) {
+            trap_with_message("width is missing its Unit attribute");
+        }
+        test.assert_equal_string("px", test.assert_some(unit.argument("name")));
         test.assert(attributes.has(circle.attributes, "Note"));
-        test.assert(!circle.field("label").writable());
+        test.assert(!label.writable());
         test.assert(members.visibility(width) == members.Visibility.Exported);
         last area = circle.method("area");
+        last scaled = circle.method("scaled");
+        if (not area || not scaled) {
+            trap_with_message("Circle is missing a method descriptor");
+        }
         test.assert(area.invocable);
         test.assert_equal_string("area() -> float64", area.to_string());
-        test.assert_equal_string("scaled(by: float64) -> Circle", circle.method("scaled").to_string());
+        test.assert_equal_string("scaled(by: float64) -> Circle", scaled.to_string());
         test.assert_equal_int32(1, members.properties(circle).length);
     };
 

@@ -14,8 +14,12 @@ from a `.nir` module, and without names and a source map, each at the
 default tier and at tier 0. A program that traps keeps the output printed
 before the trap.
 
+A suite can record deliberate nil diagnostics in `nil-warnings.json`.
+Map each source name to warning codes with their primary lines and columns.
+
 Usage: equivalence.py <neura> <directory>
 """
+import json
 import os
 import pathlib
 import subprocess
@@ -111,6 +115,29 @@ class EquivalenceTests(unittest.TestCase):
                             self.assertEqual(result.stdout, expected_stdout)
                             if trap:
                                 self.assertIn(trap, result.stderr)
+
+    def test_nil_warning_expectations(self):
+        manifest = DIRECTORY / 'nil-warnings.json'
+        if not manifest.is_file():
+            self.skipTest('this equivalence suite does not record nil warnings')
+
+        expected = json.loads(manifest.read_text(encoding='utf-8'))
+        sources = sorted(DIRECTORY.glob('*.nra'))
+        self.assertLessEqual(expected.keys(), {source.name for source in sources})
+        for source in sources:
+            with self.subTest(program=source.name):
+                checked = run('check', '--error-format=json', str(source))
+                self.assertEqual(checked.returncode, 0, checked.stderr)
+                observed = []
+                for line in checked.stderr.splitlines():
+                    if not line.startswith('{'):
+                        continue
+                    diagnostic = json.loads(line)
+                    if diagnostic['code'] not in {'W0006', 'W0007'}:
+                        continue
+                    primary = next(span for span in diagnostic['spans'] if span['primary'])
+                    observed.append([diagnostic['code'], primary['line'], primary['column']])
+                self.assertEqual(sorted(observed), sorted(expected.get(source.name, [])))
 
     def test_default_images_differ_only_in_what_records_the_source(self):
         # The grouped spelling is a different text, so the default image,

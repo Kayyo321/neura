@@ -45,7 +45,7 @@ let ProgramHelpers = module:program.Entry (
         return node;
     };
 
-    let weigh = func(node: Node) -> int64 {
+    let weigh = func(node: Node = nil) -> int64 {
         let total: int64 = 0;
         let at = node;
         while (at != nil) {

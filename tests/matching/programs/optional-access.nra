@@ -34,15 +34,16 @@ let show = func(name: Optional<string>) -> string => match (name) {
     Optional.Some(text) => "Some(" + text + ")",
 };
 
-let owner_name = func(pet: Pet) -> string => pet?.owner?.name ?? "nobody";
+let owner_name = func(pet: Pet = nil) -> string => pet?.owner?.name ?? "nobody";
 
 export let Main = module : program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         let none: Pet = nil;
         let pet = new Pet();
         let owned = new Pet();
-        owned.owner = new Owner();
-        owned.owner.name = "ada";
+        last owner = new Owner();
+        owned.owner = owner;
+        owner.name = "ada";
         console.print_line(show(none?.rename(next("a"))));
         console.print_line(show(pet?.rename(next("b"))));
         console.print_line(match (pet?.owner) {
@@ -65,7 +66,11 @@ export let Main = module : program.Entry (
         console.println("{}", total + 1);
         let a: Owner = nil;
         let b: Owner = nil;
-        console.print_line((a ?? b ?? owned.owner).name);
+        last first = a ?? b ?? owned.owner;
+        if (not first) {
+            trap_with_message("expected an owner");
+        }
+        console.print_line(first.name);
         console.print_line((owned.owner ?? (new Owner())).name);
         let ages = pet?.age ?? -1;
         console.println("{} {}", ages, none?.age ?? -1);

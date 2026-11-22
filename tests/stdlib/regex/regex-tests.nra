@@ -55,6 +55,13 @@ let RegexTests = module (
         return values;
     };
 
+    let require_match = func(m: regex.RegexMatch = nil) -> regex.RegexMatch {
+        if (m == nil) {
+            trap_with_message("expected the regex to match");
+        }
+        return m;
+    };
+
     export let test_value_members = func {
         let first = compiled("(?<part>a)");
         let second = compiled("(?<part>a)");
@@ -63,8 +70,8 @@ let RegexTests = module (
         test.assert_equal_string("(?<part>a)", first.to_string());
         test.assert(!(first === regex_check.compile_flags("(?<part>a)", 1)));
 
-        let a = first.find("ab");
-        let b = second.find("ab");
+        let a = require_match(first.find("ab"));
+        let b = require_match(second.find("ab"));
         test.assert(a === b);
         test.assert(a.hash_code() == b.hash_code());
         test.assert_equal_string("a", a.to_string());
@@ -197,7 +204,7 @@ let RegexTests = module (
         let deep = strings.repeat("(", 250) + "a" + strings.repeat(")", 250);
         let nested = compiled(deep);
         test.assert_equal_int32(250, nested.group_count);
-        test.assert_equal_string("a", test.assert_some<string>(nested.find("xa").group(250)));
+        test.assert_equal_string("a", test.assert_some<string>(require_match(nested.find("xa")).group(250)));
         out_of_range(strings.repeat("(?:", 251) + "a" + strings.repeat(")", 251), 750, "group nesting exceeds 250");
         out_of_range("(" + deep + ")", 250, "group nesting exceeds 250");
         // Sibling groups do not nest.
@@ -209,7 +216,7 @@ let RegexTests = module (
         test.assert_equal_string("(?<year>\\d{4})-(\\d\\d)(?:-(?P<day>\\d\\d))?", r.pattern);
         test.assert_equal_int32(3, r.group_count);
         test.assert_equal_int32(0, compiled("a(?:b)c").group_count);
-        let m = r.find("date: 2024-05, then 1999-12-31");
+        let m = require_match(r.find("date: 2024-05, then 1999-12-31"));
         test.assert_equal_int32(6, m.start);
         test.assert_equal_int32(13, m.end);
         test.assert_equal_string("2024-05", m.text());
@@ -223,12 +230,12 @@ let RegexTests = module (
         test.assert_equal_int32(6, m.group_start(1));
         test.assert_equal_int32(11, m.group_start(2));
         test.assert_equal_int32(-1, m.group_start(3));
-        let second = r.find_from("date: 2024-05, then 1999-12-31", m.end);
+        let second = require_match(r.find_from("date: 2024-05, then 1999-12-31", m.end));
         test.assert_equal_string("1999-12-31", second.text());
         test.assert_equal_string("31", test.assert_some<string>(second.named_group("day")));
         test.assert_equal_int32(28, second.group_start(3));
         // A group that matched empty is Some(""), not None.
-        let empty = compiled("(a*)b").find("b");
+        let empty = require_match(compiled("(a*)b").find("b"));
         test.assert_equal_string("", test.assert_some<string>(empty.group(1)));
         test.assert_equal_int32(0, empty.group_start(1));
     };
@@ -237,24 +244,23 @@ let RegexTests = module (
         let r = compiled("é+");
         test.assert(r.find("abc") == nil);
         test.assert(r.find("") == nil);
-        let m = r.find("aéé🙂é");
+        let m = require_match(r.find("aéé🙂é"));
         test.assert_equal_int32(1, m.start);
         test.assert_equal_int32(5, m.end);
-        test.assert_equal_int32(9, r.find_from("aéé🙂é", 5).start);
-        test.assert_equal_int32(3, r.find_from("aéé🙂é", 3).start);
+        test.assert_equal_int32(9, require_match(r.find_from("aéé🙂é", 5)).start);
+        test.assert_equal_int32(3, require_match(r.find_from("aéé🙂é", 3)).start);
         test.assert(r.find_from("aéé🙂é", 11) == nil);
         // An empty match is a real object, including at the end.
         let star = compiled("x*");
-        let at_end = star.find_from("ab", 2);
-        test.assert(at_end != nil);
+        let at_end = require_match(star.find_from("ab", 2));
         test.assert_equal_int32(2, at_end.start);
         test.assert_equal_string("", at_end.text());
         // ^ and \b see the text before the offset.
         test.assert(compiled("^b").find_from("ab", 1) == nil);
         test.assert(compiled("\\bb").find_from("ab", 1) == nil);
-        test.assert_equal_int32(2, compiled("\\bb").find_from("a b", 1).start);
+        test.assert_equal_int32(2, require_match(compiled("\\bb").find_from("a b", 1)).start);
         let lines = regex_check.compile_flags("^b", 2);
-        test.assert_equal_int32(2, lines.find_from("a\nb", 1).start);
+        test.assert_equal_int32(2, require_match(lines.find_from("a\nb", 1)).start);
     };
 
     export let test_is_match_and_matches_fully = func() -> void {
@@ -263,7 +269,7 @@ let RegexTests = module (
         test.assert(!r.is_match("xyz"));
         // The preferred match of a|ab on "ab" is "a", but the whole input
         // still matches the pattern.
-        test.assert_equal_string("a", r.find("ab").text());
+        test.assert_equal_string("a", require_match(r.find("ab")).text());
         test.assert(r.matches_fully("ab"));
         test.assert(r.matches_fully("a"));
         test.assert(!r.matches_fully("abc"));

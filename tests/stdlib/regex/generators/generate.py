@@ -82,6 +82,9 @@ export let RegexCheck = module (
         if (all.length == 0) {
             test.assert(first == nil);
         } else {
+            if (first == nil) {
+                trap_with_message("expected find to return the first match");
+            }
             test.assert(spans(r, first).equals(spans(r, all[0])));
         }
         let pieces = r.split(input);

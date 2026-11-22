@@ -1715,6 +1715,12 @@ if(BUILD_TESTING AND NEURA_SDK)
     add_test(NAME expressions-nil-warnings COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressions/nil-warnings.py" "$<TARGET_FILE:neura>"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressions/nil-warnings.nra")
+    add_test(NAME expressions-nil-intentional COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressions/nil-intentional.py" "$<TARGET_FILE:neura>"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME stdlib-nil-warnings COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/nil-warnings.py" "$<TARGET_FILE:neura>"
+        "${CMAKE_CURRENT_SOURCE_DIR}/stdlib")
     # A range literal as a for-each source is counted without a region.
     add_test(NAME expressions-range-loop-stack COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressions/range-loop-stack.py" "$<TARGET_FILE:neura>")

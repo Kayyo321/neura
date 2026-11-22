@@ -11,6 +11,9 @@ export let Main = module:program.Entry (
             result.Result.Ok(r) => {
                 console.print_line("before");
                 let m = r.find("a");
+                if (m == nil) {
+                    trap_with_message("expected the group test input to match");
+                }
                 let value = m.named_group("y");
                 console.print_line("after");
             },

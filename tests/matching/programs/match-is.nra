@@ -32,7 +32,7 @@ let Other = class (
     export let value: int = 0;
 );
 
-let describe = func(value: class) -> string => match.is (value) {
+let describe = func(value: class = nil) -> string => match.is (value) {
     Circle => "a circle",
     shape: Shape if shape.sides > 4 => "a large shape with " + shape.sides.to_string() + " sides",
     shape: Shape => "a shape with " + shape.sides.to_string() + " sides",

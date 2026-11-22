@@ -23,10 +23,15 @@ let CollectorMarkOrder = module:program.Entry (
     };
 
     let sum = func(node: Node) -> int {
-        if (node.left == nil) {
+        last left = node.left;
+        if (not left) {
             return node.weight;
         }
-        return node.weight + sum(node.left) + sum(node.right);
+        last right = node.right;
+        if (not right) {
+            trap_with_message("expected both children");
+        }
+        return node.weight + sum(left) + sum(right);
     };
 
     let plant = func() -> Node[list] {

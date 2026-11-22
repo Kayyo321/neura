@@ -25,6 +25,9 @@ export let Main = module : program.Entry (
                 channels.Received.Value(value) => value,
                 _ => nil,
             };
+            if (not arrived) {
+                trap_with_message("the record did not arrive on the channel");
+            }
             console.print_line(measured.join().to_string() + " " + sent.join().to_string());
             console.print_line((arrived == path).to_string() + " " + arrived.to_string());
         }

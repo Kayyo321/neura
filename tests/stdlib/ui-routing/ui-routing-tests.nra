@@ -79,9 +79,13 @@ let UiRoutingTests = module (
         let host = new model.Host();
         host.start_at("/parts/7");
         let top = router.component();
+        test.assert(router.current_page() == nil);
         let root = mounted(host, "#app", top);
         test.assert_equal_string("render part 7", join(trace));
         last first_page = router.current_page();
+        if (not first_page) {
+            trap_with_message("the mounted router has no current page");
+        }
         host.click(1, top, router.on_link("/parts/new"));
         host.end_batch();
         host.back();
@@ -148,7 +152,11 @@ let UiRoutingTests = module (
                                  + "commit 2 on root 1: 2 renders", join(host.log));
         root.close();
         test.assert(!router.component().is_mounted());
-        test.assert(!router.current_page().is_mounted());
+        last last_page = router.current_page();
+        if (not last_page) {
+            trap_with_message("the router lost its last rendered page after closing");
+        }
+        test.assert(!last_page.is_mounted());
     };
 
     // Under history routing, a page that renders the router's links before the router mounts first writes them

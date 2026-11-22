@@ -59,7 +59,11 @@ let DynamicTests = module (
         // A field of a class type, nil and not nil.
         test.assert(value.field_named("owner").is_nil());
         value.set_field_named("owner", variants.of(new Point(1, 2)));
-        test.assert_equal_int32(2, counter.owner.y);
+        last owner = counter.owner;
+        if (not owner) {
+            trap_with_message("setting the owner left it nil");
+        }
+        test.assert_equal_int32(2, owner.y);
         value.set_field_named("owner", variants.of(nil as Point));
         test.assert(counter.owner == nil);
     };
@@ -144,14 +148,19 @@ let DynamicTests = module (
         counter.owner = new Point(5, 6);
         counter.names.append("z");
         last root = variants.of(counter);
-        last owner_index = root.descriptor().field("owner").index;
-        last names_index = root.descriptor().field("names").index;
-        last at = cursors.at(root).child(owner_index).child(1);
+        last descriptor = root.descriptor();
+        last owner_field = descriptor.field("owner");
+        last names_field = descriptor.field("names");
+        last count_field = descriptor.field("count");
+        if (not owner_field || not names_field || not count_field) {
+            trap_with_message("Counter is missing a field descriptor");
+        }
+        last at = cursors.at(root).child(owner_field.index).child(1);
         test.assert_equal_int32(6, at.value().get<int32>());
         test.assert_equal_string("int32", at.descriptor().name);
-        test.assert_equal_string("z", cursors.at(root).child(names_index).child(0).value().get<string>());
+        test.assert_equal_string("z", cursors.at(root).child(names_field.index).child(0).value().get<string>());
         last steps: int[list] = new;
-        steps.append(root.descriptor().field("count").index);
+        steps.append(count_field.index);
         new cursors.ValueCursorMut(root, steps).write(variants.of(11 as int32));
         test.assert_equal_int32(11, counter.count);
     };

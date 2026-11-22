@@ -10,7 +10,7 @@ let Item = class implements Readable (
     export let.override read = func() -> int => value;
 );
 
-let guard_return = func(item: Item) -> int {
+let guard_return = func(item: Item = nil) -> int {
     if (not item) {
         return 0;
     }
@@ -27,7 +27,7 @@ let guard_trap = func(item: Item) -> int {
 let Entry = module:program.Entry (
     let calls: int = 0;
 
-    let read_once = func(value: Readable) -> Readable {
+    let read_once = func(value: Readable = nil) -> Readable {
         calls += 1;
         return value;
     };

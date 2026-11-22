@@ -1,0 +1,13 @@
+warning[W0007]: argument for parameter 'next' may be nil
+  --> $DIR/accepted-records.nra:38:37
+   |
+37 | let Node = record (value: int, next: Node);
+   |                                ---- requires a non-nil reference
+38 | let chain = new Node(1, new Node(2, nil));
+   |                                     ^^^ may supply nil here
+   |
+   = help: test that the value is non-nil before passing or storing it
+help: provide a non-nil value
+   |
+38 | let chain = new Node(1, new Node(2, <non-nil value>));
+   |                                     ~~~~~~~~~~~~~~~

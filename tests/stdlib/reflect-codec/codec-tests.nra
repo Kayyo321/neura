@@ -199,11 +199,16 @@ let CodecTests = module (
     export let test_mutable_walk = func() -> void {
         last first = new Node();
         first.name = "a";
-        first.next = new Node();
-        first.next.name = "b";
+        last second = new Node();
+        second.name = "b";
+        first.next = second;
         new walks.WalkEngine().walk_mut(variants.of(first), new Upper());
         test.assert_equal_string("a!", first.name);
-        test.assert_equal_string("b!", first.next.name);
+        last next = first.next;
+        if (not next) {
+            trap_with_message("the mutable walk removed the next node");
+        }
+        test.assert_equal_string("b!", next.name);
     };
 
     export let test_schema = func() -> void {

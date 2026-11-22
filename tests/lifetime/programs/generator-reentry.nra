@@ -15,13 +15,18 @@ let GeneratorReentry = module:program.Entry (
     let looping = iterator() -> int {
         yield 1;
         console.print_line("advancing itself");
-        yield holder.items.next();
+        last items = holder.items;
+        if (not items) {
+            trap_with_message("expected a generator iterator");
+        }
+        yield items.next();
     };
 
     export let.override main = func(args: string[]) -> program.ExitCode {
-        holder.items = looping().iterator();
-        console.print_line(holder.items.next().to_string());
-        console.print_line(holder.items.next().to_string());
+        last items = looping().iterator();
+        holder.items = items;
+        console.print_line(items.next().to_string());
+        console.print_line(items.next().to_string());
         return program.ExitCode.Ok;
     };
 );

@@ -34,7 +34,7 @@ let first_square_above = func(limit: int) -> int {
     return -1;
 };
 
-let up_to = func(limit: Limit, fallback: int) -> string {
+let up_to = func(fallback: int, limit: Limit = nil) -> string {
     let text = "";
     for (let value in 0 ..= limit?.stop ?? fallback) {
         text = text + " " + value.to_string();
@@ -644,7 +644,7 @@ export let Main = module : program.Entry (
         {
             let limit = new Limit();
             limit.stop = 4;
-            compare("coalesced stop", up_to(nil, 2) + " /" + up_to(limit, 2), " 0 1 2 / 0 1 2 3 4");
+            compare("coalesced stop", up_to(2, nil) + " /" + up_to(2, limit), " 0 1 2 / 0 1 2 3 4");
             compare("return", " " + first_square_above(10).to_string() + " " + first_square_above(-1).to_string(),
                 " 4 -1");
         }

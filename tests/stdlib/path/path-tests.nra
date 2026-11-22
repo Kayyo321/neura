@@ -4,9 +4,14 @@ let path = import:Std.Fs.Path;
 let test = import:Std.Test;
 
 let PathTests = module (
-    let text = func(p: path.Path) -> string {
-        return p.to_string();
+    let present = func(p: path.Path = nil) -> path.Path {
+        if (p == nil) {
+            trap_with_message("expected a path");
+        }
+        return p;
     };
+
+    let text = func(p: path.Path = nil) -> string => present(p).to_string();
 
     let normalized = func(raw: string) -> string {
         return path.of(raw).to_string();
@@ -219,7 +224,7 @@ let PathTests = module (
         last joined = base.join(text(path.of("C:/a/b/c").relative_to(base)));
         test.assert_equal_string("C:/a/b/c", text(joined.resolve_lexically()));
         // A relative result whose first component is a drive designator stays relative and joins back.
-        last designator = path.of("/C:/x").relative_to(path.of("/"));
+        last designator = present(path.of("/C:/x").relative_to(path.of("/")));
         test.assert_equal_string("./C:/x", text(designator));
         test.assert(!designator.is_absolute);
         test.assert_equal_string("/C:/x", text(path.of("/").join(text(designator))));

@@ -297,7 +297,11 @@ let LocalDateTests = module (
     export let test_of_and_try_of = func() -> void {
         let date = local_date.of(2024, 2, 29);
         test.assert_equal_int32(2024, date.year);
-        test.assert(local_date.try_of(2024, 2, 29).equals(date));
+        let leap_day = local_date.try_of(2024, 2, 29);
+        if (leap_day == nil) {
+            trap_with_message("expected a valid leap day");
+        }
+        test.assert(leap_day.equals(date));
         test.assert(local_date.try_of(2023, 2, 29) == nil);
         test.assert(local_date.try_of(2024, 13, 1) == nil);
         test.assert(local_date.try_of(2024, 0, 1) == nil);

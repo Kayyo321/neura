@@ -16,7 +16,7 @@ let Limit = class (
     export let stop: int = 0;
 );
 
-let stop_or = func(limit: Limit, fallback: int) -> int[] => 0 ..= limit?.stop ?? fallback;
+let stop_or = func(fallback: int, limit: Limit = nil) -> int[] => 0 ..= limit?.stop ?? fallback;
 
 export let Main = module : program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
@@ -30,7 +30,7 @@ export let Main = module : program.Entry (
         console.print_line(show({0 ..= 5}));
         let limit = new Limit();
         limit.stop = 4;
-        console.print_line(show(stop_or(nil, 2)) + " / " + show(stop_or(limit, 2)));
+        console.print_line(show(stop_or(2, nil)) + " / " + show(stop_or(2, limit)));
 
         let list: int[list] = new(0 ..= 3);
         console.print_line(list.length.to_string() + " " + list[3].to_string());

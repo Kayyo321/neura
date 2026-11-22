@@ -58,14 +58,19 @@ let EventTests = module (
         last holder = new SubscriptionHolder();
         let first = event.subscribe(new func(value: int) {
             log.add("first");
-            holder.held.unsubscribe();
+            let held = holder.held;
+            if (held == nil) {
+                trap_with_message("expected the second subscription");
+            }
+            held.unsubscribe();
         });
-        holder.held = event.subscribe(new func(value: int) { log.add("second"); });
+        let second = event.subscribe(new func(value: int) { log.add("second"); });
+        holder.held = second;
         event.emit(1);
         test.assert_equal_string("firstsecond", log.text);
         event.emit(2);
         test.assert_equal_string("firstsecondfirst", log.text);
-        test.assert(!holder.held.active());
+        test.assert(!second.active());
     };
 
     export let test_unsubscribe_twice_does_nothing = func() -> void {
