@@ -1,0 +1,54 @@
+let config = import:Std.Net.Tls.TlsConfig;
+let console = import:Std.Io.Console;
+let duration = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let socket_addr = import:Std.Net.Core.SocketAddr;
+let stream_socket = import:Std.Net.Socket.StreamSocket;
+let strings = import:Std.Text.Strings;
+let tls_connector = import:Std.Net.Tls.TlsConnector;
+let tls_stream = import:Std.Net.Tls.TlsStream;
+
+// Executed by ktls_refusal.offload_reports_unsupported_and_the_stream_stays_usable on a host without kernel
+// TLS. The client requests offload through the public API, which must report Unsupported and leave the stream
+// usable for ordinary encrypted records. Arguments: the server address and its CA file.
+export let KtlsRefusal = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(result.expect<string>(exercise(args), "kernel TLS refusal"));
+        return program.ExitCode.Ok;
+    };
+
+    let exercise = func(args: string[]) -> result.Result<string> {
+        last builder = config.builder();
+        builder.set_versions(config.TlsVersion.Tls13, config.TlsVersion.Tls13);
+        builder.set_handshake_timeout(duration.of_seconds(3));
+        builder.set_ca_file(args[1]);
+        builder.set_server_name("localhost");
+        builder.set_kernel_offload(true);
+        last address = socket_addr.parse(args[0])?;
+        last stream = new tls_connector.TlsConnector(address, builder.build_client()?).connect()?;
+        stream.set_read_timeout(duration.of_seconds(2));
+        stream.set_write_timeout(duration.of_seconds(3));
+        last outcome = exchange(stream);
+        let _ = stream.close();
+        return outcome;
+    };
+
+    let exchange = func(stream: tls_stream.TlsStream) -> result.Result<string> {
+        match (stream.enable_kernel_offload()) {
+            result.Result.Err(errors.Error.Io { kind, message, path }) => {
+                if (kind != errors.IoErrorKind.Unsupported) {
+                    return result.Result<string>.Err(errors.custom("test.ktls.kind", "expected Unsupported"));
+                }
+            },
+            _ => {
+                return result.Result<string>.Err(errors.custom("test.ktls.offload", "offload must be refused"));
+            },
+        }
+        stream.write(strings.to_bytes("ping"))?;
+        last pong = strings.from_bytes(stream.read(4)?)?;
+        stream.shutdown(stream_socket.Shutdown.Write)?;
+        return result.Result<string>.Ok("Unsupported " .. pong);
+    };
+);

@@ -154,4 +154,55 @@ let OptionalSocketFeatures = module (
         test.assert(kind_of(test.assert_err<datagrams.Datagram<ip.IpAddr>>(socket.receive_from(64)))
             == errors.IoErrorKind.Closed);
     };
+
+    // The refusal paths below run instead of the strict tests above when optional.py finds the platform
+    // precondition missing. Each checks the error the library documents for that case.
+
+    // Run with --allow-net --allow-raw where the OS denies raw sockets to this process.
+    export let test_raw_open_refused_without_privilege = func {
+        for (let attempt = 0; attempt < 2; attempt++) {
+            last refused = test.assert_err<raw.RawSocket>(raw.open(net_address.AddressFamily.Ipv4, 1));
+            test.assert(kind_of(refused) == errors.IoErrorKind.PermissionDenied);
+        }
+    };
+
+    // Run with --allow-net and without --allow-raw: the capability check refuses before the OS is asked.
+    export let test_raw_open_refused_without_capability = func {
+        last refused = test.assert_err<raw.RawSocket>(raw.open(net_address.AddressFamily.Ipv4, 1));
+        test.assert(kind_of(refused) == errors.IoErrorKind.CapabilityDenied);
+    };
+
+    // Run where the host has no Multipath TCP: both ends report Unsupported rather than falling back to TCP.
+    export let test_mptcp_refused_as_unsupported = func {
+        last listener_builder = options.builder();
+        listener_builder.set_multipath(true);
+        last listener_options =
+            test.assert_ok<options.SocketOptions>(listener_builder.build(options.SocketKind.TcpListener));
+        test.assert(kind_of(test.assert_err<server.TcpServer>(server.bind_with(loopback(), listener_options)))
+            == errors.IoErrorKind.Unsupported);
+        last plain = test.assert_ok<server.TcpServer>(server.bind(loopback()));
+        last client_builder = options.builder();
+        client_builder.set_multipath(true);
+        last client_options =
+            test.assert_ok<options.SocketOptions>(client_builder.build(options.SocketKind.TcpStream));
+        test.assert(kind_of(test.assert_err<tcp.TcpSocket>(tcp.connect_with(plain.address(), duration.of_seconds(2),
+            client_options))) == errors.IoErrorKind.Unsupported);
+        test.assert_ok<unit.Unit>(plain.close());
+    };
+
+    // Run where the host has no UDP receive coalescing: enabling it reports Unsupported and the socket keeps
+    // working for ordinary datagrams.
+    export let test_udp_coalescing_refused_as_unsupported = func {
+        last receiver = test.assert_ok<udp.UdpSocket>(udp.bind(loopback()));
+        last sender = test.assert_ok<udp.UdpSocket>(udp.bind(loopback()));
+        last address = test.assert_ok<socket_addr.SocketAddr>(receiver.local_address());
+        receiver.set_read_timeout(duration.of_seconds(2));
+        test.assert(kind_of(test.assert_err<unit.Unit>(receiver.set_receive_coalescing(true)))
+            == errors.IoErrorKind.Unsupported);
+        test.assert_equal<int>(3, test.assert_ok<int>(sender.send_to(new([7, 8, 9]), address)));
+        last received = test.assert_ok<datagrams.Datagram<socket_addr.SocketAddr>>(receiver.receive_from(64));
+        check_bytes(new([7, 8, 9]), received.data);
+        test.assert_ok<unit.Unit>(receiver.close());
+        test.assert_ok<unit.Unit>(sender.close());
+    };
 );

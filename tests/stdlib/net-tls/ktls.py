@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Qualify TLS record offload on Linux when the kernel and OpenSSL support it."""
+"""Qualify TLS record offload on Linux when the kernel and OpenSSL support it, else check its refusal."""
 
 import errno
 import os
@@ -31,17 +31,27 @@ def probe(cipher, key_bytes):
                 client.setsockopt(282, 2, key)
 
 
+def refuse(tests, source, env, reason):
+    # Without kernel TLS the documented behaviour is the refusal: kernel_offload
+    # and TlsStream.enable_kernel_offload return Unsupported and the stream
+    # keeps working in user space. OPENSSL_CONF is left unset here.
+    print(f"kernel TLS: refusal path, because {reason}; checking that offload is refused with Unsupported",
+          flush=True)
+    subprocess.run([tests, "ktls_refusal", source], env=env, timeout=20, check=True)
+    return 0
+
+
 def main():
     tests, source, openssl = sys.argv[1:]
+    env = dict(os.environ, PATH=str(Path(openssl).resolve().parent) + os.pathsep + os.environ.get("PATH", ""))
     disabled = subprocess.check_output([openssl, "list", "-disabled"], text=True, timeout=5)
     if "KTLS" in {line.strip().upper() for line in disabled.splitlines()}:
-        print("OpenSSL was built without kTLS")
-        return 77
-    env = dict(os.environ, PATH=str(Path(openssl).resolve().parent) + os.pathsep + os.environ.get("PATH", ""))
+        return refuse(tests, source, env, "OpenSSL was built without kTLS")
     tested = False
     with tempfile.TemporaryDirectory(prefix="neura-ktls-") as directory:
         config = Path(directory) / "openssl.cnf"
-        env["OPENSSL_CONF"] = str(config)
+        strict_env = dict(env, OPENSSL_CONF=str(config))
+        unavailable = []
         for suite, (cipher, key_bytes) in CIPHERS.items():
             try:
                 probe(cipher, key_bytes)
@@ -49,6 +59,7 @@ def main():
                 if error.errno not in UNAVAILABLE:
                     raise
                 print(f"kernel TLS precondition unavailable for {suite}: {error}", flush=True)
+                unavailable.append(f"{suite}: {error}")
                 continue
             # The backend test uses TLS 1.3 on both endpoints. Give both SSL
             # contexts only the suite whose kernel support was just checked.
@@ -62,10 +73,12 @@ def main():
                 "[loopback]\n"
                 f"Ciphersuites = {suite}\n"
             )
-            print(f"testing kernel TLS with {suite}", flush=True)
-            subprocess.run([tests, "ktls", source], env=env, timeout=20, check=True)
+            print(f"kernel TLS: strict path with {suite}, because the kernel accepted its keys", flush=True)
+            subprocess.run([tests, "ktls", source], env=strict_env, timeout=20, check=True)
             tested = True
-    return 0 if tested else 77
+    if tested:
+        return 0
+    return refuse(tests, source, env, "the kernel TLS probe failed for every suite (" + "; ".join(unavailable) + ")")
 
 
 if __name__ == "__main__":

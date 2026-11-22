@@ -2406,6 +2406,92 @@ NEURA_TEST(ktls, both_directions_transfer_over_kernel_records) {
     expect_ok(client.call("neura.net.tls.close", {from}), "close client kTLS stream");
     expect_ok(server.call("neura.net.tls.close", {to}), "close server kTLS stream");
 }
+
+// Run by tests/stdlib/net-tls/ktls.py instead of the ktls suite when the
+// kernel or OpenSSL cannot offload TLS records: both endpoints request
+// offload, kernel_offload reports Unsupported (docs/runtime/NVM.md), and the
+// streams keep carrying records through OpenSSL in user space.
+NEURA_TEST(ktls_refusal, offload_reports_unsupported_and_the_stream_stays_usable) {
+    const LoopbackTlsKeys material;
+    constexpr auto wait = 2'000'000'000LL;
+    Host server(everything());
+    Host client(everything());
+    const auto listener = server.call("neura.net.listen", {text("127.0.0.1"), i32(0)});
+    expect_ok(listener, "listen");
+    const auto port = server.call("neura.net.local_port", {listener.value});
+    expect_ok(port, "port");
+    HostCompletion accepted;
+    std::jthread acceptor([&] {
+        accepted = server.call("neura.net.tls.accept", {listener.value, text(material.certificate), text(material.key),
+            tls_names({}), i64(wait), i32(13), i32(13), text(""), boolean(true)}, 2);
+    });
+    const auto connected = client.call("neura.net.tls.connect", {text("127.0.0.1"), port.value, i64(wait),
+        text("localhost"), tls_names({}), text(material.certificate), i32(13), i32(13), text(""), text(""),
+        boolean(true)}, 2);
+    acceptor.join();
+    expect_ok(connected, "a handshake that requests offload completes without it");
+    expect_ok(accepted, "an accept that requests offload completes without it");
+    const auto from = connected.value.elements.at(0);
+    const auto to = accepted.value.elements.at(0);
+    expect_error(client.call("neura.net.tls.kernel_offload", {from}), host_error::unsupported,
+                 "client offload is refused");
+    expect_error(server.call("neura.net.tls.kernel_offload", {to}), host_error::unsupported,
+                 "server offload is refused");
+    expect_ok(client.call("neura.net.tls.write", {from, bytes("ping")}), "client write after the refusal");
+    check_equal(server.call("neura.net.tls.read", {to, i32(64), i64(wait)}).value.bytes,
+                std::string("ping"), "server read after the refusal");
+    expect_ok(server.call("neura.net.tls.write", {to, bytes("pong")}), "server write after the refusal");
+    check_equal(client.call("neura.net.tls.read", {from, i32(64), i64(wait)}).value.bytes,
+                std::string("pong"), "client read after the refusal");
+    expect_error(client.call("neura.net.tls.kernel_offload", {from}), host_error::unsupported,
+                 "offload stays refused after traffic");
+    expect_ok(client.call("neura.net.tls.shutdown_write", {from, i64(wait)}), "close_notify after the refusal");
+    const auto end = server.call("neura.net.tls.read", {to, i32(64), i64(wait)});
+    expect_ok(end, "orderly end after the refusal");
+    check(end.value.bytes.empty(), "close_notify is an orderly end");
+    expect_ok(client.call("neura.net.tls.close", {from}), "close client stream");
+    expect_ok(server.call("neura.net.tls.close", {to}), "close server stream");
+    expect_ok(server.call("neura.net.close", {listener.value}), "close listener");
+
+    // The same refusal through TlsStream.enable_kernel_offload, which must
+    // return the Io error Unsupported and leave the stream usable.
+    const auto image = build_with_library(environment,
+        environment.source_dir / "tests/stdlib/net-tls/loopback/ktls-refusal.nra");
+    Host native_server(everything());
+    Host nra_client(everything());
+    const auto public_listener = native_server.call("neura.net.listen", {text("127.0.0.1"), i32(0)});
+    expect_ok(public_listener, "listen for the public client");
+    const auto public_port = native_server.call("neura.net.local_port", {public_listener.value});
+    expect_ok(public_port, "public client port");
+    HostCompletion served;
+    HostCompletion server_offload;
+    HostCompletion ping;
+    HostCompletion server_end;
+    std::jthread serving([&] {
+        served = native_server.call("neura.net.tls.accept", {public_listener.value, text(material.certificate),
+            text(material.key), tls_names({}), i64(3'000'000'000), i32(13), i32(13), text(""), boolean(true)}, 2);
+        if (!served.success) return;
+        const auto peer = served.value.elements.at(0);
+        server_offload = native_server.call("neura.net.tls.kernel_offload", {peer});
+        ping = native_server.call("neura.net.tls.read", {peer, i32(4), i64(wait)});
+        if (ping.success && ping.value.bytes == "ping") native_server.call("neura.net.tls.write", {peer, bytes("pong")});
+        server_end = native_server.call("neura.net.tls.read", {peer, i32(64), i64(wait)});
+    });
+    const auto address = "127.0.0.1:" + std::to_string(as_i32(public_port.value));
+    const auto client_run = nvm::run(image, nvm::bind(image, nra_client.registry),
+        std::vector<std::string>{address, material.certificate});
+    serving.join();
+    check(client_run.completed && client_run.status == 0,
+          "public client completed: " + describe_trap(client_run, image));
+    expect_ok(served, "public client handshake");
+    expect_error(server_offload, host_error::unsupported, "server offload is refused for the public client");
+    check_equal(ping.value.bytes, std::string("ping"), "public client write after the refusal");
+    check_equal(nra_client.output.contents(), std::string("Unsupported pong\n"), "public refusal and round trip");
+    expect_ok(server_end, "public client close_notify");
+    check(server_end.value.bytes.empty(), "public client close_notify is an orderly end");
+    native_server.call("neura.net.tls.close", {served.value.elements.at(0)});
+    native_server.call("neura.net.close", {public_listener.value});
+}
 #endif
 
 // Neither side reads records after the handshake. A backpressured write must
