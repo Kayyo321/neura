@@ -4,6 +4,10 @@
 
 Import this module as `Std.Reflect.Ffi.Abi`. Its [source](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/ffi/abi.nra) defines the shipped declarations: C layouts and argument classes for a declared target. The [declaration reference](#exported-declarations) lists its exported members and links each declaration to its source. [Section 20 of the standard library specification](Stdlib-Design#22-stdreflect) describes `Std.Reflect` as a whole.
 
+## Initializing C struct members
+
+Since 0.3.1, `CMember.init(label: string, type: CType, repeat: int)` describes a scalar field or a fixed-size C array of scalars. Use `repeat` of 1 for a scalar field. The four-argument initializer takes the nested layout as its third argument.
+
 ## Exported declarations
 
 These declarations are extracted from the module source. Notes reproduce adjacent source comments; an absent note does not imply the member has no preconditions or failures. Follow the source links for implementation details.
