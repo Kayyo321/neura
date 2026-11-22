@@ -1,3 +1,6 @@
+let fs = import:Std.Fs.Fs;
+let path = import:Std.Fs.Path;
+let unit = import:Std.Core.Unit;
 let duration = import:Std.Time.Duration;
 let error = import:Std.Core.Error;
 let fixed_clock = import:Std.Time.FixedClock;
@@ -124,5 +127,39 @@ let ResolverTests = module (
         source.fail_next = true;
         test.assert_err<resolver.DynamicCertResolver>(resolver.create(new bound(source.load), new bound(source.changed),
             fixed_clock.of(instant.Epoch), duration.of_seconds(1)));
+    };
+
+    export let test_file_watch_retries_a_failed_reload = func {
+        last file = path.of("resolver-watch-fixture.pem");
+        test.assert_ok<unit.Unit>(fs.write_text(file, "initial"));
+        last clock = fixed_clock.of(instant.Epoch);
+        last source = new Source();
+        last rotating = test.assert_ok<resolver.DynamicCertResolver>(resolver.create(new bound(source.load),
+            new bound(source.changed), clock, duration.of_seconds(1)));
+        last empty = test.assert_err<unit.Unit>(resolver.watch_paths(rotating, new));
+        test.assert_equal_string("tls.watch", code_of(empty));
+        test.assert_ok<unit.Unit>(resolver.watch_paths(rotating, new([file.to_string()])));
+        source.chain = Leaf + Intermediate;
+        source.fail_next = true;
+        test.assert_ok<unit.Unit>(fs.write_text(file, "a new certificate chain"));
+        test.assert(!test.assert_ok<bool>(rotating.poll()));
+        clock.advance(duration.of_seconds(1));
+        test.assert_equal_string("test.load", code_of(test.assert_err<bool>(rotating.poll())));
+        test.assert_equal_int64(0, rotating.generation());
+        clock.advance(duration.of_seconds(1));
+        test.assert(test.assert_ok<bool>(rotating.poll()));
+        test.assert_equal_int64(1, rotating.generation());
+        test.assert_ok<unit.Unit>(fs.remove_file(file));
+        clock.advance(duration.of_seconds(1));
+        last missing = test.assert_err<bool>(rotating.poll());
+        match (missing) {
+            error.Error.Io { kind, message, path } => {
+                test.assert(kind == error.IoErrorKind.NotFound);
+            },
+            _ => {
+                test.fail("expected a missing-file error");
+            },
+        }
+        test.assert_equal_int64(1, rotating.generation());
     };
 );

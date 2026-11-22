@@ -1,6 +1,8 @@
 let.promote _ = import:Std.Time.Clock;
 let.promote _ = import:Std.Time.Duration;
 let errors = import:Std.Core.Error;
+let fs = import:Std.Fs.Fs;
+let path = import:Std.Fs.Path;
 let hashing = import:Std.Core.Hash;
 let.promote _ = import:Std.Core.Result;
 let strings = import:Std.Text.Strings;
@@ -16,8 +18,8 @@ let.promote _ = import:Std.Core.Unit;
 /// the error, so a bad rotation never removes a working certificate. A successful reload replaces the bundle in
 /// one assignment and increments `generation`; a reader gets the old or the new bundle, never a mixture.
 /// Connections already established keep the certificate they were opened with; new `TlsAcceptor`s and
-/// `TlsConnector`s take `current()`. Watching files or KMS streams for changes is a host need: `watch_paths`
-/// traps in Neura 0.3.0, and the injected detector replaces it.
+/// `TlsConnector`s take `current()`. `watch_paths` adds file metadata to the change check in `poll`; the
+/// caller drives polling.
 ///
 /// The private key is held as an ordinary string: this runtime cannot lock it in memory or guarantee that it is
 /// erased. `to_string` never shows it.
@@ -88,6 +90,8 @@ export let DynamicCertResolver = module (
         let swaps: int64 = 0;
         /// @brief The monotonic reading of the last check.
         let checked_at: int64;
+        let watched_paths: path.Path[list] = new;
+        let watched_files: fs.FileMetadata[list] = new;
 
         /// @brief Use `create`, which loads the first bundle.
         export let init = func(first: CertificateBundle, load: func() -> Result<CertificateBundle>,
@@ -118,8 +122,14 @@ export let DynamicCertResolver = module (
                 return Result<bool>.Ok(false);
             }
             checked_at = now;
-            return if (not changed()?) -> Result<bool>.Ok(false)
-                else -> reload();
+            last observed = snapshot(watched_paths)?;
+            last file_changed = not same_files(watched_files, observed);
+            if (not changed()? && not file_changed) {
+                return Result<bool>.Ok(false);
+            }
+            last replaced = reload()?;
+            watched_files = observed;
+            return Result<bool>.Ok(replaced);
         };
 
         /// @brief Loads and checks a bundle now and swaps it in. Ok(false) when it equals the current one.
@@ -140,6 +150,25 @@ export let DynamicCertResolver = module (
         /// @brief Text such as "DynamicCertResolver(generation 2, CertificateBundle(...))".
         export let.override to_string = func -> string =>
             "DynamicCertResolver(generation " .. swaps.to_string() .. ", " .. active.to_string() .. ")";
+
+        /// @brief Sets the file paths watched by `poll` and captures their initial metadata.
+        .[Internal, Hidden, NoDiscard, Since("0.3.1")]
+        export let set_watched_paths = func(paths: string[list]) -> Result<Unit> {
+            if (paths.length == 0) {
+                return Result<Unit>.Err(errors.custom("tls.watch", "at least one certificate path is required"));
+            }
+            last targets: path.Path[list] = new;
+            for (let text in paths) {
+                if (text.byte_length == 0) {
+                    return Result<Unit>.Err(errors.custom("tls.watch", "an empty path cannot be watched"));
+                }
+                targets.append(path.of(text));
+            }
+            last initial = snapshot(targets)?;
+            watched_paths = targets;
+            watched_files = initial;
+            return Result<Unit>.Ok(Unit.Value);
+        };
 
         /// @brief Replaces the bundle unless it is unchanged.
         let swap = func(candidate: CertificateBundle) -> Result<bool> {
@@ -173,11 +202,36 @@ export let DynamicCertResolver = module (
             now));
     };
 
-    /// @brief Watches files for changes and reloads the resolver when they change.
-    /// @stub file watching needs a host service (inotify or kqueue) that no runtime offers
+    /// @brief Adds file metadata change detection to `resolver.poll`. Registration replaces any prior watch.
+    /// Each check needs the fs capability and compares file size and modification time. A failed check or
+    /// reload keeps the active bundle and last successful snapshot.
     .NoDiscard
-    export let watch_paths = func(resolver: DynamicCertResolver, paths: string[list]) -> Result<Unit> {
-        trap_with_message("unsupported: Std.Net.Tls.DynamicCertResolver.watch_paths is not implemented in Neura 0.3.0 (file watching needs a host service (inotify or kqueue) that no runtime offers)");
+    export let watch_paths = func(resolver: DynamicCertResolver, paths: string[list]) -> Result<Unit> =>
+        resolver.set_watched_paths(paths);
+
+    let snapshot = func(paths: path.Path[list]) -> Result<fs.FileMetadata[list]> {
+        last observed: fs.FileMetadata[list] = new;
+        for (let entry in paths) {
+            last metadata = fs.metadata(entry)?;
+            if (metadata.kind != fs.FileKind.File || metadata.modified == nil) {
+                return Result<fs.FileMetadata[list]>.Err(errors.custom("tls.watch",
+                    "the watched path must be a regular file with a modification time: " .. entry.to_string()));
+            }
+            observed.append(metadata);
+        }
+        return Result<fs.FileMetadata[list]>.Ok(observed);
+    };
+
+    let same_files = func(previous: fs.FileMetadata[list], current: fs.FileMetadata[list]) -> bool {
+        for (let i in 0 .. previous.length) {
+            last before = previous[i];
+            last after = current[i];
+            if (before.size != after.size || before.modified.epoch_seconds != after.modified.epoch_seconds
+                || before.modified.nanos != after.modified.nanos) {
+                return false;
+            }
+        }
+        return true;
     };
 
     /// @brief Checks the PEM structure of a bundle.
