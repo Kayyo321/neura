@@ -1416,7 +1416,8 @@ private:
                     statements.push_back(initialize(held, std::move(value)));
                     for (auto& item : on_variant(load(held), type, element.id, [&](std::size_t, SymbolId v) {
                              std::vector<IrNode> arms;
-                             const auto& payloads = symbol(v).payload_types;
+                             // Boxing a payload can add a local and move the symbol table.
+                             const auto payloads = symbol(v).payload_types;
                              for (std::size_t j = 0; j < payloads.size(); ++j) {
                                  if (!usable(payloads[j])) continue;
                                  auto project = with(make(IrOp::EnumProject, span_, payloads[j]), {load(held)});

@@ -1730,6 +1730,8 @@ if(BUILD_TESTING AND NEURA_SDK)
     add_test(NAME reflect-boundary COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/reflect/reflect.py" "$<TARGET_FILE:neura>")
     set_tests_properties(reflect-boundary PROPERTIES TIMEOUT 900)
+    add_test(NAME reflect-json-bridge-check COMMAND "$<TARGET_FILE:neura>" check --warn-library
+        "${CMAKE_CURRENT_SOURCE_DIR}/stdlib/std/reflect/codec/json-bridge.nra")
     # The compile-time check of interpolated strings agrees with the
     # formatting library on a corpus of specifications (docs/design/Calls030.md).
     add_test(NAME calls-format-corpus COMMAND "${Python3_EXECUTABLE}"
