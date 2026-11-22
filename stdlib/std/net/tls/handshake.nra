@@ -31,6 +31,16 @@ export let Handshake = module (
         -> StepOutcome host("neura.net.tls.engine.exchange", 1);
 
     let engine_release = func(engine: int64) -> DoneOutcome host("neura.net.tls.engine.release", 1);
+    let DatagramStepOutcome = enum (Ok([int, uint8[list][list], uint8[list], int64, uint32]), Error(uint32));
+    let datagram_open = func(server: bool, name: string, alpn: string[list], ca: string, certificate: string,
+        key: string, local_host: string, local_port: int, peer_host: string, peer_port: int, timeout: int64)
+        -> IdOutcome host("neura.net.dtls.engine.open", 1);
+
+    let datagram_exchange = func(engine: int64, operation: int, inbound: uint8[list], sender_host: string,
+        sender_port: int, message: uint8[list], timeout: int64) -> DatagramStepOutcome
+        host("neura.net.dtls.engine.exchange", 1);
+
+    let datagram_release = func(engine: int64) -> DoneOutcome host("neura.net.dtls.engine.release", 1);
     const HandshakeStep: int = 0;
     const ReadStep: int = 1;
     const WriteStep: int = 2;
@@ -198,12 +208,168 @@ export let Handshake = module (
         }
     };
 
-    /// @brief Runs a DTLS 1.3 handshake with `peer` over a datagram socket.
-    /// @stub the linked OpenSSL provider supports DTLS 1.2 only
-    .NoDiscard
+    .[Final, NotThreadSafe]
+    let DatagramTransport = class implements Transport<uint8[list], uint8[list]> (
+        last id: int64;
+        last wire: DatagramSocket<SocketAddr>;
+        last peer: SocketAddr;
+        let opened: bool = true;
+
+        export let init = func(handle: int64, socket: DatagramSocket<SocketAddr>, address: SocketAddr) {
+            id = handle;
+            wire = socket;
+            peer = address;
+        };
+
+        export let handshake = func(timeout: duration.Duration) -> Result<Unit> {
+            process(HandshakeStep, new, timeout)?;
+            return bytes.ok();
+        };
+
+        export let receive = func -> Result<Optional<uint8[list]>> => process(ReadStep, new, wire.read_timeout());
+
+        export let send = func(data: uint8[list]) -> Result<Unit> {
+            if (data.length > RecordSize) {
+                return Result<Unit>.Err(host_error.io(4, "DTLS message exceeds 16384 bytes", peer.to_string()));
+            }
+            if (data.length == 0) {
+                return opened ? bytes.ok() : Result<Unit>.Err(bytes.closed("DTLS transport", peer.to_string()));
+            }
+            process(WriteStep, data, duration.of_nanos(0))?;
+            return bytes.ok();
+        };
+
+        export let close = func -> Result<Unit> {
+            return bytes.ok() unless opened;
+            last notified = process(CloseStep, new, duration.of_nanos(0));
+            last released = abort();
+            return match (notified) {
+                Result.Ok(_) => released,
+                Result.Err(e) => Result<Unit>.Err(e),
+            };
+        };
+
+        export let abort = func -> Result<Unit> {
+            return bytes.ok() unless opened;
+            opened = false;
+            last released = datagram_release(id);
+            last closed = wire.close();
+            return match (released) {
+                DoneOutcome.Ok => closed,
+                DoneOutcome.Error(code) => Result<Unit>.Err(host_error.io(code, "DTLS engine release failed", "")),
+            };
+        };
+
+        let process = func(operation: int, message: uint8[list], timeout: duration.Duration)
+            -> Result<Optional<uint8[list]>> {
+            if (not opened) {
+                return Result<Optional<uint8[list]>>.Err(bytes.closed("DTLS transport", peer.to_string()));
+            }
+            last original = wire.read_timeout();
+            last outcome = process_wire(operation, message, timeout);
+            wire.set_read_timeout(original);
+            return outcome;
+        };
+
+        let process_wire = func(operation: int, message: uint8[list], timeout: duration.Duration)
+            -> Result<Optional<uint8[list]>> {
+            let inbound: uint8[list] = new;
+            let sender_host = "";
+            let sender_port = 0;
+            while (true) {
+                match (datagram_exchange(id, operation, inbound, sender_host, sender_port, message, timeout.to_nanos())) {
+                    DatagramStepOutcome.Error(code) => {
+                        return Result<Optional<uint8[list]>>.Err(host_error.io(code, "DTLS processing failed", peer.to_string()));
+                    },
+                    DatagramStepOutcome.Ok(exchange) => {
+                        let [status, outgoing, received, wait_nanos, failure] = exchange;
+                        for (let packet in outgoing) {
+                            // One host packet remains one UDP datagram, including handshake flights.
+                            last sent = wire.send_to(packet, peer)?;
+                            if (sent != packet.length) {
+                                return Result<Optional<uint8[list]>>.Err(host_error.io(11, "short DTLS datagram send", peer.to_string()));
+                            }
+                        }
+                        if (failure != 0) {
+                            return Result<Optional<uint8[list]>>.Err(host_error.io(failure, "DTLS processing failed", peer.to_string()));
+                        }
+                        if (status == PeerClosed || operation == CloseStep) {
+                            return Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.None);
+                        }
+                        if (status != WantsInput) {
+                            return Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.Some(received));
+                        }
+                        wire.set_read_timeout(duration.of_nanos(wait_nanos));
+                    },
+                }
+                inbound = new;
+                sender_host = "";
+                sender_port = 0;
+                match (wire.receive_from(65535)) {
+                    Result.Ok(packet) => {
+                        match (packet.sender) {
+                            Optional.Some(sender) => {
+                                inbound = packet.data;
+                                sender_host = sender.host_text();
+                                sender_port = sender.port;
+                            },
+                            Optional.None => {},
+                        }
+                    },
+                    Result.Err(e) => {
+                        // A receive timer is a protocol timer tick, not a fresh deadline.
+                        // The host keeps the operation's original absolute expiry.
+                        match (e) {
+                            errors.Error.Io { kind, message: text, path } => {
+                                if (kind != errors.IoErrorKind.TimedOut) {
+                                    return Result<Optional<uint8[list]>>.Err(e);
+                                }
+                            },
+                            _ => {
+                                return Result<Optional<uint8[list]>>.Err(e);
+                            },
+                        }
+                    },
+                }
+            }
+        };
+    );
+
+    /// @brief Runs DTLS 1.3 with a fixed numeric peer over a bound datagram socket. A client verifies
+    /// `server_name`, or the peer IP when empty; a server validates address cookies before accepting.
+    /// Takes ownership of the socket after the engine opens, including closing it on handshake failure.
+    /// Messages are at most 16,384 bytes and retain their boundaries. Unexpected senders are dropped.
+    /// Every operation has one absolute deadline: the configured handshake timeout, the socket's read timeout
+    /// for receive, or 30 seconds for send/close; a zero timeout uses 30 seconds. Timers drive retransmissions.
+    /// Requires net; explicit credential files also require fs. DTLS never uses kernel TLS offload.
+    .[NoDiscard, Since("0.3.1")]
     export let dtls13 = func(config: TlsConfig, socket: DatagramSocket<SocketAddr>, peer: SocketAddr)
         -> Result<Transport<uint8[list], uint8[list]>> {
-        return Result<Transport<uint8[list], uint8[list]>>.Err(host_error.io(13, "the TLS provider does not support DTLS 1.3",
-            peer.to_string()));
+        if (config.max_version != TlsVersion.Tls13 || config.kernel_offload) {
+            return Result<Transport<uint8[list], uint8[list]>>.Err(errors.custom("tls.config",
+                "DTLS requires version 1.3 and does not use kernel offload"));
+        }
+        last local = socket.local_address()?;
+        last server = config.role == TlsRole.Server;
+        last name = config.server_name.byte_length == 0 ? peer.host_text() : config.server_name;
+        last ca = server ? config.client_ca_file : config.ca_file;
+        match (datagram_open(server, name, config.alpn(), ca, config.certificate_file, config.key_file,
+            local.host_text(), local.port, peer.host_text(), peer.port, config.handshake_timeout.to_nanos())) {
+            IdOutcome.Error(code) => {
+                return Result<Transport<uint8[list], uint8[list]>>.Err(host_error.io(code, "DTLS engine initialization failed", name));
+            },
+            IdOutcome.Ok(id) => {
+                last transport = new DatagramTransport(id, socket, peer);
+                match (transport.handshake(config.handshake_timeout)) {
+                    Result.Ok(_) => {
+                        return Result<Transport<uint8[list], uint8[list]>>.Ok(transport);
+                    },
+                    Result.Err(e) => {
+                        let _ = transport.abort();
+                        return Result<Transport<uint8[list], uint8[list]>>.Err(e);
+                    },
+                }
+            },
+        }
     };
 );

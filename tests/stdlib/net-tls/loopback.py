@@ -152,9 +152,6 @@ def main():
         runner = [str(args.neura), "run", str(image)]
         buffered_server(runner, args.openssl, certificate, key, client_certificate, client_key)
         trace = root / "tls.trace"
-        dtls = run(runner + ["--", "dtls", "127.0.0.1:9"])
-        assert dtls == "Unsupported", f"expected typed DTLS 1.3 Unsupported, got {dtls!r}"
-        print("PASS unsupported-dtls13")
         cases = {"round-trip": "pong", "orderly-close": "end", "untrusted": "PermissionDenied",
                  "wrong-name": "PermissionDenied", "handshake-timeout": "TimedOut", "truncated-record": "ConnectionReset",
                  "chunked-response": "200:hello", "truncated-http-body": "acme.transport",

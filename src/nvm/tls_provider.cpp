@@ -81,6 +81,21 @@ HostSignature engine_exchange() {
                      tuple({int32(), byte_list(), byte_list(), uint32()}));
 }
 
+HostSignature dtls_open() {
+    return signature("neura.net.dtls.engine.open", {boolean(), text(), text_list(), text(), text(), text(),
+                      text(), int32(), text(), int32(), int64()}, int64());
+}
+
+HostSignature dtls_exchange() {
+    return signature("neura.net.dtls.engine.exchange", {int64(), int32(), byte_list(), text(), int32(),
+                      byte_list(), int64()}, tuple({int32(), HostType(Kind::List, std::vector<HostType>{byte_list()}),
+                                                  byte_list(), int64(), uint32()}));
+}
+
+HostSignature dtls_release() {
+    return signature("neura.net.dtls.engine.release", {int64()}, void_type());
+}
+
 HostSignature engine_release() {
     return signature("neura.net.tls.engine.release", {int64()}, void_type());
 }
@@ -134,6 +149,15 @@ struct TlsStream {
     std::string alpn;
     SSL_CTX* context = nullptr;
     SSL* ssl = nullptr;
+    // Datagram engines have their own addressed BIO and (on a server) listener.
+    // They never expose a native descriptor or enter the stream TLS services.
+    bool datagram = false;
+    SSL* listener = nullptr;
+    BIO* datagram_wire = nullptr;
+    BIO_ADDR* datagram_peer = nullptr;
+    int pending_operation = 0;
+    std::uint32_t terminal_error = 0;
+    bool key_update_started = false;
     bool write_closed = false;
     std::int64_t write_timeout = default_transfer_timeout;
     ~TlsStream() {
@@ -144,6 +168,9 @@ struct TlsStream {
             }
             SSL_free(ssl);
         }
+        if (listener) SSL_free(listener);
+        if (datagram_wire) BIO_free(datagram_wire);
+        if (datagram_peer) BIO_ADDR_free(datagram_peer);
         if (context) SSL_CTX_free(context);
         if (descriptor != invalid_native_socket) platform::close_socket(descriptor);
     }
@@ -427,6 +454,48 @@ int server_alpn(SSL*, const unsigned char** out, unsigned char* out_size, const 
     return SSL_TLSEXT_ERR_OK;
 }
 
+// Numeric addresses only: the supplied datagram socket already owns name resolution.
+using DatagramAddress = std::unique_ptr<BIO_ADDR, decltype(&BIO_ADDR_free)>;
+DatagramAddress datagram_address(const std::string& host, std::int32_t port) {
+    DatagramAddress address(BIO_ADDR_new(), BIO_ADDR_free);
+    unsigned char raw[16];
+    if (!address || port < 1 || port > 65535 || !usable_text(host)) return {nullptr, BIO_ADDR_free};
+    for (const auto family : {AF_INET, AF_INET6}) {
+        const std::size_t size = family == AF_INET ? 4 : 16;
+        if (::inet_pton(family, host.c_str(), raw) == 1 &&
+            BIO_ADDR_rawmake(address.get(), family, raw, size, htons(static_cast<std::uint16_t>(port)))) return address;
+    }
+    return {nullptr, BIO_ADDR_free};
+}
+
+bool same_datagram_address(const BIO_ADDR* left, const BIO_ADDR* right) {
+    unsigned char a[16], b[16];
+    std::size_t as = sizeof a, bs = sizeof b;
+    return left && right && BIO_ADDR_family(left) == BIO_ADDR_family(right) &&
+        BIO_ADDR_rawport(left) == BIO_ADDR_rawport(right) && BIO_ADDR_rawaddress(left, a, &as) &&
+        BIO_ADDR_rawaddress(right, b, &bs) && as == bs && std::memcmp(a, b, as) == 0;
+}
+
+// Zero is bounded as well: a quiet/lost peer cannot retain the scheduler indefinitely.
+constexpr std::int64_t dtls_default_timeout = 30000000000LL;
+
+std::int64_t datagram_wait(TlsStream& stream) {
+    auto wait = std::max<std::int64_t>(1,
+        std::chrono::duration_cast<std::chrono::nanoseconds>(stream.deadline - Clock::now()).count());
+    for (auto* ssl : {stream.listener, stream.ssl}) {
+        if (!ssl) continue;
+        timeval timeout{};
+        int infinite = 1;
+        if (SSL_get_event_timeout(ssl, &timeout, &infinite) && !infinite) {
+            // The absolute application deadline caps even a very large provider timer.
+            const auto seconds = std::min<std::int64_t>(timeout.tv_sec, dtls_default_timeout / 1000000000);
+            const auto nanos = seconds * 1000000000 + static_cast<std::int64_t>(timeout.tv_usec) * 1000;
+            wait = std::min(wait, std::max<std::int64_t>(1, nanos));
+        }
+    }
+    return wait;
+}
+
 } // namespace
 
 void add_tls_services(const Adder& add, StandardServices::Tables& tables, const Capabilities& capabilities,
@@ -442,7 +511,7 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
     };
     const auto find = [state](const HostValue& id) -> TlsStream* {
         const auto found = state->tls.find(as_int64(id));
-        return found == state->tls.end() ? nullptr : found->second.get();
+        return found == state->tls.end() || found->second->datagram ? nullptr : found->second.get();
     };
 
     const auto connect = [=](const HostRequest& request, bool retain_deadline) {
@@ -545,6 +614,187 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
     };
     add(signature("neura.net.tls.accept", {int64(), text(), text(), text_list(), int64()}, stream_result()), accept);
     add(accept_extended(), accept);
+
+    // Addressed datagram engines preserve the caller's DatagramSocket abstraction.
+    // The BIO's receive source address is installed only after matching the actual
+    // sender supplied by receive_from; untrusted packet bytes never choose it.
+    add(dtls_open(), [=](const HostRequest& request) {
+        if (!granted->net) return denied();
+        const auto& args = request.arguments;
+        const auto server = as_bool(args.at(0));
+        const auto& name = args.at(1).bytes;
+        const auto alpn = alpn_wire(args.at(2));
+        auto ca = args.at(3).bytes, certificate = args.at(4).bytes, key = args.at(5).bytes;
+        auto local = datagram_address(args.at(6).bytes, as_int32(args.at(7)));
+        auto peer = datagram_address(args.at(8).bytes, as_int32(args.at(9)));
+        const auto timeout = as_int64(args.at(10));
+        if (!alpn || !local || !peer || BIO_ADDR_family(local.get()) != BIO_ADDR_family(peer.get()) ||
+            timeout < 0 || (!server && !usable_text(name)) || certificate.empty() != key.empty() ||
+            (server && certificate.empty())) return fail(host_error::invalid_input);
+        if (const auto error = permitted_paths(*granted, *allowed_paths, {&ca, &certificate, &key})) return fail(error);
+        if (state->tls.size() >= max_open_ids) return fail(host_error::other);
+        auto stream = std::make_unique<TlsStream>();
+        stream->datagram = true;
+        stream->deadline = deadline_of(timeout ? timeout : dtls_default_timeout);
+        stream->context = SSL_CTX_new(server ? DTLS_server_method() : DTLS_client_method());
+        if (!stream->context || SSL_CTX_set_min_proto_version(stream->context, DTLS1_3_VERSION) != 1 ||
+            SSL_CTX_set_max_proto_version(stream->context, DTLS1_3_VERSION) != 1) return fail(host_error::unsupported);
+        if (!server || !ca.empty()) {
+            SSL_CTX_set_verify(stream->context, server ? SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT
+                                                       : SSL_VERIFY_PEER, nullptr);
+            if (!load_trust(stream->context, ca)) return fail(host_error::invalid_input);
+        }
+        if (!certificate.empty() && !load_identity(stream->context, certificate, key)) return fail(host_error::invalid_input);
+        if (server) {
+            stream->alpn = *alpn;
+            if (!alpn->empty()) SSL_CTX_set_alpn_select_cb(stream->context, server_alpn, &stream->alpn);
+            // Do not set NO_VALIDATE: OpenSSL's default cookies bind the actual peer address.
+            stream->listener = SSL_new_listener(stream->context, SSL_LISTENER_FLAG_SINGLE_THREAD |
+                                                                SSL_LISTENER_FLAG_ADDRESS_VALIDATION);
+            if (!stream->listener) return fail(host_error::other);
+        } else {
+            stream->ssl = SSL_new(stream->context);
+            if (!stream->ssl) return fail(host_error::other);
+        }
+        auto* endpoint = server ? stream->listener : stream->ssl;
+        BIO* protocol = nullptr;
+        if (!BIO_new_bio_dgram_pair(&protocol, 262144, &stream->datagram_wire, 262144)) return fail(host_error::other);
+        SSL_set_bio(endpoint, protocol, protocol);
+        const auto caps = BIO_DGRAM_CAP_HANDLES_DST_ADDR | BIO_DGRAM_CAP_HANDLES_SRC_ADDR;
+        if (!BIO_dgram_set_caps(protocol, caps) || !BIO_dgram_set_caps(stream->datagram_wire, caps) ||
+            !BIO_dgram_set_mtu(protocol, 1200)) return fail(host_error::other);
+        // On the wire half, the local address is the source of incoming packets.
+        auto source = datagram_address(args.at(8).bytes, as_int32(args.at(9)));
+        if (!source || !BIO_dgram_set0_local_addr(protocol, local.get())) return fail(host_error::other);
+        local.release();
+        if (!BIO_dgram_set0_local_addr(stream->datagram_wire, source.get())) return fail(host_error::other);
+        source.release();
+        stream->datagram_peer = peer.release();
+        if (server) {
+            if (!SSL_set_blocking_mode(endpoint, 0) || !SSL_listen(endpoint)) return fail(host_error::other);
+        } else {
+            SSL_set_connect_state(endpoint);
+            SSL_set_options(endpoint, SSL_OP_NO_QUERY_MTU);
+            SSL_set_mtu(endpoint, 1200);
+            if (!set_identity_check(endpoint, name)) return fail(host_error::invalid_input);
+            if (!alpn->empty() && SSL_set_alpn_protos(endpoint, reinterpret_cast<const unsigned char*>(alpn->data()),
+                                                    static_cast<unsigned int>(alpn->size())) != 0)
+                return fail(host_error::invalid_input);
+        }
+        const auto id = state->next_tls++;
+        state->tls.emplace(id, std::unique_ptr<TlsStream, TlsDeleter>(stream.release()));
+        return HostCompletion::ok(int64_value(id));
+    });
+
+    add(dtls_exchange(), [=](const HostRequest& request) {
+        if (!granted->net) return denied();
+        const auto& args = request.arguments;
+        const auto found = state->tls.find(as_int64(args.at(0)));
+        const auto operation = as_int32(args.at(1));
+        const auto& inbound = args.at(2).bytes;
+        const auto& message = args.at(5).bytes;
+        const auto timeout = as_int64(args.at(6));
+        if (found == state->tls.end() || !found->second->datagram || operation < 0 || operation > 4 ||
+            inbound.size() > 65535 || message.size() > 16384 || timeout < 0 ||
+            (operation != 2 && !message.empty())) return fail(host_error::invalid_input);
+        auto& stream = *found->second;
+        if (stream.terminal_error) return fail(stream.terminal_error);
+        if (stream.pending_operation == -1) {
+            stream.pending_operation = operation;
+            stream.deadline = deadline_of(timeout ? timeout : dtls_default_timeout);
+        }
+        if (stream.pending_operation != operation) return fail(host_error::invalid_input);
+        if (Clock::now() >= stream.deadline) {
+            stream.terminal_error = host_error::timed_out;
+            return fail(stream.terminal_error);
+        }
+        // Compare parsed numeric addresses, so IPv6 spelling cannot bypass filtering.
+        if (!inbound.empty()) {
+            auto sender = datagram_address(args.at(3).bytes, as_int32(args.at(4)));
+            if (same_datagram_address(sender.get(), stream.datagram_peer) &&
+                BIO_write(stream.datagram_wire, inbound.data(), static_cast<int>(inbound.size())) !=
+                    static_cast<int>(inbound.size())) return fail(host_error::other);
+        }
+        ERR_clear_error();
+        std::uint32_t failure = 0;
+        int status = 0;
+        std::string plaintext;
+        // Drive the listener before its accepted connection. Both timer sets matter.
+        if (stream.listener && !SSL_handle_events(stream.listener)) failure = host_error::connection_reset;
+        if (!failure && !stream.ssl && stream.listener) {
+            stream.ssl = SSL_accept_connection(stream.listener, SSL_ACCEPT_CONNECTION_NO_BLOCK);
+            if (stream.ssl) {
+                SSL_set_blocking_mode(stream.ssl, 0);
+                SSL_set_options(stream.ssl, SSL_OP_NO_QUERY_MTU);
+                SSL_set_mtu(stream.ssl, 1200);
+            } else if (ERR_peek_error() != 0) {
+                failure = host_error::connection_reset;
+            }
+        }
+        if (!failure && stream.ssl) {
+            auto* ssl = stream.ssl;
+            if (operation != 0 && !SSL_is_init_finished(ssl)) return fail(host_error::invalid_input);
+            ERR_clear_error();
+            int result = 0;
+            if (!SSL_handle_events(ssl)) failure = host_error::connection_reset;
+            if (!failure) {
+                switch (operation) {
+                case 0: result = SSL_do_handshake(ssl); break;
+                case 1:
+                    plaintext.resize(16384);
+                    result = SSL_read(ssl, plaintext.data(), static_cast<int>(plaintext.size()));
+                    plaintext.resize(result > 0 ? static_cast<std::size_t>(result) : 0);
+                    break;
+                case 2: result = SSL_write(ssl, message.data(), static_cast<int>(message.size())); break;
+                case 3: result = SSL_shutdown(ssl); break;
+                case 4:
+                    if (!stream.key_update_started) {
+                        if (!SSL_key_update(ssl, SSL_KEY_UPDATE_REQUESTED)) { failure = host_error::connection_reset; break; }
+                        stream.key_update_started = true;
+                    }
+                    result = SSL_do_handshake(ssl);
+                    break;
+                }
+                status = 1;
+                if (result <= 0 && !(operation == 3 && result == 0)) {
+                    const auto reason = SSL_get_error(ssl, result);
+                    if (reason == SSL_ERROR_WANT_READ || reason == SSL_ERROR_WANT_WRITE) status = 0;
+                    else if (reason == SSL_ERROR_ZERO_RETURN && operation == 1) status = 2;
+                    else if (SSL_get_verify_result(ssl) != X509_V_OK ||
+                             ERR_GET_REASON(ERR_peek_last_error()) == SSL_R_PEER_DID_NOT_RETURN_A_CERTIFICATE)
+                        failure = host_error::permission_denied;
+                    else failure = host_error::connection_reset;
+                }
+            }
+        }
+        std::vector<HostValue> outgoing;
+        std::size_t total = 0;
+        while (const auto size = BIO_ctrl_pending(stream.datagram_wire)) {
+            if (size > 65535 || total + size > 262144) { failure = host_error::other; break; }
+            std::string packet(size, '\0');
+            if (BIO_read(stream.datagram_wire, packet.data(), static_cast<int>(size)) != static_cast<int>(size)) {
+                failure = host_error::other; break;
+            }
+            total += size;
+            outgoing.push_back(bytes_value(std::move(packet)));
+        }
+        const auto wait = datagram_wait(stream);
+        if (failure) stream.terminal_error = failure;
+        else if (status != 0) {
+            stream.pending_operation = -1;
+            stream.key_update_started = false;
+        }
+        return HostCompletion::ok(tuple_value({int32_value(status), tuple_value(std::move(outgoing)),
+                                               bytes_value(std::move(plaintext)), int64_value(wait), scalar(failure)}));
+    });
+
+    add(dtls_release(), [=](const HostRequest& request) {
+        if (!granted->net) return denied();
+        const auto found = state->tls.find(as_int64(request.arguments.at(0)));
+        if (found == state->tls.end() || !found->second->datagram) return fail(host_error::invalid_input);
+        state->tls.erase(found);
+        return HostCompletion::ok();
+    });
 
     // The buffer engine leaves wire I/O to a caller-provided Neura stream.
     // Files and record processing use the same trust rules as socket TLS.
@@ -804,6 +1054,9 @@ void add_tls_services(const Adder& add, StandardServices::Tables&, const Capabil
     add(local_address(), unsupported);
     add(peer_chain(), unsupported);
     add(shutdown_write(), unsupported);
+    add(dtls_open(), unsupported);
+    add(dtls_exchange(), unsupported);
+    add(dtls_release(), unsupported);
     add(engine_open(), unsupported);
     add(engine_exchange(), unsupported);
     add(engine_release(), unsupported);

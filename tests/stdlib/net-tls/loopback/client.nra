@@ -12,7 +12,6 @@ let socket_addr = import:Std.Net.Core.SocketAddr;
 let strings = import:Std.Text.Strings;
 let tcp = import:Std.Net.Socket.TcpSocket;
 let tcp_server = import:Std.Net.Socket.TcpServer;
-let udp = import:Std.Net.Socket.UdpSocket;
 
 export let Main = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
@@ -48,28 +47,7 @@ export let Main = module:program.Entry (
         if (args[0] == "https-deadline") {
             return request(args[1], args[2], duration.of_millis(400));
         }
-        if (args[0] == "dtls") {
-            return dtls(args[1]);
-        }
         return exchange(args[1], args[2], args[3]);
-    };
-
-    let dtls = func(address: string) -> result.Result<string> {
-        last peer = socket_addr.parse(address)?;
-        last local = socket_addr.parse("127.0.0.1:0")?;
-        last wire = udp.bind(local)?;
-        last settings = config.builder().build_client()?;
-        last outcome = handshake.dtls13(settings, wire, peer);
-        let _ = wire.close();
-        match (outcome) {
-            result.Result.Ok(stream) => {
-                let _ = stream.close();
-                return result.Result<string>.Ok("unexpected DTLS connection");
-            },
-            result.Result.Err(failure) => {
-                return result.Result<string>.Err(failure);
-            },
-        }
     };
 
     let request = func(address: string, ca: string, timeout: duration.Duration) -> result.Result<string> {

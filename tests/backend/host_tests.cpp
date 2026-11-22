@@ -1704,6 +1704,76 @@ HostValue tls_names(std::initializer_list<std::string_view> values) {
     return list;
 }
 
+// A small addressed-BIO prototype. Loopback transport and adverse delivery
+// tests live in tests/stdlib/net; this isolates the host protocol boundary.
+NEURA_TEST(host, dtls13_addressed_engine_roundtrip_and_deadline) {
+    const LoopbackTlsKeys material;
+    Host client(everything()), server(everything()), denied_host({});
+    auto opening = [&](bool accepting, std::int32_t local, std::int32_t peer) {
+        return std::vector<HostValue>{boolean(accepting), text("localhost"), tls_names({}),
+            text(material.certificate), text(material.certificate),
+            text(material.key), text("127.0.0.1"), i32(local), text("127.0.0.1"), i32(peer),
+            i64(5'000'000'000)};
+    };
+    expect_error(denied_host.call("neura.net.dtls.engine.open", opening(false, 12345, 54321)),
+                 host_error::capability_denied, "DTLS requires net");
+    const auto c = client.call("neura.net.dtls.engine.open", opening(false, 12345, 54321));
+    const auto s = server.call("neura.net.dtls.engine.open", opening(true, 54321, 12345));
+    expect_ok(c, "DTLS client open"); expect_ok(s, "DTLS server open");
+    expect_error(client.call("neura.net.tls.engine.exchange", {c.value, i32(0), bytes(""), bytes("")}),
+                 host_error::invalid_input, "DTLS handle cannot enter TLS stream engine");
+    auto step = [&](Host& host, HostValue id, int operation, const std::string& inbound, int sender,
+                    const std::string& message = "") {
+        const auto result = host.call("neura.net.dtls.engine.exchange", {id, i32(operation), bytes(inbound),
+            text("127.0.0.1"), i32(sender), bytes(message), i64(5'000'000'000)});
+        expect_ok(result, "DTLS engine step");
+        check_equal(result.value.elements.at(4).bits, std::uint64_t(0), "DTLS protocol error");
+        return result.value;
+    };
+    std::vector<std::string> to_server, to_client;
+    bool client_done = false, server_done = false;
+    auto transfer = [](const HostValue& result, std::vector<std::string>& packets) {
+        for (const auto& packet : result.elements.at(1).elements) packets.push_back(packet.bytes);
+    };
+    for (int turn = 0; turn < 100 && !(client_done && server_done); ++turn) {
+        if (!client_done) {
+            const auto incoming = to_client.empty() ? "" : to_client.front();
+            if (!to_client.empty()) to_client.erase(to_client.begin());
+            const auto result = step(client, c.value, 0, incoming, 54321);
+            transfer(result, to_server);
+            client_done = result.elements.at(0).bits == 1;
+        }
+        if (!server_done) {
+            const auto incoming = to_server.empty() ? "" : to_server.front();
+            if (!to_server.empty()) to_server.erase(to_server.begin());
+            const auto result = step(server, s.value, 0, incoming, 12345);
+            transfer(result, to_client);
+            server_done = result.elements.at(0).bits == 1;
+        }
+    }
+    check(client_done && server_done, "DTLS 1.3 handshake with address cookie");
+    const auto sent = step(client, c.value, 2, "", 54321, "message");
+    transfer(sent, to_server);
+    bool received = false;
+    for (const auto& packet : to_server) {
+        const auto result = step(server, s.value, 1, packet, 12345);
+        if (result.elements.at(0).bits == 1) {
+            check_equal(result.elements.at(2).bytes, std::string("message"), "DTLS plaintext");
+            received = true;
+        }
+    }
+    check(received, "DTLS datagram delivered");
+    expect_ok(client.call("neura.net.dtls.engine.release", {c.value}), "DTLS client release");
+    expect_ok(server.call("neura.net.dtls.engine.release", {s.value}), "DTLS server release");
+    auto quiet_args = opening(false, 12345, 54321);
+    quiet_args.back() = i64(1);
+    const auto quiet = client.call("neura.net.dtls.engine.open", quiet_args);
+    expect_ok(quiet, "deadline engine");
+    expect_error(client.call("neura.net.dtls.engine.exchange", {quiet.value, i32(0), bytes(""), text(""), i32(0),
+                 bytes(""), i64(5'000'000'000)}), host_error::timed_out, "open expiry cannot be extended by exchange");
+    expect_ok(client.call("neura.net.dtls.engine.release", {quiet.value}), "release expired engine");
+}
+
 // TLS client and server streams (src/nvm/tls_provider.cpp) against each
 // other, with a certificate the openssl command generates.
 NEURA_TEST(host, tls_streams_verify_peers_and_negotiate_alpn) {
