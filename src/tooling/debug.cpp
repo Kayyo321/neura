@@ -866,6 +866,7 @@ void Adapter::execute() {
             capabilities.env = cap["env"].boolean(true); capabilities.clock = cap["clock"].boolean(true);
             capabilities.entropy = cap["entropy"].boolean(true);
             capabilities.raw = cap["raw"].boolean(false);
+            capabilities.http_client = cap["http_client"].boolean(false);
         }
         nvm::ConsoleWriteLine console(output);
         nvm::StandardServices services(output, error, input, capabilities);

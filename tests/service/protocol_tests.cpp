@@ -62,6 +62,7 @@ Envelope sample_envelope() {
     envelope.clock = true;
     envelope.native = true;
     envelope.raw = true;
+    envelope.http_client = true;
     envelope.fs_prefixes = {"/home/u/data", "/tmp"};
     envelope.limits = {{"max-steps", 1000}, {"max-stack-cells", 1000}, {"tier", 1}};
     envelope.flags = {"stats", "tier-stats"};
@@ -102,6 +103,7 @@ int round_trips() {
     CHECK(read.environment == envelope.environment);
     CHECK(read.mode == envelope.mode);
     CHECK(read.fs && !read.net && !read.env && read.clock && !read.entropy && read.native && read.raw);
+    CHECK(read.http_client);
     CHECK(read.fs_prefixes == envelope.fs_prefixes);
     CHECK(read.limits == envelope.limits);
     CHECK(read.flag("stats") && read.flag("tier-stats") && !read.flag("profile"));

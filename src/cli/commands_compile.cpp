@@ -305,6 +305,7 @@ void note_denied_imports(const neura::nvr::Image& image, const neura::nvm::Capab
     const Group groups[] = {
         {"fs", "neura.fs.", capabilities.fs}, {"net", "neura.net.", capabilities.net},
         {"raw", "neura.net.raw.", capabilities.raw},
+        {"http_client", "neura.http.fetch", capabilities.http_client},
         {"env", "neura.env.", capabilities.env}, {"clock", "neura.clock.", capabilities.clock},
         {"entropy", "neura.entropy.", capabilities.entropy}, {"native", "neura.ffi.", capabilities.native},
     };

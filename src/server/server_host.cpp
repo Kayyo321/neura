@@ -115,7 +115,7 @@ constexpr std::string_view usage =
     "  --worker-jit off|on|auto       native compilation of a worker's tier-2 regions (default auto)\n"
     "  --worker-start zygote|exec     fork workers from a process that loaded the image once (zygote,\n"
     "                                 the default on Linux), or start each with exec\n"
-    "  --allow-fs[=prefix,...], --allow-net, --allow-env\n"
+    "  --allow-fs[=prefix,...], --allow-net, --allow-http-client, --allow-env\n"
     "                                 grant the workers that group (default: none)\n"
     "  --record-dir <directory>       record each request's host requests to <id>.trace\n"
     "  --sql-pool <name>=<url>        an SQL pool: sqlite:<path> or postgresql://... (repeatable);\n"
@@ -297,6 +297,8 @@ HostOptions read_options(int argc, char** argv) {
             }
         } else if (arg == "--allow-net") {
             options.capabilities.net = true;
+        } else if (arg == "--allow-http-client") {
+            options.capabilities.http_client = true;
         } else if (arg == "--allow-env") {
             options.capabilities.env = true;
         } else if (is(arg, "--record-dir")) {
@@ -818,6 +820,7 @@ private:
             arguments.push_back(option);
         }
         if (caps.net) arguments.emplace_back("--allow-net");
+        if (caps.http_client) arguments.emplace_back("--allow-http-client");
         if (caps.env) arguments.emplace_back("--allow-env");
         if (caps.sql) arguments.emplace_back("--allow-sql");
         if (options_.record_directory) arguments.push_back("--record-dir=" + argument_path(*options_.record_directory));
@@ -2002,6 +2005,8 @@ WorkerOptions read_worker_options(int argc, char** argv) {
             }
         } else if (arg == "--allow-net") {
             options.capabilities.net = true;
+        } else if (arg == "--allow-http-client") {
+            options.capabilities.http_client = true;
         } else if (arg == "--allow-env") {
             options.capabilities.env = true;
         } else if (arg == "--allow-sql") {

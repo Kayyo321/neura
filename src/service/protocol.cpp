@@ -408,7 +408,7 @@ void put_envelope(Message& message, const Envelope& envelope) {
     for (const auto& variable : envelope.mode) message.add(Tag::Mode, variable);
     const std::uint8_t policy = (envelope.fs ? 1 : 0) | (envelope.net ? 2 : 0) | (envelope.env ? 4 : 0) |
                                 (envelope.clock ? 8 : 0) | (envelope.entropy ? 16 : 0) | (envelope.native ? 32 : 0) |
-                                (envelope.raw ? 64 : 0);
+                                (envelope.raw ? 64 : 0) | (envelope.http_client ? 128 : 0);
     message.add_u8(Tag::Policy, policy);
     for (const auto& prefix : envelope.fs_prefixes) message.add(Tag::FsPrefix, prefix);
     for (const auto& [name, value] : envelope.limits) message.add(Tag::RunLimit, named_value(name, value));
@@ -445,7 +445,6 @@ Envelope read_envelope(const Message& message) {
     }
     for (const auto value : message.all(Tag::Mode)) envelope.mode.emplace_back(value);
     const auto policy = message.u8(Tag::Policy);
-    if (policy & ~0x7f) throw ProtocolError("unknown policy bits");
     envelope.fs = policy & 1;
     envelope.net = policy & 2;
     envelope.env = policy & 4;
@@ -453,6 +452,7 @@ Envelope read_envelope(const Message& message) {
     envelope.entropy = policy & 16;
     envelope.native = policy & 32;
     envelope.raw = policy & 64;
+    envelope.http_client = policy & 128;
     for (const auto value : message.all(Tag::FsPrefix)) envelope.fs_prefixes.emplace_back(value);
     for (const auto value : message.all(Tag::RunLimit)) {
         auto [name, number] = read_named_value(value);

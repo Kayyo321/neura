@@ -331,6 +331,9 @@ std::optional<std::string> service_group(std::string_view name) {
         return std::nullopt;
     if (starts("neura.ui.") || starts("neura.history.")) return "ui";
     if (name == "neura.http.fetch") return "http_client";
+    // HPACK is a native codec with no external capability. A browser target
+    // cannot import it because the browser runtime does not provide it.
+    if (starts("neura.http.hpack.")) return "";
     if (name == "neura.bridge.call") return "bridge";
     if (starts("neura.sql.")) return "sql";
     if (starts("neura.app.")) return "app";
@@ -418,6 +421,8 @@ Compiled compile(const Project& project, const Target& target, const BuildOption
         // Desktop.md, "Writing the native child": the child lives as long as the application.
         for (const auto* arg : {"--native", "--deny-all", "--max-steps", "18446744073709551615", "--allow-clock"})
             command.emplace_back(arg);
+        if (std::ranges::any_of(target.capabilities, [](const auto& cap) { return cap.value == Capability::HttpClient; }))
+            command.emplace_back("--allow-http-client");
     } else {
         command.emplace_back("--no-source-map");
     }

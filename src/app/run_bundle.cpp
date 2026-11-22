@@ -175,6 +175,7 @@ std::optional<std::vector<std::string>> server_command(const VerifiedBundle& bun
         switch (capability) {
         case Capability::Fs: command.emplace_back("--allow-fs"); break;
         case Capability::Net: command.emplace_back("--allow-net"); break;
+        case Capability::HttpClient: command.emplace_back("--allow-http-client"); break;
         case Capability::Env: command.emplace_back("--allow-env"); break;
         default: break;
         }
