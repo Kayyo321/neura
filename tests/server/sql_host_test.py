@@ -559,33 +559,40 @@ def test_postgres(args):
             server.stop()
         if not args.openssl:
             continue
-        # verify-full against a server with TLS: the CA the URL names, the
-        # host name in the certificate, and a CA that did not sign it.
+        # verify-full against a server with TLS: check both certificate
+        # identities, then try trust anchors with an unrelated subject and
+        # with the actual issuer's subject but a freshly generated key.
         certificates = Path(args.work) / "pg-certificates"
-        shutil.rmtree(certificates, ignore_errors=True)
+        unrelated_ca = Path(args.work) / "pg-unrelated-ca"
+        same_subject_ca = Path(args.work) / "pg-same-subject-ca"
+        for directory in (certificates, unrelated_ca, same_subject_ca):
+            shutil.rmtree(directory, ignore_errors=True)
         make_certificates(args.openssl, certificates)
-        other = Path(args.work) / "pg-other-ca"
-        shutil.rmtree(other, ignore_errors=True)
-        # A distinct CA name tests a missing trust path. Reusing the issuer's
-        # name can instead make OpenSSL try the wrong key and report an RSA error.
-        make_certificates(args.openssl, other, "neura-sql-unrelated-ca")
+        make_certificates(args.openssl, unrelated_ca, "neura-sql-unrelated-ca")
+        make_certificates(args.openssl, same_subject_ca)
         server = Postgres(version, image, certificates)
         try:
-            for host_name, ca, expected in (("localhost", certificates, True), ("127.0.0.1", certificates, True),
-                                            ("localhost", other, False)):
+            for host_name, ca in (("localhost", certificates), ("127.0.0.1", certificates),
+                                  ("localhost", unrelated_ca), ("localhost", same_subject_ca)):
                 url = (f"main=postgresql://postgres@{host_name}:{server.port}/postgres"
                        f"?sslrootcert={ca / 'ca.crt'}")
                 tls = Host(args, probe, "--sql-pool", url, "--config", "sql.main.password_env=NEURA_SQL_TEST_PASSWORD",
                            env=env, expect_ready=False)
                 try:
-                    if expected:
+                    if ca == certificates:
                         check(tls.ready, f"{label}: verify-full over TLS to {host_name}: {tls.stderr()}")
                         if tls.ready:
                             status, body = call(args, tls.port, "POST", "/setup")
                             check(status == 200, f"{label}: a statement over TLS: {status} {body!r}")
                     else:
-                        check(not tls.ready and "certificate verify failed" in tls.stderr(),
-                              f"{label}: a certificate from another CA is refused: {tls.stderr()}")
+                        diagnostics = tls.stderr()
+                        # A matching issuer name can make OpenSSL try the
+                        # wrong public key and report the RSA error instead.
+                        rejections = ("certificate verify failed", "invalid padding", "data too large for modulus",
+                                      "rsa lib")
+                        check(not tls.ready and any(f"ssl error: {message}" in diagnostics.lower()
+                                                    for message in rejections),
+                              f"{label}: verify-full refuses {ca.name}: {diagnostics}")
                 finally:
                     tls.stop()
         finally:
