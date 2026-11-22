@@ -18,31 +18,31 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **DohTransport** · [`export const MediaType = "application/dns-message"`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doh-transport.nra#L22)
+- **DohTransport** · [`export const MediaType = "application/dns-message"`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doh-transport.nra#L21)
   The media type of DNS messages over HTTP (RFC 8484 section 6).
-- **DohTransport** · [`export let DohTransport = class implements transports.DnsTransport`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doh-transport.nra#L27)
+- **DohTransport** · [`export let DohTransport = class implements transports.DnsTransport`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doh-transport.nra#L26)
   A DoH transport: an HTTP client, the endpoint URL (for example "https://dns.example/dns-query"), and the method. Tagged `#Final`, `#NotThreadSafe`.
-- **DohTransport.DohTransport** · [`export last url: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doh-transport.nra#L31)
+- **DohTransport.DohTransport** · [`export last url: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doh-transport.nra#L30)
   The endpoint URL without the `dns` parameter.
-- **DohTransport.DohTransport** · [`export last use_get: bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doh-transport.nra#L33)
+- **DohTransport.DohTransport** · [`export last use_get: bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doh-transport.nra#L32)
   Whether GET is used instead of POST.
-- **DohTransport.DohTransport** · [`export let init = func(carrier: http.Client, endpoint: string, get: bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doh-transport.nra#L36)
+- **DohTransport.DohTransport** · [`export let init = func(carrier: http.Client, endpoint: string, get: bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doh-transport.nra#L35)
   A transport over `carrier` to `endpoint`, with GET when `get` is true.
-- **DohTransport.DohTransport** · [`export let is_stream = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doh-transport.nra#L43)
+- **DohTransport.DohTransport** · [`export let is_stream = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doh-transport.nra#L42)
   A stream transport (HTTP responses are never truncated for size).
-- **DohTransport.DohTransport** · [`export let exchange = func(query: messages.Message) -> Result<messages.Message>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doh-transport.nra#L46)
+- **DohTransport.DohTransport** · [`export let exchange = func(query: messages.Message) -> Result<messages.Message>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doh-transport.nra#L45)
   One DoH exchange.
-- **DohTransport.DohTransport** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doh-transport.nra#L54)
+- **DohTransport.DohTransport** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doh-transport.nra#L53)
   Text such as "DohTransport(POST https://dns.example/dns-query)".
-- **DohTransport** · [`export let wire_query = func(query: messages.Message) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doh-transport.nra#L60)
+- **DohTransport** · [`export let wire_query = func(query: messages.Message) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doh-transport.nra#L59)
   The query's wire form with DNS ID 0 (RFC 8484 section 4.1). Tagged `#NoDiscard`.
-- **DohTransport** · [`export let get_url = func(endpoint: string, query: messages.Message) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doh-transport.nra#L69)
+- **DohTransport** · [`export let get_url = func(endpoint: string, query: messages.Message) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doh-transport.nra#L68)
   The GET URL: `endpoint` plus `?dns=` (or `&dns=` when it has a query) and the base64url text. Tagged `#NoDiscard`.
-- **DohTransport** · [`export let get_request = func(endpoint: string, query: messages.Message) -> Result<http.ClientRequest>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doh-transport.nra#L77)
+- **DohTransport** · [`export let get_request = func(endpoint: string, query: messages.Message) -> Result<http.ClientRequest>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doh-transport.nra#L76)
   The GET request. Tagged `#NoDiscard`.
-- **DohTransport** · [`export let post_request = func(endpoint: string, query: messages.Message) -> Result<http.ClientRequest>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doh-transport.nra#L85)
+- **DohTransport** · [`export let post_request = func(endpoint: string, query: messages.Message) -> Result<http.ClientRequest>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doh-transport.nra#L84)
   The POST request. Tagged `#NoDiscard`.
-- **DohTransport** · [`export let decode_response = func(response: http.Response) -> Result<messages.Message>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doh-transport.nra#L96)
+- **DohTransport** · [`export let decode_response = func(response: http.Response) -> Result<messages.Message>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doh-transport.nra#L95)
   The DNS message of a DoH response. Err (Custom `dns.doh_status`) for a status outside 200-299, (`dns.doh_media_type`) for another content type, or the decode error. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

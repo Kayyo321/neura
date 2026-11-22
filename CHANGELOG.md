@@ -25,6 +25,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - Tags accept dot or hash sigils in the same positions. CLI and editor formatting preserve the spelling by default and can explicitly convert only tag sigils.
 - `Std.Net` adds Unicode UTS 46 mapping, more socket provider operations, multicast DNS, DNS over QUIC, and TLS 1.3 over a caller-supplied stream. TLS builds support mutual TLS and narrower client and server version ranges.
 - `Std.Net.Tls` adds ACME client operations and SPIFFE SVID verification. `Handshake.dtls13` uses a bound UDP socket, verifies peer identity and uses server-side cookies. `TlsStream` exposes the verified DER certificate chain.
+- `Std.Net.Http` streams bodies through the assigned server worker. The native `neura.http.fetch` service supports HTTP/1.1 and negotiates HTTP/2 over verified TLS in builds with HTTP/2. Grant it with `--allow-http-client` or the project capability `http_client`. `H2` opens a TLS connection with ALPN `h2`, writes frames and supports HPACK in builds with nghttp2. [Host services](docs/runtime/NVM.md#http-client-services)
 - `Std.Crypto` adds codec-backed generic secret locking and process generation observation for fork-safe random generation.
 
 ### Changed
@@ -40,6 +41,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 ### Known limitations
 
 - OpenSSL 4.1.0 DTLS can drop outstanding post-handshake retransmissions on KeyUpdate ([#32878](https://github.com/openssl/openssl/issues/32878)), misclassify listener read or write errors ([#33277](https://github.com/openssl/openssl/issues/33277), [#33278](https://github.com/openssl/openssl/issues/33278)), or abort a handshake on an early acknowledgment ([#33242](https://github.com/openssl/openssl/issues/33242)). [DTLS 1.3 limitations](docs/lang/Neura0.3.1.md#dtls-13-limitations)
+- HTTP/3 transport, QPACK and MASQUE operations return typed `Unsupported`. The available QUIC provider carries DNS over QUIC.
 
 ## [0.3.0] - 2026-11-20
 

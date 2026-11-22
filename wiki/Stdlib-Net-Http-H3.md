@@ -145,25 +145,25 @@ The following public declarations are taken from the module source; each links t
 - **H3** · [`export let is_grease = func(value: uint64) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L314)
   Whether `value` has the form 0x1f * N + 0x21 used for reserved ("grease") types, settings and error codes (sections 6.2.3, 7.2.8, 7.2.4.1, 8.1). Tagged `#Pure`, `#ThreadSafe`.
 - **H3** · [`export let H3Connection = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L318)
-  An HTTP/3 connection over QUIC. Tagged `#Final`, `#NotThreadSafe`.
+  An HTTP/3 connection descriptor whose transport operations currently return `Io(Unsupported)`. Tagged `#Final`, `#NotThreadSafe`.
 - **H3.H3Connection** · [`export last authority: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L320)
-  The authority the connection was opened to.
+  The authority recorded by the descriptor.
 - **H3.H3Connection** · [`export let init = func(target: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L323)
-  Records the authority; only `connect` creates connections.
+  Records an authority only; this value owns no native connection.
 - **H3.H3Connection** · [`export let send_frame = func(stream_id: uint64, frame_type: uint64, payload: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L329)
-  Sends one frame on a request stream.
+  Returns `Io(Unsupported)` because general HTTP/3 QUIC stream I/O is unavailable. Tagged `#NoDiscard`. Since 0.3.1.
 - **H3.H3Connection** · [`export let close = func(error_code: uint64) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L334)
-  Closes the connection with an HTTP/3 error code (section 8.1).
-- **H3.H3Connection** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L337)
+  Returns `Io(Unsupported)` because this value owns no native QUIC connection to close. Tagged `#NoDiscard`. Since 0.3.1.
+- **H3.H3Connection** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L338)
   The authority.
-- **H3** · [`export let connect = func(authority: string, settings: Settings) -> Result<H3Connection>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L344)
-  Opens an HTTP/3 connection to `authority` (host:port): QUIC with TLS 1.3 and ALPN "h3", then the control stream and SETTINGS (sections 3.2, 6.2.1). Tagged `#NoDiscard`.
-- **H3** · [`export let encode_field_section = func(fields: header_map.Headers) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L350)
-  The QPACK encoding of a field section (RFC 9204). Tagged `#NoDiscard`.
+- **H3** · [`export let connect = func(authority: string, settings: Settings) -> Result<H3Connection>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L345)
+  Returns `Io(Unsupported)` because HTTP/3 connection establishment, control streams and QPACK state are unavailable. The DNS-over-QUIC provider is not a general HTTP/3 transport. No connection is opened and no request leaves the process. Tagged `#NoDiscard`. Since 0.3.1.
+- **H3** · [`export let encode_field_section = func(fields: header_map.Headers) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L352)
+  Returns `Io(Unsupported)` because QPACK field compression is unavailable. Since 0.3.1 this returns `Result<uint8[list]>` so callers can handle unavailable compression without trapping; the former unwrapped byte-list result never produced a value. Tagged `#NoDiscard`. Since 0.3.1.
 - **H3** · [`export let decode_field_section = func(encoded: uint8[list]) -> Result<header_map.Headers>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L357)
-  The field section of a QPACK-encoded HEADERS payload (RFC 9204). Tagged `#NoDiscard`.
+  Returns `Io(Unsupported)` because QPACK field decompression is unavailable. Tagged `#NoDiscard`. Since 0.3.1.
 <!-- END SOURCE API -->
 
 ## Detailed contracts
 
-The contract of this module is [section 11.4 `Std.Net`](Stdlib-Design#114-stdnet) of the standard library specification, under its package, together with the module's source comments. This module was added in 0.3.0 and is proposed: it was implemented by autonomous agents and awaits the owner's confirmation. A member marked `@stub` in the source traps as unsupported in 0.3.0. The design note [`docs/design/Net030.md`](https://github.com/Kayyo321/neura/blob/main/docs/design/Net030.md) in the repository records how each item of the networking specification is provided, the tests, and the host service each stub needs. The source and the [language status](Status) identify shipped behavior.
+Frame and settings codecs are available. HTTP/3 connections and QPACK return typed `Unsupported` because the QUIC provider only supplies DNS exchanges. [Networking status](Status)

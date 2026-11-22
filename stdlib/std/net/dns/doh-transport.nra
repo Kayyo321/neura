@@ -12,9 +12,8 @@ let transports = import:Std.Net.Dns.DnsTransport;
 /// `Content-Type: application/dns-message`, or as a GET whose `dns` parameter is the message in base64url without
 /// padding (section 4.1); both send `Accept: application/dns-message`. A response must be a 2xx status with that
 /// content type (section 4.2) and decode as a DNS message; its ID is then set back to the query's own ID so the
-/// resolver's matching works. The request building, encoding and response checks are real and tested with an
-/// injected `Std.Net.Http.Transport`; the client's default transport is the host's `neura.http.fetch`, a stub until
-/// the A4 runtime lane provides it (`Std.Net.Http.host_fetch`).
+/// resolver's matching works. It can use an injected `Std.Net.Http.Transport` or the client's default
+/// `neura.http.fetch` transport. The default needs the HTTP client capability and HTTPS support in the host.
 /// @see [Std.Net.Dns.DohTransport](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-DohTransport)
 .Since("0.3.0")
 export let DohTransport = module (

@@ -217,7 +217,7 @@ let load_projects = func -> string {
 
 Errors with codes 1 to 15 are I/O errors of the same kind, as for every host service; 16, 17 and 18 are custom errors whose codes are `http.TooLarge`, `http.Busy` and `http.OutcomeUnknown`. `failure_of(error)` classifies either as a `FetchFailure`. In a program with tasks a fetch overlaps: the calling task waits and the other tasks run, and cancelling its scope aborts the exchange.
 
-A native `neura run` does not serve `neura.http.fetch` yet; an image that calls it fails to bind there ([Not provided](#not-provided-in-the-browser-yet)). `tests/apps/web/fetch-check.py` runs the cases above from a bundle in headless Chromium and Firefox against a page origin and a second, CORS-enabled origin.
+`tests/apps/web/fetch-check.py` runs the browser cases from a bundle in headless Chromium and Firefox against a page origin and a second, CORS-enabled origin. The native runner uses the same version 1 binding with its own network policy, deadline and transport limits. [Native HTTP client services](NVM.md#http-client-services)
 
 ## Gesture actions (proposed)
 
