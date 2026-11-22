@@ -20,6 +20,7 @@
 #include <regex>
 #include <set>
 #include <sstream>
+#include <variant>
 
 #ifndef _WIN32
 #include <spawn.h>

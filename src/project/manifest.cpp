@@ -8,6 +8,7 @@
 #include <initializer_list>
 #include <system_error>
 #include <utility>
+#include <variant>
 
 namespace neura::project {
 namespace {

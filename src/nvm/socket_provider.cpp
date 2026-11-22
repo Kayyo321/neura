@@ -22,6 +22,7 @@
 #include <cstring>
 #include <limits>
 #include <optional>
+#include <variant>
 
 #ifdef _WIN32
 #include "platform/text.hpp"

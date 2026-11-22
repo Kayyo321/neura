@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <optional>
 #include <thread>
+#include <variant>
 
 #if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
 #include <cpuid.h>
