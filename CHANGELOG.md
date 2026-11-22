@@ -49,7 +49,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ### Fixed
 
-- `neura.process.generation` no longer fails on an unknown VMClock version or an unexpected read error; it falls back to the PID and vmgenid detectors and retries a transient VMClock open failure.
+- `neura.process.generation` no longer fails on an unknown VMClock version or an unexpected read error; it falls back to the PID and vmgenid detectors and retries a transient VMClock open failure or a read shorter than the VMClock header, giving VMClock up only after three short reads in a row.
 - A TLS write that times out or fails ends the stream with that error for every later operation instead of letting a next write fail with `ConnectionReset` or mix records.
 - `TlsStream.shutdown(Write)` uses the write timeout, `neura.net.tls.shutdown_write` treats zero as the 30-second default, and a TLS accept with timeout zero bounds the handshake after the TCP accept by 30 seconds, so a silent peer no longer holds the caller without limit.
 - A DTLS 1.3 transport survives a receive that times out or fails on the socket: the association stays usable instead of failing every later operation, and a later send no longer returns `InvalidInput`.

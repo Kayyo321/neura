@@ -982,7 +982,12 @@ struct VmGeneration {
     std::optional<std::uint64_t> observed;
     int clock = -2; // -2: probe on next call; -1: unavailable for this process.
     int events = -2;
+    // Consecutive VMClock reads shorter than its header.
+    int short_reads = 0;
 };
+// A short VMClock read is retried like other read errors; this many in a row
+// mean the device never gives a whole header, and VMClock is not used.
+constexpr int vmclock_short_read_limit = 3;
 VmGeneration vm_generation;
 
 void prepare_generation_fork() { ::pthread_mutex_lock(&vm_generation.mutex); }
@@ -991,6 +996,7 @@ void reset_generation_descriptors() {
     if (vm_generation.clock >= 0) ::close(vm_generation.clock);
     if (vm_generation.events >= 0) ::close(vm_generation.events);
     vm_generation.clock = vm_generation.events = -2;
+    vm_generation.short_reads = 0;
 }
 void child_generation_fork() {
     vm_generation.owner = ::getpid();
@@ -1081,7 +1087,14 @@ HostCompletion process_generation() {
         // retry. pread starts at zero on the cached descriptor every time.
         ssize_t size = ::pread(vm_generation.clock, snapshot.data(), snapshot.size(), 0);
         if (size < 0 && errno == EINTR) size = ::pread(vm_generation.clock, snapshot.data(), snapshot.size(), 0);
-        if (size >= 0) {
+        if (size >= 0 && static_cast<std::size_t>(size) < generation_internal::vmclock_header_size) {
+            // Too short to tell the layout: transient unless it repeats.
+            if (++vm_generation.short_reads >= vmclock_short_read_limit) {
+                ::close(vm_generation.clock);
+                vm_generation.clock = -1;
+            }
+        } else if (size >= 0) {
+            vm_generation.short_reads = 0;
             const auto observation = generation_internal::vmclock_generation(
                 std::span(snapshot).first(static_cast<std::size_t>(size)));
             if (!observation.valid) {
@@ -1098,8 +1111,9 @@ HostCompletion process_generation() {
         }
     }
     // A missing, unreadable or unrecognized VMClock sample leaves the PID and
-    // netlink detectors active. Other open and read errors (EMFILE, EIO) are
-    // retried on the next call.
+    // netlink detectors active. Other open and read errors (EMFILE, EIO) and
+    // a short read are retried on the next call, a short read only up to
+    // vmclock_short_read_limit times in a row.
     return HostCompletion::ok(scalar(vm_generation.epoch));
 }
 #elif defined(_WIN32)

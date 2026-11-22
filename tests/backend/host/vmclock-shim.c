@@ -69,6 +69,10 @@ ssize_t pread(int descriptor, void* data, size_t count, off_t offset) {
         errno = EIO;
         return -1;
     }
+    if (selected("short-always") && reads > 3) {
+        fprintf(stderr, "VMClock read again after repeated short reads\n");
+        _Exit(83);
+    }
     unsigned char bytes[112] = {0};
     bytes[0] = 'V';
     bytes[1] = 'C';
@@ -78,6 +82,11 @@ ssize_t pread(int descriptor, void* data, size_t count, off_t offset) {
     bytes[8] = selected("unknown-version") ? 2 : 1;
     bytes[25] = 1; // VM_GEN_COUNTER_PRESENT at bit 8 of flags.
     bytes[104] = 77;
+    // A read shorter than the 32-byte header: once, or every time.
+    if ((selected("short-read") && reads == 1) || selected("short-always")) {
+        memcpy(data, bytes, 16);
+        return 16;
+    }
     memcpy(data, bytes, sizeof bytes);
     return sizeof bytes;
 }

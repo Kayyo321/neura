@@ -2301,9 +2301,11 @@ if(BUILD_TESTING AND NEURA_SDK)
         add_executable(neura_vmclock_recovery_test tests/host-standalone/vmclock-recovery.cpp)
         target_link_libraries(neura_vmclock_recovery_test PRIVATE neura_nvm)
         neura_target_defaults(neura_vmclock_recovery_test)
-        add_test(NAME backend-generation-vmclock-recovery COMMAND ${CMAKE_COMMAND} -E env
-            "LD_PRELOAD=$<TARGET_FILE:neura_vmclock_test_shim>" "VMCLOCK_MODE=recovery"
-            "$<TARGET_FILE:neura_vmclock_recovery_test>")
+        foreach(mode IN ITEMS recovery short-read short-always)
+            add_test(NAME backend-generation-vmclock-${mode} COMMAND ${CMAKE_COMMAND} -E env
+                "LD_PRELOAD=$<TARGET_FILE:neura_vmclock_test_shim>" "VMCLOCK_MODE=${mode}"
+                "$<TARGET_FILE:neura_vmclock_recovery_test>")
+        endforeach()
         add_test(NAME backend-secret-memory-supported COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/crypto-core/locked-supported.py" --bytes 1048576 --
             "$<TARGET_FILE:neura_backend_tests>" secret_memory "${CMAKE_CURRENT_SOURCE_DIR}")
