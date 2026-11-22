@@ -2,6 +2,7 @@
 let fixed = import:Std.Time.FixedClock;
 let instant = import:Std.Time.Instant;
 let vectors = import:SpiffeVectors;
+let pem = import:Std.Crypto.Pki.Pem;
 let error = import:Std.Core.Error;
 let spiffe = import:Std.Net.Tls.Spiffe;
 let strings = import:Std.Text.Strings;
@@ -106,6 +107,38 @@ let SpiffeTests = module (
         last expired_clock = fixed.of(instant.of_epoch_seconds(2100000000, 0));
         last expired = test.assert_err<spiffe.SpiffeId>(spiffe.verify_x509_svid(vectors.Leaf, vectors.Root, "example.test", expired_clock));
         test.assert_equal_string("pki.validity", code(expired));
+    };
+
+    export let test_x509_svid_rejects_invalid_identity_material = func {
+        last clock = fixed.of(instant.of_epoch_seconds(1735689600, 0));
+        last copy = test.assert_ok<uint8[list]>(pem.decode(vectors.Leaf, "CERTIFICATE"));
+        copy[copy.length - 1] ^= 1;
+        last forged = test.assert_err<spiffe.SpiffeId>(spiffe.verify_x509_svid(pem.encode("CERTIFICATE", copy),
+            vectors.Root, "example.test", clock));
+        test.assert_equal_string("pki.signature", code(forged));
+        last wrong_root = test.assert_err<spiffe.SpiffeId>(spiffe.verify_x509_svid(vectors.Leaf, vectors.WrongRoot,
+            "example.test", clock));
+        test.assert_equal_string("pki.no_path", code(wrong_root));
+        last ca = test.assert_err<spiffe.SpiffeId>(spiffe.verify_x509_svid(vectors.CaLeaf, vectors.WrongRoot,
+            "example.test", clock));
+        test.assert_equal_string("spiffe.certificate", code(ca));
+        last server_only = test.assert_err<spiffe.SpiffeId>(spiffe.verify_x509_svid(vectors.ServerOnly, vectors.WrongRoot,
+            "example.test", clock));
+        test.assert_equal_string("spiffe.certificate", code(server_only));
+        test.assert_err<spiffe.SpiffeId>(spiffe.verify_x509_svid(vectors.Leaf, vectors.Root, "", clock));
+    };
+
+    export let test_jwt_svid_requires_an_asymmetric_algorithm_and_domain = func {
+        last clock = fixed.of(instant.of_epoch_seconds(1735689600, 0));
+        last payload = ".eyJzdWIiOiJzcGlmZmU6Ly9leGFtcGxlLnRlc3Qvd29ya2xvYWQiLCJhdWQiOiJ0ZXN0LWF1ZGllbmNlIiwiZXhwIjoxNzQwMDAwMDAwfQ.";
+        last tokens: string[] = ["eyJhbGciOiJub25lIn0" .. payload, "eyJhbGciOiJIUzI1NiJ9" .. payload .. "AA"];
+        for (let token in tokens) {
+            last rejected = test.assert_err<spiffe.SpiffeId>(spiffe.verify_jwt_svid(token, vectors.Jwks,
+                "test-audience", "example.test", clock));
+            test.assert_equal_string("spiffe.token", code(rejected));
+        }
+        test.assert_err<spiffe.SpiffeId>(spiffe.verify_jwt_svid(vectors.Jwt, vectors.Jwks,
+            "test-audience", "", clock));
     };
 
     export let test_jwt_svid_key_and_claims = func {

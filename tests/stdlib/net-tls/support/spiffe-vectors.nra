@@ -11,6 +11,41 @@ export let SpiffeVectors = module (
         .. "0ZWk1vuZywIhAKSm3Z3DUM2WCC3kbTxNCi8n5qh2IhkrHVr6OCgFuXQU\n"
         .. "-----END CERTIFICATE-----\n";
 
+    export const WrongRoot: string = "-----BEGIN CERTIFICATE-----\n"
+        .. "MIIBnTCCAUSgAwIBAgIBWzAKBggqhkjOPQQDAjAmMSQwIgYDVQQDDBtuZXVyYS1z\n"
+        .. "cGlmZmUtdW5yZWxhdGVkLXJvb3QwHhcNMjAwMTAxMDAwMDAwWhcNMzUwMTAxMDAw\n"
+        .. "MDAwWjAmMSQwIgYDVQQDDBtuZXVyYS1zcGlmZmUtdW5yZWxhdGVkLXJvb3QwWTAT\n"
+        .. "BgcqhkjOPQIBBggqhkjOPQMBBwNCAATIC7WoxObpOBywkBq7XKd9IIU6jUW4b14e\n"
+        .. "xowsPf3Qw76cdlhgEudmfUwGyPUuaCUZM4WBGNHw2RsX487U1/BFo2MwYTAdBgNV\n"
+        .. "HQ4EFgQUbs3Y+E4nXdObXOq8539JkUZc5F0wHwYDVR0jBBgwFoAUbs3Y+E4nXdOb\n"
+        .. "XOq8539JkUZc5F0wDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMCAQYwCgYI\n"
+        .. "KoZIzj0EAwIDRwAwRAIgD1kKiILPZuJkyJ1AnBEEnQSkrAC1X6EKcJuO9kvkouQC\n"
+        .. "IHLhVMWtnFgzMbqMNvhFUC9dql8sZRUNry6byuLuVmS6\n"
+        .. "-----END CERTIFICATE-----\n";
+
+    export const CaLeaf: string = "-----BEGIN CERTIFICATE-----\n"
+        .. "MIIBeDCCAR2gAwIBAgIBXDAKBggqhkjOPQQDAjAmMSQwIgYDVQQDDBtuZXVyYS1z\n"
+        .. "cGlmZmUtdW5yZWxhdGVkLXJvb3QwHhcNMjAwMTAxMDAwMDAwWhcNMzUwMTAxMDAw\n"
+        .. "MDAwWjASMRAwDgYDVQQDDAdsZWFmLWNhMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcD\n"
+        .. "QgAEU7oGaimeeIkKS5NXvPYvRCFfuQOFA2hlG/uKC3EyvOTV1ID23RRxZ9jgdMyr\n"
+        .. "PDeY+KQft3iHVVQmFLKx6vknKKNQME4wDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8B\n"
+        .. "Af8EBAMCAQYwKwYDVR0RBCQwIoYgc3BpZmZlOi8vZXhhbXBsZS50ZXN0L2NhLWZs\n"
+        .. "YWdnZWQwCgYIKoZIzj0EAwIDSQAwRgIhAPfivXY+9R8pZJjBqwC6aBB+K6agTTrJ\n"
+        .. "Uee2jD/+9FCnAiEAnTqHbSs1WQRYnzkNv6GMKLCLneCne/7x5iaa0kvR4SI=\n"
+        .. "-----END CERTIFICATE-----\n";
+
+    export const ServerOnly: string = "-----BEGIN CERTIFICATE-----\n"
+        .. "MIIBjjCCATSgAwIBAgIBXDAKBggqhkjOPQQDAjAmMSQwIgYDVQQDDBtuZXVyYS1z\n"
+        .. "cGlmZmUtdW5yZWxhdGVkLXJvb3QwHhcNMjAwMTAxMDAwMDAwWhcNMzUwMTAxMDAw\n"
+        .. "MDAwWjAWMRQwEgYDVQQDDAtzZXJ2ZXItb25seTBZMBMGByqGSM49AgEGCCqGSM49\n"
+        .. "AwEHA0IABI4Q/knL50O/sEl7GVbMOkl99htt40BwQlo6TI8MZ+jEgG0cvvdN65pY\n"
+        .. "Ecc3AYwFMyD1meVfmBU8plOdABkpMQ+jYzBhMAwGA1UdEwEB/wQCMAAwDgYDVR0P\n"
+        .. "AQH/BAQDAgeAMBMGA1UdJQQMMAoGCCsGAQUFBwMBMCwGA1UdEQQlMCOGIXNwaWZm\n"
+        .. "ZTovL2V4YW1wbGUudGVzdC9zZXJ2ZXItb25seTAKBggqhkjOPQQDAgNIADBFAiEA\n"
+        .. "pHvP+dCqxPhgynp0eTnAvPwAx0C2OC4YOL1iy2OJBsMCIFI5ZzZeeWOAu6qRgdGy\n"
+        .. "yyeGUAI1PZ+uj9Wg0YD9WyK3\n"
+        .. "-----END CERTIFICATE-----\n";
+
     export const Leaf: string = "-----BEGIN CERTIFICATE-----\n"
         .. "MIIBwjCCAWegAwIBAgIBAjAKBggqhkjOPQQDAjAhMR8wHQYDVQQDDBZuZXVyYS1z\n"
         .. "cGlmZmUtdGVzdC1yb290MB4XDTIwMDEwMTAwMDAwMFoXDTM1MDEwMTAwMDAwMFow\n"

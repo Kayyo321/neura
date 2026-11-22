@@ -31,7 +31,7 @@ let strings = import:Std.Text.Strings;
 /// errors with the byte offset of the problem. Equality is exact: the trust domain is lowercase by the rules and
 /// the path is case-sensitive.
 ///
-/// Supply the trust bundle for the expected trust domain. Pass `trust_domain` to enforce this scope locally.
+/// Supply the trust bundle for the required `trust_domain`. The verified workload must belong to that domain.
 /// Verification uses the supplied clock or the host wall clock.
 /// @see [Std.Net.Tls.Spiffe](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Tls-Spiffe)
 .Since("0.3.0")
@@ -122,8 +122,9 @@ export let Spiffe = module (
     /// @brief Verifies a leaf-first X.509-SVID chain with a PEM trust bundle. Requires one URI SAN and an
     /// end-entity certificate. The supplied bundle is authoritative for the requested trust domain.
     .NoDiscard
-    export let verify_x509_svid = func(chain_pem: string, bundle_pem: string, trust_domain: string = "",
+    export let verify_x509_svid = func(chain_pem: string, bundle_pem: string, trust_domain: string,
         clock: Clock = nil) -> Result<SpiffeId> {
+        check_trust_domain_name(trust_domain)?;
         last chain = certificates.parse_pem(chain_pem)?;
         last anchors = certificates.parse_pem(bundle_pem)?;
         if (chain.length == 0) {
@@ -160,6 +161,8 @@ export let Spiffe = module (
                 return jose.fail<SpiffeId>("spiffe.certificate", "the SVID leaf requires key usage");
             },
         }
+        // SPIFFE X.509-SVID specification §4.4. The extension may be absent.
+        // When present, it must name both clientAuth and serverAuth.
         match (leaf.extended_key_usage) {
             Optional.Some(usage) => {
                 if (not usage.has(oids.ClientAuth) || not usage.has(oids.ServerAuth)) {
@@ -198,8 +201,9 @@ export let Spiffe = module (
     /// an asymmetric signature, the `jwt-svid` key use, and `sub`, `aud` and `exp`. A `kid` selects one key;
     /// without it, the supported signatures are checked against at most 16 bundle keys.
     .NoDiscard
-    export let verify_jwt_svid = func(token: string, jwks_json: string, audience: string, trust_domain: string = "",
+    export let verify_jwt_svid = func(token: string, jwks_json: string, audience: string, trust_domain: string,
         clock: Clock = nil) -> Result<SpiffeId> {
+        check_trust_domain_name(trust_domain)?;
         if (audience.byte_length == 0 || token.byte_length > 1048576 || jwks_json.byte_length > 1048576) {
             return jose.fail<SpiffeId>("spiffe.token", "invalid audience or oversized token or bundle");
         }
@@ -242,7 +246,7 @@ export let Spiffe = module (
 
     let workload = func(uri: string, domain: string) -> Result<SpiffeId> {
         last id = parse(uri)?;
-        if (id.path.byte_length == 0 || (domain.byte_length > 0 && not id.member_of(domain))) {
+        if (id.path.byte_length == 0 || not id.member_of(domain)) {
             return jose.fail<SpiffeId>("spiffe.identity", "the SVID must identify a workload in the expected trust domain");
         }
         return Result<SpiffeId>.Ok(id);
