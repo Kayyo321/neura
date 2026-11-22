@@ -18,6 +18,7 @@
 #include "law_program.hpp"
 #include "linker.hpp"
 #include "monitors.hpp"
+#include "pointer_safety.hpp"
 #include "frozen.hpp"
 #include "nil_narrowing.hpp"
 #include "nominal.hpp"
@@ -337,6 +338,7 @@ private:
         // field initializers from such a binding annotation.
         const TypeSyntax* syntax = nullptr;
         bool initializes = false;
+        bool native_boundary = false;
     };
     std::optional<ExpectedOrigin> expected_origin_;
     // The origin that value() received for a `new` expression it lowers.
@@ -471,7 +473,7 @@ private:
     bool lowers_to_text(const Expr& syntax, Context& context);
     IrNode concatenate_text(std::vector<IrNode> operands, const Span& span);
     IrType parameter_type(const Parameter& parameter, const Context& context);
-    IrNode pack_argument(const Expr& expr, const IrType& argument, Context& context);
+    IrNode pack_argument(const Expr& expr, const IrType& argument, Context& context, bool native = false);
     IrNode allocate(const Expr& expr, Context& context, const IrType* target = nullptr);
     IrNode binary(const Expr& expr, Context& context, const IrType* expected);
     IrNode comparison_chain(const Expr& expr, Context& context);
@@ -1621,7 +1623,13 @@ bool Lowering::assignable(const IrType& actual, const IrType& expected) const {
 
 void Lowering::require_type(const IrType& actual, const IrType& expected, const Span& span,
                             const ExpectedOrigin* origin) const {
+    if (origin && origin->native_boundary && contains_pointer_type(program_, actual))
+        throw Diagnostic(span, "a managed pointer is not a native value in Std.DynamicForeign").with_code("E0403");
     if (assignable(actual, expected)) return;
+    if ((contains_pointer_type(program_, actual) && contains_native_type(program_, expected)) ||
+        (contains_native_type(program_, actual) && contains_pointer_type(program_, expected)))
+        throw Diagnostic(span, "managed pointers cannot cross the Std.DynamicForeign boundary").with_code("E0403")
+            .label("no conversion between a managed pointer and a native value");
     auto error = Diagnostic(span, "expected " + describe(expected) + ", got " + describe(actual)).with_code("E0403")
         .label("expected " + describe(expected) + ", found " + describe(actual));
     if (origin && !origin->span.file.empty()) error.label(origin->span, origin->text);
@@ -2774,7 +2782,8 @@ void Lowering::arguments(IrNode& call, const Expr& expr, std::size_t first, Symb
             const auto* function = entries_[target].declaration;
             const auto index = i + leading;
             expected_origin_ = ExpectedOrigin{parameter.span, "parameter '" + parameter.name + "' is declared here",
-                function && index < function->parameters.size() ? &function->parameters[index].type : nullptr};
+                function && index < function->parameters.size() ? &function->parameters[index].type : nullptr,
+                false, native_declaration(program_, target)};
         }
         call.operands.push_back(argument_value(expr, i + first, expected, context));
     }
@@ -2784,7 +2793,7 @@ void Lowering::arguments(IrNode& call, const Expr& expr, std::size_t first, Symb
     for (std::size_t i = fixed; i < count; ++i) {
         const auto& input = expr.operands[i + first];
         pack.operands.push_back(variadic == VariadicKind::Untyped
-            ? pack_argument(input, element, context) : argument_value(expr, i + first, element, context));
+            ? pack_argument(input, element, context, native_declaration(program_, target)) : argument_value(expr, i + first, element, context));
     }
     call.operands.push_back(std::move(pack));
 }
@@ -2821,8 +2830,34 @@ IrNode Lowering::cast_call(SymbolId target, IrNode source, const IrType& type, c
     return result;
 }
 
-IrNode Lowering::pack_argument(const Expr& expr, const IrType& argument, Context& context) {
+IrNode Lowering::pack_argument(const Expr& expr, const IrType& argument, Context& context, bool native) {
     auto input = value(expr, context);
+    if (native && contains_pointer_type(program_, input.type))
+        throw Diagnostic(expr.span, "a managed pointer is not a native value in Std.DynamicForeign").with_code("E0403");
+    if (native && input.type.kind == TypeKind::Any) {
+        // The object carrier keeps the dynamic class until the native codec
+        // refuses a managed pointer. The non-reference any tags have no
+        // value coercion at this explicit boundary.
+        const auto erased = symbol(root_class()).type;
+        const auto held = hidden_local("$native_any", any_type, expr.span, context);
+        auto save = node(IrOp::Initialize, expr.span);
+        save.symbol = held;
+        save.operands.push_back(std::move(input));
+        auto selected = node(IrOp::SelectValue, expr.span, erased);
+        selected.operands.push_back(any_tag_is(held, *any_tag(erased), expr.span));
+        selected.body.push_back(any_unpack(held, erased, expr.span));
+        auto fail = node(IrOp::TrapMessage, expr.span);
+        auto message = node(IrOp::String, expr.span, string_type);
+        message.text = "invalid argument: argument does not fit the native layout";
+        fail.operands.push_back(std::move(message));
+        auto otherwise = node(IrOp::ScopedValue, expr.span, erased);
+        otherwise.body.push_back(std::move(fail));
+        otherwise.body.push_back(node(IrOp::Nil, expr.span, erased));
+        selected.alternative.push_back(std::move(otherwise));
+        input = node(IrOp::ScopedValue, expr.span, erased);
+        input.body.push_back(std::move(save));
+        input.body.push_back(std::move(selected));
+    }
     if (input.type == argument) return input;
     if (input.type.kind == TypeKind::Any)
         throw any_operation(expr.span, "formatting")
@@ -2848,6 +2883,7 @@ IrNode Lowering::pack_argument(const Expr& expr, const IrType& argument, Context
                                         " as a variadic argument; pass its text representation explicitly")
                 .with_code("E0403");
         auto text = node(IrOp::ValueText, expr.span, string_type);
+        if (native && input.type.kind == TypeKind::TypeParameter) text.text = native_argument_packing;
         text.operands.push_back(std::move(input));
         input = std::move(text);
     }
@@ -2946,6 +2982,19 @@ std::optional<IrNode> Lowering::primitive_call(const Expr& expr, Context& contex
 }
 
 IrNode Lowering::call(const Expr& expr, Context& context, const IrType* expected) {
+    if (!expr.operands.empty() && expr.operands.front().kind == ExprKind::Name &&
+        expr.operands.front().text == "retain_cell_storage" &&
+        trusted_pointer_declaration(program_, lexical_owner(context))) {
+        if (expr.operands.size() != 2 || !expr.type_arguments.empty() || !expr.labels.empty())
+            throw Diagnostic(expr.span, "retain_cell_storage takes one cell and no type arguments").with_code("E0407");
+        auto cell = value(expr.operands[1], context);
+        if (cell.type.kind != TypeKind::Object || !cell_class(program_, cell.type.symbol))
+            throw Diagnostic(cell.span, "retain_cell_storage requires a live Std.Core.Cell").with_code("E0403");
+        auto retained = node(IrOp::RetainCellStorage, expr.span, cell.type);
+        retained.operands.push_back(std::move(cell));
+        return retained;
+    }
+
     const auto& callee_expr = expr.operands.front();
     if (callee_expr.kind == ExprKind::OptionalMember) return optional_access(callee_expr, &expr, context);
     if (auto result = primitive_call(expr, context)) return std::move(*result);
@@ -3125,7 +3174,9 @@ IrNode Lowering::allocate(const Expr& expr, Context& context, const IrType* targ
     auto target = own_member(id, "init");
     if (target != no_symbol) {
         resolve(target);
-        if (!symbol(target).exported && !inside(lexical_owner(context), id))
+        const bool pointer_factory = pointer_class(program_, id) == PointerKind::Const &&
+                                     trusted_pointer_declaration(program_, lexical_owner(context));
+        if (!symbol(target).exported && !inside(lexical_owner(context), id) && !pointer_factory)
             throw Diagnostic(expr.span, "constructor is not exported").with_code("E0507");
     } else {
         require_implicit_constructor(id, expr.span);
@@ -4137,6 +4188,17 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
                 .help("match the value instead: a 'match.is' arm 'name: " + describe(target) + "'");
         }
         if (expr.kind == ExprKind::Cast) {
+            const auto source_pointer = pointer_class(program_, source.type.symbol);
+            const auto target_pointer = pointer_class(program_, target.symbol);
+            if (source_pointer != PointerKind::None && target_pointer != PointerKind::None &&
+                source_pointer != target_pointer)
+                throw Diagnostic(expr.span, "a cast cannot change a managed pointer's capability").with_code("E0415");
+            if ((contains_pointer_type(program_, source.type) && (target.kind == TypeKind::Integer ||
+                 contains_native_type(program_, target))) ||
+                (contains_pointer_type(program_, target) && (source.type.kind == TypeKind::Integer ||
+                 contains_native_type(program_, source.type))))
+                throw Diagnostic(expr.span, "managed pointers cannot convert to or from native addresses or values")
+                    .with_code("E0415");
             if (const auto method = cast_method(source.type, target, context); method != no_symbol)
                 return cast_call(method, std::move(source), target, expr.span);
         }
@@ -4145,6 +4207,39 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
             if (!test) reject_erasure(source.type, target, expr.span);
             auto result = node(test ? IrOp::ClassIs : IrOp::ClassCast, expr.span, test ? bool_type : target);
             if (test) result.type_arguments.push_back(target);
+            const auto origin = source_file(program_, lexical_owner(context));
+            const auto pointers = library_files_.find("std/core/pointer.nra");
+            if (test && target.symbol != no_symbol && symbol(target.symbol).name == "MemorySegment" &&
+                origin != no_symbol && symbol(origin).library_path == "std/dynamic-foreign/internal/codec.nra" &&
+                pointers != library_files_.end()) {
+                // Preserve the codec's existing error path. A managed
+                // pointer fails this packing discriminator explicitly.
+                const auto module = own_member(pointers->second, "Pointer");
+                const auto marker = module == no_symbol ? no_symbol : own_member(module, "ManagedPointer");
+                if (marker == no_symbol)
+                    throw Diagnostic(expr.span, "missing managed pointer class marker").with_code("E0899");
+                resolve(marker);
+                const auto hold = hidden_local("$native_object", source.type, source.span, context);
+                auto save = node(IrOp::Initialize, source.span);
+                save.symbol = hold;
+                auto load = node(IrOp::Load, source.span, source.type);
+                load.symbol = hold;
+                save.operands.push_back(std::move(source));
+                auto pointer_test = node(IrOp::ClassIs, expr.span, bool_type);
+                pointer_test.type_arguments.push_back(symbol(marker).type);
+                pointer_test.operands.push_back(load);
+                auto selected = node(IrOp::SelectValue, expr.span, bool_type);
+                selected.operands.push_back(std::move(pointer_test));
+                auto no = node(IrOp::Boolean, expr.span, bool_type);
+                no.text = "false";
+                selected.body.push_back(std::move(no));
+                result.operands.push_back(std::move(load));
+                selected.alternative.push_back(std::move(result));
+                auto checked = node(IrOp::ScopedValue, expr.span, bool_type);
+                checked.body.push_back(std::move(save));
+                checked.body.push_back(std::move(selected));
+                return checked;
+            }
             result.operands.push_back(std::move(source));
             return result;
         }
@@ -4875,6 +4970,15 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
     }
     case StmtKind::Expression: {
         const auto& syntax = stmt.expressions.front();
+        if (syntax.kind == ExprKind::Call && syntax.operands.size() == 1 && syntax.type_arguments.empty() &&
+            syntax.operands.front().kind == ExprKind::Name &&
+            (syntax.operands.front().text == "pointer_bounds_failure" ||
+             syntax.operands.front().text == "pointer_stale_view") &&
+            trusted_pointer_declaration(program_, lexical_owner(context))) {
+            auto result = node(IrOp::Fail, syntax.span);
+            result.text = syntax.operands.front().text == "pointer_stale_view" ? "stale-list-view" : "view-bounds";
+            return result;
+        }
         if (syntax.kind == ExprKind::Call && syntax.operands.front().kind == ExprKind::Name &&
             syntax.operands.front().text == "trap_with_message" &&
             find("trap_with_message", context, syntax.span) == no_symbol) {
@@ -5019,6 +5123,8 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
             throw Diagnostic(object.span, "destroy requires an object").with_code("E0514");
         }
         reject_record_destroy(object);
+        if (pointer_class(program_, object.type.symbol) != PointerKind::None)
+            throw Diagnostic(object.span, "a managed pointer cannot be destroyed explicitly").with_code("E0514");
         if (entries_[object.type.symbol].singleton_instance != no_symbol)
             throw Diagnostic(object.span, "a singleton cannot be destroyed").with_code("E0511");
         auto result = node(IrOp::Destroy, stmt.span);
@@ -5818,13 +5924,17 @@ void Lowering::lower_declaration(SymbolId id) {
             auto instance = node(IrOp::Allocate, declaration.span, symbol(id).type);
             instance.symbol = own_member(id, "init");
             entries_[id].initializer = std::move(instance);
-            // An umbrella or interface reference must not permit destroying
-            // the singleton after its concrete type has been erased.
+        }
+        const bool singleton = entries_[id].singleton_instance != no_symbol;
+        if (singleton || pointer_class(program_, id) != PointerKind::None) {
+            // An erased reference still reaches the actual class's cleanup,
+            // which rejects destroy before the executor can free the handle.
             const auto cleanup = add(SymbolKind::Function, "deinit", declaration.span, id);
             symbol(cleanup).has_body = true;
             auto trap = node(IrOp::TrapMessage, declaration.span);
             auto message = node(IrOp::String, declaration.span, string_type);
-            message.text = "a singleton cannot be destroyed";
+            message.text = singleton ? "a singleton cannot be destroyed" :
+                                       "a managed pointer cannot be destroyed explicitly";
             trap.operands.push_back(std::move(message));
             program_.bodies.push_back({cleanup, {std::move(trap)}});
         }

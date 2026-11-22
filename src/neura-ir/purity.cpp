@@ -625,6 +625,7 @@ private:
             break;
         case IrOp::String:
         case IrOp::Allocate:
+        case IrOp::RetainCellStorage:
         case IrOp::Collection:
         case IrOp::RepeatCollection:
         case IrOp::Tuple:

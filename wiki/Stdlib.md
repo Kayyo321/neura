@@ -72,6 +72,7 @@ Tasks, channels, cancellation, timers, and shared-state handles. The [concurrenc
 | [`Std.Core.BFloat16`](Stdlib-Core-BFloat16) | [Contracts](Stdlib-Core-BFloat16#detailed-contracts) | [Declarations](Stdlib-Core-BFloat16#exported-declarations) |
 | [`Std.Core.Bool`](Stdlib-Core-Bool) | [Contracts](Stdlib-Core-Bool#detailed-contracts) | [Declarations](Stdlib-Core-Bool#exported-declarations) |
 | [`Std.Core.Cell`](Stdlib-Core-Cell) | [Contracts](Stdlib-Core-Cell#detailed-contracts) | [Declarations](Stdlib-Core-Cell#exported-declarations) |
+| [`Std.Core.Pointer`](Stdlib-Core-Pointer) | [Contracts](Stdlib-Core-Pointer#detailed-contracts) | [Declarations](Stdlib-Core-Pointer#exported-declarations) |
 | [`Std.Core.Character`](Stdlib-Core-Character) | [Contracts](Stdlib-Core-Character#detailed-contracts) | [Declarations](Stdlib-Core-Character#exported-declarations) |
 | [`Std.Core.Comparable`](Stdlib-Core-Comparable) | [Contracts](Stdlib-Core-Comparable#detailed-contracts) | [Declarations](Stdlib-Core-Comparable#exported-declarations) |
 | [`Std.Core.Comparators`](Stdlib-Core-Comparators) | [Contracts](Stdlib-Core-Comparators#detailed-contracts) | [Declarations](Stdlib-Core-Comparators#exported-declarations) |

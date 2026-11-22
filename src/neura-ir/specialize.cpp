@@ -1,4 +1,7 @@
 #include "specialize.hpp"
+
+#include "frozen.hpp"
+#include "pointer_safety.hpp"
 #include "any.hpp"
 
 #include "attributes.hpp"
@@ -464,6 +467,7 @@ private:
         std::vector<SymbolId> copies;
         for (const auto& [member, copy] : member_map_[instance]) copies.push_back(copy);
         for (const auto copy : copies) {
+            specialize_overload_group(copy, instance);
             specialize_attributes(copy, inner);
             for (const auto parameter : std::vector<SymbolId>(symbol(copy).parameters))
                 specialize_attributes(parameter, inner);
@@ -559,9 +563,17 @@ private:
             const auto name = program_.symbols[member].name;
             const auto copy = clone_function(member, instance, substitution, name, inner);
             member_map_[instance][member] = copy;
+            specialize_overload_group(copy, instance);
             return copy;
         }
         return member;
+    }
+
+    void specialize_overload_group(SymbolId function, SymbolId instance) {
+        const auto group = symbol(function).overload_group;
+        if (group == no_symbol) return;
+        const auto specialized = member_of(group, instance);
+        symbol(function).overload_group = symbol(specialized).owner == instance ? specialized : no_symbol;
     }
 
     // Whether a method of a class instance can be copied on first use: it
@@ -646,6 +658,15 @@ private:
         for (const auto& argument : node.type_arguments) {
             result.type_arguments.push_back(type(argument, context, node.span));
         }
+        if (node.op == IrOp::ValueText && node.text == native_argument_packing && !result.operands.empty()) {
+            if (contains_pointer_type(program_, result.operands.front().type)) {
+                auto error = Diagnostic(node.span, "a managed pointer is not a native value in Std.DynamicForeign")
+                    .with_code("E0403");
+                if (!context.origin.span.file.empty()) error.label(context.origin.span, "instantiated here");
+                throw error;
+            }
+            result.text.clear();
+        }
         // A function value has become an object layout of a callable type,
         // which an any does not take for a reference.
         const auto function_layout = [&](const IrType& item) {
@@ -665,6 +686,28 @@ private:
             if (!context.origin.span.file.empty()) error.label(context.origin.span, "instantiated here");
             error.help("hold it in a class and pack the reference");
             throw error;
+        }
+        if (node.op == IrOp::VirtualCall && node.symbol < program_.symbols.size() &&
+            !result.operands.empty()) {
+            const auto& called = symbol(node.symbol);
+            const auto pointer = pointer_class(program_, called.owner);
+            if ((pointer == PointerKind::Const && called.name == "read") ||
+                (pointer == PointerKind::Mutable && called.name == "as_const")) {
+                const auto& receiver = result.operands.front().type;
+                const auto instance = instance_of_.find(receiver.symbol);
+                if (instance != instance_of_.end() && !instance->second.second.empty()) {
+                    const auto& stored = instance->second.second.front();
+                    if (const auto problem = mutable_part(program_, stored)) {
+                        auto error = Diagnostic(node.span, "a ConstPointer can read only a deeply immutable value")
+                            .with_code("E0580").label("the pointer would expose a mutable " + type_text(stored));
+                        if (problem->span) error.label(*problem->span, problem->text);
+                        if (context.copying && !context.origin.span.file.empty() &&
+                            context.origin.span.offset != node.span.offset)
+                            error.label(context.origin.span, "instantiated here");
+                        throw error;
+                    }
+                }
+            }
         }
         if (node.op == IrOp::Reflect) {
             // What Std.Reflect can hold and proxy is checked on the specialized
@@ -762,6 +805,12 @@ private:
                 result.symbol = member_of(node.symbol, result.operands.front().type.symbol);
             }
             break;
+        case IrOp::ReferencePlace: {
+            const auto* place = &result.operands.front();
+            while (place->op == IrOp::ScopedValue && !place->body.empty()) place = &place->body.back();
+            result.symbol = place->symbol;
+            break;
+        }
         case IrOp::Receiver:
         case IrOp::Destroy:
             if (node.symbol < original_symbols_ && !program_.symbols[node.symbol].generics.empty()) {

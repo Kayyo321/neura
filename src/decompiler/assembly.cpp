@@ -30,6 +30,7 @@ constexpr std::array<std::string_view, nvr::state_op_count> state_ops{
     "read-component",  "write-component",
     "enter-region",    "release-region",   "region-object", "region-collection", "region-repeat",
     "move-to-region",  "hook-enter",       "hook-leave",    "concat-text", "append-run",
+    "retain-cell-storage",
 };
 constexpr std::array<std::string_view, 3> value_kinds{"slot", "constant", "lanes"};
 
@@ -480,6 +481,8 @@ std::string disassemble(const nvr::Image& image) {
     }
     if (image.transferable_layouts) {
         out << "\ntransferable-layouts " << indices(*image.transferable_layouts) << "\n";
+        for (const auto& cell : image.transferable_cell_layouts)
+            out << "transferable-cell-layout " << cell.cell_layout << " box " << index_or_absent(cell.box_layout) << "\n";
     }
     if (image.source_map) {
         out << "\nsource-map\n";
@@ -748,6 +751,9 @@ nvr::Image assemble(std::string_view text) {
                 if (exit.operation == nvr::StateOp::AppendRun && image.minor_version < nvr::append_run_minor_version) {
                     in.error("append-run requires NVR 1." + std::to_string(nvr::append_run_minor_version));
                 }
+                if (exit.operation == nvr::StateOp::RetainCellStorage && image.minor_version < nvr::pointer_minor_version) {
+                    in.error("retain-cell-storage requires NVR 1." + std::to_string(nvr::pointer_minor_version));
+                }
                 in.keyword("immediate");
                 exit.immediate = in.index("immediate");
                 arguments();
@@ -809,6 +815,13 @@ nvr::Image assemble(std::string_view text) {
             if (image.minor_version < 5) in.error("transferable layouts require NVR 1.5");
             if (image.transferable_layouts) in.error("a second transferable layout list");
             image.transferable_layouts = in.indices("transferable layout");
+        } else if (record == "transferable-cell-layout") {
+            if (image.minor_version < nvr::pointer_minor_version || !image.transferable_layouts)
+                in.error("transferable Cell layouts require NVR 1.11 transferable-layouts");
+            const auto cell = in.index("transferable Cell layout");
+            in.keyword("box");
+            const auto box = in.index_or_absent("primitive borrow box layout");
+            image.transferable_cell_layouts.push_back({cell, box});
         } else if (record == "source-map") {
             if (image.source_map) {
                 in.error("a second source map");

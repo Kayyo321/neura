@@ -1,0 +1,156 @@
+let cell = import:Std.Core.Cell;
+
+/// @brief Managed storage references and checked collection views.
+.Since("0.3.1")
+export let Pointer = module (
+    // A private nominal marker for erased pointers at the native boundary.
+    let ManagedPointer = class ();
+
+    let Source = enum<T> (
+        Array(T[]),
+        List(T[list]),
+    );
+
+    let bounds_failure = func {
+        pointer_bounds_failure();
+    };
+
+    let stale_view = func {
+        pointer_stale_view();
+    };
+
+    let check_range = func(first: int, end: int, length: int) {
+        if (first < 0 || end < first || end > length) {
+            bounds_failure();
+        }
+    };
+
+    /// @brief A mutable view of a cell's retained storage.
+    .[Final, NotThreadSafe, Since("0.3.1")]
+    export let Pointer = class<T>:ManagedPointer (
+        last backing: cell.Cell<T>;
+
+        /// @brief Retains the storage of the supplied live cell.
+        export let init = func(storage: cell.Cell<T>) {
+            super.init();
+            backing = retain_cell_storage(storage);
+        };
+
+        /// @brief Reads the current stored value.
+        export let read = func -> T => backing.value;
+
+        /// @brief Replaces the current stored value.
+        export let write = func(value: T) {
+            backing.value = value;
+        };
+
+        /// @brief Shares access to a deeply immutable stored value.
+        export let as_const = func -> ConstPointer<T> => new(backing);
+
+        /// @brief Returns another mutable view of the same storage.
+        export let clone = func -> Pointer<T> => new(backing);
+    );
+
+    /// @brief A read-only view that keeps a cell's storage live.
+    .[Final, Since("0.3.1")]
+    export let ConstPointer = class<T>:ManagedPointer (
+        last backing: cell.Cell<T>;
+
+        let init = func(storage: cell.Cell<T>) {
+            super.init();
+            backing = storage;
+        };
+
+        /// @brief Reads the stored value. T must be deeply immutable.
+        export let read = func -> T => backing.value;
+
+        /// @brief Returns another read-only view of the same storage.
+        export let clone = func -> ConstPointer<T> => new(backing);
+    );
+
+    /// @brief A non-copying, bounds-checked view of a contiguous array or list region.
+    .[Final, NotThreadSafe, Since("0.3.1")]
+    export let ListPointer = class<T>:ManagedPointer (
+        last source: Source<T>;
+        last first: int;
+        last limit: int;
+        last version: uint64;
+
+        /// @brief Creates a view of [start, end) in a fixed-length array.
+        export let init = func(values: T[], start: int, end: int) {
+            super.init();
+            check_range(start, end, values.length);
+            source = Source<T>.Array(values);
+            first = start;
+            limit = end;
+            version = 0;
+        } or func(values: T[list], start: int, end: int) {
+            super.init();
+            check_range(start, end, values.length);
+            source = Source<T>.List(values);
+            first = start;
+            limit = end;
+            version = values.version;
+        };
+
+        let check_live = func {
+            match (source) {
+                Source.List(values) => {
+                    if (values.version != version) {
+                        stale_view();
+                    }
+                },
+                Source.Array(_) => {},
+            }
+        };
+
+        let offset = func(index: int) -> int {
+            check_live();
+            if (index < 0 || index >= limit - first) {
+                bounds_failure();
+            }
+            return first + index;
+        };
+
+        /// @brief Returns the number of elements in the view.
+        export let len = func -> int {
+            check_live();
+            return limit - first;
+        };
+
+        /// @brief Reads the element at a checked index relative to this view.
+        export let value_at = func(index: int) -> T {
+            last position = offset(index);
+            return match (source) {
+                Source.Array(values) => values[position],
+                Source.List(values) => values[position],
+            };
+        };
+
+        /// @brief Replaces the element at a checked index without changing the list version.
+        export let set = func(index: int, value: T) {
+            last position = offset(index);
+            match (source) {
+                Source.Array(values) => {
+                    values[position] = value;
+                },
+                Source.List(values) => {
+                    values[position] = value;
+                },
+            }
+        };
+
+        /// @brief Creates a checked subview of [start, end) relative to this view.
+        export let sub = func(start: int, end: int) -> ListPointer<T> {
+            check_live();
+            check_range(start, end, limit - first);
+            return match (source) {
+                Source.Array(values) => new ListPointer<T>(values, first + start, first + end),
+                Source.List(values) => new ListPointer<T>(values, first + start, first + end),
+            };
+        };
+
+        /// @brief Reports whether the view contains no elements.
+        export let is_empty = func -> bool => len() == 0;
+    );
+);

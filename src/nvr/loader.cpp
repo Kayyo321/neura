@@ -555,6 +555,44 @@ void Validator::transferable_layouts() const {
     if (!std::ranges::is_sorted(marks) || std::ranges::adjacent_find(marks) != marks.end()) {
         invalid("TRNS: layout indices must be in strictly ascending order");
     }
+    // A const view may keep a Cell without exposing its mutable handle.
+    // The table records backing layouts even when no instance is made (a
+    // program can send a nil view). The scheduler checks the actual handle
+    // is retained before allowing an object of one of these layouts across.
+    const auto& cells = image_.transferable_cell_layouts;
+    const auto id = &TransferableCellLayout::cell_layout;
+    if (!std::ranges::is_sorted(cells, {}, id) || std::ranges::adjacent_find(cells, {}, id) != cells.end())
+        invalid("TRNS: retained Cell layouts must be in strictly ascending order");
+    for (const auto& cell : cells) {
+        const auto layout = cell.cell_layout;
+        if (layout >= image_.layouts.size() || std::ranges::binary_search(marks, layout))
+            invalid("TRNS: invalid retained Cell layout " + std::to_string(layout));
+        const auto where = "TRNS: retained Cell layout " + std::to_string(layout);
+        const auto& fields = image_.layouts[layout].fields;
+        if (cell.box_layout == absent) {
+            for (const auto field : fields)
+                if (!is_transferable(image_, field)) invalid(where + " has a non-transferable field");
+            continue;
+        }
+        if (cell.box_layout >= image_.layouts.size() || std::ranges::binary_search(marks, cell.box_layout) ||
+            fields.size() != 1 || image_.types[fields[0]].kind != TypeKind::Object ||
+            image_.types[fields[0]].reference != cell.box_layout)
+            invalid(where + " has an invalid primitive borrow box");
+        const auto& box = image_.layouts[cell.box_layout];
+        if (box.fields.size() != 2) invalid(where + " has a primitive borrow box with the wrong field count");
+        const auto payload = image_.types[box.fields[0]].kind;
+        if (payload != TypeKind::Bool && payload != TypeKind::Signed && payload != TypeKind::Unsigned &&
+            payload != TypeKind::Float && payload != TypeKind::BFloat && payload != TypeKind::Text)
+            invalid(where + " has a primitive borrow box with a non-primitive payload");
+        const auto& owner = image_.types[box.fields[1]];
+        if (owner.kind != TypeKind::Object || image_.layouts[owner.reference].parent != absent ||
+            !image_.layouts[owner.reference].fields.empty() || !image_.layouts[owner.reference].interfaces.empty())
+            invalid(where + " has a primitive borrow box with an invalid owner word");
+    }
+    const auto retained_field = [&](std::uint32_t type) {
+        const auto& field = image_.types[type];
+        return field.kind == TypeKind::Object && std::ranges::binary_search(cells, field.reference, {}, id);
+    };
     for (const auto index : marks) {
         if (index >= image_.layouts.size()) invalid("TRNS: layout " + std::to_string(index) + " is out of range");
         const auto& layout = image_.layouts[index];
@@ -563,7 +601,7 @@ void Validator::transferable_layouts() const {
             invalid(where + ": parent layout " + std::to_string(layout.parent) + " is not marked");
         }
         for (std::size_t field = 0; field < layout.fields.size(); ++field) {
-            if (!is_transferable(image_, layout.fields[field])) {
+            if (!is_transferable(image_, layout.fields[field]) && !retained_field(layout.fields[field])) {
                 invalid(where + ": field " + std::to_string(field) + " is not transferable");
             }
         }
@@ -1413,6 +1451,13 @@ void Validator::state(const Function& function, const Exit& exit,
             return t.kind == TypeKind::Object && system_->derives(exit.immediate, t.reference);
         }, "a reference to the allocated layout");
         break;
+    case StateOp::RetainCellStorage:
+        arity(1);
+        zero_immediate();
+        if (image_.minor_version < pointer_minor_version) invalid(where + ": retaining cell storage requires NVR 1.11");
+        require_kind(0, {TypeKind::Object});
+        require_slot_type([&](std::uint32_t slot) { return slot == args[0].type; }, "the cell argument type");
+        break;
     case StateOp::ReadTag:
         arity(1);
         zero_immediate();
@@ -1802,11 +1847,14 @@ void Validator::block(std::uint32_t function_index, std::uint32_t index) {
             continuation(function, exit.error_resume, exit_where + " error");
             break;
         }
-        case ExitKind::Trap:
-            if (exit.reason < 1 || exit.reason > 5) {
+        case ExitKind::Trap: {
+            const auto max_reason = image_.minor_version >= pointer_minor_version
+                ? TrapReason::StaleCollectionView : TrapReason::ModifiedDuringIteration;
+            if (exit.reason < 1 || exit.reason > static_cast<std::uint32_t>(max_reason)) {
                 invalid(exit_where + ": trap reason " + std::to_string(exit.reason) + " is not defined");
             }
             break;
+        }
         case ExitKind::MessageTrap:
             if (exit.arguments.size() != 1 || image_.types[exit.arguments[0].type].kind != TypeKind::Text) {
                 invalid(exit_where + ": a message trap requires one text argument");
@@ -2182,7 +2230,14 @@ Image load(std::span<const std::uint8_t> bytes, const LoadLimits& limits) {
         });
     }
     if (sections.contains("TRNS")) {
-        section("TRNS", [&](Reader& in) { image.transferable_layouts = in.indices("transferable layout list"); });
+        section("TRNS", [&](Reader& in) {
+            image.transferable_layouts = in.indices("transferable layout list");
+            if (minor >= pointer_minor_version) {
+                image.transferable_cell_layouts = in.vector(8, "transferable Cell layouts", [](Reader& r) {
+                    return TransferableCellLayout{r.u32(), r.u32()};
+                });
+            }
+        });
     }
     if (sections.contains("KERN")) {
         section("KERN", [&](Reader& in) {

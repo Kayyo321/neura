@@ -1,4 +1,6 @@
 #include "verifier.hpp"
+
+#include "pointer_safety.hpp"
 #include "any.hpp"
 #include "class_hooks.hpp"
 
@@ -889,7 +891,9 @@ private:
             break;
         case IrOp::Fail:
             expect_operands(node, 0, "fail");
-            if (node.text != "iteration") {
+            if (node.text != "iteration" &&
+                ((node.text != "view-bounds" && node.text != "stale-list-view") ||
+                 !trusted_pointer_declaration(program_, context.owner))) {
                 report(node.span, "fail names unknown failure '" + node.text + "'");
             }
             break;
@@ -1132,12 +1136,19 @@ private:
             const auto* place = &node.operands.front();
             while (place->op == IrOp::ScopedValue && !place->body.empty()) place = &place->body.back();
             const auto& target = symbol(node.symbol);
-            if (!is_primitive_reference(node.type) || node.type.name != "&" + target.type.name ||
+            auto referent = target.type;
+            if (place->op == IrOp::Field && valid(target.owner) && place->operands.size() == 1) {
+                const auto views = nominal_views(program_, place->operands.front().type);
+                const auto view = std::ranges::find(views, target.owner, &IrType::symbol);
+                if (view != views.end())
+                    referent = substitute_type(std::move(referent), symbol(target.owner).generics, view->arguments);
+            }
+            if (!is_primitive_reference(node.type) || node.type.name != "&" + referent.name ||
                 target.constant || deferred_binding(target) || target.name.starts_with("$capture") ||
                 (place->op != IrOp::Load && place->op != IrOp::Field) || place->symbol != node.symbol ||
-                place->type != target.type ||
-                (target.type.kind != TypeKind::Bool && target.type.kind != TypeKind::Integer &&
-                 target.type.kind != TypeKind::Float && target.type.kind != TypeKind::String)) {
+                place->type != referent ||
+                (referent.kind != TypeKind::Bool && referent.kind != TypeKind::Integer &&
+                 referent.kind != TypeKind::Float && referent.kind != TypeKind::String)) {
                 report(node.span, "a primitive reference must bind to matching mutable storage");
             }
             break;
@@ -1431,6 +1442,14 @@ private:
                     }
                 }
             }
+            break;
+        case IrOp::RetainCellStorage:
+            if (!trusted_pointer_declaration(program_, context.owner))
+                report(node.span, "retention of Cell storage requires the trusted pointer implementation");
+            if (expect_operands(node, 1, "retain Cell storage") &&
+                (node.type != node.operands[0].type || node.type.kind != TypeKind::Object ||
+                 !cell_class(program_, node.type.symbol)))
+                report(node.span, "retention needs a Cell operand and yields that same Cell type");
             break;
         case IrOp::Length:
             if (expect_operands(node, 1, "length") && !is_collection(node.operands.front().type)) {

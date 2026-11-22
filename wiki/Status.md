@@ -18,6 +18,7 @@ This release carries the language below from source through NeuraIR, optimizatio
 | Types | Classes and interfaces with first-use static initialization, getters and setters of exported fields, startup singletons, umbrella `class`, explicit `nil`, reference identity and checked casts, object casts, non-null primitive borrows with checked owners, primitive companion calls, value members and `===`, UTF-8 text, tuples, payload enums with exhaustive matching, and anonymous classes in type positions | [Types](Types) |
 | Generics | Generic functions, classes, enums, interfaces, methods and closures, with explicit or inferred type arguments, intersection bounds, and specialization | [Polymorphism](Polymorphism) |
 | Modules | Source and prebuilt NeuraIR imports, promoted and wildcard imports, extension sets (`let.extension`, `let.extensions`), discard bindings, exports, module inheritance, initialization, startup blocks (`static scope`), trusted `Std` sources with host and kernel bindings, and the library-defined or legacy entry point | [Modules](Modules) |
+| Managed pointers | `Pointer<T>`, `ConstPointer<T>`, and non-copying array and list views with `ListPointer<T>`. | [Pointer contract](https://github.com/Kayyo321/neura/blob/main/docs/lang/Neura0.3.1.md#stdcorepointer) |
 | Lifecycle | Constructors and constructor overloads, target-typed `new`, field initializers, `last` fields assigned once by each constructor, `destroy`, destructors, deterministic tracing garbage collection | [Object lifecycle](ObjectLifecycle) |
 | Collections | Arrays, lists, stepped ranges, `length`, indexing, `append`, `remove_at`, structural versions, and for-each over built-ins or `Iterable<T>` | [Collections](Collections) |
 | Errors | Expected failures as returned values, plus runtime traps and explicit message traps | [Errors](Errors) |
@@ -45,6 +46,7 @@ The browser runtime runs an image in a page under Node, headless Chromium and he
 
 | Area | Status |
 | --- | --- |
+| Pointer ownership and shared access | `UniquePointer`, `SharedPointer`, `WeakPointer`, `SoftPointer`, `AtomicPointer`, and `LockedPointer` are planned. |
 | Standard library extensions | Time zones, locale-sensitive sorting and formatting, Unicode normalization, HTTP, UDP, `BigInteger` bitwise operations, and concurrent collections ([specification, section 16](Stdlib-Design#16-not-provided)). Collection facades that re-export every type need generic re-exports. |
 | Concurrency | Tasks in a program that uses `Std.DynamicForeign` or a C import (the compiler rejects the combination); running tasks on several cores (only `Parallel.map` uses more than one); overlapping file I/O; concurrent collections. The limits are listed in [Concurrency, section 16](Concurrency#16-limits). |
 | Cryptography | FN-DSA awaits FIPS 206 and reference vectors. Device and network provider calls require runtime support. The [crypto tier tables and runtime needs](https://github.com/Kayyo321/neura/blob/main/docs/design/Crypto030.md#tiers) identify each supported profile and gap. |

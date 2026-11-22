@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <map>
 #include <memory>
 #include <new>
 #include <span>
@@ -553,13 +554,47 @@ public:
     // The entry a Builder holds. The builder is consumed.
     std::uint64_t create(Builder&& built);
 
-    // Frees a live entry. The executor has subtracted cells(ref) and released
-    // any scheduler record of the handle first.
+    // A storage handle keeps the allocation alive independently of the
+    // original handle. This is used only for Cell pointer storage, never for
+    // region entries. Both handles resolve to the same physical data while
+    // live, so existing checked field operations preserve direct aliases.
+    std::uint64_t retained_storage(std::uint64_t handle) const {
+        if (const auto alias = storage_aliases_.find(handle); alias != storage_aliases_.end())
+            return alias->second.storage ? handle : alias->second.peer;
+        return 0;
+    }
+
+    bool is_storage_handle(std::uint64_t handle) const {
+        const auto alias = storage_aliases_.find(handle);
+        return alias != storage_aliases_.end() && alias->second.storage;
+    }
+
+    std::uint64_t retain_storage(std::uint64_t handle, Ref ref) {
+        if (const auto storage = retained_storage(handle)) return storage;
+        reserve_handle();
+        const auto storage = last_handle() + 1;
+        storage_aliases_.emplace(handle, StorageAlias{storage, false, false});
+        try {
+            storage_aliases_.emplace(storage, StorageAlias{handle, true, false});
+        } catch (...) {
+            storage_aliases_.erase(handle);
+            throw;
+        }
+        return store_new(ref.entry_);
+    }
+
+    std::uint64_t cells_released_by(std::uint64_t handle, Ref ref) const {
+        const auto alias = storage_aliases_.find(handle);
+        return (alias == storage_aliases_.end() || alias->second.peer == 0) ? cells(ref) : 0;
+    }
+
+    // Frees a live handle. The executor has subtracted cells_released_by()
+    // and released any scheduler record of the handle first.
     void free(std::uint64_t handle) {
         const auto page = handle >> page_bits;
         auto& stored = pages_[page];
         auto& item = stored->entries[handle & page_mask];
-        release(std::exchange(item, nullptr));
+        drop_handle(handle, std::exchange(item, nullptr));
         if (--stored->live == 0 && page < ((blocks_.native.last + 1) >> page_bits)) {
             delete std::exchange(stored, nullptr);
             // The page's index stays in live_pages_ until it is compacted,
@@ -575,6 +610,15 @@ public:
         if ((ref.entry_->flags & marked_flag) != 0) return false;
         ref.entry_->flags |= marked_flag;
         return true;
+    }
+
+    // Handles sharing an entry have distinct roots. The ordinary mark bit
+    // is sufficient for all storage that has only one live handle.
+    bool mark(std::uint64_t handle, Ref ref) {
+        if (const auto alias = storage_aliases_.find(handle);
+            alias != storage_aliases_.end() && alias->second.peer != 0)
+            return !std::exchange(alias->second.marked, true);
+        return mark(ref);
     }
 
     bool marked(Ref ref) const { return (ref.entry_->flags & marked_flag) != 0; }
@@ -667,12 +711,10 @@ public:
             for (std::size_t index = 0; index < page_size; ++index) {
                 auto& item = stored->entries[index];
                 if (!item) continue;
-                if ((item->flags & marked_flag) != 0) {
-                    item->flags &= static_cast<std::uint8_t>(~marked_flag);
-                    continue;
-                }
-                dropped((static_cast<std::uint64_t>(page) << page_bits) | index, cells(Ref{item}));
-                release(std::exchange(item, nullptr));
+                const auto handle = (static_cast<std::uint64_t>(page) << page_bits) | index;
+                if (clear_mark(handle, item)) continue;
+                dropped(handle, cells_released_by(handle, Ref{item}));
+                drop_handle(handle, std::exchange(item, nullptr));
                 --stored->live;
             }
             if (stored->live == 0 && page < ((blocks_.native.last + 1) >> page_bits)) {
@@ -1394,11 +1436,39 @@ private:
         blocks_.deallocate(item, inline_bytes(static_cast<std::size_t>(item->count), item->storage));
     }
 
+    bool clear_mark(std::uint64_t handle, Entry* item) {
+        if (const auto alias = storage_aliases_.find(handle);
+            alias != storage_aliases_.end() && alias->second.peer != 0)
+            return std::exchange(alias->second.marked, false);
+        const bool marked = (item->flags & marked_flag) != 0;
+        item->flags &= static_cast<std::uint8_t>(~marked_flag);
+        return marked;
+    }
+
+    void drop_handle(std::uint64_t handle, Entry* item) {
+        const auto alias = storage_aliases_.find(handle);
+        if (alias == storage_aliases_.end()) {
+            release(item);
+            return;
+        }
+        const auto survivor = storage_aliases_.find(alias->second.peer);
+        storage_aliases_.erase(alias);
+        if (survivor == storage_aliases_.end()) {
+            release(item);
+            return;
+        }
+        if (survivor->second.marked) item->flags |= marked_flag;
+        if (survivor->second.storage) survivor->second.peer = 0;
+        else storage_aliases_.erase(survivor);
+    }
+
     void release_all() {
-        for (auto* stored : pages_) {
+        for (std::size_t page = 0; page < pages_.size(); ++page) {
+            const auto* stored = pages_[page];
             if (!stored) continue;
-            for (auto* item : stored->entries) {
-                if (item) release(item);
+            for (std::size_t index = 0; index < page_size; ++index) {
+                if (auto* item = stored->entries[index])
+                    drop_handle((static_cast<std::uint64_t>(page) << page_bits) | index, item);
             }
             delete stored;
         }
@@ -1417,6 +1487,14 @@ private:
         std::uint64_t live = 0;
     };
     static_assert(std::is_standard_layout_v<Page>);
+
+    struct StorageAlias {
+        std::uint64_t peer;
+        bool storage;
+        bool marked;
+    };
+    // Empty in programs that have never created a pointer.
+    std::map<std::uint64_t, StorageAlias> storage_aliases_;
 
     Blocks blocks_;
     // Owns the pages it points to (null: a page that does not exist).

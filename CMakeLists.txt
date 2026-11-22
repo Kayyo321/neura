@@ -1738,6 +1738,15 @@ if(BUILD_TESTING AND NEURA_SDK)
     set_tests_properties(reflect-boundary PROPERTIES TIMEOUT 900)
     add_test(NAME reflect-json-bridge-check COMMAND "$<TARGET_FILE:neura>" check --warn-library
         "${CMAKE_CURRENT_SOURCE_DIR}/stdlib/std/reflect/codec/json-bridge.nra")
+    set(NEURA_POINTER_NATIVE_TEST)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
+        set(NEURA_POINTER_NATIVE_TEST --native)
+    endif()
+    add_test(NAME pointer-qualification COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/pointer/qualify.py" "$<TARGET_FILE:neura>"
+        ${NEURA_POINTER_NATIVE_TEST})
+    set_tests_properties(pointer-qualification PROPERTIES TIMEOUT 300)
+
     # The compile-time check of interpolated strings agrees with the
     # formatting library on a corpus of specifications (docs/design/Calls030.md).
     add_test(NAME calls-format-corpus COMMAND "${Python3_EXECUTABLE}"

@@ -25,6 +25,7 @@
 #include "neura-ir/scheduler_ops.hpp"
 #include "neura-ir/specialize.hpp"
 #include "neura-ir/storage.hpp"
+#include "neura-ir/pointer_safety.hpp"
 #include "neura-ir/task_analysis.hpp"
 #include "neura-ir/value_layout.hpp"
 #include "neura-ir/verifier.hpp"
@@ -364,11 +365,16 @@ private:
 class Converter : public BlockTables {
 public:
     Converter(const IrProgram& program, const ConversionOptions& options)
-        : program_(program), options_(options), value_layouts_(program) {}
+        : program_(program), options_(options), value_layouts_(program),
+          retained_arrays_(retained_view_arrays(program)) {}
 
     Conversion run();
 
     const IrProgram& program() const { return program_; }
+    bool has_managed_backing(const IrNode& array) const { return retained_arrays_.contains(&array); }
+    bool uses_region(const IrNode& array) const {
+        return array.type.kind == TypeKind::Array && !has_managed_backing(array);
+    }
     const IrSymbol& symbol(SymbolId id) const { return program_.symbols.at(id); }
     std::string qualified(SymbolId id) const;
 
@@ -507,6 +513,7 @@ private:
     const IrProgram& program_;
     ConversionOptions options_;
     ValueLayouts value_layouts_;
+    std::set<const IrNode*> retained_arrays_;
     std::vector<std::pair<IrType, Span>> value_types_;
     nvr::Image image_;
     std::map<nvr::Type, std::uint32_t, decltype([](const nvr::Type& a, const nvr::Type& b) {
@@ -1372,6 +1379,7 @@ FunctionOrigin Converter::target(const Dispatch& dispatch, SymbolId cls) const {
 }
 
 Conversion Converter::run() {
+    if (!retained_arrays_.empty()) image_.minor_version = nvr::pointer_minor_version;
     index_program();
     order_initialization();
     if (!options_.entries.empty()) {
@@ -1441,10 +1449,18 @@ Conversion Converter::run() {
 void Converter::mark_transferable_layouts() {
     const TaskAnalysis analysis(program_);
     std::set<std::uint32_t> marked;
+    std::map<std::uint32_t, std::uint32_t> retained_cells;
     for (const auto& [id, index] : layouts_) {
         const auto& item = symbol(id);
         if (item.kind == SymbolKind::Enum ? analysis.transferable(item.type) : analysis.transferable_class(id)) {
             marked.insert(index);
+            if (pointer_class(program_, id) == PointerKind::Const) {
+                const auto& backing = symbol(member(id, "backing"));
+                const auto cell = backing.type.symbol;
+                const auto& value = symbol(member(cell, "value"));
+                retained_cells.emplace(layout(cell, backing.span), is_primitive_reference(value.type) ?
+                                       layout(value.type.symbol, value.span) : absent);
+            }
         }
     }
     for (const auto& [type, index] : box_layouts_) {
@@ -1457,6 +1473,9 @@ void Converter::mark_transferable_layouts() {
         if (parent != absent && marked.insert(parent).second) pending.push_back(parent);
     }
     image_.transferable_layouts = std::vector<std::uint32_t>(marked.begin(), marked.end());
+    for (const auto& [cell, box] : retained_cells)
+        image_.transferable_cell_layouts.push_back({cell, box});
+    if (!retained_cells.empty()) image_.minor_version = nvr::pointer_minor_version;
 }
 
 void Converter::add_reached_callbacks() {
@@ -2367,7 +2386,8 @@ bool FunctionCompiler::owns_result(const FunctionOrigin& origin, const std::vect
 bool FunctionCompiler::needs_region(const IrNode& node) {
     if (node.op == IrOp::Allocate && local_object(node)) return true;
     if (node.op == IrOp::Block || node.op == IrOp::TaskScope || node.op == IrOp::Loop) return false;
-    if ((node.type.kind == TypeKind::Array || node.type.kind == TypeKind::Tuple || node.type.kind == TypeKind::Enum) &&
+    if (!c_.has_managed_backing(node) &&
+        (node.type.kind == TypeKind::Array || node.type.kind == TypeKind::Tuple || node.type.kind == TypeKind::Enum) &&
         (node.op == IrOp::Collection || node.op == IrOp::RepeatCollection || node.op == IrOp::Call ||
          node.op == IrOp::VirtualCall || node.op == IrOp::SchedulerCall) &&
         has_array_word(result_types(node.type, node.span))) return true;
@@ -2502,10 +2522,14 @@ void FunctionCompiler::statement(const IrNode& node) {
         yield_statement(node);
         return;
     case IrOp::Fail: {
-        // The only failure NeuraIR names is a list changed during for-each.
         ExitSpec trap;
         trap.kind = nvr::ExitKind::Trap;
-        trap.reason = iteration_failure;
+        if (node.text == "stale-list-view")
+            trap.reason = static_cast<std::uint32_t>(nvr::TrapReason::StaleCollectionView);
+        else if (node.text == "view-bounds")
+            trap.reason = static_cast<std::uint32_t>(nvr::TrapReason::Bounds);
+        else
+            trap.reason = iteration_failure;
         operation_at(node.span);
         close({trap});
         return;
@@ -3096,7 +3120,7 @@ Operand FunctionCompiler::repeat_hooked(const IrNode& node) {
     const auto fill = snapshot(values(admission.operands.front()), span);
     const auto words = c_.word_types(admission.type, span);
     const auto type = c_.type_of(node.type, span);
-    const bool region = node.type.kind == TypeKind::Array;
+    const bool region = c_.uses_region(node);
     Values arguments{length, immediate(words[0], 0), immediate(words[1], 0)};
     if (region) arguments.insert(arguments.begin(), region_token());
     const auto collection = state(region ? nvr::StateOp::RegionRepeat : nvr::StateOp::RepeatCollection,
@@ -3490,7 +3514,7 @@ Operand FunctionCompiler::expression(const IrNode& node) {
     case IrOp::Collection: {
         auto elements = sequence(node.operands);
         const auto type = c_.type_of(node.type, node.span);
-        if (node.type.kind == TypeKind::Array) {
+        if (c_.uses_region(node)) {
             elements.insert(elements.begin(), region_token());
             return state(nvr::StateOp::RegionCollection, type, std::move(elements), type, node.span);
         }
@@ -3500,7 +3524,7 @@ Operand FunctionCompiler::expression(const IrNode& node) {
         if (node.operands[1].op == IrOp::HookAdmit) return repeat_hooked(node);
         auto arguments = sequence(node.operands);
         const auto type = c_.type_of(node.type, node.span);
-        if (node.type.kind == TypeKind::Array) {
+        if (c_.uses_region(node)) {
             arguments.insert(arguments.begin(), region_token());
             return state(nvr::StateOp::RegionRepeat, type, std::move(arguments), type, node.span);
         }
@@ -3560,6 +3584,10 @@ Operand FunctionCompiler::expression(const IrNode& node) {
     case IrOp::ReinterpretFloat: {
         auto input = expression(node.operands.front());
         return bits(c_.type_of(node.type, node.span), lanes(input));
+    }
+    case IrOp::RetainCellStorage: {
+        auto cell = expression(node.operands.front());
+        return state(nvr::StateOp::RetainCellStorage, 0, {cell}, cell.type, node.span);
     }
     case IrOp::CollectionVersion: {
         auto list = expression(node.operands.front());
@@ -4422,6 +4450,7 @@ void FunctionCompiler::set_borrow_owner(SymbolId box, Operand handle, std::optio
 }
 
 void FunctionCompiler::check_borrow_owner(const IrNode& field, const Operand& box) {
+    if (field.text == retained_cell_field) return;
     const auto owner_field = c_.member(field.operands.front().type.symbol, "$owner");
     if (owner_field == no_symbol) return;
     const auto type = c_.type_of(c_.symbol(owner_field).type, field.span);

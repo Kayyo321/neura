@@ -500,12 +500,12 @@ export let Main = module : program.Entry (
             (directory / 'numbers.nra').write_text(STATIC)
             self.assertEqual(run('emit-ir', 'numbers.nra', '-o', 'numbers.nir', cwd=directory).returncode, 0)
             data = bytearray((directory / 'numbers.nir').read_bytes())
-            # NeuraIR 1.16 adds law records and is the newest supported minor.
-            data[6] = 17
+            # NeuraIR 1.17 adds managed pointer storage and is the newest supported minor.
+            data[6] = 18
             (directory / 'newer.nir').write_bytes(bytes(data))
             result = run('emit-ir', 'newer.nir', cwd=directory)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn('NeuraIR format 1.17 is not supported; this reader accepts 1.0 through 1.16', result.stderr)
+            self.assertIn('NeuraIR format 1.18 is not supported; this reader accepts 1.0 through 1.17', result.stderr)
 
     def test_images_from_source_and_through_nir_are_the_same(self):
         directory = pathlib.Path(__file__).resolve().parent / 'equivalence'

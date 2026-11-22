@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -104,6 +105,11 @@ enum class StorageStage {
     Specialized, // after specialize(); generic declarations stay but are skipped
 };
 
+// The original array allocations retained by a ListPointer. The converter
+// uses ordinary managed heap operations for these sites, so every alias
+// sees the same storage for the collection's full lifetime.
+std::set<const IrNode*> retained_view_arrays(const IrProgram& program);
+
 // Every creation in the bodies of `program`, in body order and, within a body,
 // in evaluation order. Closure and reference classes that lowering and
 // specialization synthesize are skipped.
@@ -181,6 +187,7 @@ enum class EscapeKind : std::uint8_t {
     ReferenceCapturedByClosure,  // a reference to a local or parameter, captured by a closure
     ReferenceRetainedByCall,     // such a reference, passed to a call that retains it
     ArrayInLongerLivedElement,   // stored in an array element with a longer or unknown lifetime
+    ArrayBacksManagedView,       // a ListPointer backing site cannot be proved to leave the region
     ArrayRetainedByCall,         // passed to a callee that may retain the value elsewhere
     ClosureNeedsOwnership,      // a capturing function value escapes its activation
     BoundNeedsOwnership,        // a bound receiver escapes its activation

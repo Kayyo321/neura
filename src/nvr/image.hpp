@@ -19,7 +19,7 @@ inline constexpr std::uint16_t major_version = 1;
 // The highest minor version of major version 1 that this code reads and
 // writes. The writer emits the lowest minor version whose features the image
 // uses, so images that need nothing newer stay byte-identical to 1.0.
-inline constexpr std::uint16_t minor_version = 10;
+inline constexpr std::uint16_t minor_version = 11;
 // The minor version that adds the class hook operations HookEnter and
 // HookLeave (docs/design/Hooks030.md). The lead may renumber it at merge.
 inline constexpr std::uint16_t hooks_minor_version = 8;
@@ -27,6 +27,7 @@ inline constexpr std::uint16_t hooks_minor_version = 8;
 // (docs/design/Expressions030.md, String chains).
 inline constexpr std::uint16_t concat_minor_version = 9;
 inline constexpr std::uint16_t append_run_minor_version = 10;
+inline constexpr std::uint16_t pointer_minor_version = 11;
 inline constexpr std::uint32_t graph_profile = 1;
 
 enum class TypeKind : std::uint8_t {
@@ -213,14 +214,17 @@ enum class StateOp : std::uint8_t {
     ConcatText = 35,
     // NVR 1.10. Keeps the ordinary append continuation, replacing the
     // current loop index with the last index appended by the run.
-    AppendRun = 36
+    AppendRun = 36,
+    // NVR 1.11. Produces a managed handle to a Cell's existing object
+    // storage, with its own reachability and without copying its fields.
+    RetainCellStorage = 37
 };
 
 enum class AppendRunKind : std::uint32_t {
     Repeat = 0, ByteRange = 1, TextRange = 2, TextFieldRange = 3, TextQuadRange = 4
 };
 
-inline constexpr std::uint8_t state_op_count = 37;
+inline constexpr std::uint8_t state_op_count = 38;
 
 // The most events a task can have open at once.
 inline constexpr std::size_t max_hook_events = 64;
@@ -240,7 +244,9 @@ inline constexpr bool is_region_operation(StateOp operation) {
 enum class TrapReason : std::uint32_t {
     Arithmetic = 1, Bounds = 2, ProgramFailure = 3, InvalidDispatch = 4,
     // NVR 1.1.
-    ModifiedDuringIteration = 5
+    ModifiedDuringIteration = 5,
+    // NVR 1.11. A ListPointer lost its collection's structural version.
+    StaleCollectionView = 6
 };
 
 // One record for every exit kind. Fields that a kind does not use keep their
@@ -370,6 +376,16 @@ struct RawSection {
     bool operator==(const RawSection&) const = default;
 };
 
+// A ConstPointer's backing storage in TRNS/1.11. A materialized primitive
+// borrow puts the payload in a separate two-field box; its old owner word
+// is lifetime evidence for the ordinary borrow and does not transfer.
+struct TransferableCellLayout {
+    std::uint32_t cell_layout = absent;
+    std::uint32_t box_layout = absent;
+
+    bool operator==(const TransferableCellLayout&) const = default;
+};
+
 struct Image {
     // The minor version recorded in the header. The writer emits at least
     // this version and raises it when the image uses a newer feature.
@@ -387,6 +403,9 @@ struct Image {
     std::optional<NativeLibrary> native_library;
     // NVR 1.5. Required TRNS table for scheduler exits and polls.
     std::optional<std::vector<std::uint32_t>> transferable_layouts;
+    // TRNS in 1.11 lists the backing layouts used by transferable const
+    // views. Ordinary handles of these layouts remain non-transferable.
+    std::vector<TransferableCellLayout> transferable_cell_layouts;
     // NVR 1.6. Required KERN table, present exactly when the image has a
     // kernel exit.
     std::vector<KernelEntry> kernels;

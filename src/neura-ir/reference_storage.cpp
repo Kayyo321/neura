@@ -1,5 +1,7 @@
 #include "reference_storage.hpp"
 
+#include "pointer_safety.hpp"
+
 #include <iterator>
 #include <map>
 #include <string_view>
@@ -250,8 +252,11 @@ void Materialization::rewrite(IrNode& node, SymbolId owner) {
         if (node.op == IrOp::Initialize) {
             rewrite_initializer(node, found->second, owner);
         } else if (node.op == IrOp::Load || node.op == IrOp::Field) {
+            const bool retained = node.op == IrOp::Field && cell_class(program_, symbol(node.symbol).owner) &&
+                                  trusted_pointer_declaration(program_, owner);
             select_box(node, found->second);
             node = value_field(std::move(node));
+            if (retained) node.text = retained_cell_field;
         }
     }
 }

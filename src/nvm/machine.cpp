@@ -1492,6 +1492,12 @@ private:
     // An owned return transfers all array entries reached through array
     // components. They can be owned by different blocks of this frame.
     void move_return_array(std::uint64_t handle, std::uint64_t token) {
+        // A fixed array retained by ListPointer was allocated on the managed
+        // heap. It remains live through its handles and has no region to move.
+        const auto is_managed = [&](std::uint64_t item) {
+            return image_.minor_version >= nvr::pointer_minor_version && !heap_.in_region(entry(item));
+        };
+        if (is_managed(handle)) return;
         auto& destination = region_handles(token);
         const auto depth = frames_.size();
         if (token != nvr::static_region_token && frames_.regions[region_index(token)].depth >= depth) {
@@ -1523,7 +1529,7 @@ private:
         while (!work.empty()) {
             const auto next = work.back();
             work.pop_back();
-            if (moved.contains(next) || in_destination(next)) continue;
+            if (moved.contains(next) || in_destination(next) || is_managed(next)) continue;
             moved.insert(next);
             by_region[returning_region(next)].insert(next);
             const auto array = entry(next);
@@ -1584,7 +1590,7 @@ private:
         const auto found = heap_.find(handle);
         // Explicit destruction can leave stale aliases in typed roots and
         // fields. They keep their invalid-handle behavior when used.
-        if (found && heap_.mark(found)) {
+        if (found && heap_.mark(handle, found)) {
             if (!heap_.leaf(found)) {
                 mark_work_.push_back(found);
             }
@@ -2194,15 +2200,37 @@ private:
             const auto value = typed_entry(handle, expected);
             if (heap_.kind(value) != EntryKind::Object || !visited.insert(handle).second) continue;
             const auto& layouts = *image_.transferable_layouts;
-            if (!std::ranges::binary_search(layouts, heap_.type(value))) {
+            // ConstPointer can retain a Cell without giving its mutable
+            // handle to another task. Validate the retained value word by
+            // word instead of treating that internal handle as a Cell.
+            const auto layout = heap_.type(value);
+            const auto& cell_layouts = image_.transferable_cell_layouts;
+            const auto retained = std::ranges::lower_bound(cell_layouts, layout, {},
+                                                           &nvr::TransferableCellLayout::cell_layout);
+            const bool storage = heap_.is_storage_handle(handle) && retained != cell_layouts.end() &&
+                retained->cell_layout == layout;
+            if (!storage && !std::ranges::binary_search(layouts, layout)) {
                 fault(TrapKind::InvalidTaskOperation, "transferred handle has an unmarked layout");
             }
-            const auto& fields = image_.layouts[heap_.type(value)].fields;
+            const auto& fields = image_.layouts[layout].fields;
+            if (storage && retained->box_layout != nvr::absent) {
+                if (!heap_.initialized(value, 0)) continue;
+                const auto box = typed_entry(heap_.field(value, 0), fields[0]);
+                if (heap_.type(box) != retained->box_layout || heap_.in_region(box))
+                    fault(TrapKind::InvalidTaskOperation, "retained cell has an incompatible primitive borrow box");
+                const auto payload = image_.layouts[retained->box_layout].fields[0];
+                if (heap_.initialized(box, 0) && nvr::is_reference(type(payload).kind))
+                    references.emplace_back(heap_.field(box, 0), payload);
+                continue;
+            }
             for (std::uint32_t field = 0; field < fields.size(); ++field) {
                 // An unset field is not transferred data; reading it later traps as usual.
-                if (heap_.initialized(value, field) && nvr::is_reference(type(fields[field]).kind)) {
-                    references.emplace_back(heap_.field(value, field), fields[field]);
+                if (!heap_.initialized(value, field)) continue;
+                const auto kind = type(fields[field]).kind;
+                if (storage && (kind == nvr::TypeKind::Array || kind == nvr::TypeKind::List)) {
+                    fault(TrapKind::InvalidTaskOperation, "transferred cell storage contains a mutable collection");
                 }
+                if (nvr::is_reference(kind)) references.emplace_back(heap_.field(value, field), fields[field]);
             }
         }
     }
@@ -2551,7 +2579,7 @@ private:
                 break;
             case EntryKind::Object: {
                 if (!std::ranges::binary_search(*image_.transferable_layouts, heap_.type(item)) ||
-                    scheduler_object(handles[i])) {
+                    scheduler_object(handles[i]) || heap_.is_storage_handle(handles[i])) {
                     fault(TrapKind::InvalidTaskOperation, "a value that enters or leaves a parallel item is not transferable");
                 }
                 const auto& fields = image_.layouts[heap_.type(item)].fields;
@@ -3780,6 +3808,8 @@ private:
             return event;
         }
         case nvr::ExitKind::Trap:
+            if (exit.reason == static_cast<std::uint32_t>(nvr::TrapReason::StaleCollectionView))
+                fault(TrapKind::IndexOutOfBounds, "stale ListPointer view");
             fault(TrapKind::Program, {}, exit.reason);
         case nvr::ExitKind::MessageTrap:
             fault(TrapKind::Program, std::string(heap_.text(typed_entry(arguments.front(), exit.arguments.front().type))),
@@ -4087,6 +4117,16 @@ private:
             ensure_heap_cells(cells, "allocation of ");
             return insert_allocation(heap_.create_object(exit.immediate, fields), cells);
         }
+        case nvr::StateOp::RetainCellStorage: {
+            const auto item = typed_entry(args[0], types[0].type);
+            if (heap_.in_region(item))
+                fault(TrapKind::InvalidRegion, "cannot retain cell storage owned by a region");
+            if (scheduler_object(args[0]))
+                fault(TrapKind::InvalidTaskOperation, "cannot retain a scheduler object's storage");
+            if (const auto handle = heap_.retained_storage(args[0])) return handle;
+            if (heap_.last_handle() >= limits_.max_handles) fault(TrapKind::HandleLimit);
+            return heap_.retain_storage(args[0], item);
+        }
         case nvr::StateOp::ReadTag:
             return heap_.type(typed_entry(args[0], types[0].type));
         case nvr::StateOp::ReadField: {
@@ -4216,11 +4256,13 @@ private:
             return 0;
         case nvr::StateOp::FreeObject: {
             const auto item = typed_entry(args[0], types[0].type);
+            if (heap_.is_storage_handle(args[0]))
+                fault(TrapKind::InvalidHandle, "retained cell storage is released by collection");
             if (heap_.in_region(item)) {
                 fault(TrapKind::InvalidRegion, "handle " + std::to_string(args[0]) + " belongs to a region and is freed by its release");
             }
             if (scheduler_) release_scheduler_object(args[0]);
-            remove_live_cells(heap_.cells(item));
+            remove_live_cells(heap_.cells_released_by(args[0], item));
             heap_.free(args[0]);
             return 0;
         }

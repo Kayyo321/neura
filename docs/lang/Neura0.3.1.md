@@ -12,7 +12,7 @@ The release also adds language features and one new standard library module, `St
 
 A numeric literal may contain `'` between digits, and it may end in a type suffix. The marks make a long value easier to read. The suffix fixes the literal's type, so the literal no longer takes the type of its context.
 
-<!-- example: fragment: specified for 0.3.1 and not yet implemented -->
+<!-- example: fragment: run this body after introducing the import aliases from Construction -->
 ```neura
 let x = 120'000'000u64;
 let y = 64'000s32;
@@ -38,7 +38,7 @@ A literal with no suffix is unchanged: it takes the expected numeric type, or `i
 
 An `if` condition may open with one `let` declaration, a `;`, and then the condition. The declaration is evaluated once, before the condition. Its names are in scope in the condition, the `if` body, and the `else` body, and nowhere after the statement. The declaration may bind one name or destructure, and it follows the ordinary rules for `let`. The text after `;` is a condition under the same rules as a condition written on its own.
 
-<!-- example: fragment: specified for 0.3.1 and not yet implemented -->
+<!-- example: fragment: run this body after introducing the import aliases from Construction -->
 ```neura
 let console = import:Std.Io.Console;
 
@@ -121,7 +121,7 @@ tags  := ( sigil tag | sigil '[' tag (',' tag)* [','] ']' )+
 sigil := '#' | '.'
 ```
 
-<!-- example: fragment: specified for 0.3.1 and not yet implemented -->
+<!-- example: fragment: run this body after introducing the import aliases from Construction -->
 ```neura
 .Pure
 export let area = func(width: int32, height: int32) -> int32 => width * height;
@@ -265,7 +265,7 @@ They do not replace the runtime's memory manager.
 
 The declarations and usage examples in this document describe the proposed API using Neura syntax.
 
-The pointer library does not yet exist. Operations that require ownership tracking, restricted borrowing, collector integration, or atomic reference handling require compiler and runtime support.
+Version 0.3.1 implements `Pointer<T>`, `ConstPointer<T>`, and `ListPointer<T>`. The other six types are planned. Ownership transfer, restricted borrowing, weak and soft reachability, and atomic reference updates require additional compiler or runtime support.
 
 They must not be implemented as ordinary wrappers if doing so would weaken their stated guarantees.
 
@@ -283,7 +283,7 @@ It allows multiple references to the same storage without exposing raw memory or
 
 ### Construction
 
-<!-- example: fragment: specified for 0.3.1 and not yet implemented -->
+<!-- example: check -->
 ```neura
 let cell = import:Std.Core.Cell;
 let.promote _ = import:Std.Core.Pointer;
@@ -292,9 +292,11 @@ let storage = cell.of<int64>(10);
 let p: Pointer<int64> = new(storage);
 ```
 
-A `Pointer<T>` references a managed storage cell. It does not take ownership of an arbitrary variable's memory address.
+A `Pointer<T>` references a managed storage cell.
 
-### Proposed API
+**0.3.1 decision.** Creating the first pointer to a live `Cell<T>` acquires a separate, private handle to its storage. The cell and pointer see the same values until the cell is destroyed. `destroy cell` invalidates every cell alias and runs its normal cleanup. The pointer and its clones retain the storage until their last holder becomes unreachable. A cell that never acquires a pointer uses its original representation and allocation costs.
+
+### API
 
 | Method | Return type | Behavior |
 |---|---|---|
@@ -305,7 +307,7 @@ A `Pointer<T>` references a managed storage cell. It does not take ownership of 
 
 ### Example
 
-<!-- example: fragment: specified for 0.3.1 and not yet implemented -->
+<!-- example: fragment: run this body after introducing the import aliases from Construction -->
 ```neura
 let storage = cell.of<int64>(5);
 
@@ -342,7 +344,7 @@ For reference-valued `T`, `read()` follows Neura's ordinary value semantics: it 
 
 It prevents modifications through the pointer while retaining a safe, strongly reachable target.
 
-### Proposed API
+### API
 
 | Method | Return type | Behavior |
 |---|---|---|
@@ -353,7 +355,7 @@ No `write()`, `handle()`, mutable indexing, or mutable-borrow method is availabl
 
 ### Example
 
-<!-- example: fragment: specified for 0.3.1 and not yet implemented -->
+<!-- example: check -->
 ```neura
 let cell = import:Std.Core.Cell;
 let.promote _ = import:Std.Core.Pointer;
@@ -414,13 +416,14 @@ Unlike an unchecked array pointer, it never permits access outside the valid col
 
 ### Construction
 
-<!-- example: fragment: specified for 0.3.1 and not yet implemented -->
+<!-- example: check -->
 ```neura
 let.promote _ = import:Std.Core.Pointer;
 
-let data: int64[] = [10, 20, 30, 40, 50];
-
-let view: ListPointer<int64> = new(data, 0, data.length);
+let new_view = func -> ListPointer<int64> {
+    let data: int64[] = [10, 20, 30, 40, 50];
+    return new(data, 0, data.length);
+};
 ```
 
 The constructor receives:
@@ -429,7 +432,7 @@ The constructor receives:
 - A start index, inclusive.
 - An end index, exclusive.
 
-### Proposed API
+### API
 
 | Method | Return type | Behavior |
 |---|---|---|
@@ -441,7 +444,7 @@ The constructor receives:
 
 ### Example
 
-<!-- example: fragment: specified for 0.3.1 and not yet implemented -->
+<!-- example: fragment: run this body after introducing the import aliases from Construction -->
 ```neura
 let data: int64[] = [1, 2, 3, 4, 5];
 
@@ -469,16 +472,9 @@ Nested subviews must preserve the same bounds guarantees.
 
 ### Collection resizing
 
-The initial implementation should support fixed-length Neura arrays.
+**0.3.1 decision.** `ListPointer<T>` accepts both fixed arrays and growable lists. Constructing a view of an array is a retaining use. The compiler uses the managed heap for the original array allocation, so writes remain visible through every alias. If the compiler cannot trace the backing array to an allocation in scope, it rejects the argument. Create the array where the view is constructed, or pass a managed list.
 
-Support for growable `T[list]` collections may be added with structural-version tracking.
-
-When a backing collection changes size, an existing view must either:
-
-- Remain valid because its entire region is still provably accessible, or
-- Become invalidated and produce a defined runtime failure when accessed.
-
-It must never retain stale offsets into released or reallocated storage.
+A list view and its subviews hold the structural version recorded at construction. Any change in length invalidates them, including when a later change restores the original length. Element writes and reserve operations that preserve length leave views valid. Access through a stale view traps as a bounds error with the detail `stale ListPointer view`. A reversed range, a negative index, or an endpoint beyond the collection or view bounds produces a bounds trap.
 
 ### Safety guarantees
 
@@ -488,6 +484,18 @@ It must never retain stale offsets into released or reallocated storage.
 - Views keep their backing storage reachable.
 - No unchecked `next()`, `prev()`, or address-based `offset()` operations exist.
 - A view cannot access memory outside its backing collection.
+
+---
+
+### Type erasure and native code
+
+**0.3.1 decision.** The three released pointer types support ordinary upcasts to `class`, `any`, and implemented interfaces. `typeof` and type descriptors identify the pointer class. Reflection exposes no backing fields or native handle.
+
+Static use of a managed pointer at the `Std.DynamicForeign` boundary is an error. For an erased argument, native argument packing checks the object's runtime class and uses its existing argument-layout failure for a managed pointer before a foreign call.
+
+Mutable `Pointer<T>` and `ListPointer<T>` values stay in their creating task. A `ConstPointer<T>` with a deeply immutable transferable value may cross to another task on the scheduler. Isolated parallel work uses its own heap and cannot use a live view of the original storage.
+
+`ConstPointer<FrozenList<T>>` can be used within a task. Sending it to another task produces E0602 because `FrozenList<T>` has private list backing that does not meet the task-transfer rules. Shared frozen backing across tasks is a proposed future extension.
 
 ---
 

@@ -1,5 +1,7 @@
 #include "storage.hpp"
 
+#include "pointer_safety.hpp"
+
 #include "reference_storage.hpp"
 #include "kernel_signature.hpp"
 #include "scheduler_ops.hpp"
@@ -150,6 +152,7 @@ struct BodyFacts {
     std::vector<ArrayCreation> creations;
     std::vector<StorageEscape> escapes;
     std::vector<ReturnFact> returns;
+    std::set<const IrNode*> retained_arrays;
 };
 
 bool opens_scope(IrOp op, Region region) {
@@ -585,6 +588,8 @@ private:
     void visit(const IrNode& node, const StorageOwner& scope, Phase phase) {
         switch (phase) {
         case Phase::Declare:
+            if ((node.op == IrOp::Collection || node.op == IrOp::RepeatCollection) && node.type.kind == TypeKind::Array)
+                array_sites_.emplace(owned(node, scope), &node);
             if (node.op == IrOp::Initialize && local_or_parameter(node.symbol)) declared_.emplace(node.symbol, scope);
             if (node.op == IrOp::MakeClosure || closure_allocation(program_, node)) closure_scopes_.emplace(&node, scope);
             break;
@@ -657,7 +662,12 @@ private:
         }
         if (destination.op == IrOp::Field) {
             const auto kind = static_field(program_, destination.symbol) ? EscapeKind::ArrayInGlobal : EscapeKind::ArrayInField;
-            arrays_into(kind, at, value, scope, destination.symbol);
+            const bool view_backing = known(destination.symbol) && known(body_.owner) &&
+                symbol(destination.symbol).name == "source" &&
+                symbol(body_.owner).name == "init" &&
+                symbol(destination.symbol).owner == symbol(body_.owner).owner &&
+                pointer_class(program_, symbol(destination.symbol).owner) == PointerKind::List;
+            if (!view_backing) arrays_into(kind, at, value, scope, destination.symbol);
             references_into(EscapeKind::ReferenceInField, at, value, scope, destination.symbol);
         } else if (destination.op == IrOp::Load && known(destination.symbol) &&
                    symbol(destination.symbol).kind == SymbolKind::Global) {
@@ -704,8 +714,34 @@ private:
         }
     }
 
+    // All externally supplied arrays need known allocation sites. The
+    // storage walk includes nested origins, so a view cannot keep a region
+    // array indirectly through an aggregate element.
+    void retain_view_array(const IrNode& call, const StorageOwner& scope) {
+        const auto& argument = call.operands.front();
+        // A subview only uses the source of an already checked view.
+        if (known(body_.owner) && symbol(body_.owner).name == "sub" &&
+            pointer_class(program_, symbol(body_.owner).owner) == PointerKind::List)
+            return;
+        const auto set = owned_graph(origins(argument, scope));
+        if (set.empty() || (!argument.type.arguments.empty() && facts_.holds_array(argument.type.arguments.front()))) {
+            report(EscapeKind::ArrayBacksManagedView, argument, argument, owned(argument, scope), call.symbol);
+            return;
+        }
+        for (const auto& origin : set) {
+            if (const auto site = array_sites_.find(origin); site != array_sites_.end()) {
+                out_.retained_arrays.insert(site->second);
+            } else {
+                report(EscapeKind::ArrayBacksManagedView, argument, argument, origin, call.symbol);
+            }
+        }
+    }
+
     void retained(const IrNode& call, const StorageOwner& scope) {
-        for (std::size_t i = 0; i < call.operands.size(); ++i) {
+        const bool view = call.op == IrOp::Allocate && pointer_class(program_, call.type.symbol) == PointerKind::List &&
+                          !call.operands.empty() && call.operands.front().type.kind == TypeKind::Array;
+        if (view) retain_view_array(call, scope);
+        for (std::size_t i = view ? 1 : 0; i < call.operands.size(); ++i) {
             const auto& argument = call.operands[i];
             if (facts_.holds_array(argument.type) && may_retain(call, i, false))
                 arrays_into(EscapeKind::ArrayRetainedByCall, call, argument, scope, call.symbol);
@@ -843,6 +879,7 @@ private:
     std::map<SymbolId, StorageOwner> declared_;
     std::map<SymbolId, OriginSet> table_;
     std::map<Origin, OriginSet> elements_;
+    std::map<Origin, const IrNode*> array_sites_;
     std::map<const IrNode*, StorageOwner> closure_scopes_;
     std::map<SymbolId, Closures> closures_;
     Closures escaping_;
@@ -1129,6 +1166,7 @@ std::string_view describe_escape_kind(EscapeKind kind) {
     case EscapeKind::ReferenceCapturedByClosure: return "reference to a local captured by a closure";
     case EscapeKind::ReferenceRetainedByCall: return "reference to a local retained by a call";
     case EscapeKind::ArrayInLongerLivedElement: return "array stored in an element that can outlive it";
+    case EscapeKind::ArrayBacksManagedView: return "ListPointer cannot retain an array with an unknown allocation site";
     case EscapeKind::ArrayRetainedByCall: return "array passed to a call that may retain it";
     case EscapeKind::ClosureNeedsOwnership: return "escaping closure requires new func";
     case EscapeKind::BoundNeedsOwnership: return "escaping bound method requires new bound";
@@ -1154,6 +1192,26 @@ std::vector<StorageEscape> find_storage_escapes(const IrProgram& program, Storag
     return find_storage_escapes(program, PurityAnalysis(program), stage);
 }
 
+std::set<const IrNode*> retained_view_arrays(const IrProgram& program) {
+    bool has_view = false;
+    for (SymbolId id = 0; id < program.symbols.size() && !has_view; ++id)
+        has_view = pointer_class(program, id) == PointerKind::List;
+    if (!has_view) return {};
+
+    const PurityAnalysis purity(program);
+    const TypeFacts facts(program);
+    std::set<const IrNode*> result;
+    for (const auto& body : program.bodies) {
+        if (!analyzed(program, body, StorageStage::Specialized)) continue;
+        auto found = Analyzer(program, purity, facts, body).run();
+        for (const auto& escape : found.escapes)
+            if (escape.kind == EscapeKind::ArrayBacksManagedView)
+                throw Diagnostic(escape.operation, "ListPointer has no proven managed backing array").with_code("E0451");
+        result.merge(found.retained_arrays);
+    }
+    return result;
+}
+
 void check_storage(const IrProgram& program, StorageStage stage) {
     const auto escapes = find_storage_escapes(program, stage);
     for (const auto& escape : escapes) {
@@ -1165,6 +1223,23 @@ void check_storage(const IrProgram& program, StorageStage stage) {
             return result;
         };
         switch (escape.kind) {
+        case EscapeKind::ArrayBacksManagedView: {
+            auto diagnostic = with_rebuild_hint(Diagnostic(escape.operation, message).with_code("E0451"));
+            if (!escape.storage.file.empty()) diagnostic.label(escape.storage, "this array may belong to another region");
+            if (const auto source = SourceMap::global().find(escape.storage.file);
+                source && escape.storage.offset + escape.storage.length <= source->text().size()) {
+                auto end = escape.storage;
+                const auto spelling = std::string_view(source->text()).substr(end.offset, end.length);
+                if (spelling.ends_with("[]") && spelling.find('\n') == std::string_view::npos) {
+                    end.offset += end.length - 2;
+                    end.column += end.length - 2;
+                    end.length = 2;
+                    diagnostic.suggest("accept a managed list and update the callers", end, "[list]",
+                                       Applicability::MaybeIncorrect);
+                }
+            }
+            throw diagnostic.help("create the array here so its allocation can use managed storage, or pass a list");
+        }
         case EscapeKind::ReferenceReturned:
         case EscapeKind::ReferenceInField:
         case EscapeKind::ReferenceCapturedByClosure:

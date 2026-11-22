@@ -3,6 +3,8 @@
 // collects (docs/runtime/NVM.md, "Garbage collection").
 
 #include "fixtures.hpp"
+#include "decompiler/assembly.hpp"
+#include "jit/tier3_native.hpp"
 #include "nvm/heap.hpp"
 
 #include "neura_digest.h"
@@ -153,6 +155,186 @@ nvr::Image scalar_elements_image(nvr::Block allocation) {
 }
 
 } // namespace
+
+NEURA_TEST(heap, retained_cell_storage_executes_in_every_tier_and_round_trips) {
+    auto image = collection_image();
+    image.layouts[0].fields[0] = 1;
+    image.constants.push_back({1, {42, 0, 0, 0}});
+    const nvr::Value cell{ValueKind::Slot, 4, 1};
+    const nvr::Value retained{ValueKind::Slot, 4, 2};
+    const nvr::Value cloned{ValueKind::Slot, 4, 4};
+    const nvr::Value forty_two{ValueKind::Constant, 1, 4};
+    nvr::Function entry;
+    entry.parameter_count = 1;
+    entry.result_type = 1;
+    entry.frame_types = {3, 4, 4, 4, 4, 1};
+    entry.blocks = {state_block(Op::AllocateObject, 1, 1),
+                    state_block(Op::WriteField, 2, nvr::absent, {cell, forty_two}),
+                    state_block(Op::RetainCellStorage, 3, 2, {cell}),
+                    state_block(Op::RetainCellStorage, 4, 3, {cell}),
+                    state_block(Op::RetainCellStorage, 5, 4, {retained}),
+                    state_block(Op::FreeObject, 6, nvr::absent, {cell}),
+                    state_block(Op::ReadField, 7, 5, {cloned}),
+                    return_block({{ValueKind::Slot, 1, 5}})};
+    image.functions.push_back(entry);
+    const auto bytes = nvr::encode(image);
+    image = nvr::load(bytes);
+    check_equal(image.minor_version, nvr::pointer_minor_version, "the retained handle needs NVR 1.11");
+    check(decompiler::assemble(decompiler::disassemble(image)) == image, "assembly round-trips the new operation");
+    for (std::uint8_t tier = 0; tier <= 2; ++tier) {
+        for (const auto mode : {jit::Mode::Off, jit::Mode::On}) {
+            if (tier == 2 && mode == jit::Mode::On && !jit::native::supported()) continue;
+            nvm::RunLimits limits;
+            limits.tier = tier;
+            limits.jit = mode;
+            // The empty arguments array, the original Cell and one retained
+            // handle. Repeated retention must need neither handles nor cells.
+            limits.max_handles = 3;
+            const auto run = finish(image, limits);
+            check(run.event.kind == nvm::Event::Kind::Completed, describe(run, image));
+            check_equal(run.event.status, 42, "the retained handle still reads the original storage");
+            check_equal(run.peak, std::uint64_t{3}, "retention did not allocate another object");
+        }
+    }
+    auto older = bytes;
+    older[6] = static_cast<std::uint8_t>(nvr::append_run_minor_version);
+    bool rejected = false;
+    try {
+        (void)nvr::load(older);
+    } catch (const std::exception& error) {
+        rejected = std::string_view(error.what()).find("NVR 1.11 features but declares 1.10") != std::string_view::npos;
+    }
+    check(rejected, "the loader rejects a retained handle in an older image");
+
+    image.functions[0].blocks[6].exits[0].arguments = {cell};
+    const auto destroyed = finish(nvr::load(nvr::encode(image)));
+    check(destroyed.event.kind == nvm::Event::Kind::Trapped &&
+              destroyed.event.trap.kind == nvm::TrapKind::InvalidHandle,
+          "retention does not keep a destroyed Cell handle usable");
+}
+
+NEURA_TEST(heap, retained_cell_storage_rejects_region_entries) {
+    auto image = collection_image();
+    nvr::Function entry;
+    entry.parameter_count = 1;
+    entry.result_type = 1;
+    entry.frame_types = {3, 6, 4, 4};
+    entry.blocks = {state_block(Op::EnterRegion, 1, 1),
+                    state_block(Op::RegionObject, 2, 2, {{ValueKind::Slot, 6, 1}}),
+                    state_block(Op::RetainCellStorage, 3, 3, {{ValueKind::Slot, 4, 2}}),
+                    return_block({{ValueKind::Constant, 1, 0}})};
+    image.functions.push_back(entry);
+    const auto run = finish(nvr::load(nvr::encode(image)));
+    check(run.event.kind == nvm::Event::Kind::Trapped && run.event.trap.kind == nvm::TrapKind::InvalidRegion,
+          "region entries cannot be retained by a managed pointer");
+}
+
+NEURA_TEST(heap, transfer_checks_the_retained_handle_inside_a_const_view) {
+    auto image = collection_image();
+    image.layouts[0].fields[0] = 1;
+    image.layouts.push_back({nvr::absent, {4}});
+    image.types.push_back({Kind::Object, 0, 1});
+    image.transferable_layouts = std::vector<std::uint32_t>{1};
+    image.transferable_cell_layouts = {{0}};
+    image.constants.push_back({1, {42, 0, 0, 0}});
+    const nvr::Value cell{ValueKind::Slot, 4, 1};
+    const nvr::Value storage{ValueKind::Slot, 4, 2};
+    const nvr::Value view{ValueKind::Slot, 9, 3};
+    const auto scheduler = [](nvr::SchedulerOp op, std::uint32_t resume, std::uint32_t result = nvr::absent,
+                              std::vector<nvr::Value> args = {}, std::uint32_t target = 0) {
+        nvr::Exit exit;
+        exit.kind = nvr::ExitKind::Scheduler;
+        exit.scheduler = op;
+        exit.target = target;
+        exit.resume = resume;
+        exit.result_slot = result;
+        exit.arguments = std::move(args);
+        return one_exit(std::move(exit));
+    };
+    nvr::Function entry;
+    entry.parameter_count = 1;
+    entry.result_type = 1;
+    entry.frame_types = {3, 4, 4, 9, 6, 1};
+    entry.blocks = {scheduler(nvr::SchedulerOp::ScopeEnter, 1),
+                    state_block(Op::AllocateObject, 2, 1),
+                    state_block(Op::WriteField, 3, nvr::absent, {cell, {ValueKind::Constant, 1, 4}}),
+                    state_block(Op::RetainCellStorage, 4, 2, {cell}),
+                    state_block(Op::AllocateObject, 5, 3, {}, 1),
+                    state_block(Op::WriteField, 6, nvr::absent, {view, storage}),
+                    scheduler(nvr::SchedulerOp::Spawn, 7, 4, {view}, 1),
+                    scheduler(nvr::SchedulerOp::Join, 8, 5, {{ValueKind::Slot, 6, 4}}),
+                    scheduler(nvr::SchedulerOp::ScopeExit, 9),
+                    return_block({{ValueKind::Slot, 1, 5}})};
+    nvr::Function child;
+    child.parameter_count = 1;
+    child.result_type = 1;
+    child.frame_types = {9, 4, 1};
+    child.blocks = {state_block(Op::ReadField, 1, 1, {{ValueKind::Slot, 9, 0}}),
+                    state_block(Op::ReadField, 2, 2, {{ValueKind::Slot, 4, 1}}),
+                    return_block({{ValueKind::Slot, 1, 2}})};
+    image.functions = {std::move(entry), std::move(child)};
+    auto transferred_image = nvr::load(nvr::encode(image));
+    check(decompiler::assemble(decompiler::disassemble(transferred_image)) == transferred_image,
+          "assembly round-trips the transferable backing layouts");
+    const auto transferable = finish(transferred_image);
+    check(transferable.event.kind == nvm::Event::Kind::Completed, "the field retains storage, which can cross a task");
+    check_equal(transferable.event.status, 42, "the child reads the original stored value");
+
+    image.functions[0].blocks[5].exits[0].arguments = {view, cell};
+    const auto unmarked = finish(nvr::load(nvr::encode(image)));
+    check(unmarked.event.kind == nvm::Event::Kind::Trapped &&
+              unmarked.event.trap.kind == nvm::TrapKind::InvalidTaskOperation,
+          "an ordinary Cell cannot cross a task in the same layout");
+
+    image.layouts[0] = {3, {10}};
+    image.layouts.push_back({3, {1, 11}});
+    image.layouts.push_back({});
+    image.types.push_back({Kind::Object, 0, 2});
+    image.types.push_back({Kind::Object, 0, 3});
+    image.transferable_cell_layouts = {{0, 2}};
+    auto& host = image.functions[0];
+    const nvr::Value box{ValueKind::Slot, 10, 6};
+    host.frame_types.push_back(10);
+    host.blocks[2] = state_block(Op::AllocateObject, 10, 6, {}, 2);
+    host.blocks[5].exits[0].arguments = {view, storage};
+    host.blocks.push_back(state_block(Op::WriteField, 11, nvr::absent, {box, {ValueKind::Constant, 1, 4}}));
+    host.blocks.push_back(state_block(Op::WriteField, 12, nvr::absent, {box, cell}, 1));
+    host.blocks.push_back(state_block(Op::WriteField, 3, nvr::absent, {cell, box}));
+    // Expire the original handle in the box's owner word after retention. A
+    // normal primitive reference still has that lifetime; the const view
+    // owns the retained storage and transfers only the primitive payload.
+    host.blocks[3].exits[0].resume = 13;
+    host.blocks.push_back(state_block(Op::FreeObject, 4, nvr::absent, {cell}));
+    auto& reader = image.functions[1];
+    reader.frame_types = {9, 4, 10, 1};
+    reader.blocks[2] = state_block(Op::ReadField, 3, 3, {{ValueKind::Slot, 10, 2}});
+    reader.blocks.push_back(return_block({{ValueKind::Slot, 1, 3}}));
+    const auto materialized = nvr::load(nvr::encode(image));
+    check(decompiler::assemble(decompiler::disassemble(materialized)) == materialized,
+          "assembly round-trips the optional primitive borrow box");
+    const auto boxed = finish(materialized);
+    check(boxed.event.kind == nvm::Event::Kind::Completed, describe(boxed, materialized));
+    check_equal(boxed.event.status, 42, "the child reads a primitive even if its borrow owner is destroyed");
+}
+
+NEURA_TEST(heap, stale_list_pointer_recovers_bounds_trap_class) {
+    auto image = collection_image();
+    nvr::Function entry;
+    entry.parameter_count = 1;
+    entry.result_type = 1;
+    entry.frame_types = {3};
+    nvr::Exit stale;
+    stale.kind = nvr::ExitKind::Trap;
+    stale.reason = static_cast<std::uint32_t>(nvr::TrapReason::StaleCollectionView);
+    entry.blocks = {one_exit(stale)};
+    image.functions.push_back(entry);
+    image = nvr::load(nvr::encode(image));
+    check_equal(image.minor_version, nvr::pointer_minor_version, "a stale view needs NVR 1.11");
+    const auto run = finish(image);
+    check(run.event.kind == nvm::Event::Kind::Trapped && run.event.trap.kind == nvm::TrapKind::IndexOutOfBounds,
+          "a stale view is an ordinary bounds-class trap");
+    check_equal(run.event.trap.detail, std::string("stale ListPointer view"), "the trap names the stale view");
+}
 
 NEURA_TEST(heap, scalar_elements_do_not_keep_objects_alive) {
     // The argument array (1 cell) and two unreachable two-cell objects leave

@@ -53,6 +53,51 @@ NEURA_TEST(heap, handles_count_up_and_are_never_reused) {
     check_equal(heap.next_live(c), std::uint64_t{0}, "no live handle after the last");
 }
 
+NEURA_TEST(heap, retained_cell_storage_has_independent_reachability) {
+    Heap heap;
+    const auto cell = heap.create_object(7, 1);
+    const auto entry = live(heap, cell);
+    const auto storage = heap.retain_storage(cell, entry);
+    check(storage != cell && heap.is_storage_handle(storage), "the storage has a separate managed handle");
+    check_equal(heap.retain_storage(cell, entry), storage, "the Cell reuses the storage handle");
+    check_equal(heap.retain_storage(storage, live(heap, storage)), storage, "cloning reuses the storage handle");
+    heap.set_field(live(heap, storage), 0, 42);
+    check_equal(heap.field(entry, 0), std::uint64_t{42}, "the Cell sees a write through its storage alias");
+    check_equal(heap.cells_released_by(cell, entry), std::uint64_t{0}, "destroying the Cell releases no shared cells");
+    heap.free(cell);
+    check(!heap.find(cell), "the destroyed Cell handle is invalid");
+    check_equal(heap.field(live(heap, storage), 0), std::uint64_t{42}, "the storage remains live");
+    check(heap.mark(storage, live(heap, storage)), "a retained handle can be a root");
+    std::uint64_t reclaimed = 0;
+    const auto record = [&](std::uint64_t, std::uint64_t cells) { reclaimed += cells; };
+    heap.sweep(record);
+    check_equal(reclaimed, std::uint64_t{0}, "the rooted storage remains allocated");
+    heap.sweep(record);
+    check(!heap.find(storage), "the unreachable storage handle is collected");
+    check_equal(reclaimed, std::uint64_t{2}, "the last handle releases the allocation exactly once");
+}
+
+NEURA_TEST(heap, collecting_an_unreachable_storage_alias_preserves_the_cell) {
+    Heap heap;
+    const auto cell = heap.create_object(7, 1);
+    const auto entry = live(heap, cell);
+    const auto storage = heap.retain_storage(cell, entry);
+    check(heap.mark(cell, entry), "the Cell alone is a root");
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> swept;
+    heap.sweep([&](std::uint64_t handle, std::uint64_t cells) { swept.emplace_back(handle, cells); });
+    check(swept == std::vector<std::pair<std::uint64_t, std::uint64_t>>{{storage, 0}},
+          "collecting the alias accounts for no storage cells");
+    check(live(heap, cell) == entry, "the Cell is still live");
+    const auto replacement = heap.retain_storage(cell, entry);
+    check(replacement > storage, "a later pointer gets a fresh handle");
+    check(heap.mark(replacement, live(heap, replacement)), "mark the replacement as the only root");
+    swept.clear();
+    heap.sweep([&](std::uint64_t handle, std::uint64_t cells) { swept.emplace_back(handle, cells); });
+    check(swept == std::vector<std::pair<std::uint64_t, std::uint64_t>>{{cell, 0}},
+          "sweeping the original handle carries forward the storage root");
+    check(live(heap, replacement) == entry, "the original storage remains live");
+}
+
 NEURA_TEST(heap, pages_are_released_and_handles_stay_ordered) {
     // More handles than one page holds; free a whole page, then walk.
     Heap heap;

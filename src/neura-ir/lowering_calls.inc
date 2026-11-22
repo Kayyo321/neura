@@ -160,7 +160,8 @@ void Lowering::named_arguments(IrNode& call, const Expr& expr, std::size_t first
         auto expected = substitute(parameter.type, replacements);
         if (!parameter.span.file.empty()) {
             expected_origin_ = ExpectedOrigin{parameter.span, "parameter '" + parameter.name + "' is declared here",
-                function && index < function->parameters.size() ? &function->parameters[index].type : nullptr};
+                function && index < function->parameters.size() ? &function->parameters[index].type : nullptr,
+                false, native_declaration(program_, target)};
         }
         admitted.push_back(argument_value(expr, first + i, expected, context));
     }
@@ -767,8 +768,11 @@ Substitution Lowering::infer_type_arguments(SymbolId target, const Expr& expr, s
 IrNode Lowering::argument_value(const Expr& expr, std::size_t index, const IrType& expected, Context& context) {
     const auto found = inferred_.find(&expr);
     if (found != inferred_.end() && index < found->second.size() && found->second[index]) {
-        expected_origin_.reset();
+        const auto origin = std::exchange(expected_origin_, std::nullopt);
         auto lowered = std::move(*found->second[index]);
+        if (origin && origin->native_boundary && contains_pointer_type(program_, lowered.type))
+            throw Diagnostic(expr.operands[index].span, "a managed pointer is not a native value in Std.DynamicForeign")
+                .with_code("E0403");
         found->second[index].reset();
         if (std::ranges::none_of(found->second, [](const auto& item) { return item.has_value(); }))
             inferred_.erase(found);

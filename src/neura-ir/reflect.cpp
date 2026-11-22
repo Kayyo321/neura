@@ -1,5 +1,8 @@
 #include "reflect.hpp"
 
+#include "frozen.hpp"
+#include "pointer_safety.hpp"
+
 #include "aggregate.hpp"
 #include "any.hpp"
 #include "attributes.hpp"
@@ -341,6 +344,9 @@ private:
     std::vector<SymbolId> variants(SymbolId enumeration) const { return children(enumeration, SymbolKind::Variant); }
 
     std::vector<Member> fields(SymbolId cls) const {
+        // Pointer backing references and view coordinates are implementation
+        // details and never enter descriptor-driven field or codec walkers.
+        if (pointer_class(program_, cls) != PointerKind::None) return {};
         std::vector<SymbolId> chain;
         for (auto scope = cls; valid(scope) && scope != root_ && chain.size() < 256; scope = symbol(scope).base)
             chain.push_back(scope);
@@ -401,6 +407,12 @@ private:
                 if (item.name == "init" || item.name == "deinit" || item.name.starts_with('$') ||
                     item.name.find('<') != std::string::npos || !item.generics.empty())
                     continue;
+                const auto pointer = pointer_class(program_, scope);
+                if ((pointer == PointerKind::Const && item.name == "read") ||
+                    (pointer == PointerKind::Mutable && item.name == "as_const")) {
+                    const auto* value = pointer_value_type(program_, scope);
+                    if (!value || mutable_part(program_, *value)) continue;
+                }
                 if (seen.insert(item.name).second) result.push_back(id);
             }
         };

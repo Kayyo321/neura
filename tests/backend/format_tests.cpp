@@ -787,7 +787,8 @@ NEURA_TEST(format, storage_regions_need_version_1_7) {
     check_equal(static_cast<unsigned>(nvr::StateOp::HookLeave), 34U, "the hook-leave number");
     check_equal(static_cast<unsigned>(nvr::StateOp::ConcatText), 35U, "the concat-text number");
     check_equal(static_cast<unsigned>(nvr::StateOp::AppendRun), 36U, "the append-run number");
-    check_equal(static_cast<unsigned>(nvr::state_op_count), 37U, "the operation count");
+    check_equal(static_cast<unsigned>(nvr::StateOp::RetainCellStorage), 37U, "the retain-cell-storage number");
+    check_equal(static_cast<unsigned>(nvr::state_op_count), 38U, "the operation count");
     const auto image = region_image(environment);
     check_equal(image.minor_version, std::uint16_t{7}, "the assembly text declares 1.7");
     check(nvr::uses_regions(image), "the image uses regions");
@@ -1378,7 +1379,7 @@ NEURA_TEST(format, exit_validation) {
     mutate_logic([](nvr::Image& i) { i.functions[0].blocks[1].exits[0].assignments.push_back({1, {ValueKind::Constant, 1, 0}}); },
                  "a trap exit has no assignments");
     mutate_logic([](nvr::Image& i) { i.functions[0].blocks[1].exits[0].reason = 0; }, "trap reason 0 is not defined");
-    mutate_logic([](nvr::Image& i) { i.functions[0].blocks[1].exits[0].reason = 6; }, "trap reason 6 is not defined");
+    mutate_logic([](nvr::Image& i) { i.functions[0].blocks[1].exits[0].reason = 7; }, "trap reason 7 is not defined");
     mutate_logic([](nvr::Image& i) {
         auto& exit = i.functions[0].blocks[1].exits[1];
         exit.assignments = {{1, {ValueKind::Constant, 1, 0}}, {1, {ValueKind::Slot, 1, 1}}};

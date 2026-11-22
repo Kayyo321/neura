@@ -102,6 +102,7 @@ const char* reason_name(std::uint32_t reason) {
     case 3: return "program failure";
     case 4: return "invalid dispatch";
     case 5: return "collection modified during iteration";
+    case 6: return "stale ListPointer view";
     default: return "undefined reason";
     }
 }
@@ -243,6 +244,7 @@ public:
             std::string operation;
             switch (exit.operation) {
             case nvr::StateOp::AllocateObject: operation = "new L" + std::to_string(exit.immediate); break;
+            case nvr::StateOp::RetainCellStorage: operation = "retain_cell_storage(" + a(0) + ")"; break;
             case nvr::StateOp::ReadTag: operation = "tag(" + a(0) + ")"; break;
             case nvr::StateOp::ReadField:
                 operation = a(0) + "." + field(exit, args);

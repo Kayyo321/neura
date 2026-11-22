@@ -19,6 +19,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ### Added
 
+- `Std.Core.Pointer` adds managed `Pointer<T>`, `ConstPointer<T>`, and checked `ListPointer<T>` views. Storage and views remain live through their holders. [Pointer contract](docs/lang/Neura0.3.1.md#stdcorepointer)
 - The `nil-access` and `nil-argument` warnings report dereferences and transfers that may encounter a nil reference. A guard can prove a binding non-nil, and function result summaries survive separate compilation. [Nil warnings](docs/lang/CoreLanguage.md#nil-access-and-nil-argument-warnings)
 - Numeric literals accept apostrophe digit separators and fixed-width integer and floating-point suffixes.
 - Parameters with a generic class or interface reference type such as `Node<T>` can use the literal `nil` as their default.

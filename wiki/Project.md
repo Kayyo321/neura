@@ -106,6 +106,8 @@ The implemented optimization stage verifies NeuraIR before its first pass and af
 
 Measure an optimization using relevant circuit costs such as neuron and edge count, graph depth, state size, execution steps, or artifact size. State the target and workload so a reduction in one cost can be evaluated alongside changes in the others.
 
+[Managed pointer views](https://github.com/Kayyo321/neura/blob/main/docs/lang/Neura0.3.1.md#stdcorepointer) extend the storage boundary. NeuraIR verifies private cell-retention operations and traces the original arrays retained through fixed-array views. Conversion allocates those arrays on the managed heap and emits the explicit cell-retention and stale-view operations. The runtime keeps retained storage reachable independently of the original cell handle and enforces checked collection access.
+
 ## Neuron representation
 
 A circuit consists of neurons with a defined activation, weighted connections, and biases. The target defines the numeric domain, evaluation rules, and supported connectivity. For Boolean inputs in `{0, 1}`, a ReLU neuron with weights `1, 1` and bias `-1` computes `max(0, a + b - 1)`. It yields `1` for two true inputs and `0` otherwise. The compiler can compose primitives like this into circuits for logical operations, comparisons, arithmetic, and selection.

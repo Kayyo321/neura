@@ -220,7 +220,10 @@ enum class IrOp {
     // prepare_reflection makes it from the call before specialization and
     // expand_reflection replaces it with existing operations after it, so it
     // is never written to .nir and never reaches conversion.
-    Reflect = 75
+    Reflect = 75,
+    // NeuraIR 1.17. Produces an independently owned, private handle to the
+    // storage of a live Std.Core.Cell. Its result and operand share a type.
+    RetainCellStorage = 76
 };
 
 // A MakeClosure (or its specialized Allocate) carries the written

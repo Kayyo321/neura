@@ -1,4 +1,8 @@
 #include "nir_format.hpp"
+
+#include "pointer_safety.hpp"
+
+#include "reference_storage.hpp"
 #include "lexer/lexer.hpp"
 #include "attributes.hpp"
 #include "hook_arguments.hpp"
@@ -44,13 +48,14 @@ constexpr std::uint8_t max_op_1_14 = static_cast<std::uint8_t>(IrOp::Yield);
 static_assert(static_cast<unsigned>(IrOp::Cleanup) == 70 && static_cast<unsigned>(IrOp::Pending) == 71 &&
               max_op_1_14 == 72);
 constexpr std::uint8_t max_op_expressions = static_cast<std::uint8_t>(IrOp::TypeOf);
+constexpr std::uint8_t max_op_pointer = static_cast<std::uint8_t>(IrOp::RetainCellStorage);
 static_assert(static_cast<unsigned>(IrOp::ConcatText) == 73 && max_op_expressions == 74);
 // NeuraIR 1.9 stores a node's poll in the top bit of its operation byte.
 constexpr std::uint8_t poll_bit = 0x80;
 constexpr std::uint16_t task_minor = 9;
 // NeuraIR 1.10 adds symbol attributes and deferred initialization.
 constexpr std::uint16_t attribute_minor = 10;
-constexpr std::uint16_t newest_node_minor = nir_expressions_minor;
+constexpr std::uint16_t newest_node_minor = nir_pointer_minor;
 
 bool valid_non_nil_use(const IrProgram& program, const Span& use, SymbolId id) {
     if (id >= program.symbols.size() || use.file.empty() || !use.line || !use.column || !use.length ||
@@ -159,7 +164,11 @@ std::uint16_t required_minor(const std::vector<IrNode>& nodes) {
     std::uint16_t version = 0;
     for (const auto& node : nodes) {
         const auto op = static_cast<std::uint8_t>(node.op);
-        if (node.op == IrOp::ConcatText || node.op == IrOp::TypeOf) return nir_expressions_minor;
+        if (node.op == IrOp::RetainCellStorage || (node.op == IrOp::Fail && node.text != "iteration") ||
+            (node.op == IrOp::ValueText && node.text == native_argument_packing))
+            return nir_pointer_minor;
+        if (node.op == IrOp::ConcatText || node.op == IrOp::TypeOf)
+            version = std::max(version, nir_expressions_minor);
         if (node.op == IrOp::ConformanceCall) version = std::max(version, nir_records_minor);
         if (is_deferred_initialize(node)) {
             version = std::max(version, attribute_minor);
@@ -360,9 +369,9 @@ public:
                 });
             }))
             version = std::max(version, nir_lifetime_minor);
-        if (!program.laws.empty()) version = nir_laws_minor;
+        if (!program.laws.empty()) version = std::max(version, nir_laws_minor);
         if (!program.non_nil_uses.empty() || !program.nil_bindings.empty() || !program.nil_results.empty())
-            version = nir_narrowing_minor;
+            version = std::max(version, nir_narrowing_minor);
         polls_ = version >= 9;
         u16(version);
         count(files_.size());
@@ -653,8 +662,10 @@ private:
         // Events are derived on the linked program and never stored.
         if (value.op == IrOp::HookRead || value.op == IrOp::HookAdmit)
             throw NirError("class hook events exist only in an elaborated program and are not written to .nir");
-        if (static_cast<std::uint8_t>(value.op) > max_op_expressions)
+        if (static_cast<std::uint8_t>(value.op) > max_op_pointer)
             throw NirError("invalid operation tag " + std::to_string(static_cast<unsigned>(value.op)));
+        if (value.op == IrOp::Field && value.text == retained_cell_field)
+            throw NirError("retained Cell field access is derived after linking");
         if (linked_argument_annotation(value)) throw NirError("argument transport is derived after linking");
         // Only bodies carry polls, and a body with one makes the file 1.9.
         u8(static_cast<std::uint8_t>(value.op) | (polls_ && value.poll ? poll_bit : 0));
@@ -694,7 +705,7 @@ public:
         constexpr std::uint8_t operation_limits[]{
             max_op_1_0, max_op_1_1, max_op_1_2, max_op_1_3, max_op_1_4, max_op_1_4, max_op_1_4, max_op_1_7,
             max_op_1_7, max_op_1_9, max_op_1_9, max_op_1_9, max_op_1_12, max_op_records, max_op_1_14,
-            max_op_expressions, max_op_expressions};
+            max_op_expressions, max_op_expressions, max_op_pointer};
         static_assert(std::size(operation_limits) == nir_minor_version + 1);
         max_op_ = operation_limits[minor_];
         latches_ = minor_ > 0;
@@ -1141,7 +1152,7 @@ private:
             const auto byte = u8();
             const auto operation = static_cast<std::uint8_t>(byte & ~poll_bit);
             if (operation > max_op_ || operation == static_cast<unsigned>(IrOp::HookRead) ||
-                operation == static_cast<unsigned>(IrOp::HookAdmit))
+                operation == static_cast<unsigned>(IrOp::HookAdmit) || operation == static_cast<unsigned>(IrOp::Reflect))
                 fail("invalid operation tag " + std::to_string(byte));
             value.op = static_cast<IrOp>(operation);
             value.poll = (byte & poll_bit) != 0;
@@ -1153,6 +1164,12 @@ private:
         value.span = span();
         value.symbol = reference();
         value.text = text();
+        if (minor_ < nir_pointer_minor && value.op == IrOp::Fail && value.text != "iteration")
+            fail("collection view failures require NeuraIR format 1." + std::to_string(nir_pointer_minor));
+        if (minor_ < nir_pointer_minor && value.op == IrOp::ValueText && value.text == native_argument_packing)
+            fail("native pointer transport checking requires NeuraIR format 1." + std::to_string(nir_pointer_minor));
+        if (value.op == IrOp::Field && value.text == retained_cell_field)
+            fail("retained Cell field access is derived after linking");
         if (linked_argument_annotation(value)) fail("argument transport is derived after linking");
         if (!aggregates_ && new_operator(value)) fail("bitwise operations require NeuraIR format 1.2");
         value.operands = nodes(depth + 1);

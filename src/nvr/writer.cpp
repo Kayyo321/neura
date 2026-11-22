@@ -286,7 +286,15 @@ std::vector<Section> sections(const Image& image, std::uint16_t minor) {
         });
     }
     if (image.transferable_layouts) {
-        add("TRNS", true, [&](Output& out) { indices(out, *image.transferable_layouts); });
+        add("TRNS", true, [&](Output& out) {
+            indices(out, *image.transferable_layouts);
+            if (minor >= pointer_minor_version) {
+                vector(out, image.transferable_cell_layouts, [](Output& writer, const TransferableCellLayout& cell) {
+                    writer.u32(cell.cell_layout);
+                    writer.u32(cell.box_layout);
+                });
+            }
+        });
     }
     for (const auto& raw : image.other_sections) {
         for (char c : raw.tag) {
@@ -351,16 +359,23 @@ bool concurrent_image(const Image& image) {
 }
 
 std::uint16_t required_minor_version(const Image& image) {
+    if (!image.transferable_cell_layouts.empty()) return pointer_minor_version;
     bool concat = false;
+    bool append_run = false;
     for (const auto& function : image.functions) {
         for (const auto& block : function.blocks) {
             for (const auto& exit : block.exits) {
+                if ((exit.kind == ExitKind::State && exit.operation == StateOp::RetainCellStorage) ||
+                    (exit.kind == ExitKind::Trap && exit.reason == static_cast<std::uint32_t>(
+                                                                     TrapReason::StaleCollectionView)))
+                    return pointer_minor_version;
                 if (exit.kind != ExitKind::State) continue;
-                if (exit.operation == StateOp::AppendRun) return append_run_minor_version;
+                if (exit.operation == StateOp::AppendRun) append_run = true;
                 if (exit.operation == StateOp::ConcatText) concat = true;
             }
         }
     }
+    if (append_run) return append_run_minor_version;
     if (concat) return concat_minor_version;
     for (const auto& function : image.functions) {
         for (const auto& block : function.blocks) {
@@ -447,7 +462,7 @@ std::vector<std::uint8_t> encode(const Image& image) {
     const auto minor = std::max(image.minor_version, required_minor_version(image));
     // A scheduler exit or a poll needs the table; the loader accepts it only
     // together with the table.
-    if (!image.transferable_layouts && concurrent_image(image)) {
+    if (!image.transferable_layouts && (concurrent_image(image) || !image.transferable_cell_layouts.empty())) {
         throw std::invalid_argument("an image with tasks or polls needs its transferable-layout table");
     }
     const auto parts = sections(image, minor);
