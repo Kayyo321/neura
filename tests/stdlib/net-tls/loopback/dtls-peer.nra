@@ -1,0 +1,159 @@
+let config = import:Std.Net.Tls.TlsConfig;
+let console = import:Std.Io.Console;
+let duration = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let handshake = import:Std.Net.Tls.Handshake;
+let optional = import:Std.Core.Optional;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let socket_addr = import:Std.Net.Core.SocketAddr;
+let strings = import:Std.Text.Strings;
+let transport = import:Std.Net.Transport;
+let udp = import:Std.Net.Socket.UdpSocket;
+let unit = import:Std.Core.Unit;
+
+// dtls-loopback.py controls the application phase through stdin, after both
+// endpoints report READY. A relay never guesses when a handshake has finished.
+export let DtlsPeer = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        match (exercise(args)) {
+            result.Result.Ok(text) => {
+                console.print_line($"RESULT {text}");
+            },
+            result.Result.Err(failure) => {
+                match (failure) {
+                    errors.Error.Io { kind, message, path } => {
+                        console.print_line($"ERROR {kind.to_string()}");
+                    },
+                    errors.Error.Custom(detail) => {
+                        console.print_line($"ERROR {detail.code()}");
+                    },
+                    _ => {
+                        console.print_line($"ERROR {errors.message(failure)}");
+                    },
+                }
+            },
+        }
+        return program.ExitCode.Ok;
+    };
+
+    let exercise = func(args: string[]) -> result.Result<string> {
+        last server = args[0] == "server";
+        last wire = udp.bind(socket_addr.parse("127.0.0.1:0")?)?;
+        wire.set_read_timeout(duration.of_seconds(5));
+        console.print_line($"ADDRESS {(wire.local_address()?).to_string()}");
+        last builder = config.builder();
+        builder.set_versions(config.TlsVersion.Tls13, config.TlsVersion.Tls13);
+        builder.set_handshake_timeout(args[6] == "timeout" ? duration.of_millis(250) : duration.of_seconds(8));
+        if (args[2].byte_length > 0) {
+            builder.set_certificate(args[2], args[3]);
+        }
+        last settings: config.TlsConfig;
+        if (server) {
+            builder.set_client_ca_file(args[4]);
+            settings = builder.build_server()?;
+        } else {
+            builder.set_ca_file(args[4]);
+            builder.set_server_name(args[5]);
+            settings = builder.build_client()?;
+        }
+        last opened = handshake.dtls13(settings, wire, socket_addr.parse(args[1])?);
+        match (opened) {
+            result.Result.Err(failure) => {
+                let _ = wire.close();
+                return result.Result<string>.Err(failure);
+            },
+            result.Result.Ok(stream) => {
+                console.print_line("READY");
+                last outcome = exchange(stream, server, args[6]);
+                let _ = stream.close();
+                return outcome;
+            },
+        }
+    };
+
+    let barrier = func -> result.Result<unit.Unit> {
+        match (console.read_line()?) {
+            optional.Optional.Some(line) => {
+                if (line == "go") {
+                    return result.Result<unit.Unit>.Ok(unit.Unit.Value);
+                }
+            },
+            optional.Optional.None => {},
+        }
+        return result.Result<unit.Unit>.Err(errors.custom("test.dtls.control", "expected go"));
+    };
+
+    let expect_message = func(stream: transport.Transport<uint8[list], uint8[list]>, expected: string)
+        -> result.Result<unit.Unit> {
+        match (stream.receive()?) {
+            optional.Optional.Some(data) => {
+                last text = strings.from_bytes(data)?;
+                if (text != wire_text(expected)) {
+                    return result.Result<unit.Unit>.Err(errors.custom("test.dtls.payload", $"expected {expected}, got {text}"));
+                }
+                console.print_line($"RECEIVED {expected}");
+                return result.Result<unit.Unit>.Ok(unit.Unit.Value);
+            },
+            optional.Optional.None => {
+                return result.Result<unit.Unit>.Err(errors.custom("test.dtls.closed", "peer closed before a message"));
+            },
+        }
+    };
+
+    // Larger than the short ACK and KeyUpdate records. The relay uses this
+    // length after READY to select application records without decrypting them.
+    let wire_text = func(text: string) -> string => strings.pad_end(text, 256, " ") .. "\n";
+
+    let exchange = func(stream: transport.Transport<uint8[list], uint8[list]>, server: bool, scenario: string)
+        -> result.Result<string> {
+        barrier()?;
+        if (scenario == "loss-reorder") {
+            if (server) {
+                expect_message(stream, "second")?;
+                expect_message(stream, "first")?;
+                stream.send(strings.to_bytes(wire_text("pong")))?;
+            } else {
+                stream.send(strings.to_bytes(wire_text("discard")))?;
+                stream.send(strings.to_bytes(wire_text("first")))?;
+                stream.send(strings.to_bytes(wire_text("second")))?;
+                expect_message(stream, "pong")?;
+            }
+        } else {
+            for (let index in 0 .. 2) {
+                last ping = index == 0 ? "ping-one" : "ping-two";
+                last pong = index == 0 ? "pong-one" : "pong-two";
+                if (server) {
+                    expect_message(stream, ping)?;
+                    stream.send(strings.to_bytes(wire_text(pong)))?;
+                } else {
+                    stream.send(strings.to_bytes(wire_text(ping)))?;
+                    expect_message(stream, pong)?;
+                }
+                if (index == 0) {
+                    console.print_line("NEXT");
+                    barrier()?;
+                    if (scenario == "key-update-reorder") {
+                        // The harness reverses the reciprocal KeyUpdate and
+                        // this expendable response. DTLS application data need
+                        // not survive loss or epoch reordering. The following
+                        // ping-two/pong-two exchange verifies the updated keys.
+                        if (server) {
+                            expect_message(stream, "probe")?;
+                            stream.send(strings.to_bytes(wire_text("probe")))?;
+                        } else {
+                            stream.send(strings.to_bytes(wire_text("probe")))?;
+                        }
+                        console.print_line("UPDATED");
+                        barrier()?;
+                    }
+                }
+            }
+        }
+        console.print_line("DONE");
+        // Keep both endpoints alive until their peer has received its last
+        // datagram; close_notify must not race the application's final send.
+        barrier()?;
+        return result.Result<string>.Ok("ok");
+    };
+);

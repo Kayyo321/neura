@@ -2148,6 +2148,10 @@ if(BUILD_TESTING AND NEURA_SDK)
         add_test(NAME stdlib-net-tls-loopback COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/net-tls/loopback.py"
             --neura "$<TARGET_FILE:neura>" --openssl "${NEURA_SERVER_TEST_OPENSSL}")
+        add_test(NAME stdlib-net-dtls-loopback COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/net-tls/dtls-loopback.py"
+            --neura "$<TARGET_FILE:neura>" --openssl "${NEURA_SERVER_TEST_OPENSSL}")
+        set_tests_properties(stdlib-net-dtls-loopback PROPERTIES TIMEOUT 180)
     endif()
     file(GLOB stdlib_areas LIST_DIRECTORIES true CONFIGURE_DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/*")
