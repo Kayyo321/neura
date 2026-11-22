@@ -1,3 +1,7 @@
+// test-options: --gpu=off --deny-all --max-steps 1000000000
+let fixed = import:Std.Time.FixedClock;
+let instant = import:Std.Time.Instant;
+let vectors = import:SpiffeVectors;
 let error = import:Std.Core.Error;
 let spiffe = import:Std.Net.Tls.Spiffe;
 let strings = import:Std.Text.Strings;
@@ -82,5 +86,48 @@ let SpiffeTests = module (
         test.assert_equal<int>(2048, longest.byte_length);
         test.assert_ok<spiffe.SpiffeId>(spiffe.parse(longest));
         rejected(longest + "a", error.ParseErrorKind.OutOfRange, 2048);
+    };
+
+    let code = func(failure: error.Error) -> string => match (failure) {
+        error.Error.Custom(detail) => detail.code(),
+        _ => "",
+    };
+
+    export let test_x509_svid_trust_and_uri = func {
+        last clock = fixed.of(instant.of_epoch_seconds(1735689600, 0));
+        last id = test.assert_ok<spiffe.SpiffeId>(spiffe.verify_x509_svid(vectors.Leaf, vectors.Root, "example.test", clock));
+        test.assert_equal_string("spiffe://example.test/workload", id.to_string());
+        last mismatch = test.assert_err<spiffe.SpiffeId>(spiffe.verify_x509_svid(vectors.Leaf, vectors.Root, "other.test", clock));
+        test.assert_equal_string("spiffe.identity", code(mismatch));
+        last multiple = test.assert_err<spiffe.SpiffeId>(spiffe.verify_x509_svid(vectors.DoubleUri, vectors.Root, "example.test", clock));
+        test.assert_equal_string("spiffe.certificate", code(multiple));
+        last empty = test.assert_err<spiffe.SpiffeId>(spiffe.verify_x509_svid(vectors.Leaf, "", "example.test", clock));
+        test.assert_equal_string("pki.no_path", code(empty));
+        last expired_clock = fixed.of(instant.of_epoch_seconds(2100000000, 0));
+        last expired = test.assert_err<spiffe.SpiffeId>(spiffe.verify_x509_svid(vectors.Leaf, vectors.Root, "example.test", expired_clock));
+        test.assert_equal_string("pki.validity", code(expired));
+    };
+
+    export let test_jwt_svid_key_and_claims = func {
+        last clock = fixed.of(instant.of_epoch_seconds(1735689600, 0));
+        last id = test.assert_ok<spiffe.SpiffeId>(spiffe.verify_jwt_svid(vectors.Jwt, vectors.Jwks, "test-audience", "example.test", clock));
+        test.assert_equal_string("spiffe://example.test/workload", id.to_string());
+        last no_key = test.assert_ok<spiffe.SpiffeId>(spiffe.verify_jwt_svid(vectors.NoKeyIdJwt, vectors.Jwks, "test-audience", "example.test", clock));
+        test.assert(id.equals(no_key));
+        last audience = test.assert_err<spiffe.SpiffeId>(spiffe.verify_jwt_svid(vectors.Jwt, vectors.Jwks, "other-audience", "example.test", clock));
+        test.assert_equal_string("spiffe.claims", code(audience));
+        last no_expiry = test.assert_err<spiffe.SpiffeId>(spiffe.verify_jwt_svid(vectors.NoExpiryJwt, vectors.Jwks, "test-audience", "example.test", clock));
+        test.assert_equal_string("spiffe.claims", code(no_expiry));
+        last wrong_use = test.assert_err<spiffe.SpiffeId>(spiffe.verify_jwt_svid(vectors.Jwt, vectors.WrongUseJwks, "test-audience", "example.test", clock));
+        test.assert_equal_string("spiffe.bundle", code(wrong_use));
+        clock.set(instant.of_epoch_seconds(1800000000, 0));
+        last expired = test.assert_err<spiffe.SpiffeId>(spiffe.verify_jwt_svid(vectors.Jwt, vectors.Jwks, "test-audience", "example.test", clock));
+        test.assert_equal_string("jwt.expired", code(expired));
+    };
+
+    export let test_jwt_svid_ml_dsa = func {
+        last clock = fixed.of(instant.of_epoch_seconds(1735689600, 0));
+        last id = test.assert_ok<spiffe.SpiffeId>(spiffe.verify_jwt_svid(vectors.MlDsaJwt, vectors.MlDsaBundle, "test-audience", "example.test", clock));
+        test.assert_equal_string("spiffe://example.test/workload", id.to_string());
     };
 );

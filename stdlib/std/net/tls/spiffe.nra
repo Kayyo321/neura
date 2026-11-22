@@ -1,10 +1,26 @@
+let algorithms = import:Std.Crypto.Algorithm;
+let certificates = import:Std.Crypto.Pki.Certificate;
+let policy = import:Std.Crypto.Core.CryptoPolicy;
+let mldsa = import:Std.Crypto.Pqc.MlDsa;
+let ecdsa = import:Std.Crypto.Asymmetric.Ecdsa;
+let extensions = import:Std.Crypto.Pki.Extensions;
+let names = import:Std.Crypto.Pki.GeneralName;
+let oids = import:Std.Crypto.Pki.Oids;
+let path_validation = import:Std.Crypto.Pki.PathValidation;
+let jose = import:Std.Crypto.Internal.JoseJson;
+let json = import:Std.Encoding.Json;
+let jwk = import:Std.Crypto.Token.Jwk;
+let jws = import:Std.Crypto.Token.Jws;
+let jwt = import:Std.Crypto.Token.Jwt;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Time.Clock;
+let system_clock = import:Std.Time.SystemClock;
 let.promote _ = import:Std.Core.Error;
 let hashing = import:Std.Core.Hash;
 let.promote _ = import:Std.Core.Result;
 let strings = import:Std.Text.Strings;
 
-/// @brief SPIFFE identities (the SPIFFE ID standard, `SPIFFE-ID.md`): parsing and validation of SPIFFE IDs and
-/// trust domains, which are real, and SVID verification, which is a stub.
+/// @brief SPIFFE identity parsing and X.509-SVID and JWT-SVID authentication.
 ///
 /// A SPIFFE ID is `spiffe://<trust domain><path>`. The parser applies section 2: the scheme is `spiffe`, matched
 /// without regard to case (section 2.4) and kept as `spiffe`; the trust domain is non-empty, at most 255 bytes,
@@ -15,8 +31,8 @@ let strings = import:Std.Text.Strings;
 /// errors with the byte offset of the problem. Equality is exact: the trust domain is lowercase by the rules and
 /// the path is case-sensitive.
 ///
-/// Verifying an X.509-SVID or JWT-SVID needs X.509 path validation or JWS verification against a trust bundle,
-/// which Neura 0.3.0 does not provide; those functions trap.
+/// Supply the trust bundle for the expected trust domain. Pass `trust_domain` to enforce this scope locally.
+/// Verification uses the supplied clock or the host wall clock.
 /// @see [Std.Net.Tls.Spiffe](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Tls-Spiffe)
 .Since("0.3.0")
 export let Spiffe = module (
@@ -103,18 +119,277 @@ export let Spiffe = module (
         return Result<string>.Ok(domain);
     };
 
-    /// @brief Verifies an X.509-SVID chain (PEM) against a trust bundle (PEM) and returns its SPIFFE ID.
-    /// @stub needs X.509 certificate path validation, not in Neura 0.3.0
+    /// @brief Verifies a leaf-first X.509-SVID chain with a PEM trust bundle. Requires one URI SAN and an
+    /// end-entity certificate. The supplied bundle is authoritative for the requested trust domain.
     .NoDiscard
-    export let verify_x509_svid = func(chain_pem: string, bundle_pem: string) -> Result<SpiffeId> {
-        trap_with_message("unsupported: Std.Net.Tls.Spiffe.verify_x509_svid is not implemented in Neura 0.3.0 (needs X.509 certificate path validation, not in Neura 0.3.0)");
+    export let verify_x509_svid = func(chain_pem: string, bundle_pem: string, trust_domain: string = "",
+        clock: Clock = nil) -> Result<SpiffeId> {
+        last chain = certificates.parse_pem(chain_pem)?;
+        last anchors = certificates.parse_pem(bundle_pem)?;
+        if (chain.length == 0) {
+            return jose.fail<SpiffeId>("spiffe.certificate", "the SVID contains no leaf certificate");
+        }
+        last leaf = chain[0];
+        match (leaf.basic_constraints) {
+            Optional.Some(constraints) => {
+                if (constraints.ca || constraints.path_length >= 0) {
+                    return jose.fail<SpiffeId>("spiffe.certificate", "an SVID leaf cannot be a CA");
+                }
+            },
+            Optional.None => {
+                return jose.fail<SpiffeId>("spiffe.certificate", "the SVID leaf requires basic constraints");
+            },
+        }
+        match (leaf.key_usage) {
+            Optional.Some(usage) => {
+                if (not usage.has(extensions.DigitalSignature) || usage.has(extensions.KeyCertSign) || usage.has(extensions.CrlSign)) {
+                    return jose.fail<SpiffeId>("spiffe.certificate", "the SVID leaf must permit only end-entity key usages");
+                }
+            },
+            Optional.None => {
+                return jose.fail<SpiffeId>("spiffe.certificate", "the SVID leaf requires key usage");
+            },
+        }
+        match (leaf.extension(oids.KeyUsage)) {
+            Optional.Some(key_usage) => {
+                if (not key_usage.critical) {
+                    return jose.fail<SpiffeId>("spiffe.certificate", "the SVID leaf requires critical key usage");
+                }
+            },
+            Optional.None => {
+                return jose.fail<SpiffeId>("spiffe.certificate", "the SVID leaf requires key usage");
+            },
+        }
+        match (leaf.extended_key_usage) {
+            Optional.Some(usage) => {
+                if (not usage.has(oids.ClientAuth) || not usage.has(oids.ServerAuth)) {
+                    return jose.fail<SpiffeId>("spiffe.certificate", "an SVID leaf's extended usage must permit client and server authentication");
+                }
+            },
+            Optional.None => {},
+        }
+        let uri = "";
+        let count = 0;
+        match (leaf.subject_alt_names) {
+            Optional.Some(sans) => {
+                for (let san in sans) {
+                    if (san.kind == names.GeneralNameKind.Uri) {
+                        uri = san.text;
+                        count++;
+                    }
+                }
+            },
+            Optional.None => {},
+        }
+        if (count != 1) {
+            return jose.fail<SpiffeId>("spiffe.certificate", "an SVID leaf must contain exactly one URI SAN");
+        }
+        last id = workload(uri, trust_domain)?;
+        last intermediates: certificates.Certificate[list] = new;
+        for (let i in 1 .. chain.length) {
+            intermediates.append(chain[i]);
+        }
+        last now = (source(clock).now())?;
+        path_validation.validate(leaf, intermediates, anchors, new path_validation.ValidationOptions(now))?;
+        return Result<SpiffeId>.Ok(id);
     };
 
-    /// @brief Verifies a JWT-SVID against a JWK set (JSON) and an audience and returns its SPIFFE ID.
-    /// @stub needs JWS signature verification, not in Neura 0.3.0
+    /// @brief Verifies a compact JWT-SVID against a SPIFFE JWK bundle and the expected audience. Requires
+    /// an asymmetric signature, the `jwt-svid` key use, and `sub`, `aud` and `exp`. A `kid` selects one key;
+    /// without it, the supported signatures are checked against at most 16 bundle keys.
     .NoDiscard
-    export let verify_jwt_svid = func(token: string, jwks_json: string, audience: string) -> Result<SpiffeId> {
-        trap_with_message("unsupported: Std.Net.Tls.Spiffe.verify_jwt_svid is not implemented in Neura 0.3.0 (needs JWS signature verification, not in Neura 0.3.0)");
+    export let verify_jwt_svid = func(token: string, jwks_json: string, audience: string, trust_domain: string = "",
+        clock: Clock = nil) -> Result<SpiffeId> {
+        if (audience.byte_length == 0 || token.byte_length > 1048576 || jwks_json.byte_length > 1048576) {
+            return jose.fail<SpiffeId>("spiffe.token", "invalid audience or oversized token or bundle");
+        }
+        last parts = jose.split_dots(token);
+        if (parts.length != 3) {
+            return jose.fail<SpiffeId>("spiffe.token", "the token must be a compact JWS");
+        }
+        last header = jose.parse_object_bytes(jose.decode(parts[0], "spiffe.token", "invalid JWS header")?,
+            "spiffe.token")?;
+        for (let field in header) {
+            last name = field[0];
+            if (name != "alg" && name != "typ" && name != "kid") {
+                return jose.fail<SpiffeId>("spiffe.token", "unsupported JWT-SVID header member");
+            }
+        }
+        if (jose.has(header, "typ")) {
+            last type = jose.required_text(header, "typ", "spiffe.token")?;
+            if (type != "JWT" && type != "JOSE") {
+                return jose.fail<SpiffeId>("spiffe.token", "invalid JWT-SVID type");
+            }
+        }
+        last algorithm = jose.required_text(header, "alg", "spiffe.token")?;
+        last kid = jose.text_member(header, "kid", "spiffe.token")?;
+        if (kid.byte_length == 0 && jose.has(header, "kid")) {
+            return jose.fail<SpiffeId>("spiffe.token", "an explicit key ID must not be empty");
+        }
+        last candidates = select_keys(jwks_json, kid)?;
+        last payload = authenticate(token, algorithm, candidates)?;
+        last claims = jwt.validate_claims(payload, source(clock), 0)?;
+        if (not jose.has(claims, "exp") || not has_audience(claims, audience)) {
+            return jose.fail<SpiffeId>("spiffe.claims", "missing expiration or mismatched audience");
+        }
+        return workload(jose.required_text(claims, "sub", "spiffe.claims")?, trust_domain);
+    };
+
+    let source = func(clock: Clock) -> Clock {
+        return clock unless clock == nil;
+        return system_clock.create();
+    };
+
+    let workload = func(uri: string, domain: string) -> Result<SpiffeId> {
+        last id = parse(uri)?;
+        if (id.path.byte_length == 0 || (domain.byte_length > 0 && not id.member_of(domain))) {
+            return jose.fail<SpiffeId>("spiffe.identity", "the SVID must identify a workload in the expected trust domain");
+        }
+        return Result<SpiffeId>.Ok(id);
+    };
+
+    let has_audience = func(claims: [string, json.JsonValue][list], audience: string) -> bool {
+        match (json.member(claims, "aud")) {
+            Optional.Some(value) => {
+                match (value) {
+                    json.JsonValue.Text(text) => {
+                        return text == audience;
+                    },
+                    json.JsonValue.Array(values) => {
+                        let found = false;
+                        for (let item in values) {
+                            match (item) {
+                                json.JsonValue.Text(text) => {
+                                    found = found || text == audience;
+                                },
+                                _ => {
+                                    return false;
+                                },
+                            }
+                        }
+                        return found;
+                    },
+                    _ => {},
+                }
+            },
+            Optional.None => {},
+        }
+        return false;
+    };
+
+    let select_keys = func(bundle: string, kid: string) -> Result<string[list]> {
+        last members = jose.parse_object(bundle, "spiffe.bundle", true)?;
+        last matching: string[list] = new;
+        match (json.member(members, "keys")) {
+            Optional.Some(value) => {
+                match (value) {
+                    json.JsonValue.Array(keys) => {
+                        for (let key in keys) {
+                            match (key) {
+                                json.JsonValue.Object(fields) => {
+                                    last use = jose.text_member(fields, "use", "spiffe.bundle")?;
+                                    if (use != "jwt-svid") {
+                                        continue;
+                                    }
+                                    last candidate = jose.required_text(fields, "kid", "spiffe.bundle")?;
+                                    if (candidate.byte_length == 0 || (kid.byte_length > 0 && candidate != kid)) {
+                                        continue;
+                                    }
+                                    if (kid.byte_length > 0 && matching.length != 0) {
+                                        return jose.fail<string[list]>("spiffe.bundle", "duplicate JWT-SVID key ID");
+                                    }
+                                    if (matching.length >= 16) {
+                                        return jose.fail<string[list]>("spiffe.bundle", "a key ID is required for this bundle");
+                                    }
+                                    last translated: [string, json.JsonValue][list] = new;
+                                    for (let field in fields) {
+                                        // Convert the SPIFFE usage after selection for the RFC 7517 verifier.
+                                        translated.append(field[0] == "use" ? ["use", json.JsonValue.Text("sig")] : field);
+                                    }
+                                    matching.append(json.write(json.JsonValue.Object(translated)));
+                                },
+                                _ => {},
+                            }
+                        }
+                    },
+                    _ => {},
+                }
+            },
+            Optional.None => {},
+        }
+        if (matching.length == 0) {
+            return jose.fail<string[list]>("spiffe.bundle", "no JWT-SVID key with the requested ID");
+        }
+        return Result<string[list]>.Ok(matching);
+    };
+
+    let authenticate = func(token: string, algorithm: string, keys: string[list]) -> Result<uint8[list]> {
+        let last_problem = custom("spiffe.bundle", "the bundle has no verification keys");
+        for (let key in keys) {
+            match (verify_signature(token, algorithm, key)) {
+                Result.Ok(payload) => {
+                    return Result<uint8[list]>.Ok(payload);
+                },
+                Result.Err(problem) => {
+                    last_problem = problem;
+                },
+            }
+        }
+        return Result<uint8[list]>.Err(last_problem);
+    };
+
+    let verify_signature = func(token: string, algorithm: string, key: string) -> Result<uint8[list]> {
+        if (algorithm == "ES256" || algorithm == "ES384" || algorithm == "ES512") {
+            last curve = algorithm == "ES256" ? ecdsa.Curve.P256 : algorithm == "ES384" ? ecdsa.Curve.P384 : ecdsa.Curve.P521;
+            return jws.verify<jwk.EcKey>(token, jwk.parse_ec(key, curve)?);
+        }
+        if (algorithm == "ML-DSA-44" || algorithm == "ML-DSA-65" || algorithm == "ML-DSA-87") {
+            return verify_akp(token, algorithm, key);
+        }
+        for (let variant in [jwk.RsaAlgorithm.Rs256, jwk.RsaAlgorithm.Rs384, jwk.RsaAlgorithm.Rs512,
+            jwk.RsaAlgorithm.Ps256, jwk.RsaAlgorithm.Ps384, jwk.RsaAlgorithm.Ps512]) {
+            if (algorithm == jwk.rsa_name(variant)) {
+                return jws.verify<jwk.RsaKey>(token, jwk.parse_rsa(key, variant)?);
+            }
+        }
+        return jose.fail<uint8[list]>("spiffe.token", "the token must use a supported asymmetric signing algorithm");
+    };
+
+    let verify_akp = func(token: string, algorithm: string, key: string) -> Result<uint8[list]> {
+        last fields = jose.parse_object(key, "spiffe.bundle")?;
+        if ((jose.required_text(fields, "kty", "spiffe.bundle")?) != "AKP"
+            || (jose.required_text(fields, "alg", "spiffe.bundle")?) != algorithm || jose.has(fields, "priv")) {
+            return jose.fail<uint8[list]>("spiffe.bundle", "an ML-DSA key must be a matching public AKP JWK");
+        }
+        match (json.member(fields, "key_ops")) {
+            Optional.Some(ops) => {
+                match (ops) {
+                    json.JsonValue.Array(values) => {
+                        if (values.length != 1 || not json.equals(values[0], json.JsonValue.Text("verify"))) {
+                            return jose.fail<uint8[list]>("spiffe.bundle", "the ML-DSA key must authorize verification");
+                        }
+                    },
+                    _ => {
+                        return jose.fail<uint8[list]>("spiffe.bundle", "key_ops must be an array");
+                    },
+                }
+            },
+            Optional.None => {},
+        }
+        last variant = algorithm == "ML-DSA-44" ? mldsa.ParameterSet.MlDsa44
+            : algorithm == "ML-DSA-65" ? mldsa.ParameterSet.MlDsa65 : mldsa.ParameterSet.MlDsa87;
+        last policy_algorithm = algorithm == "ML-DSA-44" ? algorithms.Algorithm.MlDsa44
+            : algorithm == "ML-DSA-65" ? algorithms.Algorithm.MlDsa65 : algorithms.Algorithm.MlDsa87;
+        if (not policy.allows(policy_algorithm)) {
+            return jose.fail<uint8[list]>("spiffe.bundle", "the crypto policy denies this algorithm");
+        }
+        last public_key = mldsa.parse_public_key(variant, jose.required_bytes(fields, "pub", "spiffe.bundle")?)?;
+        last parts = jose.split_dots(token);
+        last signature = jose.decode(parts[2], "spiffe.token", "invalid JWS signature encoding")?;
+        if (not new mldsa.MlDsaVerifier(public_key).verify(strings.to_bytes(parts[0] .. "." .. parts[1]), signature)) {
+            return jose.fail<uint8[list]>("jws.signature", "signature verification failed");
+        }
+        return jose.decode(parts[1], "spiffe.token", "invalid JWS payload encoding");
     };
 
     /// @brief Checks a trust domain whose first byte is at `base` in the parsed text.
