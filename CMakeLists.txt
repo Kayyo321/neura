@@ -2024,7 +2024,8 @@ if(BUILD_TESTING AND NEURA_SDK)
         add_test(NAME stdlib-net-socket-${feature} COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/net-socket/loopback/optional.py"
             --neura "$<TARGET_FILE:neura>" --feature "${feature}" ${socket_feature_arguments})
-        set_tests_properties(stdlib-net-socket-${feature} PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 120)
+        # Without the platform precondition the driver checks the documented refusal instead of skipping.
+        set_tests_properties(stdlib-net-socket-${feature} PROPERTIES TIMEOUT 120)
     endforeach()
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NEURA_ENABLE_SERVER_TLS)
         add_executable(neura_tls_resolver_deadline_tests tests/backend/tls_resolver_deadline_tests.cpp)
