@@ -188,7 +188,9 @@ jobs:
       # the 0.3.0 suite ran out of time here without a sanitizer report. With
       # the scale, backend-reference gets 5.5 hours (it ran for more than 3),
       # decompiler-behavior 3 hours (it took 2.6), program-fuzz 2 hours
-      # (it took 1) and lifetime-programs 3 hours (1.5 were not enough).
+      # (it took 1) and lifetime-programs 5 hours (3 were not enough: every
+      # image is decompiled, and events-owned's decompile takes 18 s in a
+      # Release build and minutes when sanitized).
       - name: Configure
         run: >
           cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
@@ -198,7 +200,7 @@ jobs:
           -DNEURA_REFERENCE_TEST_TIMEOUT=3300
           -DNEURA_DECOMPILER_BEHAVIOR_TEST_TIMEOUT=1800
           -DNEURA_PROGRAM_FUZZ_TEST_TIMEOUT=1200
-          -DNEURA_LIFETIME_PROGRAMS_TEST_TIMEOUT=1800
+          -DNEURA_LIFETIME_PROGRAMS_TEST_TIMEOUT=3000
           "-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
           "-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
           "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined"
