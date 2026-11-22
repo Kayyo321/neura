@@ -1,0 +1,16 @@
+// status: 134
+// stderr: invalid state: secret codec cannot reenter the same secret
+let program = import:Std.Program;
+let.promote _ = import:Std.Crypto.Core.Secret;
+
+export let CodecReentry = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last secret = new Secret<int>(5, new func(_value: int) {});
+        secret.set_lock_codec(new func(value: int) -> uint8[list] {
+            secret.wipe();
+            return new([value as uint8]);
+        }, new func(bytes: uint8[list]) -> int => bytes[0] as int);
+        secret.lock();
+        return program.ExitCode.Ok;
+    };
+);

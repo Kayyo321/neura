@@ -1,0 +1,62 @@
+// test-options: --gpu=off --allow-entropy
+// host-dependent-counts: the locked-memory provider can decline host page locking
+let errors = import:Std.Core.Error;
+let result = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Core.Secret;
+let test = import:Std.Test;
+
+let Pair = class (
+    export let first: uint8;
+    export let second: uint8;
+
+    export let init = func(a: uint8, b: uint8) {
+        first = a;
+        second = b;
+    };
+);
+
+let encode = func(value: Pair) -> uint8[list] => new([value.first, value.second]);
+let decode = func(bytes: uint8[list]) -> Pair => new Pair(bytes[0], bytes[1]);
+
+let GenericLockTests = module (
+    export let test_codec_representation_and_wipe = func {
+        last erased: int[list] = new([0]);
+        let original = new Pair(19, 23);
+        let wrapped = new Secret<Pair>(original, new func(value: Pair) {
+            test.assert_equal_int32(19, value.first as int);
+            test.assert_equal_int32(23, value.second as int);
+            value.first = 0;
+            value.second = 0;
+            erased[0] += 1;
+        });
+        wrapped.set_lock_codec(encode, decode);
+        match (wrapped.try_lock()) {
+            result.Result.Ok(_) => {
+                test.assert_ok(wrapped.try_lock());
+                test.assert_equal_int32(19, wrapped.expose().first as int);
+                test.assert_equal_int32(23, wrapped.expose().second as int);
+                wrapped.expose().first = 10;
+                test.assert_equal_int32(19, wrapped.expose().first as int);
+                test.assert_equal_int32(19, original.first as int);
+            },
+            result.Result.Err(errors.Error.Io { kind: kind, message: _, path: _ }) => {
+                test.assert(kind == errors.IoErrorKind.Unsupported || kind == errors.IoErrorKind.Other);
+                test.assert(wrapped.expose() == original);
+            },
+            _ => {
+                test.fail("expected a locked buffer or a provider error");
+            },
+        }
+        wrapped.wipe();
+        wrapped.wipe();
+        test.assert(wrapped.is_wiped());
+        test.assert_equal_int32(1, erased[0]);
+    };
+
+    export let test_missing_codec_is_a_typed_failure = func {
+        let wrapped = new Secret<int>(42, new func(_value: int) {});
+        last failure = test.assert_err(wrapped.try_lock());
+        test.assert_equal_string("InvalidInput: generic secret lock requires a codec", errors.message(failure));
+        test.assert_equal_int32(42, wrapped.expose());
+    };
+);
