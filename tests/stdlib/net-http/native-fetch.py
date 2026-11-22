@@ -391,6 +391,20 @@ def native_cases(args, root, cert, key, other_cert, other_key):
             url = f"http://127.0.0.1:{reserved.getsockname()[1]}/"
             expect(invoke(api, url), "Io:ConnectionRefused", f"{api}-refused")
             expect(invoke(api, url, granted=False), "Io:CapabilityDenied", f"{api}-http-client-default-denied")
+        with socket.socket() as unused:
+            unused.bind(("127.0.0.1", 0))
+            unused.listen(1)
+            unused.setblocking(False)
+            url = f"http://127.0.0.1:{unused.getsockname()[1]}/"
+            for shape in ("duplicate-request-length", "request-length-and-transfer"):
+                expect(invoke(api, url, shape), "Io:InvalidInput", f"{api}-{shape}")
+            try:
+                unexpected, _ = unused.accept()
+            except BlockingIOError:
+                pass
+            else:
+                unexpected.close()
+                raise AssertionError("rejected outgoing framing opened a TCP connection")
         trace = root / f"{api}.trace"
         with Peer("fixed") as peer:
             url = f"http://127.0.0.1:{peer.port}/fixed"

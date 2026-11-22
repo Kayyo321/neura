@@ -96,6 +96,11 @@ let NativeFetch = module:program.Entry (
             if (mode == "invalid-header") {
                 request = request.with_header("X-Test", "bad\r\nvalue");
             }
+            if (mode == "duplicate-request-length") {
+                request = request.with_header("Content-Length", "0").with_header("Content-Length", "0");
+            } else if (mode == "request-length-and-transfer") {
+                request = request.with_header("Content-Length", "0").with_header("Transfer-Encoding", "chunked");
+            }
             last response = request.send()?;
             last text = response.text()?;
             return result.Result<string>.Ok(response.status.to_string() .. ":" .. text);
@@ -103,6 +108,13 @@ let NativeFetch = module:program.Entry (
         last request = new http.ClientRequest(method, url);
         request.set_deadline(limit);
         request.set_body(body);
+        if (mode == "duplicate-request-length") {
+            request.headers.add("Content-Length", "0");
+            request.headers.add("Content-Length", "0");
+        } else if (mode == "request-length-and-transfer") {
+            request.headers.add("Content-Length", "0");
+            request.headers.add("Transfer-Encoding", "chunked");
+        }
         last response = new http.Client().send(request)?;
         return result.Result<string>.Ok(response.status.to_string() .. ":" .. response.body_text());
     };
