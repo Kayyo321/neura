@@ -177,6 +177,13 @@ void zero_copy_backpressure() {
     }
     assert(answer && answer->success && answer->value.bits > 0 && answer->value.bits < payload.size());
     assert(read_exact(stream.peer, answer->value.bits) == payload.substr(0, answer->value.bits));
+    pollfd notice{stream.socket, POLLIN, 0};
+    assert(::poll(&notice, 1, 1000) > 0 && (notice.revents & POLLERR) != 0);
+    // Empty send enters the same transfer setup without adding a notice.
+    const auto empty = f.start("neura.net.send_zerocopy", {int64_value(1), bytes_value("")});
+    assert(std::get<HostCompletion>(empty).success);
+    notice.revents = 0;
+    assert(::poll(&notice, 1, 20) == 0);
     std::cout << "PASS: non-reading zero-copy peer, cancellation, exact partial-send count\n";
 }
 

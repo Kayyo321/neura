@@ -1523,12 +1523,35 @@ constexpr int nonblocking_flags =
     0;
 #endif
 
+// Transfer waits can also wake on a previous MSG_ZEROCOPY completion. A
+// relay target is not necessarily passed through net.read/write readiness,
+// so consume its notices here as well as in the ordinary stream provider.
+void drain_transfer_notices(NativeSocket descriptor) {
+#if defined(__linux__) && defined(SO_ZEROCOPY)
+    int enabled = 0;
+    socklen_t length = sizeof enabled;
+    if (::getsockopt(descriptor, SOL_SOCKET, SO_ZEROCOPY, &enabled, &length) != 0 || !enabled) return;
+    alignas(cmsghdr) std::array<char, 512> control{};
+    msghdr notice{};
+    notice.msg_control = control.data();
+    for (int count = 0; count < 64; ++count) {
+        notice.msg_controllen = control.size();
+        notice.msg_flags = 0;
+        if (::recvmsg(descriptor, &notice, MSG_ERRQUEUE | MSG_DONTWAIT) < 0) break;
+    }
+#else
+    (void)descriptor;
+#endif
+}
+
 // Winsock has no MSG_DONTWAIT. Switch only for the duration of one scheduler
 // attempt, as neura.net.read/write do; no outstanding operation owns a buffer.
 struct NonblockingAttempt {
     explicit NonblockingAttempt(NativeSocket socket) : descriptor(socket) {
 #ifdef _WIN32
         ready = platform::set_nonblocking(descriptor);
+#else
+        drain_transfer_notices(descriptor);
 #endif
     }
     ~NonblockingAttempt() {
