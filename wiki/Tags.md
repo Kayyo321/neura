@@ -46,11 +46,11 @@ A field's [accessor clauses](Types#accessors) are part of its declaration: tags 
 ```neura
 let Ticket = class (
     /// The code printed on the ticket.
-    #Deprecated(as_of: "0.2.0", reason: "print the label")
+    .Deprecated(as_of: "0.2.0", reason: "print the label")
     export let code = "T-1";
         | get: code;
 
-    #Note("set once by the constructor")
+    .Note("set once by the constructor")
     export last label: string;
 
     export let init = func(text: string) -> void {
@@ -125,7 +125,7 @@ Every accepted tag is stored on its symbol as a NeuraIR `tag` attribute ([NeuraI
 <!-- example: warning: W0001 -->
 ```neura
 let Shapes = module (
-    #Deprecated(as_of: "0.2.0", use_instead: area)
+    .Deprecated(as_of: "0.2.0", use_instead: area)
     export let rough_area = func(width: int32) -> int32 {
         return width * width;
     };
@@ -158,7 +158,7 @@ A use of a deprecated declaration of the standard library warns in a user progra
 
 <!-- example: warning: W0003 -->
 ```neura
-#NoDiscard(reason: "the result says whether the write happened")
+.NoDiscard(reason: "the result says whether the write happened")
 let write = func(text: string) -> bool {
     return text.byte_length > 0;
 };
@@ -188,7 +188,7 @@ A generic function is checked with each set of type arguments it is used with, a
 
 <!-- example: check -->
 ```neura
-#Pure
+.Pure
 let squares = func(count: int32) -> int64[list] {
     let result: int64[list] = new;
     for (let i = 0; i < count; i++) {
@@ -225,7 +225,7 @@ Both tags are persisted in `.nir` files, so they hold for the programs that impo
 
 <!-- example: check -->
 ```neura
-#Synchronized
+.Synchronized
 let Tally = class (
     let count: int64 = 0;
 
@@ -256,13 +256,13 @@ let Tally = class (
 <!-- example: check -->
 ```neura
 let Api = module (
-    #Deprecated
+    .Deprecated
     export let old = func() -> int32 {
         return 1;
     };
 );
 
-#Allow(deprecated)
+.Allow(deprecated)
 let Compatibility = module (
     export let read = func() -> int32 {
         return Api.old();
