@@ -539,6 +539,131 @@ def native_cases(args, root, cert, key, other_cert, other_key):
     task_cases(invoke)
     if args.http2:
         h2_case(args, root, cert, key, invoke)
+        h2_peer_cases(cert, key, invoke)
+
+
+def receive_exact(connection, size):
+    data = bytearray()
+    while len(data) < size:
+        portion = connection.recv(size - len(data))
+        if not portion:
+            raise AssertionError("HTTP/2 fixture received incomplete input")
+        data.extend(portion)
+    return bytes(data)
+
+
+def h2_frame(kind, flags=0, stream=0, payload=b""):
+    return len(payload).to_bytes(3, "big") + bytes((kind, flags)) + stream.to_bytes(4, "big") + payload
+
+
+def hpack_literal(text):
+    if len(text) < 127:
+        return bytes((len(text),)) + text
+    size = len(text) - 127
+    prefix = bytearray((127,))
+    while size >= 128:
+        prefix.append((size & 127) | 128)
+        size >>= 7
+    prefix.append(size)
+    return bytes(prefix) + text
+
+
+def h2_read_frame(connection):
+    header = receive_exact(connection, 9)
+    size = int.from_bytes(header[:3], "big")
+    if size > 16384:
+        raise AssertionError("HTTP/2 fixture received an oversized frame")
+    return header[3], header[4], int.from_bytes(header[5:], "big") & 0x7fffffff, receive_exact(connection, size)
+
+
+class H2Peer(Peer):
+    """An authenticated loopback peer for bounded HTTP/2 outcomes."""
+    def __init__(self, case, cert, key, compressed_head):
+        super().__init__(case, server_context(cert, key, ("h2",)))
+        self.compressed_head = compressed_head
+
+    def respond(self, connection):
+        # Without this, each flow-control window's last short frame waits for
+        # a delayed acknowledgement, and the 8 MiB body takes many seconds.
+        connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        if connection.selected_alpn_protocol() != "h2":
+            raise AssertionError("native fetch did not negotiate h2 with the fixture")
+        if receive_exact(connection, 24) != b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n":
+            raise AssertionError("HTTP/2 fixture received an invalid preface")
+        kind, _, stream, _ = h2_read_frame(connection)
+        if (kind, stream) != (4, 0):
+            raise AssertionError("HTTP/2 client preface did not start with SETTINGS")
+        connection.sendall(h2_frame(4))  # SETTINGS
+        for _ in range(16):
+            kind, flags, stream, _ = h2_read_frame(connection)
+            if (kind, flags, stream) == (1, 5, 1):  # HEADERS, END_HEADERS | END_STREAM
+                break
+        else:
+            raise AssertionError("HTTP/2 fixture did not receive a complete GET on stream 1")
+        self.respond_h2(connection)
+        if self.case == "h2-goaway-mid-body":
+            return
+        with contextlib.suppress(ssl.SSLEOFError, ConnectionResetError):
+            while connection.recv(16384):
+                pass
+
+    def respond_h2(self, connection):
+        head = h2_frame(1, 4, 1, b"\x88")  # HEADERS, :status=200
+        if self.case == "h2-reset":
+            connection.sendall(head + h2_frame(3, stream=1, payload=(8).to_bytes(4, "big")))  # CANCEL
+            return
+        if self.case == "h2-goaway-mid-body":
+            data = h2_frame(0, stream=1, payload=b"partial body")
+            goaway = h2_frame(7, payload=(1).to_bytes(4, "big") + bytes(4))
+            connection.sendall(head + data + goaway)
+            return
+        if self.case == "h2-oversized-head":
+            fields = b"\x88\x00" + hpack_literal(b"x-test-description") + hpack_literal(b"v" * 20000)
+            connection.sendall(h2_frame(1, 1, 1, fields[:16384]) + h2_frame(9, 4, 1, fields[16384:]))
+            return
+        if self.case == "h2-decoded-head-limit":
+            connection.sendall(h2_frame(1, 5, 1, self.compressed_head))
+            return
+        if self.case == "h2-oversized-body":
+            connection.sendall(head)
+            credit = {0: 65535, 1: 65535}
+            remaining = 8 * 1024 * 1024 + 1
+            payload = b"v" * 16384
+            while remaining:
+                size = min(len(payload), remaining, *credit.values())
+                if size == 0:
+                    kind, _, stream, update = h2_read_frame(connection)
+                    if kind == 8 and stream in credit:  # WINDOW_UPDATE
+                        credit[stream] += int.from_bytes(update, "big") & 0x7fffffff
+                    continue
+                remaining -= size
+                connection.sendall(h2_frame(0, int(remaining == 0), 1, payload[:size]))
+                for stream in credit:
+                    credit[stream] -= size
+            return
+        raise AssertionError(f"unknown HTTP/2 fixture case: {self.case}")
+
+
+def hpack_expansion():
+    """A small field section that decodes past the 16 KiB bound: one 4 KB field
+    entered in the dynamic table, then one-byte references to it."""
+    section = b"\x88" + b"\x40" + hpack_literal(b"x-a") + hpack_literal(b"v" * 4000) + b"\xbe" * 8
+    if len(section) > 4200:
+        raise AssertionError("the HPACK expansion input must stay small")
+    return section
+
+
+def h2_peer_cases(cert, key, invoke):
+    packed = hpack_expansion()
+    cases = (("h2-goaway-mid-body", "Custom:http.OutcomeUnknown"),
+             ("h2-reset", "Custom:http.OutcomeUnknown"),
+             ("h2-oversized-head", "Custom:http.TooLarge"),
+             ("h2-decoded-head-limit", "Custom:http.TooLarge"),
+             ("h2-oversized-body", "Custom:http.TooLarge"))
+    for api in ("fetch", "client"):
+        for case, expected in cases:
+            with H2Peer(case, cert, key, packed) as peer:
+                expect(invoke(api, f"https://localhost:{peer.port}/"), expected, f"{api}-{case}")
 
 
 class H2Relay:

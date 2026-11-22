@@ -798,13 +798,17 @@ class H2 {
             reject(host_error::other);
         while (!closed_) {
             connection.check();
+            // One write per turn: separate small writes (two WINDOW_UPDATE
+            // frames, say) would wait on Nagle and delayed acknowledgement.
+            std::string output;
             for (;;) {
                 const std::uint8_t* bytes = nullptr;
                 const auto size = nghttp2_session_mem_send2(session_, &bytes);
                 if (size < 0) reject(failure_ ? failure_ : unknown);
                 if (size == 0) break;
-                connection.write(std::string_view(reinterpret_cast<const char*>(bytes), size));
+                output.append(reinterpret_cast<const char*>(bytes), static_cast<std::size_t>(size));
             }
+            if (!output.empty()) connection.write(output);
             if (failure_) reject(failure_);
             const auto bytes = connection.read();
             if (bytes.empty()) reject(unknown);
