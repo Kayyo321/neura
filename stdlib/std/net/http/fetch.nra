@@ -10,6 +10,10 @@ let.promote _ = import:Std.Time.Duration;
 /// cookies, redirects and caching; the host checks the request and enforces the limits W-3 (8 MiB for a request
 /// or response body) and W-4 (16 fetches in flight).
 ///
+/// Native fetch requires `http_client`, an absolute HTTP(S) URL, and an available TLS provider for HTTPS.
+/// It verifies the peer and its name against the runner's configured trust store, applies a single deadline
+/// across redirects, and uses no ambient cookie jar or authentication state.
+///
 /// A response with any status, 404 and 500 included, is `Ok`: the status is the server's answer. `Err` means
 /// there is no answer. Its I/O kind is InvalidInput for a malformed request, TimedOut when the timeout passed,
 /// Unsupported for a scheme other than http and https, CapabilityDenied when the host does not grant the
@@ -19,8 +23,7 @@ let.promote _ = import:Std.Time.Duration;
 /// the browser does not explain (CORS among them): the server may or may not have acted on the request.
 ///
 /// `send` overlaps in a program with tasks: the calling task waits and the others run. Without tasks the
-/// program waits for the answer. A native `neura run` does not serve the service yet, so an image that calls
-/// it runs only in a browser.
+/// program waits for the answer. Native runs grant the group with `--allow-http-client`.
 .Since("0.3.0")
 export let Fetch = module (
     /// @brief Whether the browser sends cookies and HTTP authentication with the request.
@@ -37,7 +40,7 @@ export let Fetch = module (
     /// code.
     let FetchOutcome = enum (Ok([uint32, string[list], uint8[list]]), Error(uint32));
     /// @brief Sends one request. Arguments: method, URL, headers as alternating names and values, body, timeout
-    /// in nanoseconds (0 for none), credentials mode (0 omit, 1 same-origin, 2 include).
+    /// in nanoseconds (0 selects the native 30-second default), credentials mode (0 omit, 1 same-origin, 2 include).
     let fetch = func(method: string, url: string, headers: string[list], body: uint8[list], timeout: int64,
         credentials: uint32) -> FetchOutcome host("neura.http.fetch", 1);
 
@@ -106,7 +109,7 @@ export let Fetch = module (
         export last url: string;
         /// @brief The body; empty for none.
         export last body: uint8[list];
-        /// @brief The longest the exchange may take; zero or less means no limit of the request's own.
+        /// @brief The longest the exchange may take. Zero or less uses the host's default.
         export last timeout: Duration;
         /// @brief The credentials mode.
         export last credentials: Credentials;

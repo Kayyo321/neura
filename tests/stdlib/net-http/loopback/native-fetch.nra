@@ -1,0 +1,109 @@
+let console = import:Std.Io.Console;
+let duration = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let fetch = import:Std.Net.Http.Fetch;
+let http = import:Std.Net.Http;
+let lists = import:Std.Collections.Lists;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+// The Python fixture supplies only loopback URLs. Both public clients must
+// preserve the host's typed errors and finish within the request deadline.
+let NativeFetch = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        if (args[2] == "overlap") {
+            console.print_line(overlap(args[1]));
+            return program.ExitCode.Ok;
+        }
+        if (args[2] == "cancel-scope") {
+            console.print_line(cancel_scope(args[1]));
+            return program.ExitCode.Ok;
+        }
+        console.print_line(describe(send(args[0], args[1], args[2])));
+        return program.ExitCode.Ok;
+    };
+
+    let describe = func(outcome: result.Result<string>) -> string {
+        match (outcome) {
+            result.Result.Ok(text) => {
+                return "Ok:" .. text;
+            },
+            result.Result.Err(problem) => {
+                match (problem) {
+                    errors.Error.Io { kind, message: _, path: _ } => {
+                        return "Io:" .. kind.to_string();
+                    },
+                    errors.Error.Custom(detail) => {
+                        return "Custom:" .. detail.code();
+                    },
+                    _ => {
+                        return "Unexpected:" .. errors.message(problem);
+                    },
+                }
+            },
+        }
+    };
+
+    let fetch_one = func(url: string) -> string => describe(send("fetch", url, "get"));
+
+    let overlap = func(base: string) -> string {
+        let reply = "";
+        scope {
+            last first = spawn fetch_one(base .. "/first");
+            last second = spawn fetch_one(base .. "/second");
+            reply = first.join() .. "|" .. second.join();
+        }
+        return "Overlap:" .. reply;
+    };
+
+    let cancel_scope = func(base: string) -> string {
+        let reply = "";
+        scope (pending) {
+            last blocked = spawn fetch_one(base .. "/pending");
+            // This response is withheld until the first request is parked at
+            // its live peer. A serialized host invocation cannot reach here.
+            last probe = fetch_one(base .. "/probe");
+            if (probe != "Ok:200:pending") {
+                return "Probe:" .. probe;
+            }
+            pending.cancel();
+            // Public join is never cancelled, so it observes the fetch's
+            // actual typed cancellation result while the scope drains.
+            reply = blocked.join();
+        }
+        // The peer answers only after the cancelled request's socket closes.
+        // Waiting here keeps the process alive, distinguishing cleanup from
+        // descriptors merely being closed at process exit.
+        return "Cancel:" .. reply .. "|Cleanup:" .. fetch_one(base .. "/cancelled");
+    };
+
+    let send = func(api: string, url: string, mode: string) -> result.Result<string> {
+        last limit = mode == "short" || mode == "post-blocked" ? duration.of_millis(200) : duration.of_seconds(3);
+        last method = mode == "post-blocked" || mode == "post" ? "POST" : "GET";
+        let body: uint8[list] = new;
+        if (mode == "post-blocked") {
+            // Larger than a normal TCP send queue; the fixture deliberately
+            // never reads and advertises a small receive window.
+            body = lists.filled<uint8>(4 * 1024 * 1024, 120);
+        } else if (mode == "post") {
+            body.append(112);
+            body.append(105);
+            body.append(110);
+            body.append(103);
+        }
+        if (api == "fetch") {
+            let request = fetch.request(method, url).with_timeout(limit).with_body(body);
+            if (mode == "invalid-header") {
+                request = request.with_header("X-Test", "bad\r\nvalue");
+            }
+            last response = request.send()?;
+            last text = response.text()?;
+            return result.Result<string>.Ok(response.status.to_string() .. ":" .. text);
+        }
+        last request = new http.ClientRequest(method, url);
+        request.set_deadline(limit);
+        request.set_body(body);
+        last response = new http.Client().send(request)?;
+        return result.Result<string>.Ok(response.status.to_string() .. ":" .. response.body_text());
+    };
+);

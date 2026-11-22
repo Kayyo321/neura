@@ -294,6 +294,8 @@ set(neura_nvm_sources
     src/nvm/socket_provider.cpp
     src/nvm/doq_provider.cpp
     src/nvm/tls_provider.cpp
+    src/nvm/client_socket.cpp
+    src/nvm/http_fetch_provider.cpp
     src/nvm/schedule.cpp
     src/nvm/tier1.cpp
     src/nvm/tier2.cpp
@@ -789,6 +791,8 @@ elseif(NEURA_ENABLE_SERVER_HTTP2)
     add_library(neura_nghttp2 INTERFACE)
     target_include_directories(neura_nghttp2 INTERFACE "${NEURA_NGHTTP2_INCLUDE_DIR}")
     target_link_libraries(neura_nghttp2 INTERFACE "${NEURA_NGHTTP2_LIBRARY}")
+    target_link_libraries(neura_nvm PRIVATE neura_nghttp2)
+    target_compile_definitions(neura_nvm PRIVATE NEURA_NVM_HTTP2)
     target_sources(neura_server_http PRIVATE src/server/http2_connection.cpp)
     target_link_libraries(neura_server_http PUBLIC neura_nghttp2 Threads::Threads)
     target_compile_definitions(neura_server_http PUBLIC NEURA_SERVER_HTTP2_ENABLED)
@@ -2144,6 +2148,17 @@ if(BUILD_TESTING AND NEURA_SDK)
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/install.cmake"
     )
     set_tests_properties(stdlib-install PROPERTIES FIXTURES_SETUP stdlib)
+    set(native_fetch_options --without-tls)
+    if(NEURA_ENABLE_SERVER_TLS)
+        set(native_fetch_options --openssl "${NEURA_SERVER_TEST_OPENSSL}")
+        if(TARGET neura_nghttp2 AND TARGET neura-server-host)
+            list(APPEND native_fetch_options --http2 --host "$<TARGET_FILE:neura-server-host>")
+        endif()
+    endif()
+    add_test(NAME stdlib-net-http-native-fetch COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/net-http/native-fetch.py"
+        --neura "$<TARGET_FILE:neura>" ${native_fetch_options})
+    set_tests_properties(stdlib-net-http-native-fetch PROPERTIES TIMEOUT 300)
     if(NEURA_ENABLE_SERVER_TLS)
         add_test(NAME stdlib-net-tls-loopback COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/net-tls/loopback.py"

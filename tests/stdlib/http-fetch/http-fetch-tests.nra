@@ -4,10 +4,13 @@ let http = import:Std.Net.Http.Fetch;
 let strings = import:Std.Text.Strings;
 let test = import:Std.Test;
 
-// Std.Net.Http.Fetch without the host: requests, responses and the classification of errors. Sending needs a
-// host that serves neura.http.fetch, which a native run does not (traps/native-send.nra); the browser cases are
-// tests/apps/web/fetch-check.py.
+// Requests, responses, error classification and the default native capability policy.
 let FetchTests = module (
+    export let test_native_fetch_is_denied_by_default = func {
+        last failure = test.assert_err<http.Response>(http.get("http://127.0.0.1:9/"));
+        test.assert(http.failure_of(failure) == http.FetchFailure.CapabilityDenied);
+    };
+
     export let test_request_defaults = func() -> void {
         let request = http.request("GET", "https://api.example.com/items");
         test.assert_equal_string("GET", request.method);

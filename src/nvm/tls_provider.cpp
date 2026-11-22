@@ -5,6 +5,7 @@
 // capability answers Unsupported (13). None of these services overlaps.
 
 #include "provider_internal.hpp"
+#include "client_socket.hpp"
 #include "platform/socket.hpp"
 
 #include <algorithm>
@@ -287,110 +288,7 @@ bool prepare_socket(NativeSocket descriptor) {
 
 NativeSocket connect_tcp(const std::string& host, std::int32_t port, Clock::time_point deadline,
                          std::uint32_t& error) {
-    if (const auto start = platform::ensure_sockets()) {
-        error = socket_error(start.value());
-        return invalid_native_socket;
-    }
-    struct Resolution {
-        std::mutex mutex;
-        std::condition_variable ready;
-        bool done = false;
-        int error = 0;
-        addrinfo* addresses = nullptr;
-        ~Resolution() { if (addresses) ::freeaddrinfo(addresses); }
-    };
-    // Heap storage avoids inherited locked mutexes after fork. A stuck system
-    // resolver retains one worker, and later calls fail promptly instead of
-    // accumulating threads. A child gets a fresh slot on its first call.
-    struct ResolverSlot {
-#ifdef _WIN32
-        const std::uint64_t owner = GetCurrentProcessId();
-#else
-        const std::uint64_t owner = static_cast<std::uint64_t>(::getpid());
-#endif
-        std::atomic<bool> busy{false};
-    };
-    static std::atomic<ResolverSlot*> current{new ResolverSlot};
-    auto* slot = current.load();
-#ifndef _WIN32
-    if (slot->owner != static_cast<std::uint64_t>(::getpid())) {
-        auto replacement = std::make_unique<ResolverSlot>();
-        if (current.compare_exchange_strong(slot, replacement.get())) slot = replacement.release();
-        // The inherited slot belongs to a vanished parent worker. Do not
-        // destroy any parent-owned synchronization state in the child.
-    }
-#endif
-    bool idle = false;
-    if (!slot->busy.compare_exchange_strong(idle, true)) {
-        error = host_error::timed_out;
-        return invalid_native_socket;
-    }
-    auto resolution = std::make_shared<Resolution>();
-    auto* acquired = slot;
-    try {
-        std::thread([resolution, acquired, host, service = std::to_string(port)] {
-            addrinfo hints{};
-            hints.ai_family = AF_UNSPEC;
-            hints.ai_socktype = SOCK_STREAM;
-            addrinfo* found = nullptr;
-            const auto result = ::getaddrinfo(host.c_str(), service.c_str(), &hints, &found);
-            {
-                std::lock_guard lock(resolution->mutex);
-                resolution->addresses = found;
-                resolution->error = result;
-                resolution->done = true;
-            }
-            acquired->busy.store(false);
-            resolution->ready.notify_one();
-        }).detach();
-    } catch (...) {
-        acquired->busy.store(false);
-        error = host_error::other;
-        return invalid_native_socket;
-    }
-    std::unique_lock lock(resolution->mutex);
-    if (!resolution->ready.wait_until(lock, std::min(deadline, Clock::now() + std::chrono::seconds(30)), [&] { return resolution->done; })) {
-        error = host_error::timed_out;
-        return invalid_native_socket;
-    }
-    if (resolution->error != 0) {
-        error = host_error::not_found;
-        return invalid_native_socket;
-    }
-    const auto* found = resolution->addresses;
-    error = host_error::connection_refused;
-    for (const auto* entry = found; entry; entry = entry->ai_next) {
-        const auto descriptor = ::socket(entry->ai_family, SOCK_STREAM, 0);
-        if (descriptor == invalid_native_socket) {
-            error = socket_error(platform::last_socket_error().code);
-            continue;
-        }
-        if (prepare_socket(descriptor)) {
-            if (::connect(descriptor, entry->ai_addr, static_cast<int>(entry->ai_addrlen)) == 0) return descriptor;
-            const auto problem = platform::last_socket_error();
-            error = socket_error(problem.code);
-            if (problem.would_block()) {
-                const int ready = wait_for(descriptor, platform::poll_out, deadline);
-                int pending_error = 0;
-#ifdef _WIN32
-                int length = sizeof pending_error;
-                auto* result = reinterpret_cast<char*>(&pending_error);
-#else
-                socklen_t length = sizeof pending_error;
-                auto* result = &pending_error;
-#endif
-                if (ready > 0 && ::getsockopt(descriptor, SOL_SOCKET, SO_ERROR, result, &length) == 0 &&
-                    pending_error == 0) return descriptor;
-                error = ready == 0 ? host_error::timed_out : socket_error(pending_error ? pending_error :
-                                                                            platform::last_socket_error().code);
-            }
-        } else {
-            error = socket_error(platform::last_socket_error().code);
-        }
-        platform::close_socket(descriptor);
-        if (error == host_error::timed_out) break;
-    }
-    return invalid_native_socket;
+    return client_socket::connect(host, port, deadline, error);
 }
 
 bool numeric_host(const std::string& host) {

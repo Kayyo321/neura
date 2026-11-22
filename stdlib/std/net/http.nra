@@ -4,6 +4,7 @@ let console = import:Std.Io.Console;
 let durations = import:Std.Time.Duration;
 let errors = import:Std.Core.Error;
 let filters = import:Std.Net.Filter;
+let fetch_api = import:Std.Net.Http.Fetch;
 let hashing = import:Std.Core.Hash;
 let header_maps = import:Std.Net.Http.Headers;
 let host_errors = import:Std.Core.Internal.HostError;
@@ -1629,8 +1630,8 @@ export let Http = module (
 
     // ---------------------------------------------------------------- client
 
-    /// @brief Whether a fetch sends credentials (cookies, HTTP authentication): the `neura.http.fetch` mode
-    /// codes 0, 1, 2 (Components030, "HTTP clients").
+    /// @brief Whether the browser sends cookies and HTTP authentication with a fetch. Native requests have
+    /// no ambient credentials.
     export let CredentialsMode = enum (Omit, SameOrigin, Include);
 
     /// @brief The `uint32` code of `mode` for `neura.http.fetch`.
@@ -1709,8 +1710,7 @@ export let Http = module (
         let fetch = func(request: ClientRequest) -> Result<Response>;
     );
 
-    /// @brief The host transport: `neura.http.fetch` version 1. Host-dependent: traps until the runtime provides
-    /// the service.
+    /// @brief The host transport through `neura.http.fetch` version 1. Requires the `http_client` capability.
     .[Final, NotThreadSafe]
     export let HostTransport = class implements Transport (
         /// @brief The host transport.
@@ -1718,16 +1718,7 @@ export let Http = module (
         };
 
         /// @brief Sends the request through the host.
-        export let fetch = func(request: ClientRequest) -> Result<Response> {
-            last names: string[list] = new;
-            last values: string[list] = new;
-            for (let i = 0; i < request.headers.size(); i++) {
-                names.append(request.headers.name_at(i));
-                values.append(request.headers.value_at(i));
-            }
-            return host_fetch(request.method, request.url, names, values, request.body(), request.deadline().to_nanos(),
-                credentials_code(request.credentials_mode()));
-        };
+        export let fetch = func(request: ClientRequest) -> Result<Response> => host_fetch(request);
 
         /// @brief The text "HostTransport".
         export let.override to_string = func -> string => "HostTransport";
@@ -1811,13 +1802,31 @@ export let Http = module (
         http_server.DoneOutcome.Error(code) => Result<Unit>.Err(host_errors.io(code, "response body close failed", "")),
     };
 
-    /// @brief One client exchange: `neura.http.fetch` version 1 (method text, URL text, header name and value
-    /// pairs, body bytes, deadline nanoseconds `int64`, credentials mode `uint32`; status, header pairs, body
-    /// bytes; overlapping and cancellable; recorded for replay).
-    /// @stub needs the host service neura.http.fetch version 1 (Components030; A4 runtime lane)
-    let host_fetch = func(method: string, url: string, names: string[list], values: string[list], body: uint8[list],
-        deadline_nanos: int64, credentials: uint32) -> Result<Response> {
-        trap_with_message("unsupported: Std.Net.Http.host_fetch is not implemented in Neura 0.3.0 (needs the host service neura.http.fetch version 1)");
+    /// @brief Runs a client exchange through the shared Fetch binding and converts its response.
+    let host_fetch = func(request: ClientRequest) -> Result<Response> {
+        last pairs: [string, string][list] = new;
+        for (let i = 0; i < request.headers.size(); i++) {
+            pairs.append([request.headers.name_at(i), request.headers.value_at(i)]);
+        }
+        last mode = match (request.credentials_mode()) {
+            CredentialsMode.Omit => fetch_api.Credentials.Omit,
+            CredentialsMode.SameOrigin => fetch_api.Credentials.SameOrigin,
+            CredentialsMode.Include => fetch_api.Credentials.Include,
+        };
+        last wire_request = new fetch_api.Request(request.method, request.url, pairs, request.body(),
+            request.deadline(), mode);
+        last response = wire_request.send()?;
+        last fields = new Headers();
+        if (not statuses.is_valid(response.status)) {
+            return Result<Response>.Err(io_error(errors.IoErrorKind.InvalidInput, "invalid HTTP response status"));
+        }
+        for (let pair in response.headers()) {
+            if (not header_maps.is_token(pair[0]) || not header_maps.is_valid_value(pair[1])) {
+                return Result<Response>.Err(io_error(errors.IoErrorKind.InvalidInput, "invalid HTTP response header"));
+            }
+            fields.add(pair[0], pair[1]);
+        }
+        return Result<Response>.Ok(new Response(response.status, fields, response.body));
     };
 
     // ---------------------------------------------------------------- helpers
