@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <optional>
 #include <thread>
+#include <variant>
 
 #if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
 #include <cpuid.h>
@@ -980,9 +981,14 @@ struct VmGeneration {
     pid_t owner = ::getpid();
     std::uint64_t epoch = 0;
     std::optional<std::uint64_t> observed;
-    int clock = -2; // -2: not probed; -1: unavailable for this process.
+    int clock = -2; // -2: probe on next call; -1: unavailable for this process.
     int events = -2;
+    // Consecutive VMClock reads shorter than its header.
+    int short_reads = 0;
 };
+// A short VMClock read is retried like other read errors; this many in a row
+// mean the device never gives a whole header, and VMClock is not used.
+constexpr int vmclock_short_read_limit = 3;
 VmGeneration vm_generation;
 
 void prepare_generation_fork() { ::pthread_mutex_lock(&vm_generation.mutex); }
@@ -991,6 +997,7 @@ void reset_generation_descriptors() {
     if (vm_generation.clock >= 0) ::close(vm_generation.clock);
     if (vm_generation.events >= 0) ::close(vm_generation.events);
     vm_generation.clock = vm_generation.events = -2;
+    vm_generation.short_reads = 0;
 }
 void child_generation_fork() {
     vm_generation.owner = ::getpid();
@@ -1053,6 +1060,10 @@ std::uint64_t vm_generation_events(int socket) {
     return count;
 }
 
+bool vmclock_unavailable(int error) {
+    return error == EACCES || error == EPERM || error == ENODEV || error == ENOENT;
+}
+
 HostCompletion process_generation() {
     struct Lock {
         Lock() { prepare_generation_fork(); }
@@ -1068,7 +1079,8 @@ HostCompletion process_generation() {
     if (vm_generation.events == -2) vm_generation.events = vm_generation_socket();
     vm_generation.epoch += vm_generation_events(vm_generation.events);
     if (vm_generation.clock == -2) {
-        vm_generation.clock = ::open("/dev/vmclock0", O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+        const int clock = ::open("/dev/vmclock0", O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+        if (clock >= 0 || vmclock_unavailable(errno)) vm_generation.clock = clock;
     }
     if (vm_generation.clock >= 0) {
         std::array<unsigned char, generation_internal::vmclock_size> snapshot{};
@@ -1076,23 +1088,33 @@ HostCompletion process_generation() {
         // retry. pread starts at zero on the cached descriptor every time.
         ssize_t size = ::pread(vm_generation.clock, snapshot.data(), snapshot.size(), 0);
         if (size < 0 && errno == EINTR) size = ::pread(vm_generation.clock, snapshot.data(), snapshot.size(), 0);
-        if (size >= 0) {
+        if (size >= 0 && static_cast<std::size_t>(size) < generation_internal::vmclock_header_size) {
+            // Too short to tell the layout: transient unless it repeats.
+            if (++vm_generation.short_reads >= vmclock_short_read_limit) {
+                ::close(vm_generation.clock);
+                vm_generation.clock = -1;
+            }
+        } else if (size >= 0) {
+            vm_generation.short_reads = 0;
             const auto observation = generation_internal::vmclock_generation(
                 std::span(snapshot).first(static_cast<std::size_t>(size)));
-            if (!observation.valid) return fail(host_error::other);
-            if (observation.generation && vm_generation.observed != observation.generation) {
+            if (!observation.valid) {
+                // An unknown layout or version does not change between reads.
+                ::close(vm_generation.clock);
+                vm_generation.clock = -1;
+            } else if (observation.generation && vm_generation.observed != observation.generation) {
                 vm_generation.observed = observation.generation;
                 ++vm_generation.epoch;
             }
-        } else if (errno == EACCES || errno == EPERM || errno == ENODEV || errno == ENOENT) {
+        } else if (vmclock_unavailable(errno)) {
             ::close(vm_generation.clock);
             vm_generation.clock = -1;
-        } else {
-            return fail(host_error::from_errno(errno));
         }
     }
-    // Missing or inaccessible optional drivers leave the remaining detectors
-    // active; they are not a failure of OS entropy or POSIX fork detection.
+    // A missing, unreadable or unrecognized VMClock sample leaves the PID and
+    // netlink detectors active. Other open and read errors (EMFILE, EIO) and
+    // a short read are retried on the next call, a short read only up to
+    // vmclock_short_read_limit times in a row.
     return HostCompletion::ok(scalar(vm_generation.epoch));
 }
 #elif defined(_WIN32)
@@ -1399,13 +1421,13 @@ StandardServices::StandardServices(ConsoleSink& output, ConsoleSink& error, Cons
     };
     add_net_services(adder, overlap, *tables_, capabilities_);
     add_socket_services(adder, overlap, *tables_, capabilities_);
-    add_tls_services(adder, *tables_, capabilities_, prefixes_);
-    add_doq_services(adder, capabilities_, prefixes_);
     const OverlapAdder fetch_adder = [this](HostSignature signature, FunctionService::Handler handler,
                                           FunctionService::Begin begin) {
         services_.push_back(std::make_unique<FunctionService>(std::move(signature), std::move(handler),
                                                             std::move(begin), true));
     };
+    add_tls_services(adder, fetch_adder, *tables_, capabilities_, prefixes_);
+    add_doq_services(adder, capabilities_, prefixes_);
     add_http_fetch_services(fetch_adder, capabilities_);
     add_hpack_services(adder);
     add_ffi_services(adder, *tables_, capabilities_);

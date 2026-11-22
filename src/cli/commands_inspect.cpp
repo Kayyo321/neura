@@ -57,7 +57,18 @@ int inspect(const Options& options) {
     }
     if (caps.net) std::cout << ", network";
     if (caps.raw) std::cout << ", raw";
-    if (caps.http_client) std::cout << ", http_client";
+    if (caps.http_client) {
+        std::cout << ", http_client";
+        if (const auto& origins = caps.http_client_origins) {
+            std::cout << " (";
+            if (origins->empty()) std::cout << "no origins";
+            for (std::size_t i = 0; i < origins->size(); ++i) {
+                if (i != 0) std::cout << ", ";
+                std::cout << (*origins)[i];
+            }
+            std::cout << ')';
+        }
+    }
     if (caps.env) std::cout << ", environment";
     if (caps.clock) std::cout << ", clock";
     if (caps.entropy) std::cout << ", entropy";

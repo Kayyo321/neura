@@ -36,7 +36,12 @@ constexpr std::uint64_t task_settings_size = 4 * sizeof(std::uint64_t) + sizeof(
 constexpr std::uint64_t policy_tail_size(std::uint32_t version) {
     return 24 + (version >= 2 ? task_settings_size : 0) + (version >= 3 ? sizeof(std::uint64_t) : 0);
 }
-constexpr std::uint64_t minimum_payload_size(std::uint32_t version) { return 12 + policy_tail_size(version); }
+constexpr std::uint64_t origin_count_size(std::uint32_t version) {
+    return version >= 4 ? sizeof(std::uint32_t) : 0;
+}
+constexpr std::uint64_t minimum_payload_size(std::uint32_t version) {
+    return 12 + origin_count_size(version) + policy_tail_size(version);
+}
 constexpr std::size_t io_chunk = 64U << 10;
 
 constexpr std::uint32_t sealed = 1U;
@@ -168,6 +173,27 @@ private:
     std::uint32_t crc_ = crc_seed;
 };
 
+void read_policy_list(PayloadReader& input, std::uint32_t count, std::uint64_t tail_size,
+                      std::string_view name, std::vector<std::string>& values) {
+    // Each item leaves the fixed fields and the remaining length words intact.
+    if (count > (input.remaining() - tail_size) / sizeof(std::uint32_t)) {
+        malformed("invalid " + std::string(name) + " count");
+    }
+    for (std::uint32_t i = 0; i < count; ++i) {
+        const auto size = input.integer<std::uint32_t>();
+        const auto trailing = tail_size + std::uint64_t{count - i - 1} * sizeof(std::uint32_t);
+        std::string value;
+        if (size > input.remaining() - trailing || static_cast<std::uint64_t>(size) > value.max_size()) {
+            malformed("invalid " + std::string(name) + " length");
+        }
+        value.resize(size);
+        input.read({reinterpret_cast<std::uint8_t*>(value.data()), value.size()});
+        if (value.empty()) malformed(std::string(name) + " is empty");
+        if (!nvr::valid_utf8(value)) malformed(std::string(name) + " is not valid UTF-8");
+        values.push_back(std::move(value));
+    }
+}
+
 Container read_payload(PayloadReader& input, const Footer& footer) {
     Container result{.version = footer.version, .policy = {}, .image = {}, .launcher_size = footer.payload_offset};
     auto& policy = result.policy;
@@ -188,23 +214,13 @@ Container read_payload(PayloadReader& input, const Footer& footer) {
 
     const auto prefixes = input.integer<std::uint32_t>();
     if (!policy.capabilities.fs && prefixes != 0) malformed("file-system prefixes require the files capability");
-    // The minimum payload size guarantees space for the fixed fields here.
-    // Each prefix leaves those fields and the remaining length words intact.
-    if (prefixes > (input.remaining() - tail_size) / sizeof(std::uint32_t)) {
-        malformed("invalid file-system prefix count");
-    }
-    for (std::uint32_t i = 0; i < prefixes; ++i) {
-        const auto size = input.integer<std::uint32_t>();
-        const auto trailing = tail_size + std::uint64_t{prefixes - i - 1} * sizeof(std::uint32_t);
-        std::string prefix;
-        if (size > input.remaining() - trailing || static_cast<std::uint64_t>(size) > prefix.max_size()) {
-            malformed("invalid file-system prefix length");
-        }
-        prefix.resize(size);
-        input.read({reinterpret_cast<std::uint8_t*>(prefix.data()), prefix.size()});
-        if (prefix.empty()) malformed("file-system prefix is empty");
-        if (!nvr::valid_utf8(prefix)) malformed("file-system prefix is not valid UTF-8");
-        policy.capabilities.fs_prefixes.push_back(std::move(prefix));
+    read_policy_list(input, prefixes, origin_count_size(footer.version) + tail_size, "file-system prefix",
+                     policy.capabilities.fs_prefixes);
+
+    if (footer.version >= 4) {
+        if (!policy.capabilities.http_client) malformed("HTTP client origins require the HTTP client capability");
+        const auto count = input.integer<std::uint32_t>();
+        read_policy_list(input, count, tail_size, "HTTP client origin", policy.capabilities.http_client_origins.emplace());
     }
 
     policy.limits.max_steps = input.integer<std::uint64_t>();
@@ -235,12 +251,22 @@ Container read_payload(PayloadReader& input, const Footer& footer) {
     return result;
 }
 
+void append_policy_list(std::vector<std::uint8_t>& bytes, const std::vector<std::string>& values, std::string_view name) {
+    if (values.size() > std::numeric_limits<std::uint32_t>::max()) malformed("too many entries for " + std::string(name));
+    append_integer(bytes, static_cast<std::uint32_t>(values.size()));
+    for (const auto& value : values) {
+        if (value.empty()) malformed(std::string(name) + " is empty");
+        if (value.size() > std::numeric_limits<std::uint32_t>::max()) malformed(std::string(name) + " is too long");
+        if (!nvr::valid_utf8(value)) malformed(std::string(name) + " is not valid UTF-8");
+        append_integer(bytes, static_cast<std::uint32_t>(value.size()));
+        bytes.insert(bytes.end(), value.begin(), value.end());
+    }
+}
+
 std::vector<std::uint8_t> encode_policy(const Policy& policy, std::uint32_t image_size) {
     const auto& caps = policy.capabilities;
     if (!caps.fs && !caps.fs_prefixes.empty()) malformed("file-system prefixes require the files capability");
-    if (caps.fs_prefixes.size() > std::numeric_limits<std::uint32_t>::max()) {
-        malformed("too many file-system prefixes");
-    }
+    if (!caps.http_client && caps.http_client_origins) malformed("HTTP client origins require the HTTP client capability");
 
     std::vector<std::uint8_t> bytes;
     append_integer(bytes, policy.sealed ? sealed : 0U);
@@ -248,14 +274,8 @@ std::vector<std::uint8_t> encode_policy(const Policy& policy, std::uint32_t imag
                           (caps.env ? environment : 0U) | (caps.clock ? clock : 0U) |
                           (caps.entropy ? entropy : 0U) | (caps.native ? native : 0U) | (caps.raw ? raw : 0U) |
                           (caps.http_client ? http_client : 0U));
-    append_integer(bytes, static_cast<std::uint32_t>(caps.fs_prefixes.size()));
-    for (const auto& prefix : caps.fs_prefixes) {
-        if (prefix.empty()) malformed("file-system prefix is empty");
-        if (prefix.size() > std::numeric_limits<std::uint32_t>::max()) malformed("file-system prefix is too long");
-        if (!nvr::valid_utf8(prefix)) malformed("file-system prefix is not valid UTF-8");
-        append_integer(bytes, static_cast<std::uint32_t>(prefix.size()));
-        bytes.insert(bytes.end(), prefix.begin(), prefix.end());
-    }
+    append_policy_list(bytes, caps.fs_prefixes, "file-system prefix");
+    if (caps.http_client_origins) append_policy_list(bytes, *caps.http_client_origins, "HTTP client origin");
     append_integer(bytes, policy.limits.max_steps);
     append_integer(bytes, policy.limits.max_frames);
     append_integer(bytes, policy.limits.max_heap_cells);
@@ -430,7 +450,7 @@ void write_executable(const std::filesystem::path& path, std::span<const std::ui
     append_integer(footer, static_cast<std::uint64_t>(launcher.size()));
     append_integer(footer, std::uint64_t{policy_bytes.size()} + image.size());
     append_integer(footer, checksum);
-    append_integer(footer, container_version);
+    append_integer(footer, policy.capabilities.http_client_origins ? container_version : unscoped_container_version);
     footer.insert(footer.end(), magic.begin(), magic.end());
 
     AtomicOutput output(path);

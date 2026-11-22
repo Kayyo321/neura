@@ -5,6 +5,7 @@
 
 #include "app/project.hpp"
 
+#include "cli/http_client_options.hpp"
 #include "cli/tool.hpp"
 #include "project/files.hpp"
 #include "tooling/json.hpp"
@@ -175,7 +176,27 @@ std::optional<std::vector<std::string>> server_command(const VerifiedBundle& bun
         switch (capability) {
         case Capability::Fs: command.emplace_back("--allow-fs"); break;
         case Capability::Net: command.emplace_back("--allow-net"); break;
-        case Capability::HttpClient: command.emplace_back("--allow-http-client"); break;
+        case Capability::HttpClient: {
+            // The http_client_origins requirement scopes the grant, to the
+            // bundle's connect list or to no origin when it has none. The
+            // operator's arguments may withdraw a scoped grant but not widen it.
+            const auto& manifest = bundle.manifest();
+            if (!manifest.requirements.contains("http_client_origins")) {
+                command.push_back(cli::http_client_option(nullptr));
+                break;
+            }
+            const auto connect = manifest.origins.find("connect");
+            const std::vector<std::string> none;
+            command.push_back(cli::http_client_option(connect == manifest.origins.end() ? &none : &connect->second));
+            for (const auto& argument : arguments) {
+                if (cli::widens_http_client(argument)) {
+                    err << "neura run: " << argument << " cannot widen the bundle's HTTP client origin list; "
+                        << "only --deny-http-client may follow --\n";
+                    return std::nullopt;
+                }
+            }
+            break;
+        }
         case Capability::Env: command.emplace_back("--allow-env"); break;
         default: break;
         }

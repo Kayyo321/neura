@@ -31,14 +31,15 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - `Std.Net` adds Unicode UTS 46 mapping, more socket provider operations, multicast DNS, DNS over QUIC, and TLS 1.3 over a caller-supplied stream. TLS builds support mutual TLS and narrower client and server version ranges.
 - `Std.Net.Tls` adds ACME client operations and SPIFFE SVID verification. `Handshake.dtls13` uses a bound UDP socket, verifies peer identity and uses server-side cookies. `TlsStream` exposes the verified DER certificate chain.
 - `Std.Net.Http` streams bodies through the assigned server worker. The native `neura.http.fetch` service supports HTTP/1.1 and negotiates HTTP/2 over verified TLS in builds with HTTP/2. Grant it with `--allow-http-client` or the project capability `http_client`. `H2` opens a TLS connection with ALPN `h2`, writes frames and supports HPACK in builds with nghttp2. [Host services](docs/runtime/NVM.md#http-client-services)
+- `--allow-http-client=origin,...` limits native `neura.http.fetch` to the listed origins, checked at every redirect and on each address a name resolves to: a listed name reaches its global addresses, and loopback, private or link-local addresses only when their numeric origin is listed too. The list travels with the grant into native executables (container version 4), the runtime service, `neura-server-host`, the debugger's `capabilities.http_client`, and project server and desktop targets (`origins.connect`). Without a list the grant reaches every origin, as before. `neura.http.fetch` version 2 names a refused origin; `Std.Net.Http.Fetch` binds it. [HTTP client services](docs/runtime/NVM.md#http-client-services)
 - `Std.Crypto` adds codec-backed generic secret locking and process generation observation for fork-safe random generation.
 - Managed-list runs batch `Lists.filled` and byte appends in `StringBuilder`, `Strings.join`, and internal I/O buffers with element-wise step, heap, and version accounting. Images that use them require NVR 1.10. [Managed list runs](docs/runtime/NVM.md#managed-list-runs)
 - Module-level laws check pure claims at compile time with `neura prove`, `check`, and `build`. NeuraIR 1.16 preserves law statements and proofs for separate compilation. [Laws](docs/lang/Laws.md)
+- `Handshake.dtls_peer_certificate_chain` returns the verified peer chain of a DTLS 1.3 transport, including a client certificate verified by a DTLS server.
 
 ### Changed
 
 - In a `let` or `const` initializer, bare `law()` starts a law declaration and requires a claim. Parenthesize the callee as `(law)()` to call a zero-argument function named `law`.
-
 - Empty tag groups (`#[]` and `.[]`) are now rejected with `E0910`.
 - `E0105` now reads "unknown numeric suffix".
 - The condition diagnostic now reads "expected bool or a class or interface reference".
@@ -49,9 +50,32 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - `H2Connection.init(target: string)` is now `init(seal: Seal, target: string, stream: int64, timeout: int64)`. Create connections through `H2.connect` or `H2.connect_with`.
 - SPIFFE X.509-SVID and JWT-SVID verification require callers to pass a nonempty `trust_domain` argument.
 - Unqualified device and enclave evidence APIs and FN-DSA return typed `Unsupported` results. FN-DSA signing and verification now return `Result`.
+- `TcpSocket.send_file` (`neura.net.send_file`) no longer holds the scheduler. It parks only the calling task and fails with TimedOut when the socket accepts nothing for 30 seconds; the error message reports the bytes already sent. Linux still uses `sendfile(2)`; Windows now copies through a bounded buffer instead of `TransmitFile`. Version 3 of the service sends a prefix per call. [Socket services](docs/runtime/NVM.md#host-services)
+- Native fetch never follows a redirect from HTTPS to HTTP, or one that would resend the request body to another origin; both fail with `http.RedirectDenied` (codes 23 and 24). A redirect to another origin keeps only the caller's `Accept`, `Accept-Language` and `Content-Language` fields.
+- Native fetch reports an HTTP/2 request the peer states it did not process (GOAWAY with last stream 0, or `REFUSED_STREAM`, before a response) as `http.NotProcessed` (code 25), rejects caller `Keep-Alive` and `HTTP2-Settings` fields on both protocols, ignores repeated `Location` fields on a response that is not a redirect, and cancels and joins its workers at process exit before OpenSSL's cleanup.
+
+### Fixed
+
+- `neura.process.generation` no longer fails on an unknown VMClock version or an unexpected read error; it falls back to the PID and vmgenid detectors and retries a transient VMClock open failure or a read shorter than the VMClock header, giving VMClock up only after three short reads in a row.
+- A TLS write that times out or fails ends the stream with that error for every later operation instead of letting a next write fail with `ConnectionReset` or mix records.
+- `TlsStream.shutdown(Write)` uses the write timeout, `neura.net.tls.shutdown_write` treats zero as the 30-second default, and a TLS accept with timeout zero bounds the handshake after the TCP accept by 30 seconds, so a silent peer no longer holds the caller without limit.
+- A DTLS 1.3 transport survives a receive that times out or fails on the socket: the association stays usable instead of failing every later operation, and a later send no longer returns `InvalidInput`.
+- A DTLS write that OpenSSL keeps asking to retry waits on the socket with backoff instead of spinning.
+- `H2.connect`, `send_frame` and `close` no longer hold the scheduler while TLS waits on a stalled peer; they run as cancellable overlapped operations through new `neura.net.tls.*_overlapped` host services.
+- TLS credential files load without `/proc` when no path prefixes are configured. Paths are checked against the prefixes and for a regular file before they are opened, so a FIFO or device the given path names is not opened, and Windows refuses UNC and device paths, including link targets, before opening. FreeBSD and NetBSD check prefixes through `F_KINFO` and `F_GETPATH` instead of returning `Unsupported`.
+- Native fetch accepts a chunked response of any number of chunks: each chunk-size line and the trailer section have their own 16 KiB bound, instead of one budget for all chunk metadata.
+- Native fetch keys redirect-loop detection on the method as well as the URL, so a `POST` that a 303 sends to its own URL as a `GET` is not a loop.
+- Native HTTP/2 fetch writes each turn's frames in one write, so flow-control updates do not wait for delayed acknowledgements.
+- A desktop target with `http_client` and no `connect` list on it or its `ui` target now gets an empty origin list, so its native child reaches no origin, instead of an unrestricted grant. `neura run` and `neura dev` scope a server bundle's grant by its `http_client_origins` requirement, and refuse an `--allow-http-client` of either form after `--` for a scoped bundle instead of letting it lift or extend the manifest's list.
+- On Linux, a TLS credential file under path prefixes is opened through an `O_PATH` handle resolved with `openat2(RESOLVE_NO_SYMLINKS)` and checked before it is reopened for reading, so a directory swapped for a link between the path check and the open can no longer make the provider open a FIFO, device or file outside the prefixes. Other POSIX systems check the resolved name instead of the given path; their remaining race and the limit of path checks for hard links are documented.
+- On Linux, `neura.net.send_file` to a peer that has closed or reset the connection returns `ConnectionReset` instead of ending `neura run` or a native executable with SIGPIPE: `sendfile(2)` now runs with SIGPIPE blocked on the calling thread, as TLS writes do. An offset past a 32-bit `off_t` returns `InvalidInput` instead of wrapping.
+- Native fetch under an origin list reads an IP literal with a final dot (`http://1.2.3.4.:80`) as that address: it matched the listed numeric origin but was then treated as a name whose global answers were all allowed, instead of allowing exactly the listed address.
+- A DTLS read whose deadline passed while a peer datagram was on its way returns the packets that datagram produced, such as an ACK or the reply to a KeyUpdate, with `TimedOut`, instead of draining and dropping them, so the peer's KeyUpdate still completes.
+- Native fetch bounds the total framing of a chunked response to 64 KiB or eight times the body received so far, whichever is larger, and returns `TooLarge` past it, so one-byte chunks with 16 KiB extensions can no longer cost thousands of times the body in parsing.
 
 ### Known limitations
 
+- OpenSSL 4.1.0's DTLS 1.3 listener retransmits the HelloRetryRequest to an unvalidated address and briefly ignores further first flights from it, so address validation is not strictly stateless: a first flight spoofed with the peer's address delays the peer's handshake by about one retransmission interval. [DTLS services](docs/runtime/NVM.md#host-services)
 - OpenSSL 4.1.0 DTLS can drop outstanding post-handshake retransmissions on KeyUpdate ([#32878](https://github.com/openssl/openssl/issues/32878)), misclassify listener read or write errors ([#33277](https://github.com/openssl/openssl/issues/33277), [#33278](https://github.com/openssl/openssl/issues/33278)), or abort a handshake on an early acknowledgment ([#33242](https://github.com/openssl/openssl/issues/33242)). [DTLS 1.3 limitations](docs/lang/Neura0.3.1.md#dtls-13-limitations)
 - HTTP/3 transport, QPACK and MASQUE operations return typed `Unsupported`. The available QUIC provider carries DNS over QUIC.
 

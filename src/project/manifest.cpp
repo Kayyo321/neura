@@ -6,7 +6,9 @@
 #include <algorithm>
 #include <charconv>
 #include <initializer_list>
+#include <system_error>
 #include <utility>
+#include <variant>
 
 namespace neura::project {
 namespace {
@@ -318,11 +320,16 @@ std::vector<Located<Origin>> origin_list(const TomlTable& table, std::string_vie
     return result;
 }
 
+std::optional<std::vector<Located<Origin>>> read_connect_origins(const TomlTable& table) {
+    if (!find(table, "connect")) return std::nullopt;
+    return origin_list(table, "connect");
+}
+
 Origins read_origins(const TomlDocument& doc, const TomlEntry* entry) {
     if (!entry) return {};
     const auto& table = as_table(doc, *entry);
     keys(table, {"connect", "load", "style", "external"});
-    return {origin_list(table, "connect"), origin_list(table, "load"),
+    return {read_connect_origins(table), origin_list(table, "load"),
             origin_list(table, "style"), origin_list(table, "external")};
 }
 
@@ -464,7 +471,13 @@ ConfigSettings read_config(const TomlDocument& doc, const TomlEntry* entry) {
 }
 
 ServerSettings read_server(const TomlDocument& doc, const TomlTable& table) {
-    return {read_http(doc, find(table, "http")), read_sql(doc, find(table, "sql")),
+    std::optional<std::vector<Located<Origin>>> connect;
+    if (const auto* entry = find(table, "origins")) {
+        const auto& origins = as_table(doc, *entry);
+        keys(origins, {"connect"});
+        connect = read_connect_origins(origins);
+    }
+    return {read_http(doc, find(table, "http")), std::move(connect), read_sql(doc, find(table, "sql")),
             read_config(doc, find(table, "config")), texts(table, "providers")};
 }
 
@@ -505,7 +518,7 @@ Target read_target(const TomlDocument& doc, const TomlEntry& entry, const Named<
         keys(table, {"kind", "package", "entry", "capabilities", "styles", "routing", "origins", "limits"});
         break;
     case TargetKind::Server:
-        keys(table, {"kind", "package", "entry", "capabilities", "http", "sql", "config", "providers", "limits"});
+        keys(table, {"kind", "package", "entry", "capabilities", "http", "origins", "sql", "config", "providers", "limits"});
         break;
     case TargetKind::Desktop:
         keys(table, {"kind", "package", "entry", "capabilities", "ui", "bridge", "origins", "packaging",

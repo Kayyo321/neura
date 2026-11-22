@@ -152,29 +152,29 @@ The following public declarations are taken from the module source; each links t
   The SETTINGS payload holding `settings` in order (section 6.5.1). Tagged `#NoDiscard`.
 - **H2** · [`export let decode_settings = func(payload: uint8[list]) -> Result<Settings>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L292)
   The settings of a SETTINGS payload. Errors are `error.custom` with the HTTP/2 error name as the code: FRAME_SIZE_ERROR for a length that is not a multiple of 6 (section 6.5); PROTOCOL_ERROR for ENABLE_PUSH or ENABLE_CONNECT_PROTOCOL other than 0 or 1, or MAX_FRAME_SIZE outside 16,384 through 16,777,215; FLOW_CONTROL_ERROR for INITIAL_WINDOW_SIZE above 2^31-1 (section 6.5.2). Tagged `#NoDiscard`.
-- **H2** · [`export let H2Connection = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L330)
+- **H2** · [`export let H2Connection = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L337)
   A low-level HTTP/2 frame sender over a verified TLS connection. It does not read peer frames, acknowledge their settings, enforce stream lifecycle, or multiplex requests; `Http.Fetch` owns that driver. Tagged `#Final`, `#NotThreadSafe`.
-- **H2.H2Connection** · [`export last authority: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L332)
+- **H2.H2Connection** · [`export last authority: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L339)
   The authority the connection was opened to.
-- **H2.H2Connection** · [`export let init = func(seal: Seal, target: string, stream: int64, timeout: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L338)
+- **H2.H2Connection** · [`export let init = func(seal: Seal, target: string, stream: int64, timeout: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L345)
   Created only by `connect` or `connect_with`.
-- **H2.H2Connection** · [`export let send_frame = func(header: FrameHeader, payload: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L348)
-  Writes one complete frame within the connection's positive per-operation deadline. Length/payload disagreements and fixed-size frame violations return FRAME_SIZE_ERROR; invalid stream identifiers return PROTOCOL_ERROR. Frames remain limited to 16,384 payload bytes. Tagged `#NoDiscard`. Since 0.3.1.
-- **H2.H2Connection** · [`export let close = func(error_code: int) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L371)
-  Sends GOAWAY with last-stream-id zero, sends close_notify and discards inbound data until peer close_notify, within one deadline. Releases TLS on success or failure. Closing again succeeds. A negative `error_code` returns InvalidInput without closing. Tagged `#NoDiscard`. Since 0.3.1.
-- **H2.H2Connection** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L406)
+- **H2.H2Connection** · [`export let send_frame = func(header: FrameHeader, payload: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L356)
+  Writes one complete frame within the connection's positive per-operation deadline. A write waiting on TLS lets other tasks run. Length/payload disagreements and fixed-size frame violations return FRAME_SIZE_ERROR; invalid stream identifiers return PROTOCOL_ERROR. Frames remain limited to 16,384 payload bytes. Tagged `#NoDiscard`. Since 0.3.1.
+- **H2.H2Connection** · [`export let close = func(error_code: int) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L377)
+  Sends GOAWAY with last-stream-id zero, sends close_notify and discards inbound data until peer close_notify, within one deadline. TLS waits let other tasks run. Releases TLS on success or failure. Closing again succeeds. A negative `error_code` returns InvalidInput without closing. Tagged `#NoDiscard`. Since 0.3.1.
+- **H2.H2Connection** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L409)
   The authority.
-- **H2** · [`export let connect = func(authority: string, settings: Settings) -> Result<H2Connection>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L466)
-  Opens verified TLS with ALPN h2 and system trust, then writes the preface and SETTINGS. The complete connect operation has a thirty-second deadline. Needs net and clock capabilities. Tagged `#NoDiscard`. Since 0.3.1.
-- **H2** · [`export let connect_with = func(authority: string, settings: Settings, config: tls_config.TlsConfig) -> Result<H2Connection>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L477)
+- **H2** · [`export let connect = func(authority: string, settings: Settings) -> Result<H2Connection>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L479)
+  Opens verified TLS with ALPN h2 and system trust, then writes the preface and SETTINGS. The complete connect operation has a thirty-second deadline. Network waits park the calling task while other tasks run. Needs net and clock capabilities. Tagged `#NoDiscard`. Since 0.3.1.
+- **H2** · [`export let connect_with = func(authority: string, settings: Settings, config: tls_config.TlsConfig) -> Result<H2Connection>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L490)
   As `connect`, with explicit trust/credentials and a positive total handshake/preface deadline. `config` must be a client configuration offering exactly h2. Later sends use the same duration as a fresh per-operation deadline. Explicit trust/credential files also require the fs capability. Tagged `#NoDiscard`. Since 0.3.1.
-- **H2** · [`export let hpack_encode = func(fields: header_map.Headers) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L556)
+- **H2** · [`export let hpack_encode = func(fields: header_map.Headers) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L565)
   Compresses regular header fields as an independent HPACK block. Names are lowercased. Unlike the former stub, encoding returns a Result. See `hpack_encode_fields` for limits and state. Tagged `#NoDiscard`. Since 0.3.1.
-- **H2** · [`export let hpack_decode = func(block: uint8[list]) -> Result<header_map.Headers>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L567)
+- **H2** · [`export let hpack_decode = func(block: uint8[list]) -> Result<header_map.Headers>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L576)
   Decodes regular fields into Headers. A pseudo-header returns PROTOCOL_ERROR rather than reaching Headers' token-name trap; use `hpack_decode_fields` for complete HTTP/2 field sections. Tagged `#NoDiscard`. Since 0.3.1.
-- **H2** · [`export let hpack_encode_fields = func(fields: [string, string][list]) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L585)
+- **H2** · [`export let hpack_encode_fields = func(fields: [string, string][list]) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L594)
   Compresses lowercase name/value pairs, including pseudo-header names. Each call uses a new encoder with dynamic table size zero and no indexing. At most 256 fields and 65,536 total name/value bytes or encoded bytes; a conservative encoder allocation bound also applies. Invalid field text is PROTOCOL_ERROR, limits are hpack.limit, and an HTTP/2-disabled provider returns typed Unsupported. Tagged `#NoDiscard`. Since 0.3.1.
-- **H2** · [`export let hpack_decode_fields = func(block: uint8[list]) -> Result<[string, string][list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L604)
+- **H2** · [`export let hpack_decode_fields = func(block: uint8[list]) -> Result<[string, string][list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L613)
   Decodes a complete independent block with an initial 4,096-byte dynamic table, including RFC 7541 Huffman strings and table references created within this block. No table state survives a call. Bounds are those of `hpack_encode_fields`; malformed text/encoding is COMPRESSION_ERROR. Tagged `#NoDiscard`. Since 0.3.1.
 <!-- END SOURCE API -->
 

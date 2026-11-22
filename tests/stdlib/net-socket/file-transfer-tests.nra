@@ -1,0 +1,68 @@
+// test-options: --allow-net --allow-fs=file-transfer-work
+// host-dependent-counts: TCP can deliver the same stream in different prefix sizes.
+let duration = import:Std.Time.Duration;
+let fs = import:Std.Fs.Fs;
+let options = import:Std.Net.Socket.SocketOptions;
+let path = import:Std.Fs.Path;
+let socket_addr = import:Std.Net.Core.SocketAddr;
+let tcp = import:Std.Net.Socket.TcpSocket;
+let server = import:Std.Net.Socket.TcpServer;
+let test = import:Std.Test;
+let unit = import:Std.Core.Unit;
+
+// Runs against the real file system in file-transfer-work/ below the test's
+// working directory, the only path the capability grants.
+let FileTransfer = module (
+    let size = 200000;
+
+    let listen = func -> server.TcpServer {
+        last address = test.assert_ok<socket_addr.SocketAddr>(socket_addr.parse("127.0.0.1:0"));
+        return test.assert_ok<server.TcpServer>(server.bind(address));
+    };
+
+    // A small send buffer makes the transfer park on writability many times.
+    let send_ranges = func(port: int) {
+        last target = test.assert_ok<socket_addr.SocketAddr>(socket_addr.parse("127.0.0.1:" .. port.to_string()));
+        last builder = options.builder();
+        builder.set_send_buffer(4096);
+        last settings = test.assert_ok<options.SocketOptions>(builder.build(options.SocketKind.TcpStream));
+        last client = test.assert_ok<tcp.TcpSocket>(tcp.connect_with(target, duration.of_seconds(2), settings));
+        test.assert_equal<int64>(150000, test.assert_ok<int64>(
+            client.send_file("file-transfer-work/payload.bin", 1000, 150000)));
+        // A count past the end of the file stops there.
+        test.assert_equal<int64>(10, test.assert_ok<int64>(
+            client.send_file("file-transfer-work/payload.bin", 199990, 100)));
+        test.assert_equal<int64>(0, test.assert_ok<int64>(
+            client.send_file("file-transfer-work/payload.bin", 300000, 100)));
+        test.assert_ok<unit.Unit>(client.close());
+    };
+
+    export let test_send_file_sends_ranges_under_backpressure = func {
+        last dir = path.of("file-transfer-work");
+        test.assert_ok<unit.Unit>(fs.create_directories(dir));
+        last data: uint8[list] = new;
+        for (let i = 0; i < size; i++) {
+            data.append((i % 251) as uint8);
+        }
+        test.assert_ok<unit.Unit>(fs.write_bytes(dir.join("payload.bin"), data));
+        last listener = listen();
+        scope {
+            spawn send_ranges(listener.local_port());
+            last peer = test.assert_ok<tcp.TcpSocket>(listener.accept());
+            peer.set_read_timeout(duration.of_seconds(5));
+            let received = 0;
+            while (received < 150010) {
+                last part = test.assert_ok<uint8[list]>(peer.read(150010 - received));
+                test.assert(part.length > 0);
+                for (let byte in part) {
+                    last at = received < 150000 ? 1000 + received : 199990 + received - 150000;
+                    test.assert_equal<uint8>((at % 251) as uint8, byte);
+                    received++;
+                }
+            }
+            test.assert_equal<int>(0, test.assert_ok<uint8[list]>(peer.read(1)).length);
+            test.assert_ok<unit.Unit>(peer.close());
+        }
+        test.assert_ok<unit.Unit>(listener.close());
+    };
+);

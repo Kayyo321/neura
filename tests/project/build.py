@@ -46,6 +46,64 @@ def run(*args, cwd=None, env=None):
                           stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='replace', timeout=600)
 
 
+def http_client_operator_arguments(first):
+    """The HTTP client option `neura run` gives the server host, seen through a stand-in host.
+
+    The bundle's `http_client_origins` requirement, not the presence of `origins.connect`, decides whether the
+    grant is scoped, and operator arguments after `--` cannot widen a scoped grant.
+    """
+    if WINDOWS:
+        print('note: the stand-in server host is a shell script; the HTTP client option checks are not run here')
+        return
+    tools = SCRATCH / 'stand-in-tools'
+    shutil.rmtree(tools, ignore_errors=True)
+    tools.mkdir()
+    # `neura run` hands a bundle to neura-run, which finds the server host beside itself.
+    run_tool = NEURA.parent / 'neura-run'
+    try:
+        os.link(run_tool, tools / 'neura-run')
+    except OSError:
+        shutil.copy2(run_tool, tools / 'neura-run')
+    host = tools / 'neura-server-host'
+    host.write_text('#!/bin/sh\nfor argument in "$@"; do printf "%s\\n" "$argument"; done\n')
+    host.chmod(0o755)
+
+    def host_arguments(bundle, *operator):
+        result = subprocess.run([str(tools / 'neura-run'), str(bundle), '--', *operator], stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='replace', timeout=60)
+        return result, [line for line in result.stdout.splitlines() if 'http-client' in line]
+
+    def bundle_copy(name, change):
+        copy = SCRATCH / name
+        shutil.rmtree(copy, ignore_errors=True)
+        shutil.copytree(first / 'dist/server', copy)
+        change(copy / 'bundle.json')
+        return copy
+
+    listed = first / 'dist/server'
+    no_key = bundle_copy('server-no-connect-key', lambda b: edit(b, '"origins":{"connect":[]}', '"origins":{}'))
+    unscoped = bundle_copy('server-unscoped', lambda b: edit(b, '"http_client_origins":1,', ''))
+    for bundle, expected, what in ((listed, ['--allow-http-client='], 'an explicit empty origin list'),
+                                   (no_key, ['--allow-http-client='], 'the requirement without a connect list'),
+                                   (unscoped, ['--allow-http-client'], 'a connect list without the requirement')):
+        result, options = host_arguments(bundle)
+        check(result.returncode == 0 and options == expected, f'the server host is given {expected} for {what}')
+        if result.returncode != 0 or options != expected:
+            print(result.stdout + result.stderr)
+    for bundle in (listed, no_key):
+        for option in ('--allow-http-client', '--allow-http-client=https://other.example'):
+            result, _ = host_arguments(bundle, option)
+            check(result.returncode != 0 and "cannot widen the bundle's HTTP client origin list" in result.stderr
+                  and option in result.stderr, f'{bundle.name}: {option} after -- is refused')
+        result, options = host_arguments(bundle, '--deny-http-client')
+        check(result.returncode == 0 and options == ['--allow-http-client=', '--deny-http-client'],
+              f'{bundle.name}: --deny-http-client after -- narrows the grant')
+    result, options = host_arguments(unscoped, '--allow-http-client=https://other.example')
+    check(result.returncode == 0 and options == ['--allow-http-client', '--allow-http-client=https://other.example'],
+          'an unscoped bundle passes the operator HTTP client options through')
+    shutil.rmtree(tools, ignore_errors=True)
+
+
 def refused(result, code, text, what):
     output = result.stdout + result.stderr
     check(result.returncode != 0 and f'[{code}]' in output and text in output, f'{what}: {code}')
@@ -156,6 +214,9 @@ def main():
     check(html.unescape(page).count(web['csp']) == 1 and "default-src 'none'" in web['csp'] and 'form-action' in web['csp'],
           'index.html carries the content-security policy of bundle.json')
     check(page.index('styles/') < page.index('neura-boot'), 'global stylesheet linked before the boot script')
+    server = json.loads((first / 'dist/server/bundle.json').read_text())
+    check(server['requires'].get('http_client_origins') == 1 and server['origins'].get('connect') == [],
+          'a server bundle preserves an explicit empty HTTP origin list')
     if native:
         desktop = json.loads((first / 'dist/desktop/bundle.json').read_text())
         import hashlib
@@ -163,6 +224,28 @@ def main():
               'desktop bundle embeds the web bundle with the same digest')
         check((first / 'dist/desktop/web/bundle.json').read_bytes() == (first / 'dist/web/bundle.json').read_bytes(),
               'embedded web bundle unchanged')
+        check(desktop['requires'].get('http_client_origins') == 1 and
+              desktop['origins'].get('connect') == ['https://api.example:8443'],
+              'desktop bundle inherits the embedded web target connect list')
+        child = first / 'dist/desktop' / desktop['image']['path']
+        policy = run('inspect', child)
+        check(policy.returncode == 0 and 'http_client (https://api.example:8443)' in policy.stdout,
+              'the desktop native child records its HTTP origin list')
+        # With no connect list on the desktop target or its ui target, the native child reaches no origin.
+        unlisted = copy_project('desktop-no-connect')
+        shutil.copy(first / 'neura.lock', unlisted / 'neura.lock')
+        edit(unlisted / 'neura.toml', '[targets.web.origins]\nconnect = ["https://api.example:8443"]\n', '')
+        result = run('build', '--target', 'desktop', cwd=unlisted, env=env)
+        check(result.returncode == 0, 'build a desktop target with no connect list')
+        if result.returncode == 0:
+            bare = json.loads((unlisted / 'dist/desktop/bundle.json').read_text())
+            check(bare['requires'].get('http_client_origins') == 1 and bare['origins'].get('connect') == [],
+                  'a desktop bundle with no connect list has an empty HTTP origin list')
+            policy = run('inspect', unlisted / 'dist/desktop' / bare['image']['path'])
+            check(policy.returncode == 0 and 'http_client (no origins)' in policy.stdout,
+                  'the desktop native child with no connect list reaches no origin')
+        else:
+            print(result.stdout + result.stderr)
 
     # Case 12: history routing writes 404.html and says what the host must do.
     routed = copy_project('routed')
@@ -204,6 +287,7 @@ def main():
             output, _ = host.communicate(timeout=30)
             if body != 'hi, Ada\n':
                 print(output)
+        http_client_operator_arguments(first)
     else:
         print(f'note: neura-server-host{EXE} is not built here; neura run of a server bundle is not run')
 
@@ -244,7 +328,8 @@ def main():
         edit(project / 'ui/main.nra', 'let web = import:Std.Web;', 'let web = import:Std.Web;\nlet files = import:Std.Fs.Fs;\nlet paths = import:Std.Fs.Path;')
         edit(project / 'ui/main.nra', 'last counter = make_counter();', 'last counter = make_counter();\n        last found = files.exists(paths.of("x"));')
     variant('fs', fs_use, 'web', 'E1027', 'neura.fs.', 'a web target that reaches the file system (case 28)')
-    variant('unlisted', lambda p: edit(p / 'neura.toml', 'capabilities = ["http_server", "app", "sql"]', 'capabilities = ["sql"]'),
+    variant('unlisted', lambda p: edit(p / 'neura.toml', 'capabilities = ["http_server", "app", "sql", "http_client"]',
+                                       'capabilities = ["sql"]'),
             'server', 'E1027', "group 'app', not listed", 'a server image using a group it does not list')
 
     if failures:

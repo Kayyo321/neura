@@ -20,6 +20,7 @@ See https://openssl-library.org/post/2026-10-23-openssl-41-final-release/.
 import argparse
 import collections
 import contextlib
+import hashlib
 import pathlib
 import queue
 import re
@@ -34,8 +35,33 @@ import time
 WAIT = 15
 CASES = ("round-trip", "mutual", "wrong-hostname", "wrong-ca", "missing-client-certificate",
          "handshake-drop", "handshake-reorder", "duplicate", "truncate", "loss-reorder",
+         "idle-read", "receive-error",
          "client-timeout", "server-timeout", "denied-net", "openssl-server", "openssl-client",
          "key-update", "key-update-drop", "key-update-reorder")
+
+
+# RFC 8446 section 4.1.3: the ServerHello random that marks a HelloRetryRequest.
+HELLO_RETRY_RANDOM = hashlib.sha256(b"HelloRetryRequest").digest()
+assert HELLO_RETRY_RANDOM.hex().startswith("cf21ad74e59a6111"), HELLO_RETRY_RANDOM.hex()
+
+
+def hello_retry_with_cookie(data):
+    """A plaintext DTLS 1.3 HelloRetryRequest record carrying a cookie extension."""
+    # 13-byte DTLSPlaintext header (type 22), 12-byte handshake header (ServerHello, 2).
+    if len(data) < 13 + 12 + 2 + 32 + 1 or data[0] != 22 or data[13] != 2:
+        return False
+    at = 13 + 12 + 2
+    if data[at:at + 32] != HELLO_RETRY_RANDOM:
+        return False
+    at += 32
+    at += 1 + data[at] + 2 + 1
+    end = min(len(data), at + 2 + int.from_bytes(data[at:at + 2], "big"))
+    at += 2
+    while at + 4 <= end:
+        if int.from_bytes(data[at:at + 2], "big") == 44:
+            return True
+        at += 4 + int.from_bytes(data[at + 2:at + 4], "big")
+    return False
 
 
 def address(text):
@@ -177,6 +203,9 @@ class Relay:
         # Side zero is the client's ingress, side one the server's ingress.
         self.events[f"packets-{side}"] += 1
         self.packets.append((self.mode, side, len(data)))
+        if side == 1 and hello_retry_with_cookie(data):
+            # The server's address validation: a cookie round trip precedes its flight.
+            self.events["hello-retry"] += 1
         if self.mode == "handshake-drop" and side == 0 and not self.events["handshake-drop"]:
             self.events["handshake-drop"] += 1
             return
@@ -315,14 +344,15 @@ def pair(runner, root, certificates, case, record=False):
         mutual = case in {"mutual", "missing-client-certificate"}
         ca = client_cert if mutual else ""
         server = neura_peer(stack, runner, relay, True, cert, key, ca,
-                            scenario="loss-reorder" if case == "loss-reorder" else "round-trip")
+                            scenario=case if case in {"loss-reorder", "mutual"} else "round-trip")
         trace = root / "dtls.trace"
         options = ["--record", str(trace)] if record else []
         client = neura_peer(stack, runner, relay, False,
                             client_cert if case == "mutual" else "", client_key if case == "mutual" else "",
                             wrong_ca if case == "wrong-ca" else cert,
                             "wrong.test" if case == "wrong-hostname" else "localhost",
-                            "loss-reorder" if case == "loss-reorder" else "round-trip", options)
+                            case if case in {"loss-reorder", "idle-read", "receive-error", "mutual"}
+                            else "round-trip", options)
         if case in {"wrong-hostname", "wrong-ca"}:
             client.expect("ERROR PermissionDenied")
             client.finish()
@@ -332,6 +362,13 @@ def pair(runner, root, certificates, case, record=False):
         else:
             client.expect("READY")
             server.expect("READY")
+            if case in {"idle-read", "receive-error"}:
+                client.expect("READ TimedOut" if case == "idle-read" else "READ ConnectionReset")
+            if case == "mutual":
+                client.expect("CHAIN verified")
+                server.expect("CHAIN verified")
+            elif case == "round-trip":
+                server.expect("CHAIN PermissionDenied")
             relay.arm(case if case in {"duplicate", "truncate", "loss-reorder"} else "plain")
             complete_pair(client, server, case)
             expected = ["RECEIVED second", "RECEIVED first"] if case == "loss-reorder" else [
@@ -341,7 +378,8 @@ def pair(runner, root, certificates, case, record=False):
                   "handshake-reorder": ["handshake-reorder", "distinct-handshake-reorder"],
                   "duplicate": ["duplicate"], "truncate": ["truncate"],
                   "loss-reorder": ["application-drop", "application-reorder"]}
-        relay.check(*events.get(case, []))
+        # Every pair case reaches the server; each one validates the address first.
+        relay.check("hello-retry", *events.get(case, []))
         recorded = "\n".join(client.output["stdout"]) + "\n"
         replay_command = runner + ["--replay", str(trace)] + client.command[len(runner) + len(options):]
     if record:

@@ -130,6 +130,8 @@ enum class Tag : std::uint16_t {
     Lifetime = 57,
     ClientClock = 58,
     Pid = 59,
+    HttpClientScoped = 60,
+    HttpClientOrigin = 61,  // list
     // The extension range starts here.
     Extension = 0x8000,
 };
@@ -298,6 +300,7 @@ struct Envelope {
     // The resolved capability policy.
     bool fs = false, net = false, env = false, clock = false, entropy = false, native = false, raw = false;
     bool http_client = false;
+    std::optional<std::vector<std::string>> http_client_origins;
     std::vector<std::string> fs_prefixes;
     // Every limit an option sets, by option name without its dashes, and
     // the runner's flags (stats, tier-stats, profile, trace-wall-time,

@@ -18,11 +18,11 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Offload** · [`export const MaxUdpPayload: int = 65507`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/offload.nra#L15)
+- **Offload** · [`export const MaxUdpPayload: int = 65507`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/offload.nra#L16)
   The largest UDP payload over IPv4: 65,535 bytes minus the 8-byte UDP and 20-byte IPv4 headers.
-- **Offload** · [`export let segment_count = func(length: int, segment_size: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/offload.nra#L20)
+- **Offload** · [`export let segment_count = func(length: int, segment_size: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/offload.nra#L21)
   The number of datagrams a buffer of `length` bytes becomes with segments of `segment_size` bytes. A segment size below 1 or a negative length traps with "invalid argument". Tagged `#Pure`.
-- **Offload** · [`export let split = func(data: uint8[list], segment_size: int) -> uint8[list][list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/offload.nra#L28)
+- **Offload** · [`export let split = func(data: uint8[list], segment_size: int) -> uint8[list][list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/offload.nra#L29)
   Cuts `data` into datagrams of `segment_size` bytes; the last holds the rest. An empty buffer gives no datagrams. A segment size below 1 or above `MaxUdpPayload` traps with "invalid argument". Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

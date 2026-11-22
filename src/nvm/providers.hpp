@@ -46,6 +46,14 @@ inline constexpr std::uint32_t pool_exhausted = 19;
 inline constexpr std::uint32_t version_mismatch = 20;
 inline constexpr std::uint32_t constraint_violation = 21;
 inline constexpr std::uint32_t serialization = 22;
+// The HTTP client services' own codes (docs/runtime/NVM.md, "HTTP client
+// services"): a refused redirect from HTTPS to HTTP, a refused redirect that
+// would resend the body to another origin, and an HTTP/2 request the peer
+// stated it did not process. The library reports them as http.RedirectDenied
+// and http.NotProcessed.
+inline constexpr std::uint32_t redirect_downgrade = 23;
+inline constexpr std::uint32_t redirect_body = 24;
+inline constexpr std::uint32_t not_processed = 25;
 // The one code the providers use for every failure without a kind of its
 // own, including an exhausted ID table.
 inline constexpr std::uint32_t other = 100;
@@ -113,6 +121,9 @@ struct Capabilities {
     bool sql = false;
     // HTTP(S) client requests have their own grant, independent of sockets.
     bool http_client = false;
+    // With an HTTP client grant, no list allows all origins and an empty
+    // list allows none. The provider normalizes the configured origins.
+    std::optional<std::vector<std::string>> http_client_origins;
 };
 
 // The target triple of this runner, such as x86_64-linux-gnu; an image's

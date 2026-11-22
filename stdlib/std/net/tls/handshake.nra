@@ -24,6 +24,7 @@ export let Handshake = module (
     let IdOutcome = enum (Ok(int64), Error(uint32));
     let StepOutcome = enum (Ok([int, uint8[list], uint8[list], uint32]), Error(uint32));
     let DoneOutcome = enum (Ok, Error(uint32));
+    let ChainOutcome = enum (Ok(uint8[list][list]), Error(uint32));
     let engine_open = func(server: bool, name: string, alpn: string[list], ca: string, certificate: string,
         key: string) -> IdOutcome host("neura.net.tls.engine.open", 1);
 
@@ -41,10 +42,12 @@ export let Handshake = module (
         host("neura.net.dtls.engine.exchange", 1);
 
     let datagram_release = func(engine: int64) -> DoneOutcome host("neura.net.dtls.engine.release", 1);
+    let peer_chain = func(engine: int64) -> ChainOutcome host("neura.net.tls.peer_chain", 1);
     const HandshakeStep: int = 0;
     const ReadStep: int = 1;
     const WriteStep: int = 2;
     const CloseStep: int = 3;
+    const AbandonStep: int = 5;
     const WantsInput: int = 0;
     const PeerClosed: int = 2;
     const RecordSize: int = 16384;
@@ -228,6 +231,15 @@ export let Handshake = module (
 
         export let receive = func -> Result<Optional<uint8[list]>> => process(ReadStep, new, wire.read_timeout());
 
+        export let verified_chain = func -> Result<uint8[list][list]> {
+            return Result<uint8[list][list]>.Err(bytes.closed("DTLS transport", peer.to_string())) unless opened;
+            return match (peer_chain(id)) {
+                ChainOutcome.Ok(chain) => Result<uint8[list][list]>.Ok(chain),
+                ChainOutcome.Error(code) => Result<uint8[list][list]>.Err(
+                    host_error.io(code, "verified peer certificate chain unavailable", peer.to_string())),
+            };
+        };
+
         export let send = func(data: uint8[list]) -> Result<Unit> {
             if (data.length > 1024) {
                 return Result<Unit>.Err(host_error.io(4, "DTLS message exceeds 1024 bytes", peer.to_string()));
@@ -268,6 +280,14 @@ export let Handshake = module (
             last original = wire.read_timeout();
             last outcome = process_wire(operation, message, timeout);
             wire.set_read_timeout(original);
+            match (outcome) {
+                Result.Err(_) => {
+                    // A socket error leaves no operation pending in the host: a read
+                    // stays usable, and an unfinished other operation ends the engine.
+                    let _ = datagram_exchange(id, AbandonStep, new, "", 0, new, 0);
+                },
+                Result.Ok(_) => {},
+            }
             return outcome;
         };
 
@@ -349,6 +369,8 @@ export let Handshake = module (
     /// Messages are at most 1,024 bytes and retain their boundaries. Unexpected senders are dropped.
     /// Every operation has one absolute deadline: the configured handshake timeout, the socket's read timeout
     /// for receive, or 30 seconds for send/close; a zero timeout uses 30 seconds. Timers drive retransmissions.
+    /// A receive that times out or fails on the socket leaves the association usable; a handshake, send or
+    /// close that times out or fails ends it.
     /// Requires net; explicit credential files also require fs. DTLS never uses kernel TLS offload.
     .[NoDiscard, Since("0.3.1")]
     export let dtls13 = func(config: TlsConfig, socket: DatagramSocket<SocketAddr>, peer: SocketAddr)
@@ -379,5 +401,15 @@ export let Handshake = module (
                 }
             },
         }
+    };
+
+    /// @brief Gets the verified peer certificates in leaf-first DER order, including the trust anchor,
+    /// from a transport returned by `dtls13`. A server without client verification returns PermissionDenied.
+    .[NoDiscard, Since("0.3.1")]
+    export let dtls_peer_certificate_chain = func(stream: Transport<uint8[list], uint8[list]>) -> Result<uint8[list][list]> {
+        if (stream is not datagram: DatagramTransport) {
+            return Result<uint8[list][list]>.Err(host_error.io(4, "expected a DTLS transport", ""));
+        }
+        return datagram.verified_chain();
     };
 );

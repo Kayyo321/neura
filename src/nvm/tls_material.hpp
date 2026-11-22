@@ -1,20 +1,35 @@
 #pragma once
 
-// Explicit TLS paths are opened once. Authorize the opened object, then give
-// OpenSSL its bytes; a later path replacement cannot change the material used.
+// Authorize explicit TLS paths before opening them for reading, then validate
+// the opened file and give OpenSSL bytes from that same handle.
 #include "provider_internal.hpp"
 #include "platform/file.hpp"
 #include <algorithm>
 #include <array>
 #include <cerrno>
-#include <climits>
+#include <iterator>
 #ifdef _WIN32
 #include "platform/text.hpp"
 #include "platform/windows.hpp"
+#include <cstring>
+#include <winioctl.h>
 #else
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#if defined(F_GETPATH) || (defined(__FreeBSD__) && defined(F_KINFO))
+#include <sys/param.h>
+#endif
+#if defined(__FreeBSD__) && defined(F_KINFO)
+#include <sys/user.h>
+#endif
+#if defined(__linux__)
+#include <string>
+#include <sys/syscall.h>
+#if __has_include(<linux/openat2.h>)
+#include <linux/openat2.h>
+#endif
+#endif
 #endif
 #include <openssl/err.h>
 #include <openssl/pem.h>
@@ -22,83 +37,294 @@
 
 namespace neura::nvm::provider::tls_material {
 
-inline std::uint32_t read(const Capabilities& capabilities, const std::vector<ResolvedPath>& prefixes,
-                          std::string& path) {
-    if (path.empty()) return 0;
-    if (!capabilities.fs) return host_error::capability_denied;
-    if (!usable_text(path)) return host_error::invalid_input;
-    std::string final;
-#ifdef _WIN32
-    if (const auto error = windows_path_error(path)) return error;
-    const auto wide = platform::try_to_utf16(path);
-    if (!wide) return host_error::invalid_input;
-    platform::UniqueFile file(CreateFileW(wide->c_str(), GENERIC_READ,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr));
-    if (!file) return host_error::from_win32(GetLastError());
-    if (GetFileType(file.get()) != FILE_TYPE_DISK) return host_error::invalid_input;
-    std::wstring name(512, L'\0');
-    for (;;) {
-        const auto size = GetFinalPathNameByHandleW(file.get(), name.data(), static_cast<DWORD>(name.size()),
-                                                   FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
-        if (!size) return host_error::from_win32(GetLastError());
-        if (size < name.size()) { name.resize(size); break; }
-        name.resize(static_cast<std::size_t>(size) + 1);
+inline bool path_permitted(const ResolvedPath& path, const std::vector<ResolvedPath>& prefixes) {
+    return std::any_of(prefixes.begin(), prefixes.end(), [&](const auto& prefix) { return path.within(prefix); });
+}
+
+// Split an already resolved absolute pathname without doing another lookup.
+inline ResolvedPath resolved_name(std::string_view name) {
+    ResolvedPath path;
+    while (!name.empty()) {
+        const auto end = name.find('/');
+        if (end != 0) path.components.emplace_back(name.substr(0, end));
+        if (end == std::string_view::npos) break;
+        name.remove_prefix(end + 1);
     }
-    if (name.starts_with(L"\\\\?\\UNC\\")) name = L"//" + name.substr(8);
-    else if (name.starts_with(L"\\\\?\\")) name.erase(0, 4);
+    return path;
+}
+
+#ifdef _WIN32
+
+inline bool drive_path(std::wstring_view path) {
+    if (path.size() < 3 || path[1] != L':' || path[2] != L'\\') return false;
+    const auto drive = path[0];
+    return (drive >= L'A' && drive <= L'Z') || (drive >= L'a' && drive <= L'z');
+}
+
+inline std::uint32_t qualify_local_path(std::wstring& path) {
+    std::wstring full(MAX_PATH, L'\0');
+    for (;;) {
+        const DWORD size = ::GetFullPathNameW(path.c_str(), static_cast<DWORD>(full.size()), full.data(), nullptr);
+        if (!size) return host_error::from_win32(::GetLastError());
+        if (size < full.size()) { full.resize(size); break; }
+        full.resize(size);
+    }
+    if (!drive_path(full) || ::GetDriveTypeW(full.substr(0, 3).c_str()) == DRIVE_REMOTE)
+        return host_error::invalid_input;
+    path = std::move(full);
+    return 0;
+}
+
+inline constexpr DWORD share_all = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+
+// Read the substitute name, which the filesystem actually follows. The
+// optional print name can differ. The fixed layouts are defined by
+// REPARSE_DATA_BUFFER for symbolic links and mount points.
+inline std::uint32_t link_target(const std::wstring& path, std::wstring& target, bool& relative) {
+    const platform::UniqueFile link(::CreateFileW(path.c_str(), FILE_READ_ATTRIBUTES, share_all, nullptr,
+        OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+    if (!link) return host_error::from_win32(::GetLastError());
+    std::array<unsigned char, MAXIMUM_REPARSE_DATA_BUFFER_SIZE> data;
+    DWORD size = 0;
+    if (!::DeviceIoControl(link.get(), FSCTL_GET_REPARSE_POINT, nullptr, 0, data.data(),
+                           static_cast<DWORD>(data.size()), &size, nullptr))
+        return host_error::from_win32(::GetLastError());
+    if (size < 8) return host_error::invalid_input;
+
+    DWORD tag;
+    std::memcpy(&tag, data.data(), sizeof tag);
+    if (tag != IO_REPARSE_TAG_SYMLINK && tag != IO_REPARSE_TAG_MOUNT_POINT) return host_error::unsupported;
+    const bool symbolic = tag == IO_REPARSE_TAG_SYMLINK;
+    const std::size_t path_offset = symbolic ? 20 : 16;
+    if (size < path_offset) return host_error::invalid_input;
+    WORD offset, length;
+    std::memcpy(&offset, data.data() + 8, sizeof offset);
+    std::memcpy(&length, data.data() + 10, sizeof length);
+    if (!length || length % sizeof(wchar_t) || offset % sizeof(wchar_t) ||
+        path_offset + offset + length > size)
+        return host_error::invalid_input;
+    target.resize(length / sizeof(wchar_t));
+    std::memcpy(target.data(), data.data() + path_offset + offset, length);
+    DWORD flags = 0;
+    if (symbolic) std::memcpy(&flags, data.data() + 16, sizeof flags);
+    if (flags > 1) return host_error::invalid_input;
+    relative = flags == 1;
+    if (!relative) {
+        if (target.starts_with(L"\\??\\") || target.starts_with(L"\\\\?\\")) target.erase(0, 4);
+        if (!drive_path(target)) return host_error::invalid_input;
+    } else if (target.front() == L'\\' || target.front() == L'/' || target.find(L':') != std::wstring::npos) {
+        return host_error::invalid_input;
+    }
+    const auto text = platform::try_to_utf8(target);
+    return text ? windows_path_error(*text) : host_error::invalid_input;
+}
+
+// Inspect path components before traversing a reparse point. This rejects
+// UNC and device targets before reading attributes or bytes from them.
+inline std::uint32_t resolve_local_path(std::wstring& path) {
+    for (int links = 0; links <= 40; ++links) {
+        if (const auto error = qualify_local_path(path)) return error;
+        bool follow = false;
+        for (std::size_t start = 3; start < path.size();) {
+            const auto end = std::min(path.find(L'\\', start), path.size());
+            const auto component = L"\\\\?\\" + path.substr(0, end);
+            const auto attributes = ::GetFileAttributesW(component.c_str());
+            if (attributes == INVALID_FILE_ATTRIBUTES) return host_error::from_win32(::GetLastError());
+            if (attributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+                std::wstring target;
+                bool relative = false;
+                if (const auto error = link_target(component, target, relative)) return error;
+                if (relative) target.insert(0, path.substr(0, start));
+                path = target + path.substr(end);
+                follow = true;
+                break;
+            }
+            start = end + 1;
+        }
+        if (!follow) return 0;
+    }
+    return host_error::other;
+}
+
+inline std::uint32_t windows_name_error(std::wstring name, const std::vector<ResolvedPath>& prefixes) {
+    if (name.starts_with(L"\\\\?\\")) name.erase(0, 4);
+    if (!drive_path(name)) return host_error::invalid_input;
     std::replace(name.begin(), name.end(), L'\\', L'/');
     const auto utf8 = platform::try_to_utf8(name);
     if (!utf8) return host_error::unsupported;
-    final = *utf8;
+    return prefixes.empty() || path_permitted(resolved_name(*utf8), prefixes) ? 0 : host_error::capability_denied;
+}
+
+#endif
+
+inline std::uint32_t opened_path_error(platform::native_file file, const std::vector<ResolvedPath>& prefixes) {
+#ifdef _WIN32
+    std::wstring name(512, L'\0');
+    for (;;) {
+        const auto size = ::GetFinalPathNameByHandleW(file, name.data(), static_cast<DWORD>(name.size()),
+                                                     FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+        if (!size) return host_error::from_win32(::GetLastError());
+        if (size < name.size()) { name.resize(size); break; }
+        name.resize(size);
+    }
+    return windows_name_error(std::move(name), prefixes);
 #else
-    platform::UniqueFile file(::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK));
-    if (!file) return host_error::from_errno(errno);
-    struct stat info{};
-    if (::fstat(file.get(), &info) != 0) return host_error::from_errno(errno);
-    if (!S_ISREG(info.st_mode)) return host_error::invalid_input;
+    std::string name;
 #if defined(__linux__)
-    std::string name(512, '\0');
-    const auto link = "/proc/self/fd/" + std::to_string(file.get());
+    name.resize(512);
+    const auto link = "/proc/self/fd/" + std::to_string(file);
     for (;;) {
         const auto size = ::readlink(link.c_str(), name.data(), name.size());
-        if (size < 0) return host_error::from_errno(errno);
+        // Without procfs the opened object cannot be checked against the prefixes.
+        if (size < 0) return errno == ENOENT || errno == ENOTDIR || errno == EACCES || errno == EPERM
+            ? host_error::unsupported : host_error::from_errno(errno);
         if (static_cast<std::size_t>(size) < name.size()) { name.resize(static_cast<std::size_t>(size)); break; }
         if (name.size() >= 1024 * 1024) return host_error::invalid_input;
         name.resize(name.size() * 2);
     }
     // An unlinked object has no authorizable pathname.
     if (name.ends_with(" (deleted)")) return host_error::capability_denied;
-    final = std::move(name);
-#elif defined(__APPLE__)
-    char name[PATH_MAX];
-    if (::fcntl(file.get(), F_GETPATH, name) != 0) return host_error::from_errno(errno);
-    final = name;
+#elif defined(F_GETPATH)
+    char buffer[MAXPATHLEN]{};
+    if (::fcntl(file, F_GETPATH, buffer) != 0) return host_error::from_errno(errno);
+    name.assign(buffer, std::find(std::begin(buffer), std::end(buffer), '\0'));
+#elif defined(__FreeBSD__) && defined(F_KINFO)
+    struct kinfo_file info{};
+    info.kf_structsize = sizeof(info);
+    if (::fcntl(file, F_KINFO, &info) != 0) return host_error::from_errno(errno);
+    name.assign(info.kf_path, std::find(std::begin(info.kf_path), std::end(info.kf_path), '\0'));
 #else
-    if (!prefixes.empty()) return host_error::unsupported;
+    (void)file;
+    return host_error::unsupported;
 #endif
+    return name.starts_with('/') && path_permitted(resolved_name(name), prefixes) ?
+        0 : host_error::capability_denied;
 #endif
-    if (!prefixes.empty()) {
-        // Parse the canonical name reported for the handle without opening or
-        // resolving it again. ResolvedPath::within applies Windows case rules.
-        ResolvedPath actual;
-        std::size_t start = 0;
+}
+
+#if defined(__linux__)
+// Opens `candidate`, a name resolve_path gave, as an O_PATH handle. The
+// handle names the object without opening it, so a FIFO or device is not
+// opened. The name has no symbolic link once resolved, and openat2 with
+// RESOLVE_NO_SYMLINKS refuses one in any component (ELOOP): a directory
+// swapped for a link after the check cannot redirect the open. Without
+// openat2 (ENOSYS before Linux 5.6, or EPERM from a seccomp filter) the
+// O_PATH open follows such a link in a directory component, and the
+// descriptor-to-path check of the handle rejects where it leads before
+// anything is opened for reading.
+inline platform::native_file open_name(const std::string& candidate) {
+#if defined(SYS_openat2) && defined(RESOLVE_NO_SYMLINKS)
+    open_how how{};
+    how.flags = O_PATH | O_CLOEXEC;
+    how.resolve = RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS;
+    const auto opened = ::syscall(SYS_openat2, AT_FDCWD, candidate.c_str(), &how, sizeof how);
+    if (opened >= 0 || (errno != ENOSYS && errno != EPERM)) return static_cast<platform::native_file>(opened);
+#endif
+    return ::open(candidate.c_str(), O_PATH | O_CLOEXEC | O_NOFOLLOW);
+}
+#endif
+
+inline std::uint32_t read(const Capabilities& capabilities, const std::vector<ResolvedPath>& prefixes,
+                          std::string& path) {
+    if (path.empty()) return 0;
+    if (!capabilities.fs) return host_error::capability_denied;
+    if (!usable_text(path)) return host_error::invalid_input;
 #ifdef _WIN32
-        if (final.starts_with("//")) {
-            const auto share = final.find('/', final.find('/', 2) + 1);
-            actual.components.push_back(final.substr(0, share));
-            start = share == std::string::npos ? final.size() : share + 1;
+    const auto separator = [](char c) { return c == '\\' || c == '/'; };
+    if (path.size() >= 2 && separator(path[0]) && separator(path[1])) return host_error::invalid_input;
+    if (const auto error = windows_path_error(path)) return error;
+    auto wide = platform::try_to_utf16(path);
+    if (!wide) return host_error::invalid_input;
+    if (const auto error = resolve_local_path(*wide)) return error;
+    const auto absolute = L"\\\\?\\" + *wide;
+    if (!prefixes.empty()) {
+        std::wstring canonical(MAX_PATH, L'\0');
+        for (;;) {
+            const auto size = ::GetLongPathNameW(absolute.c_str(), canonical.data(), static_cast<DWORD>(canonical.size()));
+            if (!size) return host_error::from_win32(::GetLastError());
+            if (size < canonical.size()) { canonical.resize(size); break; }
+            canonical.resize(size);
         }
-#endif
-        while (start < final.size()) {
-            const auto end = final.find('/', start);
-            if (end != start) actual.components.push_back(final.substr(start, end - start));
-            if (end == std::string::npos) break;
-            start = end + 1;
-        }
-        if (std::none_of(prefixes.begin(), prefixes.end(), [&](const auto& prefix) { return actual.within(prefix); }))
-            return host_error::capability_denied;
+        if (const auto error = windows_name_error(std::move(canonical), prefixes)) return error;
     }
+    const platform::UniqueFile file(::CreateFileW(absolute.c_str(), GENERIC_READ, share_all, nullptr, OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN, nullptr));
+    if (!file) return host_error::from_win32(::GetLastError());
+    BY_HANDLE_FILE_INFORMATION info{};
+    if (::GetFileType(file.get()) != FILE_TYPE_DISK) return host_error::invalid_input;
+    if (!::GetFileInformationByHandle(file.get(), &info)) return host_error::from_win32(::GetLastError());
+    if (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))
+        return host_error::invalid_input;
+    if (const auto error = opened_path_error(file.get(), prefixes)) return error;
+#else
+    std::string candidate = path;
+    if (!prefixes.empty()) {
+#if !defined(__linux__) && !defined(F_GETPATH) && !(defined(__FreeBSD__) && defined(F_KINFO))
+        // No descriptor-to-path facility (for example OpenBSD): the opened
+        // object cannot be checked against the prefixes.
+        return host_error::unsupported;
+#else
+        const auto resolved = resolve_path(path, true);
+        if (resolved.error) return resolved.error;
+        if (!path_permitted(resolved, prefixes)) return host_error::capability_denied;
+        candidate = resolved.text();
+#endif
+    }
+    // Check the kind before opening, so a FIFO or device is not opened.
+    // This also preserves lookup failures such as a trailing slash on a file.
+    struct stat before{};
+    if (::stat(path.c_str(), &before) != 0) return host_error::from_errno(errno);
+    if (!S_ISREG(before.st_mode)) return host_error::invalid_input;
+    platform::UniqueFile file;
+#if defined(__linux__)
+    if (!prefixes.empty()) {
+        // docs/runtime/NVM.md, "TLS credential files": check the object the
+        // resolved name leads to now, through a handle that opens nothing,
+        // and only then open that same object for reading.
+        const platform::UniqueFile name(open_name(candidate));
+        if (!name) return errno == ELOOP ? host_error::capability_denied : host_error::from_errno(errno);
+        struct stat named{};
+        if (::fstat(name.get(), &named) != 0) return host_error::from_errno(errno);
+        if (!S_ISREG(named.st_mode)) return host_error::invalid_input;
+        if (named.st_nlink == 0) return host_error::capability_denied;
+        if (const auto error = opened_path_error(name.get(), prefixes)) return error;
+        const auto handle = "/proc/self/fd/" + std::to_string(name.get());
+        file = platform::UniqueFile(::open(handle.c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK));
+        if (!file) return host_error::from_errno(errno);
+        struct stat info{};
+        if (::fstat(file.get(), &info) != 0) return host_error::from_errno(errno);
+        if (info.st_dev != named.st_dev || info.st_ino != named.st_ino) return host_error::capability_denied;
+    } else
+#else
+    if (!prefixes.empty()) {
+        // Without an open that refuses links in every component, check the
+        // resolved name itself. A directory swapped between this check and
+        // the open can still redirect it; the descriptor check below then
+        // rejects the object, but it has been opened (docs/runtime/NVM.md).
+        struct stat resolved{};
+        if (::stat(candidate.c_str(), &resolved) != 0) return host_error::from_errno(errno);
+        if (!S_ISREG(resolved.st_mode)) return host_error::invalid_input;
+    }
+#endif
+    {
+        auto flags = O_RDONLY | O_CLOEXEC | O_NONBLOCK;
+        if (!prefixes.empty()) {
+            flags |= O_NOFOLLOW;
+#ifdef O_NOFOLLOW_ANY
+            flags |= O_NOFOLLOW_ANY; // macOS 11: no link in any component.
+#endif
+        }
+        file = platform::UniqueFile(::open(candidate.c_str(), flags));
+        if (!file) return host_error::from_errno(errno);
+    }
+    struct stat info{};
+    if (::fstat(file.get(), &info) != 0) return host_error::from_errno(errno);
+    if (!S_ISREG(info.st_mode)) return host_error::invalid_input;
+    if (!prefixes.empty()) {
+        if (info.st_nlink == 0) return host_error::capability_denied;
+        if (const auto error = opened_path_error(file.get(), prefixes)) return error;
+    }
+#endif
     constexpr std::size_t limit = 16 * 1024 * 1024;
     std::string bytes;
     std::array<char, 8192> buffer;

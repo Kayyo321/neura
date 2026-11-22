@@ -2,24 +2,27 @@
 // a client stream that verifies its peer, and a server stream accepted from
 // a TCP listener, both with ALPN. Built with OpenSSL 4.1 when the build has
 // NEURA_ENABLE_SERVER_TLS (NEURA_NVM_TLS); otherwise each call with the net
-// capability answers Unsupported (13). None of these services overlaps.
+// capability answers Unsupported (13). The HTTP/2 adapter uses cancellable
+// variants of client connect and stream I/O.
 
 #include "provider_internal.hpp"
 #include "client_socket.hpp"
 #include "platform/socket.hpp"
+#include "tls_internal.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <climits>
 #include <cstring>
-#include <condition_variable>
 #include <mutex>
-#include <thread>
-#include <atomic>
 #include <memory>
 #include <optional>
 #include <string>
+#include <thread>
+#include <utility>
+#include <variant>
 
 #ifdef NEURA_NVM_TLS
 #ifdef _WIN32
@@ -29,16 +32,30 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
-#if !defined(SO_NOSIGPIPE)
-#include <pthread.h>
-#include <signal.h>
-#endif
+#include <unistd.h>
 #endif
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 #include <openssl/x509v3.h>
+#include "dtls_internal.hpp"
+#include "sigpipe_guard.hpp"
 #include "tls_material.hpp"
 #endif
+
+namespace neura::nvm::tls_internal {
+namespace {
+std::atomic<std::int64_t> handshake_bound{0};
+} // namespace
+
+std::int64_t accept_handshake_bound() {
+    const auto bound = handshake_bound.load(std::memory_order_relaxed);
+    return bound > 0 ? bound : default_transfer_timeout;
+}
+
+void set_accept_handshake_bound_for_testing(std::int64_t nanos) {
+    handshake_bound.store(nanos, std::memory_order_relaxed);
+}
+} // namespace neura::nvm::tls_internal
 
 namespace neura::nvm::provider {
 
@@ -73,6 +90,25 @@ HostSignature peer_chain() {
     return signature("neura.net.tls.peer_chain", {int64()}, HostType(Kind::List, std::vector<HostType>{byte_list()}));
 }
 
+HostSignature connect_overlapped() {
+    auto sig = connect_extended();
+    sig.name = "neura.net.tls.connect_overlapped";
+    sig.version = 1;
+    return sig;
+}
+
+HostSignature read_overlapped() {
+    return signature("neura.net.tls.read_overlapped", {int64(), int32(), int64()}, byte_list());
+}
+
+HostSignature write_overlapped() {
+    return signature("neura.net.tls.write_overlapped", {int64(), byte_list(), int64()}, int32());
+}
+
+HostSignature shutdown_write_overlapped() {
+    return signature("neura.net.tls.shutdown_write_overlapped", {int64(), int64()}, void_type());
+}
+
 HostSignature engine_open() {
     return signature("neura.net.tls.engine.open", {boolean(), text(), text_list(), text(), text(), text()}, int64());
 }
@@ -105,44 +141,12 @@ HostSignature engine_release() {
 
 #ifdef NEURA_NVM_TLS
 
-namespace {
+// OpenSSL's socket BIO can raise SIGPIPE on a closed socket: TLS writes run
+// under SocketWrites (sigpipe_guard.hpp).
 
-// OpenSSL's socket BIO can raise SIGPIPE on a closed socket. Suppress it only
-// on the host-calling thread, preserving a signal that was already pending.
-class SocketWrites {
-public:
-#if !defined(_WIN32) && !defined(SO_NOSIGPIPE)
-    SocketWrites() {
-        sigemptyset(&blocked_);
-        sigaddset(&blocked_, SIGPIPE);
-        changed_ = pthread_sigmask(SIG_BLOCK, &blocked_, &saved_) == 0;
-        sigset_t pending;
-        pending_ = sigpending(&pending) != 0 || sigismember(&pending, SIGPIPE) == 1;
-    }
+constexpr std::int64_t default_transfer_timeout = tls_internal::default_transfer_timeout;
 
-    ~SocketWrites() {
-        if (!changed_) return;
-        if (!pending_) {
-            timespec zero{};
-            while (sigtimedwait(&blocked_, nullptr, &zero) < 0 && errno == EINTR) {}
-        }
-        pthread_sigmask(SIG_SETMASK, &saved_, nullptr);
-    }
-
-private:
-    sigset_t blocked_{};
-    sigset_t saved_{};
-    bool changed_ = false;
-    bool pending_ = false;
-#else
-    SocketWrites() = default;
-    ~SocketWrites() = default;
-#endif
-};
-
-} // namespace
-
-constexpr std::int64_t default_transfer_timeout = 30'000'000'000LL;
+struct TlsIo;
 
 struct TlsStream {
     NativeSocket descriptor = invalid_native_socket;
@@ -151,7 +155,8 @@ struct TlsStream {
     SSL_CTX* context = nullptr;
     SSL* ssl = nullptr;
     // Datagram engines have their own addressed BIO and (on a server) listener.
-    // They never expose a native descriptor or enter the stream TLS services.
+    // They never expose a native descriptor; of the stream services only
+    // peer_chain accepts them.
     bool datagram = false;
     SSL* listener = nullptr;
     BIO* datagram_wire = nullptr;
@@ -160,11 +165,17 @@ struct TlsStream {
     std::uint32_t terminal_error = 0;
     bool key_update_started = false;
     bool datagram_handshake_complete = false;
+    int datagram_write_retries = 0;
     bool write_closed = false;
+    bool overlapping = false;
+    std::weak_ptr<TlsIo> pending_io;
     std::int64_t write_timeout = default_transfer_timeout;
     ~TlsStream() {
         if (ssl) {
-            if (SSL_is_init_finished(ssl) && descriptor != invalid_native_socket) {
+            // A failed or still pending write can leave a partial record; never
+            // append close_notify to it.
+            if (!terminal_error && pending_io.expired() && SSL_is_init_finished(ssl) &&
+                descriptor != invalid_native_socket) {
                 [[maybe_unused]] SocketWrites protection;
                 SSL_shutdown(ssl);
             }
@@ -214,45 +225,61 @@ int wait_for(NativeSocket descriptor, short events, Clock::time_point deadline) 
     }
 }
 
+// One nonblocking SSL call, including the socket direction OpenSSL needs next.
+struct TlsStep {
+    int result;
+    short events = 0;
+    std::uint32_t error = 0;
+};
+
+template<typename Operation>
+TlsStep step_tls(SSL* ssl, Operation operation) {
+    ERR_clear_error();
+#ifdef _WIN32
+    WSASetLastError(0);
+#else
+    errno = 0;
+#endif
+    int result = 0;
+    platform::SocketError last_error;
+    int reason = 0;
+    {
+        [[maybe_unused]] SocketWrites protection;
+        result = operation();
+        last_error = platform::last_socket_error();
+        if (result <= 0) reason = SSL_get_error(ssl, result);
+    }
+    if (result > 0) return {result};
+    if (reason == SSL_ERROR_WANT_READ) return {0, platform::poll_in};
+    if (reason == SSL_ERROR_WANT_WRITE) return {0, platform::poll_out};
+    return {0, 0, reason == SSL_ERROR_ZERO_RETURN ? 0 : reason == SSL_ERROR_SYSCALL && last_error.code != 0
+        ? socket_error(last_error.code) : host_error::connection_reset};
+}
+
 // Repeats an SSL operation until it completes, waiting for the socket as it asks.
 template<typename Operation>
-int drive(SSL* ssl, NativeSocket descriptor, Clock::time_point deadline, std::uint32_t& error, Operation operation) {
+int drive(SSL* ssl, NativeSocket descriptor, Clock::time_point deadline, std::uint32_t& error, Operation operation,
+          const std::atomic<bool>* cancelled = nullptr) {
     for (;;) {
+        if (cancelled && cancelled->load()) {
+            error = host_error::cancelled;
+            return 0;
+        }
         if (deadline != Clock::time_point::max() && Clock::now() >= deadline) {
             error = host_error::timed_out;
             return 0;
         }
-        ERR_clear_error();
-#ifdef _WIN32
-        WSASetLastError(0);
-#else
-        errno = 0;
-#endif
-        // Preserve the socket error across the signal-mask guard's destructor.
-        int result = 0;
-        platform::SocketError last_error;
-        {
-            [[maybe_unused]] SocketWrites protection;
-            result = operation();
-            last_error = platform::last_socket_error();
+        const auto step = step_tls(ssl, operation);
+        if (step.events == 0) {
+            error = step.error;
+            return step.result;
         }
-        if (result > 0) return result;
-        const int reason = SSL_get_error(ssl, result);
-        short events = 0;
-        if (reason == SSL_ERROR_WANT_READ) events = platform::poll_in;
-        else if (reason == SSL_ERROR_WANT_WRITE) events = platform::poll_out;
-        else {
-            error = reason == SSL_ERROR_ZERO_RETURN ? 0 : reason == SSL_ERROR_SYSCALL && last_error.code != 0
-                ? socket_error(last_error.code) : host_error::connection_reset;
-            return 0;
-        }
-        const int ready = wait_for(descriptor, events, deadline);
-        if (ready == 0) {
-            error = host_error::timed_out;
-            return 0;
-        }
-        if (ready < 0) {
-            error = socket_error(platform::last_socket_error().code);
+        if (cancelled) {
+            if (client_socket::wait(descriptor, step.events, deadline, error, cancelled) <= 0) return 0;
+        } else {
+            const int ready = wait_for(descriptor, step.events, deadline);
+            if (ready > 0) continue;
+            error = ready == 0 ? host_error::timed_out : socket_error(platform::last_socket_error().code);
             return 0;
         }
     }
@@ -284,11 +311,6 @@ bool prepare_socket(NativeSocket descriptor) {
 #else
     return true;
 #endif
-}
-
-NativeSocket connect_tcp(const std::string& host, std::int32_t port, Clock::time_point deadline,
-                         std::uint32_t& error) {
-    return client_socket::connect(host, port, deadline, error);
 }
 
 bool numeric_host(const std::string& host) {
@@ -377,6 +399,11 @@ bool same_datagram_address(const BIO_ADDR* left, const BIO_ADDR* right) {
 
 // Zero is bounded as well: a quiet/lost peer cannot retain the scheduler indefinitely.
 constexpr std::int64_t dtls_default_timeout = 30000000000LL;
+constexpr int dtls_read_step = 1;
+// Abandons the pending operation after a failure outside the host (a socket
+// receive or send error): a read leaves the association usable; any other
+// unfinished operation may hold partial engine state and ends the engine.
+constexpr int dtls_abandon_step = 5;
 
 std::int64_t datagram_wait(TlsStream& stream) {
     auto wait = std::max<std::int64_t>(1,
@@ -395,9 +422,171 @@ std::int64_t datagram_wait(TlsStream& stream) {
     return wait;
 }
 
+using ConnectResult = std::variant<HostCompletion, std::unique_ptr<TlsStream>>;
+
+ConnectResult open_client(const HostRequest& request, const Capabilities& capabilities,
+                          const std::vector<ResolvedPath>& prefixes, Clock::time_point deadline,
+                          bool retain_deadline, const std::atomic<bool>* cancelled = nullptr) {
+    const auto& args = request.arguments;
+    const auto& host = args.at(0).bytes;
+    const auto port = as_int32(args.at(1));
+    const auto timeout = as_int64(args.at(2));
+    const auto& name = args.at(3).bytes.empty() ? host : args.at(3).bytes;
+    const auto alpn = alpn_wire(args.at(4));
+    auto ca_file = args.at(5).bytes;
+    const bool extended = args.size() > 6;
+    const auto low = extended ? as_int32(args.at(6)) : 12;
+    const auto high = extended ? as_int32(args.at(7)) : 13;
+    auto certificate = extended ? args.at(8).bytes : std::string();
+    auto key = extended ? args.at(9).bytes : std::string();
+    const bool kernel = extended && as_bool(args.at(10));
+    if (!usable_text(host) || !usable_text(name) || port < 1 || port > 65535 || timeout < 0 || !alpn ||
+        !valid_versions(low, high) || certificate.empty() != key.empty()) return fail(host_error::invalid_input);
+    if (const auto error = permitted_paths(capabilities, prefixes, {&ca_file, &certificate, &key})) return fail(error);
+    if (!cancelled) deadline = deadline_of(timeout == 0 ? default_transfer_timeout : timeout);
+    auto stream = std::make_unique<TlsStream>();
+    stream->overlapping = cancelled != nullptr;
+    if (timeout > 0) stream->write_timeout = timeout;
+    if (!init_context(*stream, false, low, high, kernel)) return fail(host_error::other);
+    SSL_CTX_set_verify(stream->context, SSL_VERIFY_PEER, nullptr);
+    if (!load_trust(stream->context, ca_file)) {
+        if (ca_file.empty()) return fail(host_error::other);
+        return fail(extended ? host_error::invalid_input : host_error::not_found);
+    }
+    if (!certificate.empty() && !load_identity(stream->context, certificate, key)) return fail(host_error::invalid_input);
+    std::uint32_t error = 0;
+    stream->descriptor = client_socket::connect(host, port, deadline, error, cancelled);
+    if (stream->descriptor == invalid_native_socket) return fail(error);
+    if (!attach_socket(*stream)) return fail(host_error::other);
+    if (!set_identity_check(stream->ssl, name)) return fail(host_error::invalid_input);
+    if (!alpn->empty() && SSL_set_alpn_protos(stream->ssl, reinterpret_cast<const unsigned char*>(alpn->data()),
+                                            static_cast<unsigned int>(alpn->size())) != 0) {
+        return fail(host_error::invalid_input);
+    }
+    if (drive(stream->ssl, stream->descriptor, deadline, error, [&] { return SSL_connect(stream->ssl); }, cancelled) <= 0) {
+        if (SSL_get_verify_result(stream->ssl) != X509_V_OK) return fail(host_error::permission_denied);
+        return fail(error ? error : host_error::connection_reset);
+    }
+    if (retain_deadline) stream->deadline = deadline;
+    return stream;
+}
+
+struct TlsConnectState {
+    std::atomic<bool> cancelled{false};
+    std::atomic<bool> finished{false};
+    std::shared_ptr<ExternalSignal> signal = std::make_shared<ExternalSignal>();
+    std::mutex mutex;
+    std::optional<ConnectResult> result;
+
+    void finish(ConnectResult answer) {
+        {
+            std::lock_guard lock(mutex);
+            if (!cancelled.load()) result = std::move(answer);
+        }
+        signal->signal();
+        finished.store(true);
+    }
+
+    std::optional<ConnectResult> take() {
+        std::lock_guard lock(mutex);
+        return std::exchange(result, std::nullopt);
+    }
+
+    void cancel() {
+        cancelled.store(true);
+        // Discard even a successful open if cancellation won before the VM took it.
+        auto discarded = take();
+    }
+};
+
+struct TlsConnectTicket {
+    std::shared_ptr<TlsConnectState> state = std::make_shared<TlsConnectState>();
+    ~TlsConnectTicket() { state->cancel(); }
+};
+
 } // namespace
 
-void add_tls_services(const Adder& add, StandardServices::Tables& tables, const Capabilities& capabilities,
+std::uint64_t current_process() {
+#ifdef _WIN32
+    return ::GetCurrentProcessId();
+#else
+    return static_cast<std::uint64_t>(::getpid());
+#endif
+}
+
+struct TlsConnectJobs {
+    struct Job {
+        std::shared_ptr<TlsConnectState> state;
+        std::jthread worker;
+    };
+    std::vector<Job> entries;
+    const std::uint64_t owner = current_process();
+
+    // A fork child inherits the entries but not their threads: joining one
+    // would wait for a parent thread that never ends here. The child leaves
+    // them alone, as the fetch workers do.
+    bool inherited() const { return owner != current_process(); }
+
+    ~TlsConnectJobs() {
+        if (inherited()) {
+            [[maybe_unused]] const auto* left = new std::vector<Job>(std::move(entries));
+            return;
+        }
+        for (auto& job : entries) job.state->cancel();
+        // Job destruction joins the workers before OpenSSL or the provider's
+        // capability and path configuration can be torn down.
+    }
+};
+
+enum class TlsAction { Read, Write, ShutdownWrite };
+
+struct TlsIo {
+    TlsAction action;
+    Clock::time_point deadline;
+    std::string bytes;
+    short events = platform::poll_in;
+
+    HostCompletion fail_io(TlsStream& stream, std::uint32_t error) const {
+        if (action != TlsAction::Read) stream.terminal_error = error;
+        return fail(error);
+    }
+
+    std::optional<HostCompletion> attempt(TlsStream& stream, bool cancelled) {
+        if (cancelled) return fail_io(stream, host_error::cancelled);
+        if (Clock::now() >= deadline) return fail_io(stream, host_error::timed_out);
+        if (action != TlsAction::Read && stream.write_closed) {
+            return action == TlsAction::ShutdownWrite ? HostCompletion::ok() : fail(host_error::connection_reset);
+        }
+        if (action == TlsAction::Write && bytes.empty()) return HostCompletion::ok(int32_value(0));
+        const auto step = step_tls(stream.ssl, [&] {
+            const int size = static_cast<int>(bytes.size());
+            switch (action) {
+            case TlsAction::Read: return SSL_read(stream.ssl, bytes.data(), size);
+            case TlsAction::Write: return SSL_write(stream.ssl, bytes.data(), size);
+            case TlsAction::ShutdownWrite:
+                // Either 0 or 1 confirms that our own close_notify was sent.
+                const auto sent = SSL_shutdown(stream.ssl);
+                return sent == 0 ? 1 : sent;
+            }
+            return -1;
+        });
+        if (step.events != 0) {
+            events = step.events;
+            return std::nullopt;
+        }
+        if (action == TlsAction::Read && step.error == 0) {
+            bytes.resize(static_cast<std::size_t>(step.result));
+            return HostCompletion::ok(bytes_value(std::move(bytes)));
+        }
+        if (step.result <= 0) return fail_io(stream, step.error ? step.error : host_error::connection_reset);
+        if (action == TlsAction::Write) return HostCompletion::ok(int32_value(step.result));
+        stream.write_closed = true;
+        return HostCompletion::ok();
+    }
+};
+
+void add_tls_services(const Adder& add, const OverlapAdder& cancellable, StandardServices::Tables& tables,
+                      const Capabilities& capabilities,
                       const std::vector<ResolvedPath>& prefixes) {
     auto* state = &tables;
     const auto* granted = &capabilities;
@@ -408,61 +597,84 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
         state->tls.emplace(id, std::unique_ptr<TlsStream, TlsDeleter>(stream.release()));
         return HostCompletion::ok(tuple_value({int64_value(id), bytes_value(selection)}));
     };
-    const auto find = [state](const HostValue& id) -> TlsStream* {
-        const auto found = state->tls.find(as_int64(id));
+    const auto find_stream = [state](std::int64_t id) -> TlsStream* {
+        const auto found = state->tls.find(id);
         return found == state->tls.end() || found->second->datagram ? nullptr : found->second.get();
     };
+    const auto find = [=](const HostValue& id) -> TlsStream* {
+        auto* stream = find_stream(as_int64(id));
+        return stream && !stream->overlapping ? stream : nullptr;
+    };
+    const auto find_overlapped = [=](std::int64_t id) -> TlsStream* {
+        auto* stream = find_stream(id);
+        return stream && stream->overlapping ? stream : nullptr;
+    };
 
-    const auto connect = [=](const HostRequest& request, bool retain_deadline) {
-        if (!granted->net) return denied();
-        const auto& args = request.arguments;
-        const auto& host = args.at(0).bytes;
-        const auto port = as_int32(args.at(1));
-        const auto timeout = as_int64(args.at(2));
-        const auto& name = args.at(3).bytes.empty() ? host : args.at(3).bytes;
-        const auto alpn = alpn_wire(args.at(4));
-        auto ca_file = args.at(5).bytes;
-        const bool extended = args.size() > 6;
-        const auto low = extended ? as_int32(args.at(6)) : 12;
-        const auto high = extended ? as_int32(args.at(7)) : 13;
-        auto certificate = extended ? args.at(8).bytes : std::string();
-        auto key = extended ? args.at(9).bytes : std::string();
-        const bool kernel = extended && as_bool(args.at(10));
-        if (!usable_text(host) || !usable_text(name) || port < 1 || port > 65535 || timeout < 0 || !alpn ||
-            !valid_versions(low, high) || certificate.empty() != key.empty()) return fail(host_error::invalid_input);
-        if (const auto error = permitted_paths(*granted, *allowed_paths, {&ca_file, &certificate, &key})) return fail(error);
+    const auto finish_connect = [=](ConnectResult result) {
+        if (auto* error = std::get_if<HostCompletion>(&result)) return std::move(*error);
         if (state->tls.size() >= max_open_ids) return fail(host_error::other);
-        const auto deadline = deadline_of(timeout == 0 ? default_transfer_timeout : timeout);
-        auto stream = std::make_unique<TlsStream>();
-        if (timeout > 0) stream->write_timeout = timeout;
-        if (!init_context(*stream, false, low, high, kernel)) return fail(host_error::other);
-        SSL_CTX_set_verify(stream->context, SSL_VERIFY_PEER, nullptr);
-        if (!load_trust(stream->context, ca_file)) {
-            if (ca_file.empty()) return fail(host_error::other);
-            return fail(extended ? host_error::invalid_input : host_error::not_found);
-        }
-        if (!certificate.empty() && !load_identity(stream->context, certificate, key)) return fail(host_error::invalid_input);
-        std::uint32_t error = 0;
-        stream->descriptor = connect_tcp(host, port, deadline, error);
-        if (stream->descriptor == invalid_native_socket) return fail(error);
-        if (!attach_socket(*stream)) return fail(host_error::other);
-        if (!set_identity_check(stream->ssl, name)) return fail(host_error::invalid_input);
-        if (!alpn->empty() && SSL_set_alpn_protos(stream->ssl, reinterpret_cast<const unsigned char*>(alpn->data()),
-                                                static_cast<unsigned int>(alpn->size())) != 0) {
-            return fail(host_error::invalid_input);
-        }
-        if (drive(stream->ssl, stream->descriptor, deadline, error, [&] { return SSL_connect(stream->ssl); }) <= 0) {
-            if (SSL_get_verify_result(stream->ssl) != X509_V_OK) return fail(host_error::permission_denied);
-            return fail(error ? error : host_error::connection_reset);
-        }
-        if (retain_deadline) stream->deadline = deadline;
-        return remember(std::move(stream));
+        return remember(std::get<std::unique_ptr<TlsStream>>(std::move(result)));
+    };
+    const auto connect = [=](const HostRequest& request, bool retain_deadline, bool overlapping = false) {
+        if (!granted->net) return denied();
+        if (state->tls.size() >= max_open_ids) return fail(host_error::other);
+        const auto timeout = as_int64(request.arguments.at(2));
+        if (overlapping && timeout <= 0) return fail(host_error::invalid_input);
+        const std::atomic<bool> running{false};
+        return finish_connect(open_client(request, *granted, *allowed_paths, deadline_of(timeout), retain_deadline,
+                                          overlapping ? &running : nullptr));
     };
     const auto connect_stream = [=](const HostRequest& request) { return connect(request, false); };
     add(signature("neura.net.tls.connect", {text(), int32(), int64(), text(), text_list(), text()}, stream_result()),
         connect_stream);
     add(connect_extended(), connect_stream);
     add(connect_deadline(), [=](const HostRequest& request) { return connect(request, true); });
+    cancellable(connect_overlapped(), [=](const HostRequest& request) { return connect(request, false, true); },
+        [=](const HostRequest& request) -> std::variant<HostCompletion, PendingOperation> {
+            if (!granted->net) return denied();
+            const auto timeout = as_int64(request.arguments.at(2));
+            if (timeout <= 0) return fail(host_error::invalid_input);
+            if (state->tls.size() >= max_open_ids) return fail(host_error::other);
+            const auto deadline = deadline_of(timeout);
+            try {
+                if (!state->tls_connect_jobs || state->tls_connect_jobs->inherited())
+                    state->tls_connect_jobs = std::make_shared<TlsConnectJobs>();
+                auto& jobs = state->tls_connect_jobs->entries;
+                std::erase_if(jobs, [](const auto& job) { return job.state->finished.load(); });
+                if (jobs.size() >= 16) return fail(host_error::busy);
+                auto ticket = std::make_shared<TlsConnectTicket>();
+                PendingOperation pending;
+                pending.wait_source = ExternalWait{ticket->state->signal};
+                pending.deadline = deadline_after(request.now, timeout);
+                pending.attempt = [=](bool cancelled) -> std::optional<HostCompletion> {
+                    if (auto result = ticket->state->take()) {
+                        if (Clock::now() >= deadline) return fail(host_error::timed_out);
+                        return finish_connect(std::move(*result));
+                    }
+                    if (cancelled) return cancelled_answer();
+                    return std::nullopt;
+                };
+                pending.expire = [] { return fail(host_error::timed_out); };
+                auto& job = jobs.emplace_back(ticket->state, std::jthread{});
+                try {
+                    job.worker = std::jthread([=, work = ticket->state, owned = request] {
+                        ConnectResult result = fail(host_error::other);
+                        try {
+                            result = open_client(owned, *granted, *allowed_paths, deadline, false, &work->cancelled);
+                        } catch (...) {
+                            // Keep the worker boundary exception-safe for the VM.
+                        }
+                        work->finish(std::move(result));
+                    });
+                } catch (...) {
+                    jobs.pop_back();
+                    throw;
+                }
+                return pending;
+            } catch (...) {
+                return fail(host_error::other);
+            }
+        });
 
     const auto accept = [=](const HostRequest& request) {
         if (!granted->net || !granted->fs) return denied();
@@ -501,8 +713,13 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
             return fail(socket_error(platform::last_socket_error().code));
         }
         if (!attach_socket(*stream)) return fail(host_error::other);
+        // Zero waits for a client without limit, but a connected peer that
+        // stalls the handshake is still bounded by the transfer default.
+        const auto handshake_deadline = tls_internal::accepted_handshake_deadline(
+            timeout, deadline, Clock::now(), tls_internal::accept_handshake_bound());
         std::uint32_t error = 0;
-        if (drive(stream->ssl, stream->descriptor, deadline, error, [&] { return SSL_accept(stream->ssl); }) <= 0) {
+        if (drive(stream->ssl, stream->descriptor, handshake_deadline, error,
+                  [&] { return SSL_accept(stream->ssl); }) <= 0) {
             if (SSL_get_verify_result(stream->ssl) != X509_V_OK ||
                 ERR_GET_REASON(ERR_peek_last_error()) == SSL_R_PEER_DID_NOT_RETURN_A_CERTIFICATE) {
                 return fail(host_error::permission_denied);
@@ -598,11 +815,20 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
         const auto& inbound = args.at(2).bytes;
         const auto& message = args.at(5).bytes;
         const auto timeout = as_int64(args.at(6));
-        if (found == state->tls.end() || !found->second->datagram || operation < 0 || operation > 4 ||
+        if (found == state->tls.end() || !found->second->datagram || operation < 0 || operation > dtls_abandon_step ||
             inbound.size() > 65535 || message.size() > 16384 || timeout < 0 ||
             (operation != 2 && !message.empty())) return fail(host_error::invalid_input);
         auto& stream = *found->second;
         if (stream.terminal_error) return fail(stream.terminal_error);
+        if (operation == dtls_abandon_step) {
+            if (!inbound.empty()) return fail(host_error::invalid_input);
+            if (stream.pending_operation != -1 && stream.pending_operation != dtls_read_step)
+                stream.terminal_error = host_error::connection_reset;
+            stream.pending_operation = -1;
+            stream.key_update_started = false;
+            return HostCompletion::ok(tuple_value({int32_value(1), tuple_value({}), bytes_value({}), int64_value(0),
+                                                   scalar(stream.terminal_error)}));
+        }
         // DTLS application records are not fragmented like handshake messages.
         // Reject an oversized message before changing the pending operation.
         if (operation == 2 && (!stream.ssl || !stream.datagram_handshake_complete ||
@@ -611,19 +837,24 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
         if (stream.pending_operation == -1) {
             stream.pending_operation = operation;
             stream.deadline = deadline_of(timeout ? timeout : dtls_default_timeout);
+            stream.datagram_write_retries = 0;
         }
         if (stream.pending_operation != operation) return fail(host_error::invalid_input);
-        if (Clock::now() >= stream.deadline) {
-            stream.terminal_error = host_error::timed_out;
-            return fail(stream.terminal_error);
-        }
         // Compare parsed numeric addresses, so IPv6 spelling cannot bypass filtering.
-        if (!inbound.empty()) {
-            auto sender = datagram_address(args.at(3).bytes, as_int32(args.at(4)));
-            if (same_datagram_address(sender.get(), stream.datagram_peer) &&
-                BIO_write(stream.datagram_wire, inbound.data(), static_cast<int>(inbound.size())) !=
-                    static_cast<int>(inbound.size())) return fail(host_error::other);
+        auto sender = inbound.empty() ? DatagramAddress(nullptr, BIO_ADDR_free)
+                                      : datagram_address(args.at(3).bytes, as_int32(args.at(4)));
+        const bool admitted = sender && same_datagram_address(sender.get(), stream.datagram_peer);
+        const bool expired = Clock::now() >= stream.deadline;
+        // A read that expires leaves the association usable; an unfinished
+        // handshake, write, close or key update does not. A peer datagram
+        // that arrived by the deadline is still given to the read once.
+        if (expired && (operation != dtls_read_step || !admitted)) {
+            if (operation == dtls_read_step) stream.pending_operation = -1;
+            else stream.terminal_error = host_error::timed_out;
+            return fail(host_error::timed_out);
         }
+        if (admitted && BIO_write(stream.datagram_wire, inbound.data(), static_cast<int>(inbound.size())) !=
+                            static_cast<int>(inbound.size())) return fail(host_error::other);
         ERR_clear_error();
         std::uint32_t failure = 0;
         int status = 0;
@@ -652,7 +883,7 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
             if (!failure) {
                 switch (operation) {
                 case 0: result = SSL_do_handshake(ssl); break;
-                case 1:
+                case dtls_read_step:
                     plaintext.resize(16384);
                     result = SSL_read(ssl, plaintext.data(), static_cast<int>(plaintext.size()));
                     plaintext.resize(result > 0 ? static_cast<std::size_t>(result) : 0);
@@ -681,7 +912,7 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
                     if (ERR_peek_error() == 0 && (reason == SSL_ERROR_WANT_READ || write_retry)) {
                         status = 0;
                         retry_output = write_retry;
-                    } else if (reason == SSL_ERROR_ZERO_RETURN && operation == 1) status = 2;
+                    } else if (reason == SSL_ERROR_ZERO_RETURN && operation == dtls_read_step) status = 2;
                     else if (SSL_get_verify_result(ssl) != X509_V_OK ||
                              ERR_GET_REASON(ERR_peek_last_error()) == SSL_R_PEER_DID_NOT_RETURN_A_CERTIFICATE)
                         failure = host_error::permission_denied;
@@ -691,7 +922,7 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
                 // A requested reciprocal update may be queued while read asks
                 // for application input. Flush it now instead of waiting for
                 // an application write. The read itself still needs input.
-                if (!failure && operation == 1 && status == 0 &&
+                if (!failure && operation == dtls_read_step && status == 0 &&
                     SSL_get_key_update_type(ssl) != SSL_KEY_UPDATE_NONE) {
                     const auto updated = SSL_do_handshake(ssl);
                     if (updated <= 0) {
@@ -717,13 +948,28 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
             total += size;
             outgoing.push_back(bytes_value(std::move(packet)));
         }
-        // Draining output freed BIO capacity: resume a parked write before
-        // waiting for network input. Zero is an immediate retry, never infinity.
-        const auto wait = retry_output ? 0 : datagram_wait(stream);
+        // Draining output freed BIO capacity: resume a parked write at once.
+        // When OpenSSL keeps asking to retry, wait on the socket with backoff.
+        auto wait = datagram_wait(stream);
+        if (retry_output) {
+            wait = dtls_internal::write_retry_wait(stream.datagram_write_retries, !outgoing.empty(), wait);
+            stream.datagram_write_retries = std::min(stream.datagram_write_retries + 1, 1000);
+        } else {
+            stream.datagram_write_retries = 0;
+        }
         if (failure) stream.terminal_error = failure;
         else if (status != 0) {
             stream.pending_operation = -1;
             stream.key_update_started = false;
+        } else if (expired) {
+            // The late datagram completed no message (an ACK, a retransmission).
+            // Its answer, such as an ACK or the reply to a KeyUpdate, is
+            // already drained from the BIO: return it with the timeout in the
+            // failure field, which the caller sends before reporting. The
+            // read leaves the association usable, so this is not terminal.
+            stream.pending_operation = -1;
+            return HostCompletion::ok(tuple_value({int32_value(0), tuple_value(std::move(outgoing)), bytes_value({}),
+                                                   int64_value(wait), scalar(host_error::timed_out)}));
         }
         return HostCompletion::ok(tuple_value({int32_value(status), tuple_value(std::move(outgoing)),
                                                bytes_value(std::move(plaintext)), int64_value(wait), scalar(failure)}));
@@ -849,9 +1095,13 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
 
     add(peer_chain(), [=](const HostRequest& request) {
         if (!granted->net) return denied();
-        const auto* stream = find(request.arguments.at(0));
-        if (!stream) return fail(host_error::invalid_input);
-        if (!SSL_is_init_finished(stream->ssl) ||
+        // Streams, buffer engines and DTLS engines (after their handshake).
+        const auto found = state->tls.find(as_int64(request.arguments.at(0)));
+        if (found == state->tls.end()) return fail(host_error::invalid_input);
+        const auto* stream = found->second.get();
+        if (stream->terminal_error) return fail(stream->terminal_error);
+        if (!stream->ssl || (stream->datagram && !stream->datagram_handshake_complete) ||
+            !SSL_is_init_finished(stream->ssl) ||
             !(SSL_get_verify_mode(stream->ssl) & SSL_VERIFY_PEER) ||
             SSL_get_verify_result(stream->ssl) != X509_V_OK) return fail(host_error::permission_denied);
         const auto* chain = SSL_get0_verified_chain(stream->ssl);
@@ -876,6 +1126,7 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
         if (!granted->net) return denied();
         const auto* stream = find(request.arguments.at(0));
         if (!stream || stream->descriptor == invalid_native_socket) return fail(host_error::invalid_input);
+        if (stream->terminal_error) return fail(stream->terminal_error);
         sockaddr_storage address{};
 #ifdef _WIN32
         int length = sizeof address;
@@ -901,15 +1152,22 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
         auto* stream = find(request.arguments.at(0));
         const auto timeout = as_int64(request.arguments.at(1));
         if (!stream || stream->descriptor == invalid_native_socket || timeout < 0) return fail(host_error::invalid_input);
+        if (stream->terminal_error) return fail(stream->terminal_error);
         if (stream->write_closed) return HostCompletion::ok();
         std::uint32_t error = 0;
-        const auto deadline = std::min(stream->deadline, deadline_of(timeout));
+        // Zero selects the 30-second transfer default, never an unlimited wait.
+        const auto deadline = std::min(stream->deadline,
+                                       deadline_of(timeout == 0 ? default_transfer_timeout : timeout));
         const auto notified = drive(stream->ssl, stream->descriptor, deadline, error, [&] {
             const auto result = SSL_shutdown(stream->ssl);
             // 0 means our close_notify was sent and the peer's is still outstanding.
             return result == 0 ? 1 : result;
         });
-        if (notified <= 0) return fail(error ? error : host_error::connection_reset);
+        if (notified <= 0) {
+            // A close_notify record may be partly sent; the stream cannot continue.
+            stream->terminal_error = error ? error : host_error::connection_reset;
+            return fail(stream->terminal_error);
+        }
         stream->write_closed = true;
         return HostCompletion::ok();
     });
@@ -918,6 +1176,7 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
         if (!granted->net) return denied();
         const auto* stream = find(request.arguments.at(0));
         if (!stream || stream->descriptor == invalid_native_socket) return fail(host_error::invalid_input);
+        if (stream->terminal_error) return fail(stream->terminal_error);
         return BIO_get_ktls_send(SSL_get_wbio(stream->ssl)) && BIO_get_ktls_recv(SSL_get_rbio(stream->ssl))
             ? HostCompletion::ok() : fail(host_error::unsupported);
     });
@@ -928,6 +1187,7 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
         const auto max = as_int32(request.arguments.at(1));
         const auto timeout = as_int64(request.arguments.at(2));
         if (!stream || stream->descriptor == invalid_native_socket || max < 1 || timeout < 0) return fail(host_error::invalid_input);
+        if (stream->terminal_error) return fail(stream->terminal_error);
         std::string bytes(std::min<std::size_t>(static_cast<std::size_t>(max), max_read_bytes), '\0');
         std::uint32_t error = 0;
         const auto deadline = std::min(stream->deadline, deadline_of(timeout == 0 ? default_transfer_timeout : timeout));
@@ -950,22 +1210,97 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
             : stream ? stream->write_timeout : 0;
         if (timeout <= 0) return fail(host_error::invalid_input);
         if (!stream || stream->descriptor == invalid_native_socket) return fail(host_error::invalid_input);
+        if (stream->terminal_error) return fail(stream->terminal_error);
         if (stream->write_closed) return fail(host_error::connection_reset);
         if (bytes.empty()) return HostCompletion::ok(int32_value(0));
         const auto size = static_cast<int>(std::min<std::size_t>(bytes.size(), INT32_MAX));
         std::uint32_t error = 0;
         const int sent = drive(stream->ssl, stream->descriptor, std::min(stream->deadline, deadline_of(timeout)), error,
                                [&] { return SSL_write(stream->ssl, bytes.data(), size); });
-        if (sent <= 0) return fail(error ? error : host_error::connection_reset);
+        if (sent <= 0) {
+            // OpenSSL may be partway through a record and requires the same
+            // buffer on retry, which ends with this call: the stream is done.
+            stream->terminal_error = error ? error : host_error::connection_reset;
+            return fail(stream->terminal_error);
+        }
         return HostCompletion::ok(int32_value(sent));
     };
     add(signature("neura.net.tls.write", {int64(), byte_list()}, int32()), write);
     add({"neura.net.tls.write", 2, {int64(), byte_list(), int64()}, int32(), uint32()}, write);
 
+    const auto register_io = [=, &cancellable](HostSignature service, TlsAction action) {
+        const auto prepare = [=](const HostRequest& request, TlsStream& stream) -> std::variant<HostCompletion, TlsIo> {
+            const auto& args = request.arguments;
+            const auto timeout = as_int64(args.at(action == TlsAction::ShutdownWrite ? 1 : 2));
+            if (timeout <= 0) return fail(host_error::invalid_input);
+            if (stream.terminal_error) return fail(stream.terminal_error);
+            if (!stream.pending_io.expired()) return fail(host_error::busy);
+            TlsIo io{action, deadline_of(timeout), {}};
+            if (action == TlsAction::Read) {
+                const auto max = as_int32(args.at(1));
+                if (max < 1) return fail(host_error::invalid_input);
+                io.bytes.resize(std::min<std::size_t>(max, max_read_bytes));
+            } else if (action == TlsAction::Write) {
+                const auto& data = args.at(1).bytes;
+                io.bytes.assign(data.data(), std::min<std::size_t>(data.size(), INT_MAX));
+            }
+            return io;
+        };
+        cancellable(std::move(service),
+            [=](const HostRequest& request) {
+                if (!granted->net) return denied();
+                auto* stream = find_overlapped(as_int64(request.arguments.at(0)));
+                if (!stream) return fail(host_error::invalid_input);
+                auto operation = prepare(request, *stream);
+                if (auto* done = std::get_if<HostCompletion>(&operation)) return std::move(*done);
+                auto& io = std::get<TlsIo>(operation);
+                for (;;) {
+                    if (auto done = io.attempt(*stream, false)) return std::move(*done);
+                    const int ready = wait_for(stream->descriptor, io.events, io.deadline);
+                    if (ready <= 0) {
+                        return io.fail_io(*stream, ready == 0 ? host_error::timed_out
+                                                              : socket_error(platform::last_socket_error().code));
+                    }
+                }
+            },
+            [=](const HostRequest& request) -> std::variant<HostCompletion, PendingOperation> {
+                if (!granted->net) return denied();
+                const auto id = as_int64(request.arguments.at(0));
+                auto* stream = find_overlapped(id);
+                if (!stream) return fail(host_error::invalid_input);
+                auto operation = prepare(request, *stream);
+                if (auto* done = std::get_if<HostCompletion>(&operation)) return std::move(*done);
+                auto io = std::make_shared<TlsIo>(std::get<TlsIo>(std::move(operation)));
+                if (auto done = io->attempt(*stream, false)) return std::move(*done);
+                stream->pending_io = io;
+                PendingOperation pending;
+                pending.wait_source = PosixWait{{}, [=] {
+                    const auto* current = find_overlapped(id);
+                    return PosixWait::Interest{current ? static_cast<std::intptr_t>(current->descriptor) : -1,
+                        io->events == platform::poll_in ? PosixWait::Events::Read : PosixWait::Events::Write};
+                }};
+                const auto timeout = as_int64(request.arguments.at(action == TlsAction::ShutdownWrite ? 1 : 2));
+                pending.deadline = deadline_after(request.now, timeout);
+                pending.attempt = [=](bool cancelled) -> std::optional<HostCompletion> {
+                    auto* current = find_overlapped(id);
+                    if (!current) return fail(host_error::invalid_input);
+                    return io->attempt(*current, cancelled);
+                };
+                pending.expire = [=] {
+                    auto* current = find_overlapped(id);
+                    return current ? io->fail_io(*current, host_error::timed_out) : fail(host_error::invalid_input);
+                };
+                return pending;
+            });
+    };
+    register_io(read_overlapped(), TlsAction::Read);
+    register_io(write_overlapped(), TlsAction::Write);
+    register_io(shutdown_write_overlapped(), TlsAction::ShutdownWrite);
+
     add(signature("neura.net.tls.close", {int64()}, void_type()), [=](const HostRequest& request) {
         if (!granted->net) return denied();
         const auto& id = request.arguments.at(0);
-        const auto* stream = find(id);
+        const auto* stream = find_stream(as_int64(id));
         if (!stream || stream->descriptor == invalid_native_socket) return fail(host_error::invalid_input);
         state->tls.erase(as_int64(id));
         return HostCompletion::ok();
@@ -973,6 +1308,7 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
 }
 
 void close_tls(StandardServices::Tables& tables) {
+    tables.tls_connect_jobs.reset();
     tables.tls.clear();
     tables.next_tls = 1;
 }
@@ -982,7 +1318,8 @@ void close_tls(StandardServices::Tables& tables) {
 struct TlsStream {};
 void TlsDeleter::operator()(TlsStream* stream) const { delete stream; }
 
-void add_tls_services(const Adder& add, StandardServices::Tables&, const Capabilities& capabilities,
+void add_tls_services(const Adder& add, const OverlapAdder& cancellable, StandardServices::Tables&,
+                      const Capabilities& capabilities,
                       const std::vector<ResolvedPath>&) {
     const auto unsupported = [&capabilities](const HostRequest&) {
         return capabilities.net ? fail(host_error::unsupported) : denied();
@@ -1001,6 +1338,12 @@ void add_tls_services(const Adder& add, StandardServices::Tables&, const Capabil
     add(engine_open(), unsupported);
     add(engine_exchange(), unsupported);
     add(engine_release(), unsupported);
+    const auto begin_unsupported = [unsupported](const HostRequest& request)
+        -> std::variant<HostCompletion, PendingOperation> { return unsupported(request); };
+    cancellable(connect_overlapped(), unsupported, begin_unsupported);
+    cancellable(read_overlapped(), unsupported, begin_unsupported);
+    cancellable(write_overlapped(), unsupported, begin_unsupported);
+    cancellable(shutdown_write_overlapped(), unsupported, begin_unsupported);
     add(connect_extended(), unsupported);
     add(accept_extended(), unsupported);
     add(signature("neura.net.tls.kernel_offload", {int64()}, void_type()), unsupported);

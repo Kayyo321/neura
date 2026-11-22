@@ -11,7 +11,10 @@ let streams = import:Std.Net.Socket.StreamSocket;
 let tcp = import:Std.Net.Socket.TcpSocket;
 let server = import:Std.Net.Socket.TcpServer;
 let test = import:Std.Test;
+let udp = import:Std.Net.Socket.UdpSocket;
 let unit = import:Std.Core.Unit;
+let unix_addr = import:Std.Net.Core.UnixAddr;
+let unix_datagram = import:Std.Net.Socket.UnixDatagram;
 
 let SocketHostExtensions = module (
     let loopback = func -> socket_addr.SocketAddr =>
@@ -25,6 +28,24 @@ let SocketHostExtensions = module (
     let kind_of = func(error: errors.Error) -> errors.IoErrorKind => match (error) {
         errors.Error.Io { kind, message, path } => kind,
         _ => errors.IoErrorKind.Other,
+    };
+
+    // Whether the host is Linux: only Linux binds a Unix socket in the abstract namespace, and every other
+    // host reports Unsupported. The name carries a fresh UDP port so parallel runs do not collide.
+    let linux_host = func -> bool {
+        last holder = test.assert_ok<udp.UdpSocket>(udp.bind(loopback()));
+        last port = test.assert_ok<socket_addr.SocketAddr>(holder.local_address()).port;
+        test.assert_ok<unit.Unit>(holder.close());
+        match (unix_datagram.bind(unix_addr.abstract_name("neura-net-test-epoll-" + port.to_string()))) {
+            result.Result.Ok(socket) => {
+                test.assert_ok<unit.Unit>(socket.close());
+                return true;
+            },
+            result.Result.Err(problem) => {
+                test.assert(kind_of(problem) == errors.IoErrorKind.Unsupported);
+                return false;
+            },
+        }
     };
 
     let check_bytes = func(expected: uint8[list], actual: uint8[list]) {
@@ -72,11 +93,12 @@ let SocketHostExtensions = module (
 
     export let test_readiness_backend_change = func {
         test.assert_ok<unit.Unit>(event_loop.install(event_loop.EventLoopBackend.Poll));
-        match (event_loop.install(event_loop.EventLoopBackend.Epoll)) {
-            result.Result.Ok(_) => {},
-            result.Result.Err(problem) => {
-                test.assert(kind_of(problem) == errors.IoErrorKind.Unsupported);
-            },
+        // epoll exists on every Linux host: there the install must succeed. Elsewhere it is Unsupported.
+        if (linux_host()) {
+            test.assert_ok<unit.Unit>(event_loop.install(event_loop.EventLoopBackend.Epoll));
+        } else {
+            last problem = test.assert_err<unit.Unit>(event_loop.install(event_loop.EventLoopBackend.Epoll));
+            test.assert(kind_of(problem) == errors.IoErrorKind.Unsupported);
         }
         last listener = listen();
         scope {

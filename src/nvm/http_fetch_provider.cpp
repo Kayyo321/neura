@@ -1,19 +1,27 @@
 #include "http_fetch_provider.hpp"
 #include "client_socket.hpp"
 #include "platform/socket.hpp"
+#include "sigpipe_guard.hpp"
 
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <charconv>
 #include <chrono>
+#include <climits>
 #include <condition_variable>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
+#include <string>
 #include <string_view>
 #include <thread>
+#include <variant>
+#include <vector>
 
 #ifdef _WIN32
 #include "platform/windows.hpp"
@@ -39,13 +47,34 @@ namespace {
 using Clock = std::chrono::steady_clock;
 constexpr std::size_t body_limit = 8 * 1024 * 1024;
 constexpr std::size_t head_limit = 16384;
+// Chunked framing (size lines, extensions and each chunk's CRLF) may total
+// 64 KiB or eight times the body bytes received so far, whichever is larger.
+// A one-byte chunk needs five framing bytes, so only extensions reach it:
+// they cannot make each body byte cost a 16 KiB line of parsing.
+constexpr std::size_t chunk_framing_floor = 64 * 1024;
+constexpr std::size_t chunk_framing_factor = 8;
 constexpr std::uint32_t too_large = 16, busy = 17, unknown = 18;
+// Codes 23 to 25 are the fetch services' own, in the shared table of
+// providers.hpp after the SQL provider's 19 to 22.
+using host_error::not_processed;
+using host_error::redirect_body;
+using host_error::redirect_downgrade;
 constexpr std::int64_t default_timeout = 30000000000LL;
 struct Failure {
     std::uint32_t code;
+    std::string origin{};
 };
 [[noreturn]] void reject(std::uint32_t code) {
     throw Failure{code};
+}
+HostCompletion fetch_error(std::uint32_t code, bool detailed, std::string origin = {}) {
+    // A host error carries only a uint32. Version 2 reports an origin outside
+    // the grant as a reply with status 0, no fields or body, and the origin;
+    // version 1 reports it as error 14 (CapabilityDenied).
+    if (detailed && !origin.empty())
+        return HostCompletion::ok(
+            tuple_value({scalar(0), HostValue{}, HostValue{}, bytes_value(std::move(origin))}));
+    return fail(code);
 }
 std::string lower(std::string_view text) {
     std::string result(text);
@@ -199,10 +228,92 @@ struct Url {
     bool secure = false;
     std::string host, authority, target;
     std::int32_t port = 0;
-    std::string origin() const {
-        return std::string(secure ? "https://" : "http://") + lower(host) + ":" + std::to_string(port);
+    std::string origin() const;
+};
+
+struct Address {
+    std::array<unsigned char, 16> bytes{};
+    int family = AF_UNSPEC;
+
+    explicit Address(const char* text) {
+        if (::inet_pton(AF_INET, text, bytes.data()) == 1) family = AF_INET;
+        else if (::inet_pton(AF_INET6, text, bytes.data()) == 1) family = AF_INET6;
+    }
+
+    bool operator==(const Address&) const = default;
+
+    // An IPv4-mapped IPv6 address connects to its IPv4 address.
+    Address unmapped() const {
+        if (family != AF_INET6 || !std::all_of(bytes.begin(), bytes.begin() + 10, [](auto b) { return b == 0; }) ||
+            bytes[10] != 0xff || bytes[11] != 0xff)
+            return *this;
+        Address result("");
+        result.family = AF_INET;
+        std::copy(bytes.begin() + 12, bytes.end(), result.bytes.begin());
+        return result;
     }
 };
+
+// The host without the trailing dot of an absolute name. `1.2.3.4.` is the
+// address 1.2.3.4 both in its origin and in the origin filter, so a listed
+// numeric origin still allows exactly that address.
+std::string bare_host(const std::string& host) {
+    return host.size() > 1 && host.back() == '.' ? host.substr(0, host.size() - 1) : host;
+}
+
+std::string Url::origin() const {
+    const auto bare = bare_host(host);
+    auto name = lower(bare);
+    const Address address(bare.c_str());
+    if (address.family != AF_UNSPEC) {
+        char numeric[INET6_ADDRSTRLEN];
+        if (::inet_ntop(address.family, address.bytes.data(), numeric, sizeof numeric)) name = numeric;
+        if (address.family == AF_INET6) name = "[" + name + "]";
+    }
+    return std::string(secure ? "https://" : "http://") + name + ":" + std::to_string(port);
+}
+
+bool global_ipv4(const unsigned char* bytes) {
+    const auto address = (std::uint32_t(bytes[0]) << 24) | (std::uint32_t(bytes[1]) << 16) |
+                         (std::uint32_t(bytes[2]) << 8) | bytes[3];
+    // IANA IPv4 Special-Purpose Address Registry, including globally
+    // reachable anycast exceptions to the IETF assignments block.
+    if (address == 0xc0000009 || address == 0xc000000a) return true;
+    constexpr std::pair<std::uint32_t, unsigned> nonglobal[] = {
+        {0x00000000, 8}, {0x0a000000, 8}, {0x64400000, 10}, {0x7f000000, 8},
+        {0xa9fe0000, 16}, {0xac100000, 12}, {0xc0000000, 24}, {0xc0000200, 24},
+        {0xc0586300, 24}, {0xc0a80000, 16}, {0xc6120000, 15}, {0xc6336400, 24},
+        {0xcb007100, 24}, {0xe0000000, 3},
+    };
+    return std::ranges::none_of(nonglobal, [address](const auto& block) {
+        const auto [network, prefix] = block;
+        return (address >> (32 - prefix)) == (network >> (32 - prefix));
+    });
+}
+
+bool global_address(const Address& address) {
+    const auto& bytes = address.bytes;
+    if (address.family == AF_INET) return global_ipv4(bytes.data());
+    if (address.family != AF_INET6) return false;
+    if (std::all_of(bytes.begin(), bytes.begin() + 10, [](auto byte) { return byte == 0; }) &&
+        bytes[10] == 0xff && bytes[11] == 0xff) return global_ipv4(bytes.data() + 12);
+    const auto prefix = [&](const char* text, unsigned length) {
+        const Address block(text);
+        const auto whole = length / 8;
+        const auto remaining = length % 8;
+        return std::equal(bytes.begin(), bytes.begin() + whole, block.bytes.begin()) &&
+               (remaining == 0 || (bytes[whole] >> (8 - remaining)) == (block.bytes[whole] >> (8 - remaining)));
+    };
+    if (prefix("64:ff9b::", 96)) return global_ipv4(bytes.data() + 12);
+    // The global unicast block also contains IANA special-purpose ranges.
+    if (!prefix("2000::", 3) || prefix("2001:db8::", 32) || prefix("2002::", 16) || prefix("3fff::", 20))
+        return false;
+    if (!prefix("2001::", 23)) return true;
+    return prefix("2001:1::1", 128) || prefix("2001:1::2", 128) || prefix("2001:1::3", 128) ||
+           prefix("2001:3::", 32) || prefix("2001:4:112::", 48) ||
+           prefix("2001:20::", 28) || prefix("2001:30::", 28);
+}
+
 Url parse_url(std::string_view text) {
     if (text.size() > 8192) reject(too_large);
     for (const unsigned char c : text)
@@ -258,6 +369,49 @@ Url parse_url(std::string_view text) {
         normalize_path(url.target.substr(0, query)) + (query == std::string::npos ? "" : url.target.substr(query));
     return url;
 }
+
+using Origins = std::optional<std::vector<Url>>;
+
+Url parse_origin(std::string_view text) {
+    auto url = parse_url(text);
+    const auto authority_end = text.find_first_of("/?#", text.find("://") + 3);
+    if (authority_end != std::string_view::npos && text.substr(authority_end) != "/") reject(host_error::invalid_input);
+    return url;
+}
+
+Origins parse_origins(const std::optional<std::vector<std::string>>& configured) {
+    if (!configured) return std::nullopt;
+    Origins origins(std::in_place);
+    for (const auto& text : *configured) origins->push_back(parse_origin(text));
+    return origins;
+}
+
+[[noreturn]] void deny_origin(const Url& url) {
+    throw Failure{host_error::capability_denied, url.origin()};
+}
+
+client_socket::AddressFilter origin_filter(const Url& url, const Origins& origins) {
+    if (!origins) return {};
+    const auto origin = url.origin();
+    if (std::ranges::none_of(*origins, [&](const auto& allowed) { return allowed.origin() == origin; }))
+        deny_origin(url);
+    // docs/runtime/NVM.md, "HTTP client origins": a listed numeric origin
+    // allows exactly its address. A listed name allows its global addresses,
+    // and another address only when a numeric origin with the same scheme
+    // and port lists it. Each connect attempt checks its own candidate.
+    const auto literal = Address(bare_host(url.host).c_str()).unmapped();
+    return [&url, &origins, literal](std::string_view numeric) {
+        const auto candidate = Address(std::string(numeric).c_str()).unmapped();
+        if (candidate.family == AF_UNSPEC) return false;
+        if (literal.family != AF_UNSPEC) return candidate == literal;
+        if (global_address(candidate)) return true;
+        return std::ranges::any_of(*origins, [&](const auto& allowed) {
+            const auto listed = Address(bare_host(allowed.host).c_str()).unmapped();
+            return allowed.secure == url.secure && allowed.port == url.port && listed.family != AF_UNSPEC &&
+                   candidate == listed;
+        });
+    };
+}
 std::string redirected(const Url& base, std::string_view location) {
     if (has_scheme(location)) return std::string(location);
     const auto origin = std::string(base.secure ? "https://" : "http://") + base.authority;
@@ -296,7 +450,7 @@ Request parse_request(const HostRequest& host) {
         if (!token(name) || !field_value(value) || trim(value).size() != value.size() || name == "host" ||
             name == "content-length" || name == "transfer-encoding" || name == "connection" || name == "expect" ||
             name == "upgrade" || name == "proxy-connection" || name == "proxy-authorization" || name == "te" ||
-            name == "trailer")
+            name == "trailer" || name == "keep-alive" || name == "http2-settings")
             reject(host_error::invalid_input);
         total += name.size() + value.size() + 4;
         if (total > head_limit) reject(too_large);
@@ -311,34 +465,8 @@ struct Response {
     std::string body;
 };
 
-// TLS BIO writes may raise SIGPIPE. This mask is local to the fetch worker,
-// and consumes only a signal newly produced by that worker's socket writes.
-class SocketWrites {
-#if !defined(_WIN32) && !defined(SO_NOSIGPIPE)
-    sigset_t blocked_{}, saved_{};
-    bool changed_ = false, pending_ = false;
-
-  public:
-    SocketWrites() {
-        sigemptyset(&blocked_);
-        sigaddset(&blocked_, SIGPIPE);
-        changed_ = pthread_sigmask(SIG_BLOCK, &blocked_, &saved_) == 0;
-        sigset_t pending;
-        pending_ = sigpending(&pending) != 0 || sigismember(&pending, SIGPIPE) == 1;
-    }
-    ~SocketWrites() {
-        if (!changed_) return;
-        if (!pending_) {
-            timespec zero{};
-            while (sigtimedwait(&blocked_, nullptr, &zero) < 0 && errno == EINTR) {}
-        }
-        pthread_sigmask(SIG_SETMASK, &saved_, nullptr);
-    }
-#else
-  public:
-    SocketWrites() = default;
-#endif
-};
+// TLS BIO writes may raise SIGPIPE: the fetch worker writes under
+// SocketWrites (sigpipe_guard.hpp), a mask local to that thread.
 class Connection {
     NativeSocket socket_ = invalid_native_socket;
     Clock::time_point deadline_;
@@ -354,7 +482,8 @@ class Connection {
 
   public:
     bool h2 = false;
-    Connection(const Url& url, Clock::time_point deadline, const std::atomic<bool>& cancelled)
+    Connection(const Url& url, Clock::time_point deadline, const std::atomic<bool>& cancelled,
+               const Origins& origins)
         : deadline_(deadline), cancelled_(cancelled) {
         if (url.secure) {
 #ifndef NEURA_NVM_TLS
@@ -362,8 +491,19 @@ class Connection {
 #endif
         }
         std::uint32_t error = 0;
-        socket_ = client_socket::connect(url.host, url.port, deadline, error, &cancelled);
-        if (socket_ == invalid_native_socket) reject(error);
+        auto filter = origin_filter(url, origins);
+        bool permitted_address = false;
+        const client_socket::AddressFilter observe = !filter ? client_socket::AddressFilter{} :
+            client_socket::AddressFilter([&](std::string_view numeric) {
+                const bool allowed = filter(numeric);
+                permitted_address |= allowed;
+                return allowed;
+            });
+        socket_ = client_socket::connect(url.host, url.port, deadline, error, &cancelled, observe);
+        if (socket_ == invalid_native_socket) {
+            if (filter && !permitted_address && error == host_error::permission_denied) deny_origin(url);
+            reject(error);
+        }
         try {
 #ifdef NEURA_NVM_TLS
             if (url.secure) {
@@ -617,9 +757,15 @@ Response http1(Connection& connection, const Url& url, const Request& request) {
     }
     if (request.method == "HEAD" || response.status == 204 || response.status == 304) return response;
     if (chunked) {
-        std::size_t metadata_budget = head_limit;
+        std::size_t framing = 0;
+        const auto framing_limit = [&] {
+            return std::max(chunk_framing_floor, chunk_framing_factor * response.body.size());
+        };
         for (;;) {
-            const auto line = input.line(metadata_budget);
+            std::size_t line_budget = head_limit;
+            const auto line = input.line(line_budget);
+            framing += head_limit - line_budget;
+            if (framing > framing_limit()) reject(too_large);
             const auto semi = line.find(';');
             auto digits = std::string_view(line).substr(0, semi);
             if (semi != std::string::npos)
@@ -628,10 +774,14 @@ Response http1(Connection& connection, const Url& url, const Request& request) {
             if (semi != std::string::npos) chunk_extensions(std::string_view(line).substr(semi));
             if (count == 0) break;
             input.take(count, response.body);
-            if (!input.line(metadata_budget).empty()) reject(unknown);
+            std::string ending;
+            input.take(2, ending);
+            if (ending != "\r\n") reject(unknown);
+            framing += 2;
         }
+        std::size_t trailer_budget = head_limit;
         for (std::size_t fields = 0;; ++fields) {
-            const auto line = input.line(metadata_budget);
+            const auto line = input.line(trailer_budget);
             if (line.empty()) break;
             const auto colon = line.find(':');
             if (fields >= 100 || colon == std::string::npos || !token(std::string_view(line).substr(0, colon)) ||
@@ -654,7 +804,7 @@ class H2 {
     std::size_t offset_ = 0, header_bytes_ = 0;
     Headers block_;
     std::uint32_t block_status_ = 0, failure_ = 0;
-    bool final_head_ = false, closed_ = false;
+    bool response_seen_ = false, final_head_ = false, closed_ = false;
     Response response_;
     static H2& of(void* user) { return *static_cast<H2*>(user); }
     template <class F> int callback(F function) {
@@ -692,9 +842,12 @@ class H2 {
     static int frame(nghttp2_session*, const nghttp2_frame* frame, void* user) {
         auto& self = of(user);
         return self.callback([&] {
-            if (frame->hd.type == NGHTTP2_GOAWAY &&
-                (frame->goaway.error_code != NGHTTP2_NO_ERROR || frame->goaway.last_stream_id < 1))
-                reject(unknown);
+            // RFC 9113, 6.8: a GOAWAY whose last stream ID is below 1 states
+            // that the peer did not process stream 1, whatever its error code.
+            if (frame->hd.type == NGHTTP2_GOAWAY) {
+                if (frame->goaway.last_stream_id < 1) reject(self.response_seen_ ? unknown : not_processed);
+                if (frame->goaway.error_code != NGHTTP2_NO_ERROR) reject(unknown);
+            }
             if (frame->hd.type != NGHTTP2_HEADERS || frame->hd.stream_id != 1) return;
             if (self.final_head_) {
                 for (const auto& [name, value] : self.block_) {
@@ -703,6 +856,7 @@ class H2 {
                 }
             } else {
                 if (!self.block_status_) reject(unknown);
+                self.response_seen_ = true;
                 std::optional<std::uint64_t> length;
                 bool chunked = false;
                 validate_response_fields(self.block_, length, chunked,
@@ -737,7 +891,9 @@ class H2 {
         auto& self = of(user);
         if (stream == 1) {
             self.closed_ = true;
-            if (error) self.failure_ = unknown;
+            // REFUSED_STREAM before any response is "not processed" (RFC 9113, 8.7).
+            if (error && !self.failure_)
+                self.failure_ = error == NGHTTP2_REFUSED_STREAM && !self.response_seen_ ? not_processed : unknown;
         }
         return 0;
     }
@@ -792,13 +948,17 @@ class H2 {
             reject(host_error::other);
         while (!closed_) {
             connection.check();
+            // One write per turn: separate small writes (two WINDOW_UPDATE
+            // frames, say) would wait on Nagle and delayed acknowledgement.
+            std::string output;
             for (;;) {
                 const std::uint8_t* bytes = nullptr;
                 const auto size = nghttp2_session_mem_send2(session_, &bytes);
                 if (size < 0) reject(failure_ ? failure_ : unknown);
                 if (size == 0) break;
-                connection.write(std::string_view(reinterpret_cast<const char*>(bytes), size));
+                output.append(reinterpret_cast<const char*>(bytes), static_cast<std::size_t>(size));
             }
+            if (!output.empty()) connection.write(output);
             if (failure_) reject(failure_);
             const auto bytes = connection.read();
             if (bytes.empty()) reject(unknown);
@@ -821,13 +981,14 @@ class H2 {
 };
 #endif
 
-HostCompletion exchange(Request request, Clock::time_point deadline, const std::atomic<bool>& cancelled) {
+HostCompletion exchange(Request request, Clock::time_point deadline, const std::atomic<bool>& cancelled,
+                        const Origins& origins) {
     [[maybe_unused]] SocketWrites protection;
-    std::set<std::string> visited;
+    std::set<std::pair<std::string, std::string>> visited;
     for (int redirects = 0;; ++redirects) {
         const auto url = parse_url(request.url);
-        if (redirects > 10 || !visited.insert(url.origin() + url.target).second) reject(unknown);
-        Connection connection(url, deadline, cancelled);
+        if (redirects > 10 || !visited.emplace(request.method, url.origin() + url.target).second) reject(unknown);
+        Connection connection(url, deadline, cancelled, origins);
         Response response;
 #ifdef NEURA_NVM_HTTP2
         if (connection.h2)
@@ -835,24 +996,34 @@ HostCompletion exchange(Request request, Clock::time_point deadline, const std::
         else
 #endif
             response = http1(connection, url, request);
-        std::optional<std::string> location;
-        for (const auto& [name, value] : response.headers) {
-            if (name == "location") {
-                if (location) reject(unknown);
-                location = value;
+        std::optional<std::string_view> location;
+        if (response.status == 301 || response.status == 302 || response.status == 303 || response.status == 307 ||
+            response.status == 308) {
+            for (const auto& [name, value] : response.headers) {
+                if (name == "location") {
+                    if (location) reject(unknown);
+                    location = value;
+                }
             }
         }
-        if (location && (response.status == 301 || response.status == 302 || response.status == 303 ||
-                         response.status == 307 || response.status == 308)) {
+        if (location) {
+            // Redirect policy (docs/runtime/NVM.md, "HTTP client services"):
+            // never HTTPS to HTTP; across origins keep only the safe fields
+            // and never resend a body (307, 308, or 301 and 302 other than
+            // POST would). The next hop is checked against the origin list.
             const auto next = redirected(url, *location);
-            if (parse_url(next).origin() != url.origin()) {
+            const auto next_url = parse_url(next);
+            const bool to_get = (response.status == 303 && request.method != "HEAD") ||
+                                ((response.status == 301 || response.status == 302) && request.method == "POST");
+            if (url.secure && !next_url.secure) reject(redirect_downgrade);
+            if (next_url.origin() != url.origin()) {
+                if (!to_get && !request.body.empty()) reject(redirect_body);
                 std::erase_if(request.headers, [](const auto& field) {
-                    return field.first == "authorization" || field.first == "proxy-authorization" ||
-                           field.first == "cookie";
+                    return field.first != "accept" && field.first != "accept-language" &&
+                           field.first != "content-language";
                 });
             }
-            if ((response.status == 303 && request.method != "HEAD") ||
-                ((response.status == 301 || response.status == 302) && request.method == "POST")) {
+            if (to_get) {
                 request.method = "GET";
                 request.body.clear();
                 std::erase_if(request.headers, [](const auto& field) {
@@ -875,32 +1046,66 @@ struct FetchState {
     std::mutex mutex;
     std::condition_variable ready;
     std::atomic<bool> cancelled{false};
+    std::atomic<bool> finished{false};
     std::shared_ptr<ExternalSignal> signal = std::make_shared<ExternalSignal>();
     std::optional<HostCompletion> answer;
     Clock::time_point deadline;
 };
-// A capped worker pool by ownership: each detached worker retains its slot
-// until it exits. A cancelled request cannot accumulate unbounded workers.
-struct WorkerSlots {
+std::uint64_t process_id() {
 #ifdef _WIN32
-    const std::uint64_t owner = GetCurrentProcessId();
+    return ::GetCurrentProcessId();
 #else
-    const std::uint64_t owner = static_cast<std::uint64_t>(::getpid());
+    return static_cast<std::uint64_t>(::getpid());
 #endif
-    std::atomic<unsigned int> active{0};
-};
-WorkerSlots* worker_slots() {
-    static std::atomic<WorkerSlots*> slots{new WorkerSlots};
-    auto* result = slots.load();
-#ifndef _WIN32
-    if (result->owner != static_cast<std::uint64_t>(::getpid())) {
-        auto replacement = std::make_unique<WorkerSlots>();
-        if (slots.compare_exchange_strong(result, replacement.get())) result = replacement.release();
-    }
-#endif
-    return result;
 }
-std::shared_ptr<FetchState> start_fetch(const HostRequest& host, bool allowed) {
+struct FetchWorkers {
+    struct Worker {
+        std::shared_ptr<FetchState> state;
+        std::thread thread;
+    };
+    const std::uint64_t owner = process_id();
+    std::mutex mutex;
+    std::array<Worker, 16> slots;
+};
+std::atomic<FetchWorkers*> workers{nullptr};
+std::atomic<bool> stopping_workers{false};
+
+void stop_fetch_workers() {
+    stopping_workers.store(true);
+    auto* pool = workers.load();
+    if (!pool || pool->owner != process_id()) return;
+    std::lock_guard lock(pool->mutex);
+    for (auto& slot : pool->slots)
+        if (slot.state) slot.state->cancelled.store(true);
+    for (auto& slot : pool->slots) {
+        if (!slot.thread.joinable()) continue;
+        slot.thread.join();
+        slot.state.reset();
+    }
+}
+
+FetchWorkers& fetch_workers() {
+    // At process exit, cancel and join every live fetch before the TLS
+    // library's own exit handler runs. Handlers run in reverse order of
+    // registration, so initialize the TLS library (which registers its
+    // cleanup) before registering this one. A fork child inherits both.
+    static const bool registered = [] {
+#ifdef NEURA_NVM_TLS
+        if (OPENSSL_init_ssl(0, nullptr) != 1) return false;
+#endif
+        return std::atexit(stop_fetch_workers) == 0;
+    }();
+    if (!registered) reject(host_error::other);
+    auto* pool = workers.load();
+    // A fork child must leave its parent's mutex and threads alone.
+    if (!pool || pool->owner != process_id()) {
+        auto replacement = std::make_unique<FetchWorkers>();
+        if (workers.compare_exchange_strong(pool, replacement.get())) pool = replacement.release();
+    }
+    return *pool;
+}
+std::shared_ptr<FetchState> start_fetch(const HostRequest& host, bool allowed, bool detailed,
+                                        const std::shared_ptr<const Origins>& origins) {
     if (!allowed) reject(host_error::capability_denied);
     const auto started = Clock::now();
     auto request = parse_request(host);
@@ -908,31 +1113,39 @@ std::shared_ptr<FetchState> start_fetch(const HostRequest& host, bool allowed) {
     const auto duration = std::chrono::duration_cast<Clock::duration>(
         std::chrono::nanoseconds(request.timeout ? request.timeout : default_timeout));
     state->deadline = duration < Clock::time_point::max() - started ? started + duration : Clock::time_point::max();
-    auto* slots = worker_slots();
-    auto active = slots->active.load();
-    do {
-        if (active >= 16) reject(busy);
-    } while (!slots->active.compare_exchange_weak(active, active + 1));
+    auto& pool = fetch_workers();
+    std::lock_guard lock(pool.mutex);
+    if (stopping_workers.load()) reject(host_error::cancelled);
+    FetchWorkers::Worker* available = nullptr;
+    for (auto& slot : pool.slots) {
+        if (slot.state && slot.state->finished.load()) {
+            slot.thread.join();
+            slot.state.reset();
+        }
+        if (!available && !slot.state) available = &slot;
+    }
+    if (!available) reject(busy);
     try {
-        std::thread([state, slots, request = std::move(request)]() mutable {
+        available->thread = std::thread([state, request = std::move(request), origins, detailed]() mutable {
             HostCompletion answer;
             try {
-                answer = exchange(std::move(request), state->deadline, state->cancelled);
+                answer = exchange(std::move(request), state->deadline, state->cancelled, *origins);
+                if (detailed) answer.value.elements.push_back(bytes_value(""));
             } catch (const Failure& failure) {
-                answer = fail(failure.code);
+                answer = fetch_error(failure.code, detailed, failure.origin);
             } catch (...) {
-                answer = fail(host_error::other);
+                answer = fetch_error(host_error::other, detailed);
             }
             {
                 std::lock_guard lock(state->mutex);
                 state->answer = std::move(answer);
             }
-            slots->active.fetch_sub(1);
+            state->finished.store(true);
             state->ready.notify_one();
             state->signal->signal();
-        }).detach();
+        });
+        available->state = state;
     } catch (...) {
-        slots->active.fetch_sub(1);
         reject(host_error::other);
     }
     return state;
@@ -946,60 +1159,84 @@ struct FetchOwner {
 
 void add_http_fetch_services(const OverlapAdder& add, const Capabilities& capabilities) {
     const auto allowed = capabilities.http_client;
-    const auto sig = signature("neura.http.fetch", {text(), text(), text_list(), byte_list(), int64(), uint32()},
-                               tuple({uint32(), text_list(), byte_list()}));
-    const FunctionService::Handler invoke = [allowed](const HostRequest& request) {
-        try {
-            const auto state = start_fetch(request, allowed);
-            std::unique_lock lock(state->mutex);
-            if (!state->ready.wait_until(lock, state->deadline, [&] { return state->answer.has_value(); })) {
-                state->cancelled.store(true);
-                return fail(host_error::timed_out);
-            }
-            return std::move(*state->answer);
-        } catch (const Failure& failure) {
-            return fail(failure.code);
-        } catch (...) {
-            return fail(host_error::other);
+    // A list that does not parse allows no origin. Option and manifest
+    // readers validate it first with valid_http_client_origin.
+    auto parsed = std::make_shared<Origins>();
+    try {
+        *parsed = parse_origins(capabilities.http_client_origins);
+    } catch (const Failure&) {
+        parsed->emplace();
+    }
+    const std::shared_ptr<const Origins> configured = std::move(parsed);
+    for (const bool detailed : {false, true}) {
+        auto sig = signature("neura.http.fetch", {text(), text(), text_list(), byte_list(), int64(), uint32()},
+                                   tuple({uint32(), text_list(), byte_list()}));
+        if (detailed) {
+            sig.version = 2;
+            sig.success = tuple({uint32(), text_list(), byte_list(), text()});
         }
-    };
-    const FunctionService::Begin begin =
-        [allowed](const HostRequest& request) -> std::variant<HostCompletion, PendingOperation> {
-        try {
-            const auto state = start_fetch(request, allowed);
-            std::shared_ptr<FetchOwner> owner;
+        const FunctionService::Handler invoke = [allowed, configured, detailed](const HostRequest& request) {
             try {
-                owner = std::make_shared<FetchOwner>(state);
-            } catch (...) {
-                state->cancelled.store(true);
-                throw;
-            }
-            PendingOperation pending;
-            pending.wait_source = ExternalWait{state->signal};
-            const auto left = std::max<std::int64_t>(
-                1, std::chrono::duration_cast<std::chrono::nanoseconds>(state->deadline - Clock::now()).count());
-            pending.deadline = deadline_after(request.now, left);
-            pending.attempt = [owner](bool cancelled) -> std::optional<HostCompletion> {
-                auto& state = *owner->state;
-                std::lock_guard lock(state.mutex);
-                if (state.answer) return std::move(*state.answer);
-                if (cancelled) {
-                    state.cancelled.store(true);
-                    return cancelled_answer();
+                const auto state = start_fetch(request, allowed, detailed, configured);
+                std::unique_lock lock(state->mutex);
+                if (!state->ready.wait_until(lock, state->deadline, [&] { return state->answer.has_value(); })) {
+                    state->cancelled.store(true);
+                    return fetch_error(host_error::timed_out, detailed);
                 }
-                return std::nullopt;
-            };
-            pending.expire = [owner] {
-                owner->state->cancelled.store(true);
-                return fail(host_error::timed_out);
-            };
-            return pending;
-        } catch (const Failure& failure) {
-            return fail(failure.code);
-        } catch (...) {
-            return fail(host_error::other);
-        }
-    };
-    add(sig, invoke, begin);
+                return std::move(*state->answer);
+            } catch (const Failure& failure) {
+                return fetch_error(failure.code, detailed, failure.origin);
+            } catch (...) {
+                return fetch_error(host_error::other, detailed);
+            }
+        };
+        const FunctionService::Begin begin =
+            [allowed, configured, detailed](const HostRequest& request) -> std::variant<HostCompletion, PendingOperation> {
+            try {
+                const auto state = start_fetch(request, allowed, detailed, configured);
+                std::shared_ptr<FetchOwner> owner;
+                try {
+                    owner = std::make_shared<FetchOwner>(state);
+                } catch (...) {
+                    state->cancelled.store(true);
+                    throw;
+                }
+                PendingOperation pending;
+                pending.wait_source = ExternalWait{state->signal};
+                const auto left = std::max<std::int64_t>(
+                    1, std::chrono::duration_cast<std::chrono::nanoseconds>(state->deadline - Clock::now()).count());
+                pending.deadline = deadline_after(request.now, left);
+                pending.attempt = [owner, detailed](bool cancelled) -> std::optional<HostCompletion> {
+                    auto& state = *owner->state;
+                    std::lock_guard lock(state.mutex);
+                    if (state.answer) return std::move(*state.answer);
+                    if (cancelled) {
+                        state.cancelled.store(true);
+                        return cancelled_answer();
+                    }
+                    return std::nullopt;
+                };
+                pending.expire = [owner, detailed] {
+                    owner->state->cancelled.store(true);
+                    return fetch_error(host_error::timed_out, detailed);
+                };
+                return pending;
+            } catch (const Failure& failure) {
+                return fetch_error(failure.code, detailed, failure.origin);
+            } catch (...) {
+                return fetch_error(host_error::other, detailed);
+            }
+        };
+        add(sig, invoke, begin);
+    }
+}
+
+bool valid_http_client_origin(std::string_view text) {
+    try {
+        (void)parse_origin(text);
+        return true;
+    } catch (const Failure&) {
+        return false;
+    }
 }
 } // namespace neura::nvm::provider

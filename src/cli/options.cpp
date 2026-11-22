@@ -1,4 +1,5 @@
 #include "options.hpp"
+#include "http_client_options.hpp"
 #include "tool.hpp"
 
 #include "jit/jit.hpp"
@@ -100,8 +101,8 @@ bool parse_policy_option(Options& options, std::string_view arg, Next next) {
         options.capabilities.net = true;
     } else if (arg == "--allow-raw") {
         options.capabilities.raw = true;
-    } else if (arg == "--allow-http-client") {
-        options.capabilities.http_client = true;
+    } else if (parse_http_client_option(arg, options.capabilities)) {
+        return true;
     } else if (arg == "--allow-env") {
         options.capabilities.env = true;
     } else if (arg == "--allow-clock") {
@@ -118,8 +119,6 @@ bool parse_policy_option(Options& options, std::string_view arg, Next next) {
         options.capabilities.net = false;
     } else if (arg == "--deny-raw") {
         options.capabilities.raw = false;
-    } else if (arg == "--deny-http-client") {
-        options.capabilities.http_client = false;
     } else if (arg == "--deny-env") {
         options.capabilities.env = false;
     } else if (arg == "--deny-clock") {

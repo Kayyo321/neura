@@ -11,6 +11,8 @@ namespace neura::nvm::generation_internal {
 // Linux UAPI version 1: include/uapi/linux/vmclock-abi.h. Decode fixed
 // little-endian byte offsets instead of depending on the build kernel headers.
 inline constexpr std::size_t vmclock_size = 112;
+// The header (magic, size, version, flags) that every layout begins with.
+inline constexpr std::size_t vmclock_header_size = 32;
 struct VmClockObservation {
     bool valid = false;
     std::optional<std::uint64_t> generation;
@@ -21,7 +23,7 @@ inline VmClockObservation vmclock_generation(std::span<const unsigned char> byte
         for (std::size_t i = 0; i < width; ++i) value |= std::uint64_t{bytes[offset + i]} << (8 * i);
         return value;
     };
-    if (bytes.size() < 32 || read(0, 4) != 0x4b4c4356 || read(8, 2) != 1 || read(4, 4) < 32) return {};
+    if (bytes.size() < vmclock_header_size || read(0, 4) != 0x4b4c4356 || read(8, 2) != 1 || read(4, 4) < 32) return {};
     if ((read(24, 8) & (1u << 8)) == 0) return {true, std::nullopt};
     if (bytes.size() < vmclock_size || read(4, 4) < vmclock_size) return {};
     return {true, read(104, 8)};

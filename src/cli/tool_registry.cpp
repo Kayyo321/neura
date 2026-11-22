@@ -351,7 +351,7 @@ const char* usage_text() {
            "  --deny-fs                files and directories\n"
            "  --deny-net               network connections and listeners\n"
            "  --allow-raw, --deny-raw  grant or deny raw IP sockets, which also need network access\n"
-           "  --allow-http-client, --deny-http-client  grant or deny outgoing HTTP requests\n"
+           "  --allow-http-client[=origin,...], --deny-http-client  grant or deny outgoing HTTP requests\n"
            "  --deny-env               environment variables\n"
            "  --deny-clock             wall and monotonic clocks and sleeping\n"
            "  --deny-entropy           operating-system entropy\n"

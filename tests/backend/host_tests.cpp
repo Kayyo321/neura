@@ -7,6 +7,8 @@
 #include "cli/source_loader.hpp"
 #include "fixtures.hpp"
 #include "nvm/app_services.hpp"
+#include "nvm/dtls_internal.hpp"
+#include "nvm/tls_internal.hpp"
 #include "nvm/generation_internal.hpp"
 #include "nvm/secret_services.hpp"
 #include "nvm/providers.hpp"
@@ -26,6 +28,7 @@
 #ifndef _WIN32
 #ifdef NEURA_NVM_TLS
 #include <openssl/err.h>
+#include <openssl/pem.h>
 #include <openssl/quic.h>
 #include <openssl/ssl.h>
 #endif
@@ -1290,6 +1293,24 @@ NEURA_TEST(host, socket_options_resolution_and_send_file) {
                  "option denied");
 }
 
+// OpenSSL's repeated write-retry answer cannot be induced through the
+// provider, which drains its BIO on every call; check the schedule itself.
+NEURA_TEST(host, dtls_write_retry_waits_on_the_socket) {
+    using nvm::dtls_internal::write_retry_wait;
+    constexpr std::int64_t ms = 1'000'000;
+    check_equal(write_retry_wait(0, true, 30'000 * ms), std::int64_t{0}, "first retry after a drain is immediate");
+    check_equal(write_retry_wait(0, false, 30'000 * ms), ms, "a retry without drained output waits");
+    check_equal(write_retry_wait(1, true, 30'000 * ms), 2 * ms, "a repeated retry waits even after a drain");
+    check_equal(write_retry_wait(3, false, 30'000 * ms), 8 * ms, "the wait doubles");
+    check_equal(write_retry_wait(6, false, 30'000 * ms), 64 * ms, "the wait reaches 64 ms");
+    check_equal(write_retry_wait(999, false, 30'000 * ms), 64 * ms, "and stays there");
+    check_equal(write_retry_wait(5, false, 3 * ms), 3 * ms, "the protocol timer or deadline caps the wait");
+    check_equal(write_retry_wait(5, false, 1), std::int64_t{1}, "a nearly expired deadline is still a wait");
+    for (int retries = 1; retries < 50; ++retries) {
+        check(write_retry_wait(retries, true, 30'000 * ms) > 0, "only the first drained retry is immediate");
+    }
+}
+
 NEURA_TEST(host, entropy_comes_from_the_system_generator) {
     Host host(everything());
     const auto first = host.call("neura.entropy.fill", {i32(32)});
@@ -1720,6 +1741,10 @@ NEURA_TEST(host, dtls13_addressed_engine_roundtrip_and_deadline) {
     const auto c = client.call("neura.net.dtls.engine.open", opening(false, 12345, 54321));
     const auto s = server.call("neura.net.dtls.engine.open", opening(true, 54321, 12345));
     expect_ok(c, "DTLS client open"); expect_ok(s, "DTLS server open");
+    expect_error(client.call("neura.net.tls.peer_chain", {c.value}), host_error::permission_denied,
+                 "DTLS client chain requires a finished handshake");
+    expect_error(server.call("neura.net.tls.peer_chain", {s.value}), host_error::permission_denied,
+                 "DTLS listener has no accepted connection yet");
     expect_error(client.call("neura.net.tls.engine.exchange", {c.value, i32(0), bytes(""), bytes("")}),
                  host_error::invalid_input, "DTLS handle cannot enter TLS stream engine");
     auto step = [&](Host& host, HostValue id, int operation, const std::string& inbound, int sender,
@@ -1752,6 +1777,26 @@ NEURA_TEST(host, dtls13_addressed_engine_roundtrip_and_deadline) {
         }
     }
     check(client_done && server_done, "DTLS 1.3 handshake with address cookie");
+    // Both sides verified the other's self-signed certificate (mutual DTLS).
+    std::string expected_der;
+    {
+        std::unique_ptr<FILE, decltype(&std::fclose)> file(std::fopen(material.certificate.c_str(), "r"), std::fclose);
+        check(file != nullptr, "open loopback certificate");
+        std::unique_ptr<X509, decltype(&X509_free)> parsed(PEM_read_X509(file.get(), nullptr, nullptr, nullptr),
+                                                          X509_free);
+        check(parsed != nullptr, "parse loopback certificate");
+        unsigned char* der = nullptr;
+        const int size = i2d_X509(parsed.get(), &der);
+        check(size > 0, "encode loopback certificate");
+        expected_der.assign(reinterpret_cast<const char*>(der), static_cast<std::size_t>(size));
+        OPENSSL_free(der);
+    }
+    for (auto* side : {&client, &server}) {
+        const auto chain = side->call("neura.net.tls.peer_chain", {side == &client ? c.value : s.value});
+        expect_ok(chain, "DTLS verified chain after the handshake");
+        check_equal(chain.value.elements.size(), std::size_t{1}, "self-signed DTLS chain length");
+        check(chain.value.elements.at(0).bytes == expected_der, "DTLS chain is the verified certificate");
+    }
     expect_error(client.call("neura.net.dtls.engine.exchange", {c.value, i32(2), bytes(""), text(""), i32(0),
         bytes(std::string(16384, 'x')), i64(5'000'000'000)}), host_error::invalid_input,
         "application messages above the negotiated data MTU fail without poisoning the engine");
@@ -1781,6 +1826,287 @@ NEURA_TEST(host, dtls13_addressed_engine_roundtrip_and_deadline) {
     expect_error(client.call("neura.net.dtls.engine.exchange", {quiet.value, i32(0), bytes(""), text(""), i32(0),
                  bytes(""), i64(5'000'000'000)}), host_error::timed_out, "open expiry cannot be extended by exchange");
     expect_ok(client.call("neura.net.dtls.engine.release", {quiet.value}), "release expired engine");
+}
+
+// A read whose deadline passed while a peer datagram was on its way still
+// processes it once. When that datagram is a KeyUpdate, the answer the read
+// produces (the reply KeyUpdate and ACK) is returned with TimedOut instead of
+// being drained and dropped, and the peer's KeyUpdate then completes.
+NEURA_TEST(host, dtls13_expired_read_returns_the_answers_it_produced) {
+    const LoopbackTlsKeys material;
+    Host client(everything()), server(everything());
+    auto opening = [&](bool accepting, std::int32_t local, std::int32_t peer) {
+        return std::vector<HostValue>{boolean(accepting), text("localhost"), tls_names({}),
+            text(material.certificate), text(material.certificate),
+            text(material.key), text("127.0.0.1"), i32(local), text("127.0.0.1"), i32(peer),
+            i64(5'000'000'000)};
+    };
+    const auto c = client.call("neura.net.dtls.engine.open", opening(false, 12345, 54321));
+    const auto s = server.call("neura.net.dtls.engine.open", opening(true, 54321, 12345));
+    expect_ok(c, "DTLS client open"); expect_ok(s, "DTLS server open");
+    auto exchange = [&](Host& host, HostValue id, int operation, const std::string& inbound, int sender,
+                        std::int64_t timeout = 5'000'000'000, const std::string& message = "") {
+        return host.call("neura.net.dtls.engine.exchange", {id, i32(operation), bytes(inbound),
+            text("127.0.0.1"), i32(sender), bytes(message), i64(timeout)});
+    };
+    auto step = [&](Host& host, HostValue id, int operation, const std::string& inbound, int sender) {
+        const auto result = exchange(host, id, operation, inbound, sender);
+        expect_ok(result, "DTLS engine step");
+        check_equal(result.value.elements.at(4).bits, std::uint64_t(0), "DTLS protocol error");
+        return result.value;
+    };
+    auto packets = [](const HostValue& result) {
+        std::vector<std::string> out;
+        for (const auto& packet : result.elements.at(1).elements) out.push_back(packet.bytes);
+        return out;
+    };
+    std::vector<std::string> to_server, to_client;
+    bool client_done = false, server_done = false;
+    for (int turn = 0; turn < 100 && !(client_done && server_done); ++turn) {
+        if (!client_done) {
+            const auto incoming = to_client.empty() ? "" : to_client.front();
+            if (!to_client.empty()) to_client.erase(to_client.begin());
+            const auto result = step(client, c.value, 0, incoming, 54321);
+            for (auto& packet : packets(result)) to_server.push_back(std::move(packet));
+            client_done = result.elements.at(0).bits == 1;
+        }
+        if (!server_done) {
+            const auto incoming = to_server.empty() ? "" : to_server.front();
+            if (!to_server.empty()) to_server.erase(to_server.begin());
+            const auto result = step(server, s.value, 0, incoming, 12345);
+            for (auto& packet : packets(result)) to_client.push_back(std::move(packet));
+            server_done = result.elements.at(0).bits == 1;
+        }
+    }
+    check(client_done && server_done, "DTLS 1.3 handshake");
+    // Let the tail of the handshake (the server's ACK of the client Finished) reach the client.
+    for (const auto& packet : to_client) step(client, c.value, 1, packet, 54321);
+    to_client.clear();
+    to_server.clear();
+
+    // The client requests a KeyUpdate; its record waits on the wire.
+    const auto update = step(client, c.value, 4, "", 54321);
+    check_equal(update.elements.at(0).bits, std::uint64_t(0), "the KeyUpdate waits for its ACK");
+    const auto requests = packets(update);
+    check(!requests.empty(), "the KeyUpdate is sent");
+
+    // The server's read expires before the record arrives.
+    const auto waiting = exchange(server, s.value, 1, "", 0, 30'000'000);
+    if (waiting.success) check_equal(waiting.value.elements.at(0).bits, std::uint64_t(0), "the read waits");
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    if (!waiting.success) {
+        // The 30 ms deadline passed before the first call returned.
+        expect_error(waiting, host_error::timed_out, "the first read call expired");
+        check(false, "the read was started before its deadline");
+    }
+    std::vector<std::string> answers;
+    for (const auto& packet : requests) {
+        const auto late = exchange(server, s.value, 1, packet, 12345);
+        expect_ok(late, "an expired read given a late datagram answers with its packets");
+        check_equal(late.value.elements.at(0).bits, std::uint64_t(0), "the late datagram completes no message");
+        check_equal(late.value.elements.at(4).bits, std::uint64_t(host_error::timed_out), "the read reports TimedOut");
+        for (auto& answer : packets(late.value)) answers.push_back(std::move(answer));
+        // Later datagrams of the same flight go to a read started afresh.
+        const auto again = exchange(server, s.value, 1, "", 0, 30'000'000);
+        if (again.success) check_equal(again.value.elements.at(0).bits, std::uint64_t(0), "the read waits again");
+        std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    }
+    check(!answers.empty(), "the late KeyUpdate produced the server's answer");
+
+    // Those answers complete the client's KeyUpdate: nothing was lost.
+    bool updated = false;
+    for (const auto& answer : answers) {
+        const auto result = step(client, c.value, 4, answer, 54321);
+        for (auto& packet : packets(result)) to_server.push_back(std::move(packet));
+        updated = updated || result.elements.at(0).bits == 1;
+    }
+    check(updated, "the client's KeyUpdate completes with the answers of the expired read");
+
+    // The association stays usable after the expired read.
+    const auto sent = exchange(client, c.value, 2, "", 54321, 5'000'000'000, "message");
+    expect_ok(sent, "DTLS write after the KeyUpdate");
+    for (auto& packet : packets(sent.value)) to_server.push_back(std::move(packet));
+    bool received = false;
+    for (const auto& packet : to_server) {
+        const auto result = step(server, s.value, 1, packet, 12345);
+        if (result.elements.at(0).bits == 1) {
+            check_equal(result.elements.at(2).bytes, std::string("message"), "DTLS plaintext after the expired read");
+            received = true;
+            break;
+        }
+    }
+    check(received, "the association stays usable after the expired read");
+    expect_ok(client.call("neura.net.dtls.engine.release", {c.value}), "DTLS client release");
+    expect_ok(server.call("neura.net.dtls.engine.release", {s.value}), "DTLS server release");
+}
+
+// A DTLS 1.3 HelloRetryRequest: a plaintext handshake record (type 22) whose
+// ServerHello (type 2) carries the RFC 8446 section 4.1.3 random, with a
+// cookie extension (44). Offsets follow the 13-byte DTLSPlaintext header and
+// the 12-byte DTLS handshake header.
+bool dtls_hello_retry_with_cookie(const std::string& packet) {
+    static const std::string magic = [] {
+        const unsigned char bytes[] = {0xcf, 0x21, 0xad, 0x74, 0xe5, 0x9a, 0x61, 0x11, 0xbe, 0x1d, 0x8c,
+                                       0x02, 0x1e, 0x65, 0xb8, 0x91, 0xc2, 0xa2, 0x11, 0x16, 0x7a, 0xbb,
+                                       0x8c, 0x5e, 0x07, 0x9e, 0x09, 0xe2, 0xc8, 0xa8, 0x33, 0x9c};
+        return std::string(reinterpret_cast<const char*>(bytes), sizeof bytes);
+    }();
+    const auto byte = [&](std::size_t at) { return static_cast<unsigned char>(packet.at(at)); };
+    if (packet.size() < 13 + 12 + 2 + 32 + 1 || byte(0) != 22 || byte(13) != 2) return false;
+    std::size_t at = 13 + 12 + 2;
+    if (packet.compare(at, 32, magic) != 0) return false;
+    at += 32;
+    at += 1 + byte(at); // legacy_session_id_echo
+    at += 2 + 1;        // cipher_suite, legacy_compression_method
+    if (at + 2 > packet.size()) return false;
+    const std::size_t end = std::min(packet.size(), at + 2 + (std::size_t{byte(at)} << 8 | byte(at + 1)));
+    for (at += 2; at + 4 <= end;) {
+        const auto type = std::size_t{byte(at)} << 8 | byte(at + 1);
+        if (type == 44) return true;
+        at += 4 + (std::size_t{byte(at + 2)} << 8 | byte(at + 3));
+    }
+    return false;
+}
+
+// The server answers a cookie-less first flight with a stateless
+// HelloRetryRequest only. The provider admits datagrams only from the
+// configured peer address, so an unvalidated source here is a first flight
+// claiming that address whose sender never sees the cookie.
+NEURA_TEST(host, dtls13_server_validates_the_address_before_its_handshake_flight) {
+    const LoopbackTlsKeys material;
+    Host client(everything()), server(everything());
+    auto opening = [&](bool accepting, std::int32_t local, std::int32_t peer) {
+        return std::vector<HostValue>{boolean(accepting), text("localhost"), tls_names({}),
+            text(accepting ? "" : material.certificate), text(material.certificate), text(material.key),
+            text("127.0.0.1"), i32(local), text("127.0.0.1"), i32(peer), i64(5'000'000'000)};
+    };
+    auto step = [&](Host& host, const HostValue& id, const std::string& inbound, int sender) {
+        const auto result = host.call("neura.net.dtls.engine.exchange", {id, i32(0), bytes(inbound),
+            text("127.0.0.1"), i32(sender), bytes(""), i64(5'000'000'000)});
+        expect_ok(result, "DTLS handshake step");
+        check_equal(result.value.elements.at(4).bits, std::uint64_t(0), "DTLS protocol error");
+        return result.value;
+    };
+    auto packets = [](const HostValue& result) {
+        std::vector<std::string> out;
+        for (const auto& packet : result.elements.at(1).elements) out.push_back(packet.bytes);
+        return out;
+    };
+    const auto c = client.call("neura.net.dtls.engine.open", opening(false, 12345, 54321));
+    const auto s = server.call("neura.net.dtls.engine.open", opening(true, 54321, 12345));
+    expect_ok(c, "DTLS client open"); expect_ok(s, "DTLS server open");
+
+    const auto first_flight = packets(step(client, c.value, "", 54321));
+    check(!first_flight.empty(), "client first flight");
+    std::vector<std::string> answers;
+    for (const auto& packet : first_flight) {
+        const auto answer = packets(step(server, s.value, packet, 12345));
+        answers.insert(answers.end(), answer.begin(), answer.end());
+    }
+    check_equal(answers.size(), std::size_t{1}, "a cookie-less first flight gets one datagram");
+    check(dtls_hello_retry_with_cookie(answers.at(0)), "the datagram is a HelloRetryRequest with a cookie");
+    check(answers.at(0).size() < 400, "the HelloRetryRequest does not amplify the first flight");
+    expect_error(server.call("neura.net.tls.peer_chain", {s.value}), host_error::permission_denied,
+                 "no connection was accepted for the unvalidated flight");
+
+    // Until the cookie returns, the server sends nothing but HelloRetryRequests
+    // for this address: not for a replay of the flight (as a spoofing sender
+    // would send), not over a retransmission interval, and it accepts no
+    // connection. OpenSSL 4.1's listener is not strictly stateless here: it
+    // retransmits the HelloRetryRequest and briefly ignores further first
+    // flights from the same address (docs/runtime/NVM.md, DTLS services).
+    std::vector<std::string> unvalidated;
+    for (const auto& packet : first_flight) {
+        const auto answer = packets(step(server, s.value, packet, 12345));
+        unvalidated.insert(unvalidated.end(), answer.begin(), answer.end());
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+    const auto idle = packets(step(server, s.value, "", 0));
+    unvalidated.insert(unvalidated.end(), idle.begin(), idle.end());
+    check(unvalidated.size() <= 2, "at most one answer to the replay and one retransmission");
+    for (const auto& packet : unvalidated) {
+        check(dtls_hello_retry_with_cookie(packet), "an unvalidated address gets only HelloRetryRequests");
+    }
+    expect_error(server.call("neura.net.tls.peer_chain", {s.value}), host_error::permission_denied,
+                 "still no connection for the unvalidated flight");
+
+    // The client returns the cookie; only then does the server answer with
+    // its handshake flight, and the handshake completes.
+    bool client_done = false, server_done = false, validated_flight = false;
+    std::vector<std::string> to_server, to_client{answers.at(0)};
+    for (int turn = 0; turn < 100 && !(client_done && server_done); ++turn) {
+        if (!client_done) {
+            const auto incoming = to_client.empty() ? "" : to_client.front();
+            if (!to_client.empty()) to_client.erase(to_client.begin());
+            const auto result = step(client, c.value, incoming, 54321);
+            for (auto& packet : packets(result)) to_server.push_back(std::move(packet));
+            client_done = as_i32(result.elements.at(0)) == 1;
+        }
+        if (!server_done) {
+            const auto incoming = to_server.empty() ? "" : to_server.front();
+            if (!to_server.empty()) to_server.erase(to_server.begin());
+            const auto result = step(server, s.value, incoming, 12345);
+            for (auto& packet : packets(result)) {
+                validated_flight = validated_flight || !dtls_hello_retry_with_cookie(packet);
+                to_client.push_back(std::move(packet));
+            }
+            server_done = as_i32(result.elements.at(0)) == 1;
+        }
+    }
+    check(validated_flight, "the server sent its handshake flight after the cookie round trip");
+    check(client_done && server_done, "the handshake completes after the cookie round trip");
+    expect_ok(client.call("neura.net.dtls.engine.release", {c.value}), "DTLS client release");
+    expect_ok(server.call("neura.net.dtls.engine.release", {s.value}), "DTLS server release");
+}
+
+// A first flight that claims the peer's address (a spoofing sender that never
+// sees the cookie) is not ignored state-free by OpenSSL 4.1's listener: the
+// real peer's own first flight from that address goes unanswered for a while.
+// This bounds that stall: one of the peer's retransmissions gets a cookie.
+NEURA_TEST(host, dtls13_unvalidated_flight_only_delays_the_peer) {
+    const LoopbackTlsKeys material;
+    Host spoofer(everything()), client(everything()), server(everything());
+    auto opening = [&](bool accepting) {
+        return std::vector<HostValue>{boolean(accepting), text("localhost"), tls_names({}),
+            text(accepting ? "" : material.certificate), text(material.certificate), text(material.key),
+            text("127.0.0.1"), i32(accepting ? 54321 : 12345), text("127.0.0.1"), i32(accepting ? 12345 : 54321),
+            i64(20'000'000'000)};
+    };
+    auto step = [&](Host& host, const HostValue& id, const std::string& inbound, int sender) {
+        const auto result = host.call("neura.net.dtls.engine.exchange", {id, i32(0), bytes(inbound),
+            text("127.0.0.1"), i32(sender), bytes(""), i64(20'000'000'000)});
+        expect_ok(result, "DTLS handshake step");
+        std::vector<std::string> out;
+        for (const auto& packet : result.value.elements.at(1).elements) out.push_back(packet.bytes);
+        return out;
+    };
+    const auto forged = spoofer.call("neura.net.dtls.engine.open", opening(false));
+    const auto c = client.call("neura.net.dtls.engine.open", opening(false));
+    const auto s = server.call("neura.net.dtls.engine.open", opening(true));
+    expect_ok(forged, "spoofing client open"); expect_ok(c, "client open"); expect_ok(s, "server open");
+    for (const auto& packet : step(spoofer, forged.value, "", 54321)) step(server, s.value, packet, 12345);
+    bool answered = false;
+    auto flight = step(client, c.value, "", 54321);
+    const auto started = std::chrono::steady_clock::now();
+    for (int round = 0; round < 6 && !answered; ++round) {
+        for (const auto& packet : flight) {
+            for (const auto& answer : step(server, s.value, packet, 12345)) {
+                answered = answered || dtls_hello_retry_with_cookie(answer);
+            }
+        }
+        if (answered) break;
+        // Let the client's retransmission timer (1 s, doubling) expire.
+        do {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            flight = step(client, c.value, "", 54321);
+        } while (flight.empty() && std::chrono::steady_clock::now() - started < std::chrono::seconds(15));
+    }
+    check(answered, "a retransmitted first flight from the peer gets a HelloRetryRequest");
+    check(std::chrono::steady_clock::now() - started < std::chrono::seconds(10), "the stall is bounded");
+    for (auto* host : {&spoofer, &client}) {
+        host->call("neura.net.dtls.engine.release", {host == &spoofer ? forged.value : c.value});
+    }
+    server.call("neura.net.dtls.engine.release", {s.value});
 }
 
 // TLS client and server streams (src/nvm/tls_provider.cpp) against each
@@ -2079,8 +2405,8 @@ NEURA_TEST(ktls, both_directions_transfer_over_kernel_records) {
 }
 #endif
 
-// Neither side reads records after the handshake. Every direct write must
-// return TimedOut, including streams created by both service versions.
+// Neither side reads records after the handshake. A backpressured write must
+// time out and make the stream unusable, including streams from both versions.
 NEURA_TEST(host, tls_write_deadlines_cover_connect_and_accept_versions) {
     const LoopbackTlsKeys material;
     constexpr auto budget = 150'000'000LL;
@@ -2107,14 +2433,28 @@ NEURA_TEST(host, tls_write_deadlines_cover_connect_and_accept_versions) {
             expect_ok(accepted, "accept for blocked TLS write");
             auto& writer = write_server ? server : client;
             const auto id = (write_server ? accepted : connected).value.elements.at(0);
+            expect_error(writer.call("neura.net.tls.write", {id, bytes("x"), i64(0)}, 2),
+                         host_error::invalid_input, "write v2 refuses unlimited timeout");
             const auto started = std::chrono::steady_clock::now();
             expect_error(writer.call("neura.net.tls.write", {id, bytes(std::string(16 * 1024 * 1024, 'x'))}),
                          host_error::timed_out, "non-reading TLS peer bounds legacy write");
             check(std::chrono::steady_clock::now() - started < std::chrono::seconds(2), "write deadline elapsed bound");
-            expect_error(writer.call("neura.net.tls.write", {id, bytes("x"), i64(0)}, 2),
-                         host_error::invalid_input, "write v2 refuses unlimited timeout");
-            client.call("neura.net.tls.close", {connected.value.elements.at(0)});
-            server.call("neura.net.tls.close", {accepted.value.elements.at(0)});
+            expect_error(writer.call("neura.net.tls.write", {id, bytes("different buffer"), i64(budget)}, 2),
+                         host_error::timed_out, "next write reuses the original error");
+            expect_error(writer.call("neura.net.tls.write", {id, bytes("")}),
+                         host_error::timed_out, "empty write reuses the original error");
+            expect_error(writer.call("neura.net.tls.read", {id, i32(64), i64(budget)}),
+                         host_error::timed_out, "read reuses the original error");
+            expect_error(writer.call("neura.net.tls.shutdown_write", {id, i64(budget)}),
+                         host_error::timed_out, "write shutdown reuses the original error");
+            for (const auto* service : {"neura.net.tls.local_address", "neura.net.tls.peer_chain",
+                                        "neura.net.tls.kernel_offload"}) {
+                expect_error(writer.call(service, {id}), host_error::timed_out, service);
+            }
+            expect_ok(client.call("neura.net.tls.close", {connected.value.elements.at(0)}), "close client");
+            expect_ok(server.call("neura.net.tls.close", {accepted.value.elements.at(0)}), "close server");
+            expect_error(writer.call("neura.net.tls.write", {id, bytes("x")}),
+                         host_error::invalid_input, "close released the terminal stream");
         }
     }
 }
@@ -2151,12 +2491,18 @@ NEURA_TEST(host, tls_public_endpoints_verify_live_svid) {
         }
     });
     const auto address = "127.0.0.1:" + std::to_string(as_i32(port.value));
-    const auto client_run = nvm::run(image, nvm::bind(image, nra_client.registry),
+    const auto client_run = nvm::record(image, nvm::bind(image, nra_client.registry),
         std::vector<std::string>{"client", address, certificate, client_key, material.certificate});
     serving.join();
-    check(client_run.completed && client_run.status == 0, "public client completed: " + describe_trap(client_run, image));
+    check(client_run.outcome.completed && client_run.outcome.status == 0,
+          "public client completed: " + client_run.outcome.message);
     expect_ok(accepted, "public client authenticated");
     check_equal(nra_client.output.contents(), std::string("pong\n"), "public connector round trip");
+    const auto shutdown = std::ranges::find_if(client_run.entries, [](const auto& entry) {
+        return entry.import == "neura.net.tls.shutdown_write";
+    });
+    check(shutdown != client_run.entries.end(), "public shutdown issued the host call");
+    check_equal(as_i64(shutdown->arguments.at(1)), std::int64_t{3'000'000'000}, "shutdown uses the write timeout");
     native_server.call("neura.net.tls.close", {accepted.value.elements.at(0)});
     native_server.call("neura.net.close", {listener.value});
 
@@ -2257,7 +2603,7 @@ NEURA_TEST(host, tls_v2_requires_exact_versions_and_mutual_identity) {
         check_equal(local.value.elements.at(0).bytes, std::string("127.0.0.1"), "numeric loopback address");
         expect_error(client.call("neura.net.tls.kernel_offload", {socket}), host_error::unsupported,
                      "kernel offload without handshake opt-in");
-        expect_ok(client.call("neura.net.tls.shutdown_write", {socket, i64(wait)}), "send close_notify");
+        expect_ok(client.call("neura.net.tls.shutdown_write", {socket, i64(0)}), "send close_notify with default budget");
         const auto ended = server.call("neura.net.tls.read", {peer, i32(64), i64(wait)});
         expect_ok(ended, "orderly TLS shutdown");
         check(ended.value.bytes.empty(), "close_notify is an orderly end");
@@ -2294,6 +2640,57 @@ NEURA_TEST(host, tls_v2_requires_exact_versions_and_mutual_identity) {
     Host restricted(only_net);
     expect_error(restricted.call("neura.net.tls.connect", {text("127.0.0.1"), port.value, i64(wait), text(""),
         tls_names({}), text(material.certificate)}), host_error::capability_denied, "explicit CA requires fs");
+}
+
+// The handshake deadline of a connection accepted with timeout zero.
+NEURA_TEST(host, tls_accept_handshake_deadline_is_bounded_for_timeout_zero) {
+    using nvm::tls_internal::accepted_handshake_deadline;
+    using Point = std::chrono::steady_clock::time_point;
+    const auto now = std::chrono::steady_clock::now();
+    const auto accept_deadline = now + std::chrono::seconds(5);
+    const auto bound = nvm::tls_internal::default_transfer_timeout;
+    check(accepted_handshake_deadline(0, Point::max(), now, bound) == now + std::chrono::seconds(30),
+          "timeout zero bounds the handshake by 30 seconds from the accept");
+    check(accepted_handshake_deadline(5'000'000'000, accept_deadline, now, bound) == accept_deadline,
+          "a positive timeout keeps the accept deadline for the handshake");
+    const auto late = Point::max() - std::chrono::seconds(1);
+    check(accepted_handshake_deadline(0, Point::max(), late, bound) == Point::max(),
+          "the bound saturates at the end of the clock");
+    check(nvm::tls_internal::accept_handshake_bound() == bound, "the provider uses the 30-second default");
+}
+
+// A silent TCP peer of an accept with timeout zero is cut off by the bound,
+// shortened here to 200 ms; an unbounded handshake would leave the peer's
+// read to time out at 1.5 seconds instead of seeing the close.
+NEURA_TEST(host, tls_accept_default_bounds_a_stalled_handshake) {
+    const LoopbackTlsKeys material;
+    struct Bound {
+        Bound() { nvm::tls_internal::set_accept_handshake_bound_for_testing(200'000'000); }
+        ~Bound() { nvm::tls_internal::set_accept_handshake_bound_for_testing(0); }
+    } bound;
+    Host server(everything());
+    Host silent(everything());
+    const auto listener = server.call("neura.net.listen", {text("127.0.0.1"), i32(0)});
+    expect_ok(listener, "listen");
+    const auto port = server.call("neura.net.local_port", {listener.value});
+    expect_ok(port, "port");
+    const auto peer = silent.call("neura.net.connect", {text("127.0.0.1"), port.value, i64(1'000'000'000)});
+    expect_ok(peer, "TCP peer connects without speaking TLS");
+    HostCompletion accepted;
+    const auto started = std::chrono::steady_clock::now();
+    std::jthread worker([&] {
+        accepted = server.call("neura.net.tls.accept", {listener.value, text(material.certificate), text(material.key),
+            tls_names({}), i64(0)});
+    });
+    // Close at this outer bound even on a regression so the accept can finish.
+    const auto ended = silent.call("neura.net.read", {peer.value, i32(1), i64(1'500'000'000)});
+    const auto closed = silent.call("neura.net.close", {peer.value});
+    worker.join();
+    expect_ok(closed, "close silent peer");
+    expect_ok(ended, "the handshake bound closed the socket");
+    check(ended.value.bytes.empty(), "silent peer gets EOF after the bound");
+    expect_error(accepted, host_error::timed_out, "TLS accept reports TimedOut");
+    check(std::chrono::steady_clock::now() - started < std::chrono::milliseconds(1500), "the bound ends the wait early");
 }
 
 #endif

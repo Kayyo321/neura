@@ -16,7 +16,7 @@ let.promote _ = import:Std.Core.Unit;
 ///
 /// `TlsConnector` and `TlsAcceptor` open streams. The record layer runs in the host's TLS library (OpenSSL 4.1 in
 /// builds configured with `NEURA_ENABLE_SERVER_TLS`). Reading, writing and close call `neura.net.tls.*`.
-/// `close` sends `close_notify`.
+/// A failed write ends the stream's I/O with that error. Close still releases the stream.
 /// Shutdown sends TLS `close_notify` on the write side. `local_address` reports the underlying socket address.
 /// After close every operation except close fails with Closed.
 /// @see [Std.Net.Tls.TlsStream](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Tls-TlsStream)
@@ -49,6 +49,12 @@ export let TlsStream = module (
         /// @brief Tracks whether the stream may still use the host ID.
         let open_now: bool = true;
         let write_closed: bool = false;
+        let write_error: uint32 = 0;
+
+        let write_failure = func -> Error => host_error.io(write_error,
+            host_error.kind_of(write_error) == IoErrorKind.Unsupported
+            ? "TLS operation is unavailable in this runtime"
+            : "TLS write failed", label);
 
         /// @brief Use `TlsConnector` or `TlsAcceptor`; the handle comes from the library.
         export let init = func(opened: socket.Handle, dialed: Optional<SocketAddr>, selected: string) {
@@ -76,6 +82,7 @@ export let TlsStream = module (
         .NoDiscard
         export let write = func(data: uint8[list]) -> Result<Unit> {
             return Result<Unit>.Err(bytes.closed("stream", label)) unless open_now && not write_closed;
+            return Result<Unit>.Err(write_failure()) unless write_error == 0;
             let remaining = data;
             while (remaining.length > 0) {
                 match (tls_write_bounded(id, remaining, write_timeout_nanos)) {
@@ -87,9 +94,8 @@ export let TlsStream = module (
                             remaining.length);
                     },
                     host.CountOutcome.Error(code) => {
-                        return Result<Unit>.Err(host_error.io(code, host_error.kind_of(code) == IoErrorKind.Unsupported
-                            ? "TLS operation is unavailable in this runtime"
-                            : "TLS write failed", label));
+                        write_error = code;
+                        return Result<Unit>.Err(write_failure());
                     },
                 }
             }
@@ -116,7 +122,7 @@ export let TlsStream = module (
             timeout_nanos = support.timeout_nanos(timeout);
         };
 
-        /// @brief Sets a positive per-host-write timeout; zero or negative traps.
+        /// @brief Sets a positive timeout for each host write or write shutdown; zero or negative traps.
         .Since("0.3.1")
         export let set_write_timeout = func(timeout: Duration) {
             last nanos = support.timeout_nanos(timeout);
@@ -152,15 +158,17 @@ export let TlsStream = module (
             };
         };
 
-        /// @brief Sends authenticated `close_notify` for Write. Read and Both return Unsupported without changing state.
+        /// @brief Sends authenticated `close_notify` for Write within the write timeout.
+        /// Read and Both return Unsupported without changing state.
         .NoDiscard
         export let shutdown = func(how: Shutdown) -> Result<Unit> {
             return Result<Unit>.Err(bytes.closed("stream", label)) unless open_now;
+            return Result<Unit>.Err(write_failure()) unless write_error == 0;
             if (how != Shutdown.Write) {
                 return Result<Unit>.Err(host_error.io(13 as uint32, "TLS read shutdown is unsupported", label));
             }
             if (not write_closed) {
-                match (tls_shutdown_write(id, timeout_nanos)) {
+                match (tls_shutdown_write(id, write_timeout_nanos)) {
                     host.DoneOutcome.Ok => {
                         write_closed = true;
                     },
@@ -183,8 +191,8 @@ export let TlsStream = module (
             };
         };
 
-        /// @brief Sends `close_notify` and releases the stream. Closing again returns Ok; the stream is closed
-        /// even when the host reports an error.
+        /// @brief Releases the stream, sending `close_notify` if the record layer is still usable.
+        /// Closing again returns Ok; the stream is closed even when the host reports an error.
         export let close = func -> Result<Unit> {
             return bytes.ok() unless open_now;
             open_now = false;

@@ -42,7 +42,7 @@ export let DirectEndpoints = module:program.Entry (
             stream = new tls_connector.TlsConnector(address, builder.build_client()?).connect()?;
         }
         stream.set_read_timeout(duration.of_seconds(2));
-        stream.set_write_timeout(duration.of_seconds(2));
+        stream.set_write_timeout(duration.of_seconds(3));
         last outcome = inspect(stream, args[0] == "server", args[4]);
         let _ = stream.close();
         return outcome;
@@ -85,6 +85,8 @@ export let DirectEndpoints = module:program.Entry (
             return result.Result<string>.Ok(identity.to_string());
         }
         stream.write(strings.to_bytes("ping"))?;
-        return strings.from_bytes(stream.read(4)?);
+        last pong = strings.from_bytes(stream.read(4)?)?;
+        stream.shutdown(stream_socket.Shutdown.Write)?;
+        return result.Result<string>.Ok(pong);
     };
 );
