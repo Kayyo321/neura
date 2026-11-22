@@ -4,6 +4,7 @@
 #include "heap.hpp"
 #include "nvr/format.hpp"
 #include "tier1.hpp"
+#include "tier3_passes.hpp"
 
 #include "jit/tier3_native.hpp"
 #include "kernels/kernel_binding.hpp"
@@ -1918,17 +1919,44 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
             };
             tier3::inline_calls(image_, built.program->ir, source, tier3::verify_enabled());
         }
-        if (built.program && options_.native_passes && tier3::passes_enabled()) tier3::optimize(image_, built.program->ir, tier3::verify_enabled());
-        if (built.program) built.program->ir.check_heap = tier3::verify_enabled();
-        if (built.program) tier3::place_canons(image_, built.program->ir, tier3::verify_enabled());
+        if (built.program) {
+            auto& original = built.program->ir;
+            const bool verify = tier3::verify_enabled();
+            original.check_heap = verify;
+            if (options_.native_passes && tier3::passes_enabled()) {
+                if (machine_code_ && variant == tier3::Variant::Standard && original.entries.size() > 1) {
+                    auto entry = std::make_unique<tier3::Program>();
+                    entry->ir = original;
+                    entry->ir.entries.resize(1);
+                    tier3::detail::remove_unreachable(entry->ir);
+                    tier3::detail::compact(entry->ir);
+                    const tier3::detail::Cfg cfg(entry->ir);
+                    if (!tier3::detail::find_loops(entry->ir, cfg).empty()) {
+                        tier3::optimize(image_, entry->ir, verify);
+                        tier3::place_canons(image_, entry->ir, verify);
+                        built.program->function_entry = std::move(entry);
+                    }
+                }
+                tier3::optimize(image_, original, verify);
+            }
+            tier3::place_canons(image_, original, verify);
+        }
     } catch (const std::exception& error) {
+        built.program.reset();
         built.reason = std::string("internal error: ") + error.what();
     }
     // Machine code; a program that cannot have it stays on the program
     // interpreter.
     std::uint64_t bytes = 0;
     if (built.program && machine_code_) {
-        auto generated = jit::native::generate(built.program->ir, tier3::verify_enabled());
+        auto& program = *built.program;
+        auto* entry = program.function_entry.get();
+        auto generated = jit::native::generate(entry ? entry->ir : program.ir, tier3::verify_enabled());
+        if (entry && !generated.failure.empty()) {
+            program.function_entry.reset();
+            entry = nullptr;
+            generated = jit::native::generate(program.ir, tier3::verify_enabled());
+        }
         if (generated.failure.empty()) {
             built.program->machine = jit::Program::load(generated.code.bytes, generated.failure);
             if (!built.program->machine) generated.failure = "no executable memory: " + generated.failure;
@@ -1937,11 +1965,18 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
             built.reason = generated.failure;
             built.program.reset();
         } else {
-            built.program->entry_code = std::move(generated.code.entries);
-            built.program->trampoline = generated.code.trampoline;
-            built.program->verify = tier3::verify_enabled();
-            built.program->lazy_entries =
-                std::make_unique<std::atomic<const std::uint8_t*>[]>(built.program->entry_code.size());
+            program.trampoline = generated.code.trampoline;
+            program.verify = tier3::verify_enabled();
+            if (entry) {
+                entry->machine = program.machine;
+                entry->trampoline = program.trampoline;
+                entry->verify = program.verify;
+                entry->entry_code = std::move(generated.code.entries);
+                program.entry_code.assign(program.ir.entries.size(), jit::native::lazy);
+            } else {
+                program.entry_code = std::move(generated.code.entries);
+            }
+            program.lazy_entries = std::make_unique<std::atomic<const std::uint8_t*>[]>(program.entry_code.size());
             bytes = generated.code.bytes.size();
         }
     }
@@ -1953,6 +1988,11 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
             for (const auto& [name, count] : built.program->ir.pass_counts) {
                 text += "pass " + name + " " + std::to_string(count) + "\n";
             }
+            if (const auto& entry = built.program->function_entry) {
+                for (const auto& [name, count] : entry->ir.pass_counts) {
+                    text += "entry 0 pass " + name + " " + std::to_string(count) + "\n";
+                }
+            }
         }
         std::fputs(("tier 3 program " + std::to_string(program.program_id) + " of function " +
                     std::to_string(program.function) + ":\n" + text).c_str(), stderr);
@@ -1961,7 +2001,11 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
         const std::lock_guard lock(mutex_);
         if (built.program) {
             published = built.program.get();
-            for (const auto& [name, count] : built.program->ir.pass_counts) {
+            auto pass_counts = built.program->ir.pass_counts;
+            if (const auto& entry = built.program->function_entry) {
+                for (const auto& [name, count] : entry->ir.pass_counts) pass_counts[name] += count;
+            }
+            for (const auto& [name, count] : pass_counts) {
                 for (const char* kind : {"nil", "lookup", "kind", "init", "bounds", "global"}) {
                     if (name == std::string("gvn.") + kind || name == std::string("elim.") + kind) {
                         statistics_.native_heap_checks[kind] += count;

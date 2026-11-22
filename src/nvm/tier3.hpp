@@ -405,7 +405,13 @@ struct Context;
 struct Program {
     Function ir;
     // The code of entry 0, read-only and executable; null without code.
-    std::unique_ptr<jit::Program> machine;
+    std::shared_ptr<jit::Program> machine;
+    // Entry zero may have its own graph, with all interpreter resume roots
+    // removed. It owns the same code mapping and uses its own IR metadata.
+    std::unique_ptr<Program> function_entry;
+    const Program& for_entry(std::uint32_t index) const {
+        return index == 0 && function_entry ? *function_entry : *this;
+    }
     // The offset in `machine` of each IR entry's code (Function::entries),
     // or jit::native::lazy for an entry whose code is made when a run first
     // enters there; and the offset of the stub a run calls to enter code.

@@ -1,0 +1,49 @@
+let console = import:Std.Io.Console;
+let math = import:Std.Math.Math;
+let program = import:Std.Program;
+
+let sum_roots = func(values: float64[], left: int, right: int, rounds: int, report: bool) -> uint64 {
+    let total = -0.0;
+    for (let round = 0; round < rounds; round = round + 1) {
+        total = total + math.sqrt(values[left]);
+    }
+    // The cold host path leaves native code between the two loops.
+    if (report) {
+        console.print_line("between loops");
+    }
+    for (let round = 0; round < rounds; round = round + 1) {
+        total = total + math.sqrt(values[right]);
+    }
+    return total.to_bits();
+};
+
+let FunctionEntryLoops = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let nan = float64.from_bits(9'223'092'407'043'655'969u64);
+        let values = [4.0, 9.0, -0.0, nan];
+        let checksum = 0u64;
+        for (let warmup = 0; warmup < 256; warmup = warmup + 1) {
+            checksum = checksum ^ sum_roots(values, 0, 1, 4, false);
+        }
+        console.println("{:x}", checksum);
+
+        let choice = "";
+        if (args.length > 0) {
+            choice = args[0];
+        }
+        if (choice == "resume") {
+            console.println("{:x}", sum_roots(values, 0, 1, 4, true));
+        } else if (choice == "before") {
+            console.println("{:x}", sum_roots(values, values.length, 1, 4, true));
+        } else if (choice == "after") {
+            console.println("{:x}", sum_roots(values, 0, values.length, 4, true));
+        } else if (choice == "nan") {
+            console.println("{:x}", sum_roots(values, 3, 1, 4, true));
+        } else if (choice == "zero") {
+            console.println("{:x}", sum_roots(values, 2, 2, 4, true));
+        } else {
+            console.println("{:x}", sum_roots(values, 0, 1, 4, false));
+        }
+        return program.ExitCode.Ok;
+    };
+);

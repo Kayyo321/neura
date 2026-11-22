@@ -325,11 +325,13 @@
             const auto width = program->slot_widths[slot];
             if (width < 64 && (frame.slots[slot] >> width) != 0) return nullptr;
         }
-        const auto* code = self.tier3_code(*program, false);
-        if (code == nullptr || self.frames_.size() + code->ir.max_inline_depth > self.limits_.max_frames) return nullptr;
-        if (code->ir.uses_float && !context->float_default) return nullptr;
-        if (!tier3_clean_entry(code->ir, 0, frame.slots)) return nullptr;
-        return code;
+        const auto* published = self.tier3_code(*program, false);
+        if (published == nullptr) return nullptr;
+        const auto& code = published->for_entry(0);
+        if (self.frames_.size() + code.ir.max_inline_depth > self.limits_.max_frames) return nullptr;
+        if (code.ir.uses_float && !context->float_default) return nullptr;
+        if (!tier3_clean_entry(code.ir, 0, frame.slots)) return nullptr;
+        return &code;
     }
 
     // Widen: the reference store of an element, which widens the storage
@@ -732,7 +734,8 @@
     // checks run_program makes, then the IR runs until it ends. At every
     // ending every frame is as tier 1 would have it, the innermost frame's
     // block is where the run goes on, and the steps are in the run's.
-    RegionOutcome run_native_program(const tier3::Program& code, std::uint32_t entry_index, std::uint64_t allowance) {
+    RegionOutcome run_native_program(const tier3::Program& published, std::uint32_t entry_index, std::uint64_t allowance) {
+        const auto& code = published.for_entry(entry_index);
         const auto& entered = *code.ir.region;
         // The machine code of the entry, made now if it is made on first use;
         // an entry without it is refused.

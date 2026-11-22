@@ -1,0 +1,19 @@
+{
+  "builds": [[]],
+  "mechanism": {
+    "flags": [],
+    "argument": "resume",
+    "parameters": 5,
+    "markers": {"exit state kernel immediate 0 ": 2},
+    "trace_resume": true,
+    "pattern": "^entry 0 pass licm\\.(?:kind|lookup|bounds|read) [1-9][0-9]*$"
+  },
+  "cases": [
+    {"argument": "nominal", "output": ["0", "4034000000000000"]},
+    {"argument": "resume", "output": ["0", "between loops", "4034000000000000"]},
+    {"argument": "before", "output": ["0"], "status": 139, "trap": "index out of bounds: index 4 for length 4", "budget": true},
+    {"argument": "after", "output": ["0", "between loops"], "status": 139, "trap": "index out of bounds: index 4 for length 4", "budget": true},
+    {"argument": "nan", "output": ["0", "between loops", "7ff8000000000000"]},
+    {"argument": "zero", "output": ["0", "between loops", "8000000000000000"]}
+  ]
+}
