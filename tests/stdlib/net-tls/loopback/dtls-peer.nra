@@ -37,6 +37,7 @@ export let DtlsPeer = module:program.Entry (
         export let set_read_timeout = func(timeout: duration.Duration) => wire.set_read_timeout(timeout);
         export let send_to = func(data: uint8[list], target: socket_addr.SocketAddr) -> result.Result<int> =>
             wire.send_to(data, target);
+
         export let close = func -> result.Result<unit.Unit> => wire.close();
 
         export let receive_from = func(max: int) -> result.Result<datagram.Datagram<socket_addr.SocketAddr>> {

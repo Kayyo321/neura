@@ -53,8 +53,8 @@ export let TlsStream = module (
 
         let write_failure = func -> Error => host_error.io(write_error,
             host_error.kind_of(write_error) == IoErrorKind.Unsupported
-                ? "TLS operation is unavailable in this runtime"
-                : "TLS write failed", label);
+            ? "TLS operation is unavailable in this runtime"
+            : "TLS write failed", label);
 
         /// @brief Use `TlsConnector` or `TlsAcceptor`; the handle comes from the library.
         export let init = func(opened: socket.Handle, dialed: Optional<SocketAddr>, selected: string) {

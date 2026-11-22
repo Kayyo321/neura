@@ -180,5 +180,5 @@ let NativeFetch = module:program.Entry (
 
     let body_summary = func(status: int, body: uint8[list]) -> string =>
         status.to_string() .. ":" .. body.length.to_string() .. ":" .. body[0].to_string() .. ":" ..
-            body[body.length - 1].to_string();
+        body[body.length - 1].to_string();
 );
