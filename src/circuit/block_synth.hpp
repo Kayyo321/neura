@@ -59,6 +59,7 @@ struct ExitSpec {
     // a Continue or Call exit.
     nvr::SchedulerOp scheduler = nvr::SchedulerOp::ScopeEnter;
     bool poll = false;
+    bool receiver_non_nil = false;
 };
 
 // The image tables a block refers to. The converter interns into the image it

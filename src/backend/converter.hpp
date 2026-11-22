@@ -34,6 +34,8 @@ struct ConversionOptions {
     // counts and image bytes. SMAP then names the statement whose effects
     // have not yet happened, rather than a later failure in a merged block.
     bool debug_statements = false;
+    // Re-prove non-nil receiver uses on this exact executable IR.
+    bool elide_nil_checks = false;
 };
 
 // What an image function implements.
@@ -96,6 +98,7 @@ struct BuildOptions {
     bool source_map = true;
     bool lift_hints = true;
     bool debug_statements = false;
+    bool elide_nil_checks = true;
 };
 
 // The pipeline shared by `neura build` from source and from .nir: verify the

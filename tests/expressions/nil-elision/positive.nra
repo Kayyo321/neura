@@ -1,0 +1,22 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Node = class (
+    export last value: int = 17;
+);
+
+let guarded = func(item: Node = nil) -> int {
+    if (!item) {
+        return 0;
+    }
+    return item.value;
+};
+
+let make = func -> Node => new Node();
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.println("{} {} {}", guarded(new Node()), guarded(nil), make().value);
+        return program.ExitCode.Ok;
+    };
+);

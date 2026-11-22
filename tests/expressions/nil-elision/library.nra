@@ -1,0 +1,24 @@
+export let Library = module (
+    export let Node = class (
+        export last value: int = 17;
+    );
+
+    export let Base = class (
+        export let pick = func -> Node => new Node();
+    );
+
+    export let Provider = interface (
+        let pick = func -> Node => new Node();
+    );
+
+    export let read_virtual = func(provider: Base) -> int => provider.pick().value;  // trap: virtual
+    export let read_interface = func(provider: Provider) -> int => provider.pick().value;  // trap: interface
+
+    export let guarded = func(provider: Base) -> int {
+        last item = provider.pick();
+        if (!item) {
+            return 0;
+        }
+        return item.value;
+    };
+);

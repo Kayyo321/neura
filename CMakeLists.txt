@@ -545,6 +545,7 @@ add_library(neura_compiler STATIC
     src/neura-ir/reference_storage.cpp
     src/ir-optimization/analysis.cpp
     src/ir-optimization/effects.cpp
+    src/ir-optimization/nil_proof.cpp
     src/ir-optimization/analysis_cache.cpp
     src/ir-optimization/inlining.cpp
     src/ir-optimization/integer_folding.cpp
@@ -1758,6 +1759,10 @@ if(BUILD_TESTING AND NEURA_SDK)
     set_tests_properties(pointer-qualification PROPERTIES TIMEOUT 300)
     add_test(NAME pointer-unused-import COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/pointer/unused-import.py" "$<TARGET_FILE:neura>")
+    add_test(NAME expressions-nil-elision COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressions/nil-elision.py" "$<TARGET_FILE:neura>"
+        ${NEURA_POINTER_NATIVE_TEST})
+    set_tests_properties(expressions-nil-elision PROPERTIES TIMEOUT 300)
 
     # The compile-time check of interpolated strings agrees with the
     # formatting library on a corpus of specifications (docs/design/Calls030.md).

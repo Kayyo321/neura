@@ -406,9 +406,10 @@ struct KnownSection {
     bool always = true;
 };
 
-constexpr std::array<KnownSection, 13> known_sections{{
+constexpr std::array<KnownSection, 14> known_sections{{
     {"CALB", true, false}, {"CONS", true}, {"FUNC", true}, {"GLOB", true}, {"GRPH", true}, {"IMPT", true},
-    {"KERN", true, false}, {"LAYO", true}, {"META", true}, {"NATV", true, false}, {"SMAP", false, false},
+    {"KERN", true, false}, {"LAYO", true}, {"META", true}, {"NATV", true, false}, {"NILP", false, false},
+    {"SMAP", false, false},
     {"TRNS", true, false}, {"TYPE", true},
 }};
 
@@ -2209,6 +2210,30 @@ Image load(std::span<const std::uint8_t> bytes, const LoadLimits& limits) {
     });
     section("FUNC", [&](Reader& in) { image.functions = read_functions(in, image.types, minor); });
     section("META", [&](Reader& in) { image.entry = in.u32(); });
+    if (sections.contains("NILP")) {
+        section("NILP", [&](Reader& in) {
+            const auto locations = in.vector(12, "non-nil receiver hints", [](Reader& r) {
+                return std::array{r.u32(), r.u32(), r.u32()};
+            });
+            if (locations.empty() || !std::ranges::is_sorted(locations) ||
+                std::ranges::adjacent_find(locations) != locations.end()) {
+                fail(Kind::Malformed, "NILP: receiver hints must be nonempty and strictly ordered");
+            }
+            for (const auto& [fi, bi, ei] : locations) {
+                if (fi >= image.functions.size() || bi >= image.functions[fi].blocks.size() ||
+                    ei >= image.functions[fi].blocks[bi].exits.size()) {
+                    fail(Kind::Malformed, "NILP: receiver hint exit is out of range");
+                }
+                auto& exit = image.functions[fi].blocks[bi].exits[ei];
+                if (minor < 2 || exit.kind != ExitKind::State || !has_nil_checked_receiver(exit.operation) ||
+                    exit.arguments.empty() || exit.arguments.front().type >= image.types.size() ||
+                    image.types[exit.arguments.front().type].kind != TypeKind::Object) {
+                    fail(Kind::Malformed, "NILP: receiver hint requires a nil-checked object state operation");
+                }
+                exit.receiver_non_nil = true;
+            }
+        });
+    }
     if (sections.contains("CALB")) {
         section("CALB", [&](Reader& in) {
             image.callbacks = in.vector(12, "callback table", [](Reader& r) {

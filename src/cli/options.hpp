@@ -56,6 +56,7 @@ neura::nvm::Capabilities granted_capabilities();
 struct Options {
     Command command = Command::Check;
     bool optimize = true;
+    bool elide_nil_checks = true;
     bool source_map = true;
     // build: emit the optional LIFT section (--no-lift-hints omits it).
     bool lift_hints = true;

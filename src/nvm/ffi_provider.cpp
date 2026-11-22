@@ -56,9 +56,6 @@ namespace neura::nvm::provider {
 
 namespace {
 
-constexpr std::int64_t max_transfer_bytes = std::int64_t{1} << 24;
-constexpr std::int64_t max_allocation_bytes = std::int64_t{1} << 32;
-
 enum Tag : std::uint8_t {
     Void = 0, Bool = 1, Int8 = 2, UInt8 = 3, Int16 = 4, UInt16 = 5, Int32 = 6, UInt32 = 7,
     Int64 = 8, UInt64 = 9, Float = 10, Double = 11, Pointer = 12, Struct = 13
@@ -121,6 +118,9 @@ void UpcallDeleter::operator()(Upcall* upcall) const { delete upcall; }
 #else
 
 namespace {
+
+constexpr std::int64_t max_transfer_bytes = std::int64_t{1} << 24;
+constexpr std::int64_t max_allocation_bytes = std::int64_t{1} << 32;
 
 // Decodes a type description and owns the libffi struct types it builds.
 class TypeReader {

@@ -1,0 +1,13 @@
+let program = import:Std.Program;
+
+let Node = class (
+    export last value: int = 17;
+);
+
+let read_contract = func(item: Node) -> int => item.value;  // trap: contract
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        return read_contract(nil) == 17 ? program.ExitCode.Ok : program.ExitCode.Failure;
+    };
+);

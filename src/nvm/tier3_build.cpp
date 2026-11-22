@@ -849,10 +849,12 @@ private:
 
     // typed_entry (machine.cpp): nil is a trap of its own for an object
     // type, then the handle must name a live entry of the type.
-    std::uint32_t typed_entry(std::uint32_t handle, std::uint32_t type_index, std::uint32_t state) {
-        if (image_.types[type_index].kind == nvr::TypeKind::Object && image_.minor_version >= 2) {
+    std::uint32_t typed_entry(std::uint32_t handle, std::uint32_t type_index, std::uint32_t state,
+                              bool non_nil = false) {
+        if (!non_nil && image_.types[type_index].kind == nvr::TypeKind::Object && image_.minor_version >= 2) {
             heap_check(Op::CheckNotNil, handle, none, 0, state);
         }
+        // Lookup still deoptimizes for nil. A replay reports the original trap.
         const auto entry = heap_check(Op::Lookup, handle, none, 0, state);
         heap_check(Op::CheckKind, entry, none, type_test(type_index), state);
         return entry;
@@ -918,16 +920,18 @@ private:
         const auto result_type = slot_type_or(exit.result_slot, integer(64));
         std::uint32_t result = none;
         switch (exit.operation) {
-        case StateOp::ReadTag: result = heap_op(Op::LoadTag, result_type, typed_entry(args[0], types[0].type, state)); break;
+        case StateOp::ReadTag:
+            result = heap_op(Op::LoadTag, result_type, typed_entry(args[0], types[0].type, state, exit.receiver_non_nil));
+            break;
         case StateOp::ReadField: {
-            const auto entry = typed_entry(args[0], types[0].type, state);
+            const auto entry = typed_entry(args[0], types[0].type, state, exit.receiver_non_nil);
             heap_check(Op::CheckInit, entry, none, exit.immediate, state);
             result = heap_op(Op::LoadField, result_type, entry, none, none, none, exit.immediate,
                              f_->type_tests[type_test(types[0].type)].words);
             break;
         }
         case StateOp::WriteField: {
-            const auto entry = typed_entry(args[0], types[0].type, state);
+            const auto entry = typed_entry(args[0], types[0].type, state, exit.receiver_non_nil);
             heap_op(Op::StoreField, {}, entry, args[1], none, none, exit.immediate, f_->type_tests[type_test(types[0].type)].words);
             break;
         }

@@ -233,6 +233,11 @@ inline constexpr bool is_hook_operation(StateOp operation) {
     return operation == StateOp::HookEnter || operation == StateOp::HookLeave;
 }
 
+inline constexpr bool has_nil_checked_receiver(StateOp operation) {
+    return operation == StateOp::ReadTag || operation == StateOp::ReadField ||
+           operation == StateOp::WriteField;
+}
+
 // Reserved token of execution-lifetime static storage (NVR 1.7).
 inline constexpr std::uint64_t static_region_token = UINT64_MAX;
 
@@ -273,6 +278,8 @@ struct Exit {
     std::uint32_t error_resume = 0;
     // Trap reason.
     std::uint32_t reason = 0;
+    // Optional NILP hint. The heap lookup and its failure path still apply.
+    bool receiver_non_nil = false;
 
     bool operator==(const Exit&) const = default;
 };

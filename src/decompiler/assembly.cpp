@@ -435,7 +435,9 @@ std::string disassemble(const nvr::Image& image) {
                     out << " arguments " << values(exit.arguments);
                     break;
                 case nvr::ExitKind::State:
-                    out << " " << state_ops.at(static_cast<std::size_t>(exit.operation)) << " immediate "
+                    out << " " << state_ops.at(static_cast<std::size_t>(exit.operation));
+                    if (exit.receiver_non_nil && minor >= 2) out << " non-nil-receiver";
+                    out << " immediate "
                         << exit.immediate << " arguments " << values(exit.arguments) << " result "
                         << index_or_absent(exit.result_slot) << " resume " << exit.resume;
                     break;
@@ -732,6 +734,13 @@ nvr::Image assemble(std::string_view text) {
                 break;
             case nvr::ExitKind::State:
                 exit.operation = static_cast<nvr::StateOp>(in.choice(state_ops, "state operation"));
+                if (in.peek("non-nil-receiver")) {
+                    in.keyword("non-nil-receiver");
+                    if (image.minor_version < 2 || !nvr::has_nil_checked_receiver(exit.operation)) {
+                        in.error("non-nil-receiver requires a nil-checked object state operation");
+                    }
+                    exit.receiver_non_nil = true;
+                }
                 if (exit.operation == nvr::StateOp::Kernel && image.minor_version < 6) {
                     in.error("kernel exits require NVR 1.6");
                 }

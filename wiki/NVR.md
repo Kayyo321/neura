@@ -54,6 +54,7 @@ Minor version 11 adds the private Cell-storage operation 37 and a trap reason fo
 | `META` | Entry function index as one `u32` | Yes |
 | `NATV` | The embedded native library (1.4); present only when the image has C imports | Yes, when present |
 | `NAME` | Source names for tools (provenance; not interpreted by the loader) | Optional |
+| `NILP` | Non-nil receiver hints for field accesses and dispatch tag reads | Optional |
 | `SMAP` | Source locations for function blocks | Optional |
 | `TRNS` | Transferable layout indices (1.5) | Yes, when present: required for a scheduler exit or poll, and present exactly when the image has one |
 | `TYPE` | Type records | Yes |
@@ -425,6 +426,12 @@ dispatch_count:u32, (exit:u32, layout_count:u32, layout:u32[layout_count])[dispa
 Each node is `kind:u8, type:u32` followed by its fields: kind 0, a block input, `input:u32` (its position in the block's input list); kind 1, an immediate, `bits:u64` (its slot encoding); kind 2, a unary operation, `op:u8, operand:u32`; kind 3, a binary operation, `op:u8, left:u32, right:u32`; kind 4, a conversion to `type`, `operand:u32`. An operand names an earlier node, so a form is acyclic, and nesting is at most 256 deep. Operator codes 0 through 24 are `!`, `~`, `index`, `neg`, `+`, `+~`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `<=`, `>`, `>=`, `&&`, `||`, `&`, `|`, `^`, `<<`, `>>`, `-~`, and `hash`, with the meanings of [Numbers](Numbers) for the operand types; `index` widens a signed or unsigned integer to `uint64` after checking that it is not negative, and `+~` and `-~` add and subtract integers without an overflow check, keeping the result modulo 2^width, as the converter's generated hash loops do. `hash` is the `uint32` value hash of a Boolean, integer, or float operand that `hash_code` returns: a Boolean hashes to 1231 when true and 1237 when false; a float has any NaN replaced by its format's canonical quiet NaN first; a 64-bit value is folded to the exclusive or of its two halves; and a narrower value is extended to 32 bits, with its sign when it is a signed integer. Codes 23 and 24 were added after Neura 0.2.0, whose runtime reads a section that uses either as malformed and ignores it whole, as the next paragraph says; such an image runs there with every block on the reference evaluator or found by search.
 
 A value names the first output lane an exit reads and the node that computes it, in the order the block computes them. In a shared form, a node stands for one computation however often it is used, and the schedule lists the operations in the order the block performs them, including any whose only effect is a check, which fixes the order in which checks fail. The condition chooses between a block's two normal exits: `exit_when_true` is the one taken when it holds. A dispatch form instead lists, for each call exit of a virtual dispatch block, the layouts that select it. A section of another version, or one with any malformed byte (a count beyond the bytes left, an operand that is not an earlier node, an unknown kind or operator, a duplicate lane or exit, entries out of order, or trailing bytes), is ignored whole; an entry that names a function or block outside the image is dropped.
+
+### Non-nil receiver hints
+
+`NILP` holds a nonempty vector of `function:u32, block:u32, exit:u32` triples in strictly ascending order. Each triple names a `ReadTag`, `ReadField`, or `WriteField` state exit with an object receiver in an image of version 1.2 or later. Assembly spells the hint `non-nil-receiver` after the state operation. The section has no effect on the required format version.
+
+The hint lets the runtime use the heap lookup in place of a separate nil test on the success path. An absent heap entry still goes through the original failure path, which distinguishes a nil receiver from an invalid or released handle. Reference type and field initialization checks still apply. A runtime can ignore the section without changing execution, and an incorrect hint cannot turn a nil access into a successful one. `--no-nil-check-elision` omits the section.
 
 ## Writer and loader requirements
 

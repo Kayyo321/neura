@@ -1,0 +1,28 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let library = import:Library;
+
+let Override = class:library.Base (
+    export let.override pick = func -> library.Node => nil;
+);
+
+let Implementation = class implements library.Provider (
+    export let pick = func -> library.Node => nil;
+);
+
+let run_case = func(mode: string) -> int {
+    if (mode == "virtual") {
+        return library.read_virtual(new Override());
+    }
+    if (mode == "interface") {
+        return library.read_interface(new Implementation());
+    }
+    return library.guarded(new Override());
+};
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.println("{}", run_case(args[0]));
+        return program.ExitCode.Ok;
+    };
+);

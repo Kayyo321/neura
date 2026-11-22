@@ -397,6 +397,11 @@ Options read_options(int argc, char** argv) {
                 throw std::runtime_error("--no-optimize applies only to emit-ir, build, and test");
             }
             options.optimize = false;
+        } else if (arg == "--no-nil-check-elision") {
+            if (options.command != Command::Build && options.command != Command::Test) {
+                throw std::runtime_error("--no-nil-check-elision applies only to build and test");
+            }
+            options.elide_nil_checks = false;
         } else if (arg == "--no-provenance") {
             if (options.command != Command::Decompile) {
                 throw std::runtime_error("--no-provenance applies only to decompile");

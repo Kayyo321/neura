@@ -49,6 +49,7 @@ struct BuildOptions {
     bool update_lock = false;
     bool source_map = false;
     bool no_optimize = false;
+    bool no_nil_check_elision = false;
     bool no_lift_hints = false;
     bool dev = false;
     // The `neura` executable that compiles images.

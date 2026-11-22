@@ -353,6 +353,7 @@ std::optional<nvr::Block> replay(const nvr::Image& image, const nvr::Block& orig
             spec.reason = exit.reason;
             spec.scheduler = exit.scheduler;
             spec.poll = exit.poll;
+            spec.receiver_non_nil = exit.receiver_non_nil;
             if (exit_when_true) {
                 spec.when = non_trap == *exit_when_true ? when : Circuit::logical_not(when);
             }

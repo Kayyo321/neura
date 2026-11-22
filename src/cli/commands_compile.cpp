@@ -274,6 +274,8 @@ std::vector<std::uint8_t> build_image_bytes(const Options& options, std::vector<
         if (options.files.size() != 1) throw std::runtime_error("a .nvr input must be the only input file");
         if (!options.roots.empty()) throw std::runtime_error("-I applies only to source inputs");
         if (!options.optimize) throw std::runtime_error("--no-optimize cannot be applied to an image that is already built");
+        if (!options.elide_nil_checks)
+            throw std::runtime_error("--no-nil-check-elision cannot be applied to an image that is already built");
         if (!options.source_map) throw std::runtime_error("--no-source-map cannot be applied to an image that is already built");
         if (!options.lift_hints) {
             // Hints are optional metadata: stripping them from a built image
@@ -289,6 +291,7 @@ std::vector<std::uint8_t> build_image_bytes(const Options& options, std::vector<
     }
     neura::backend::BuildOptions build_options;
     build_options.optimize = options.optimize;
+    build_options.elide_nil_checks = options.elide_nil_checks;
     build_options.source_map = options.source_map;
     build_options.lift_hints = options.lift_hints;
     auto program = load_program(options);

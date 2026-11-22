@@ -57,7 +57,7 @@ A condition is a `bool`, or a class or interface reference. A reference is true 
 
 `not` and `!` are the same operator on a reference. `if (not val)` and `if (!val)` are the same nil check, and `not val` and `!val` give the same `bool` wherever they appear.
 
-A nil condition narrows like a type test. Inside the body of `if (val)`, `val` is known to be non-nil. The same holds in the `else` body of `if (!val)` or `if (not val)`, and in the code after such an `if` when its body always leaves through `return`, `break`, `continue`, or a trap. Lowering records the proven use and its span in NeuraIR 1.16. A proven reference can use either ordinary member access or `?.` without a warning. Ordinary member access continues to execute the runtime nil check.
+A nil condition narrows like a type test. Inside the body of `if (val)`, `val` is known to be non-nil. The same holds in the `else` body of `if (!val)` or `if (not val)`, and in the code after such an `if` when its body always leaves through `return`, `break`, `continue`, or a trap. Lowering records the proven use and its span in NeuraIR 1.16. A proven reference can use either ordinary member access or `?.` without a warning. Optimized builds can omit the separate receiver nil test after proving the use again in the final program. Pass `--no-nil-check-elision` to keep that test for comparison.
 
 <!-- example: check -->
 ```neura

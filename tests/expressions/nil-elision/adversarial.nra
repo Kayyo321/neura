@@ -1,0 +1,191 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+.Immutable
+let Node = class (
+    export last value: int = 17;
+);
+
+let Holder = class (
+    export let item: Node = nil;
+
+    export let clear = func {
+        item = nil;
+    };
+);
+
+let State = module (
+    export let item: Node = new Node();
+
+    export let clear = func {
+        item = nil;
+    };
+);
+
+let Hooked = class (
+    | get: {
+        reads += 1;
+        if (reads == 1) {
+            return instance;
+        }
+        return nil;
+    };
+
+    static let reads: int = 0;
+    export last value: int = 17;
+);
+
+let reassign = func(node: Node = nil) -> int {
+    let item = node;
+    if (item) {
+        console.println("{}", item.value);
+        item = nil;
+        return item.value;  // trap: reassignment
+    }
+    return 0;
+};
+
+let loop = func(node: Node) -> int {
+    let item = node;
+    if (!item) {
+        return 0;
+    }
+    for (let index = 0; ; item = nil) {
+        if (index == 1) {
+            return item.value;  // trap: loop
+        }
+        console.println("{}", item.value);
+        index += 1;
+        continue;
+    }
+};
+
+let capture = func -> int {
+    let item: Node = nil;
+    let read = new func -> int => item.value;  // trap: closure
+    item = new Node();
+    console.println("{}", item.value);
+    return read();
+};
+
+let alias = func -> int {
+    let holder = new Holder();
+    holder.item = new Node();
+    let other = holder;
+    if (holder.item) {
+        other.clear();
+        return holder.item.value;  // trap: alias
+    }
+    return 0;
+};
+
+let read_destroyed = func -> int {
+    let holder = new Holder();
+    last saved = holder;
+    if (saved) {
+        destroy holder;
+        return saved.item == nil ? 0 : 1;  // trap: destroyed
+    }
+    return 0;
+};
+
+let mutate_field = func -> int {
+    let holder = new Holder();
+    holder.item = new Node();
+    if (holder.item) {
+        holder.item = nil;
+        return holder.item.value;  // trap: mutable-field
+    }
+    return 0;
+};
+
+let read_global = func -> int {
+    if (State.item) {
+        State.clear();
+        return State.item.value;  // trap: global
+    }
+    return 0;
+};
+
+let read_hook = func -> int {
+    last item = new Hooked();
+    if (item) {
+        return item.value;  // trap: getter
+    }
+    return 0;
+};
+
+let require_item = func(item: Node = nil) -> int {
+    if (!item) {
+        trap_with_message("missing item");  // trap: explicit-guard
+    }
+    return item.value;
+};
+
+let read_generic = func<T: Node>(item: T) -> int => item.value;  // trap: generic
+
+let choose = func(present: bool) -> Node => present ? new Node() : nil;
+
+let read_contract = func(item: Node) -> int => item.value;  // trap: task-argument
+
+let task_argument = func -> int {
+    scope {
+        let child = spawn read_contract(nil);
+        return child.join();
+    }
+};
+
+let task_result = func -> int {
+    scope {
+        let child = spawn choose(false);
+        let item = child.join();
+        return item.value;  // trap: task-result
+    }
+};
+
+let run_case = func(mode: string) -> int {
+    if (mode == "reassignment") {
+        return reassign(new Node());
+    }
+    if (mode == "loop") {
+        return loop(new Node());
+    }
+    if (mode == "closure") {
+        return capture();
+    }
+    if (mode == "alias") {
+        return alias();
+    }
+    if (mode == "destroyed") {
+        return read_destroyed();
+    }
+    if (mode == "mutable-field") {
+        return mutate_field();
+    }
+    if (mode == "global") {
+        return read_global();
+    }
+    if (mode == "getter") {
+        return read_hook();
+    }
+    if (mode == "explicit-guard") {
+        return require_item(nil);
+    }
+    if (mode == "generic") {
+        return read_generic<Node>(choose(false));
+    }
+    if (mode == "task-argument") {
+        return task_argument();
+    }
+    if (mode == "task-result") {
+        return task_result();
+    }
+    trap_with_message("unknown case");
+};
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.println("{}", run_case(args[0]));
+        return program.ExitCode.Ok;
+    };
+);

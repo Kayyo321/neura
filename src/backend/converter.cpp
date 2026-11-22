@@ -5,6 +5,7 @@
 #include "circuit/circuit.hpp"
 #include "circuit/float_circuit.hpp"
 #include "ir-optimization/analysis.hpp"
+#include "ir-optimization/nil_proof.hpp"
 #include "lift/hints.hpp"
 #include "lift/lowered_block.hpp"
 #include "lift/proof.hpp"
@@ -168,7 +169,7 @@ private:
 
     // Effects that end a block.
     Operand state(nvr::StateOp operation, std::uint32_t immediate, std::vector<Operand> arguments,
-                  std::uint32_t result_type, const Span& span);
+                  std::uint32_t result_type, const Span& span, bool receiver_non_nil = false);
     Operand invoke(const FunctionOrigin& callee, std::vector<Operand> arguments, std::uint32_t result_type,
                    const Span& span, bool poll = false);
     // A call whose result is the given words: a tuple's words land in
@@ -183,9 +184,9 @@ private:
     // types of all the value's words.
     Values read_words(nvr::StateOp operation, std::uint32_t base, std::vector<Operand> arguments,
                       const std::vector<std::uint32_t>& types, const std::vector<std::size_t>& positions,
-                      const Span& span);
+                      const Span& span, bool receiver_non_nil = false);
     void write_words(nvr::StateOp operation, std::uint32_t base, std::vector<Operand> prefix, Values words,
-                     const Span& span, bool atomic = false);
+                     const Span& span, bool atomic = false, bool receiver_non_nil = false);
     // An inline value at a one-word runtime boundary: allocated into its
     // heap layout, and read back from it.
     Operand box(const IrType& value, Values words, const Span& span);
@@ -280,7 +281,8 @@ private:
     Values call(const IrNode& node);
     Values virtual_call(const IrNode& node);
     Values dispatch_call(SymbolId cls, SymbolId method, std::vector<Operand> operands,
-                         const std::vector<std::uint32_t>& result_types, const Span& span, bool poll = false);
+                         const std::vector<std::uint32_t>& result_types, const Span& span, bool poll = false,
+                         bool receiver_non_nil = false);
     Operand spawn(const IrNode& node, bool handle = true);
     Values scheduler_call(const IrNode& node);
     // The operands of a node that carries one word for each value, evaluated
@@ -366,11 +368,14 @@ class Converter : public BlockTables {
 public:
     Converter(const IrProgram& program, const ConversionOptions& options)
         : program_(program), options_(options), value_layouts_(program),
-          retained_arrays_(retained_view_arrays(program)) {}
+          retained_arrays_(retained_view_arrays(program)) {
+        if (options.elide_nil_checks) nil_proof_.emplace(program);
+    }
 
     Conversion run();
 
     const IrProgram& program() const { return program_; }
+    bool proves_non_nil(const IrNode& value) const { return nil_proof_ && nil_proof_->proves_non_nil(value); }
     bool has_managed_backing(const IrNode& array) const { return retained_arrays_.contains(&array); }
     bool uses_region(const IrNode& array) const {
         return array.type.kind == TypeKind::Array && !has_managed_backing(array);
@@ -514,6 +519,7 @@ private:
     ConversionOptions options_;
     ValueLayouts value_layouts_;
     std::set<const IrNode*> retained_arrays_;
+    std::optional<optimization::NilProof> nil_proof_;
     std::vector<std::pair<IrType, Span>> value_types_;
     nvr::Image image_;
     std::map<nvr::Type, std::uint32_t, decltype([](const nvr::Type& a, const nvr::Type& b) {
@@ -2199,12 +2205,13 @@ void FunctionCompiler::finish() {
 }
 
 Operand FunctionCompiler::state(nvr::StateOp operation, std::uint32_t immediate, std::vector<Operand> arguments,
-                                std::uint32_t result_type, const Span& span) {
+                                std::uint32_t result_type, const Span& span, bool receiver_non_nil) {
     const auto result_slot = c_.type_at(result_type).kind == nvr::TypeKind::Void ? absent : new_slot(result_type);
     const auto resume = new_block();
     ExitSpec exit;
     exit.kind = nvr::ExitKind::State;
     exit.operation = operation;
+    exit.receiver_non_nil = receiver_non_nil;
     exit.immediate = immediate;
     exit.arguments = std::move(arguments);
     exit.result_slot = result_slot;
@@ -2249,7 +2256,7 @@ Values FunctionCompiler::invoke_values(const FunctionOrigin& callee, std::vector
 
 Values FunctionCompiler::read_words(nvr::StateOp operation, std::uint32_t base, std::vector<Operand> arguments,
                                     const std::vector<std::uint32_t>& types, const std::vector<std::size_t>& positions,
-                                    const Span& span) {
+                                    const Span& span, bool receiver_non_nil) {
     // Each read closes the block, so what several reads share is committed first.
     if (positions.size() > 1) {
         for (auto& argument : arguments) spill(argument);
@@ -2258,7 +2265,8 @@ Values FunctionCompiler::read_words(nvr::StateOp operation, std::uint32_t base, 
     for (const auto i : positions) {
         std::vector<Operand> each;
         for (const auto& argument : arguments) each.push_back(resolve(argument));
-        result.push_back(state(operation, base + static_cast<std::uint32_t>(i), std::move(each), types[i], span));
+        result.push_back(state(operation, base + static_cast<std::uint32_t>(i), std::move(each), types[i], span,
+                               receiver_non_nil));
     }
     return result;
 }
@@ -2270,10 +2278,10 @@ Values FunctionCompiler::slots_at(std::uint32_t first, const std::vector<std::si
 }
 
 void FunctionCompiler::write_words(nvr::StateOp operation, std::uint32_t base, std::vector<Operand> prefix,
-                                   Values words, const Span& span, bool atomic) {
+                                   Values words, const Span& span, bool atomic, bool receiver_non_nil) {
     if (atomic && words.size() > 1) {
         prefix.insert(prefix.end(), words.begin(), words.end());
-        state(operation, base, std::move(prefix), c_.scalar(nvr::TypeKind::Void), span);
+        state(operation, base, std::move(prefix), c_.scalar(nvr::TypeKind::Void), span, receiver_non_nil);
         return;
     }
     if (words.size() > 1) {
@@ -2285,7 +2293,7 @@ void FunctionCompiler::write_words(nvr::StateOp operation, std::uint32_t base, s
         std::vector<Operand> arguments;
         for (const auto& operand : prefix) arguments.push_back(resolve(operand));
         arguments.push_back(resolve(words[i]));
-        state(operation, base + static_cast<std::uint32_t>(i), std::move(arguments), nothing, span);
+        state(operation, base + static_cast<std::uint32_t>(i), std::move(arguments), nothing, span, receiver_non_nil);
     }
 }
 
@@ -2640,7 +2648,8 @@ void FunctionCompiler::store(const IrNode& node) {
             check_borrow_owner(destination, object);
         }
         write_words(nvr::StateOp::WriteField, c_.field_index(destination.symbol, destination.span),
-                    {resolve(object)}, std::move(parts[1]), node.span, atomic);
+                    {resolve(object)}, std::move(parts[1]), node.span, atomic,
+                    c_.proves_non_nil(destination.operands.front()));
         return;
     }
     case IrOp::Index: {
@@ -3371,7 +3380,7 @@ Values FunctionCompiler::select(const IrNode& node, const std::vector<std::size_
     case IrOp::Field: {
         auto object = expression(node.operands.front());
         return read_words(nvr::StateOp::ReadField, c_.field_index(node.symbol, node.span), {object}, types, positions,
-                          node.span);
+                          node.span, c_.proves_non_nil(node.operands.front()));
     }
     case IrOp::EnumProject: {
         // The payload's words are at their pooled positions in the enum.
@@ -3460,7 +3469,7 @@ Operand FunctionCompiler::expression(const IrNode& node) {
             check_borrow_owner(node, object);
         }
         return state(nvr::StateOp::ReadField, c_.field_index(node.symbol, node.span), {resolve(object)},
-                     c_.type_of(node.type, node.span), node.span);
+                     c_.type_of(node.type, node.span), node.span, c_.proves_non_nil(node.operands.front()));
     }
     case IrOp::Reference: {
         const auto type = c_.type_of(node.type, node.span);
@@ -4166,16 +4175,18 @@ Values FunctionCompiler::virtual_call(const IrNode& node) {
                                        last.type, node.span);
         auto admitted = hook_event(last, std::move(incoming), std::move(previous));
         place.insert(place.end(), admitted.begin(), admitted.end());
-        return dispatch_call(receiver.type.symbol, node.symbol, std::move(place), results, node.span, node.poll);
+        return dispatch_call(receiver.type.symbol, node.symbol, std::move(place), results, node.span, node.poll,
+                             c_.proves_non_nil(receiver));
     }
     auto parts = groups(node.operands);
     parts.front().resize(1);
     return dispatch_call(receiver.type.symbol, node.symbol, flatten(parts), results, node.span,
-                         node.poll);
+                         node.poll, c_.proves_non_nil(receiver));
 }
 
 Values FunctionCompiler::dispatch_call(SymbolId cls, SymbolId method, std::vector<Operand> operands,
-                                       const std::vector<std::uint32_t>& results, const Span& span, bool poll) {
+                                       const std::vector<std::uint32_t>& results, const Span& span, bool poll,
+                                       bool receiver_non_nil) {
     if (has_array_word(results)) operands.push_back(region_token());
     for (auto& operand : operands) {
         spill(operand);
@@ -4201,6 +4212,7 @@ Values FunctionCompiler::dispatch_call(SymbolId cls, SymbolId method, std::vecto
     ExitSpec read_tag;
     read_tag.kind = nvr::ExitKind::State;
     read_tag.operation = nvr::StateOp::ReadTag;
+    read_tag.receiver_non_nil = receiver_non_nil;
     read_tag.arguments = {operands.front()};
     read_tag.result_slot = tag_slot;
     read_tag.resume = dispatch_block;
@@ -5195,6 +5207,7 @@ Conversion build(IrProgram program, const BuildOptions& options) {
     conversion.source_map = options.source_map;
     conversion.lift_hints = options.lift_hints;
     conversion.debug_statements = options.debug_statements;
+    conversion.elide_nil_checks = options.optimize && options.elide_nil_checks;
     return convert(program, conversion);
 }
 

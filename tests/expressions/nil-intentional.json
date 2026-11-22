@@ -3,6 +3,8 @@
   "tests/backend/tier3/inline.nra": [["W0007", 158, 44, 5]],
   "tests/backend/traps/nil-receiver.nra": [["W0006", 10, 28, 9]],
   "tests/bench-wall/neura/binary-trees.nra": [["W0007", 32, 26, 9], ["W0007", 32, 45, 10]],
+  "tests/expressions/nil-elision/adversarial.nra": [["W0007", 21, 16, 3], ["W0006", 43, 16, 4], ["W0006", 55, 20, 4], ["W0006", 57, 31, 4], ["W0006", 77, 16, 11], ["W0006", 97, 16, 11], ["W0007", 175, 35, 13]],
+  "tests/expressions/nil-elision/no-removable-check.nra": [["W0007", 11, 30, 3]],
   "tests/expressions/nil-narrowing.nra": [["W0006", 85, 16, 7], ["W0006", 116, 24, 7], ["W0006", 158, 26, 7], ["W0006", 166, 16, 5], ["W0006", 173, 16, 11], ["W0006", 176, 16, 14], ["W0006", 206, 20, 5]],
   "tests/lifetime/programs/using-nil.nra": [["W0006", 23, 25, 13]],
   "tests/stdlib/array-list/array-list-tests.nra": [],

@@ -429,6 +429,7 @@ Compiled compile(const Project& project, const Target& target, const BuildOption
         command.emplace_back("--no-source-map");
     }
     if (options.no_optimize) command.emplace_back("--no-optimize");
+    if (options.no_nil_check_elision) command.emplace_back("--no-nil-check-elision");
     if (options.no_lift_hints) command.emplace_back("--no-lift-hints");
     if (auto problems = check_closure(project, {source}); !problems.empty()) {
         auto first = problems.front();

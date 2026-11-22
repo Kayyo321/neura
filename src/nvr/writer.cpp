@@ -296,6 +296,25 @@ std::vector<Section> sections(const Image& image, std::uint16_t minor) {
             }
         });
     }
+    std::vector<std::array<std::uint32_t, 3>> non_nil_receivers;
+    if (minor >= 2) {
+        for (std::uint32_t fi = 0; fi < image.functions.size(); ++fi) {
+            const auto& blocks = image.functions[fi].blocks;
+            for (std::uint32_t bi = 0; bi < blocks.size(); ++bi) {
+                const auto& exits = blocks[bi].exits;
+                for (std::uint32_t ei = 0; ei < exits.size(); ++ei) {
+                    if (exits[ei].receiver_non_nil) non_nil_receivers.push_back({fi, bi, ei});
+                }
+            }
+        }
+    }
+    if (!non_nil_receivers.empty()) {
+        add("NILP", false, [&](Output& out) {
+            vector(out, non_nil_receivers, [](Output& o, const auto& location) {
+                for (const auto index : location) o.u32(index);
+            });
+        });
+    }
     for (const auto& raw : image.other_sections) {
         for (char c : raw.tag) {
             if (c < 0x20 || c > 0x7e) {

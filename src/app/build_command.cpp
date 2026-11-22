@@ -40,7 +40,7 @@ namespace {
 
 constexpr std::string_view usage =
     "usage: neura build --project <manifest> --target <name> [--out <directory>] [--update-lock]\n"
-    "                   [--no-optimize] [--no-lift-hints] [--web-runtime <directory>]\n"
+    "                   [--no-optimize] [--no-nil-check-elision] [--no-lift-hints] [--web-runtime <directory>]\n"
     "\n"
     "Builds the target's bundle into dist/<name> of the project (or --out). Without --project the manifest is\n"
     "neura.toml of the current directory. A desktop target builds its web target first and embeds it.\n";
@@ -89,6 +89,8 @@ int project_build_main(const std::vector<std::string>& arguments) {
             options.source_map = true;
         } else if (arg == "--no-optimize") {
             options.no_optimize = true;
+        } else if (arg == "--no-nil-check-elision") {
+            options.no_nil_check_elision = true;
         } else if (arg == "--no-lift-hints") {
             options.no_lift_hints = true;
         } else {

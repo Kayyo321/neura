@@ -163,6 +163,7 @@ int run_tests(const Options& options) {
     }
     neura::backend::ConversionOptions conversion_options;
     conversion_options.entries = tests;
+    conversion_options.elide_nil_checks = options.optimize && options.elide_nil_checks;
     if (options.test_coverage) {
         // Emit concrete project functions even when no selected test calls
         // them, so their mapped locations appear as unexecuted coverage.
