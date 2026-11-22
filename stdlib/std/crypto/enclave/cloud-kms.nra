@@ -1,4 +1,5 @@
 let.promote _ = import:Std.Core.Result;
+let error = import:Std.Core.Error;
 let versioned = import:Std.Crypto.Enclave.VersionedKeyStore;
 
 /// @brief A cloud KMS-backed key store provider.
@@ -15,6 +16,8 @@ export let CloudKms = module (
     /// @see [Std.Crypto.Enclave.CloudKms](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-CloudKms)
     .[NoDiscard, Since("0.3.0")]
     export let open = func(provider_profile: string, endpoint: string) -> Result<Provider> {
-        trap_with_message("unsupported: Std.Crypto.Enclave.CloudKms.open is not implemented in Neura 0.3.0 (the runtime has no authenticated cloud key management host service)");
+        return Result<Provider>.Err(error.Error.Io {
+            kind: error.IoErrorKind.Unsupported, message: "the runtime has no authenticated cloud key management host service", path: "",
+        });
     };
 );

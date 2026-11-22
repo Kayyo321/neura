@@ -1,0 +1,53 @@
+// test-options: --gpu=off --deny-fs --deny-net --deny-native --deny-entropy
+let cloud_kms = import:Std.Crypto.Enclave.CloudKms;
+let dcap = import:Std.Crypto.Enclave.Dcap;
+let error = import:Std.Core.Error;
+let nitro = import:Std.Crypto.Enclave.Nitro;
+let pkcs11 = import:Std.Crypto.Enclave.Pkcs11;
+let sev_snp = import:Std.Crypto.Enclave.SevSnp;
+let test = import:Std.Test;
+let tpm = import:Std.Crypto.Enclave.Tpm;
+
+let UnsupportedDevicesTests = module (
+    let assert_unsupported = func(cause: error.Error, expected_message: string) {
+        match (cause) {
+            error.Error.Io { kind, message, path } => {
+                test.assert(kind == error.IoErrorKind.Unsupported);
+                test.assert_equal_string(expected_message, message);
+                test.assert_equal_string("", path);
+            },
+            _ => {
+                test.fail("expected a typed unsupported I/O error");
+            },
+        }
+    };
+
+    export let test_pkcs11_open = func {
+        assert_unsupported(test.assert_err(pkcs11.open("token-module", "test-token")),
+            "the runtime has no PKCS #11 token and session host service");
+    };
+
+    export let test_tpm_open = func {
+        assert_unsupported(test.assert_err(tpm.open("test-tpm")), "the runtime has no TPM command host service");
+    };
+
+    export let test_cloud_kms_open = func {
+        assert_unsupported(test.assert_err(cloud_kms.open("test-profile", "https://127.0.0.1:1")),
+            "the runtime has no authenticated cloud key management host service");
+    };
+
+    export let test_nitro_request_attestation = func {
+        assert_unsupported(test.assert_err(nitro.request_attestation(new([1]), new([2]), new([3]))),
+            "the runtime has no Nitro Secure Module attestation host operation");
+    };
+
+    export let test_sev_snp_request_report = func {
+        assert_unsupported(test.assert_err(sev_snp.request_report(new([1]))),
+            "the runtime has no SEV-SNP guest report host service");
+    };
+
+    export let test_dcap_request_quote = func {
+        assert_unsupported(test.assert_err(dcap.request_quote(dcap.Platform.Tdx, new([1]))),
+            "the runtime has no SGX or TDX quote-generation host operation");
+    };
+);

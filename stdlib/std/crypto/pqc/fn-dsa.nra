@@ -1,7 +1,8 @@
 let.promote _ = import:Std.Core.Result;
+let error = import:Std.Core.Error;
 
 /// @brief FN-DSA, the Falcon-based signature scheme that NIST is to standardize as FIPS 206 (Stdlib.md section
-/// 21.9). Every cryptographic entry point traps until the standard and vectors are available.
+/// 21.9). Every cryptographic entry point returns `IoErrorKind.Unsupported`.
 ///
 /// On 2026-11-18 NIST's list of FIPS publications held FIPS 203, 204 and 205 but no FIPS 206, final or draft,
 /// its post-quantum project page described FIPS 206 as in development, and the NIST ACVP server had no FN-DSA
@@ -16,31 +17,28 @@ export let FnDsa = module (
     .Since("0.3.0")
     export let ParameterSet = enum (FnDsa512, FnDsa1024);
 
+    let unsupported = func() -> error.Error => error.Error.Io {
+        kind: error.IoErrorKind.Unsupported, message: "FN-DSA is not implemented", path: "",
+    };
+
     /// @brief An FN-DSA key pair: the private key's encoding.
     /// @stub NIST had no final or initial public draft of FIPS 206 and no FN-DSA reference vectors on 2026-11-18
     /// @see [Std.Crypto.Pqc.FnDsa](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-FnDsa)
     .[NoDiscard, Since("0.3.0")]
-    export let generate_key_pair = func(set: ParameterSet) -> Result<uint8[list]> {
-        trap_with_message("unsupported: Std.Crypto.Pqc.FnDsa.generate_key_pair is not implemented in Neura 0.3.0 "
-            .. "(NIST had no final or initial public draft of FIPS 206 and no FN-DSA reference vectors on 2026-11-18)");
-    };
+    export let generate_key_pair = func(set: ParameterSet) -> Result<uint8[list]> =>
+        Result<uint8[list]>.Err(unsupported());
 
     /// @brief The FN-DSA signature of the message under the encoded private key.
     /// @stub NIST had no final or initial public draft of FIPS 206 and no FN-DSA reference vectors on 2026-11-18
     /// @see [Std.Crypto.Pqc.FnDsa](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-FnDsa)
     .[NoDiscard, Since("0.3.0")]
-    export let sign = func(set: ParameterSet, private_key: uint8[list], message: uint8[list]) -> uint8[list] {
-        trap_with_message("unsupported: Std.Crypto.Pqc.FnDsa.sign is not implemented in Neura 0.3.0 "
-            .. "(NIST had no final or initial public draft of FIPS 206 and no FN-DSA reference vectors on 2026-11-18)");
-    };
+    export let sign = func(set: ParameterSet, private_key: uint8[list], message: uint8[list]) -> Result<uint8[list]> =>
+        Result<uint8[list]>.Err(unsupported());
 
     /// @brief Whether the signature is valid for the message under the encoded public key.
     /// @stub NIST had no final or initial public draft of FIPS 206 and no FN-DSA reference vectors on 2026-11-18
     /// @see [Std.Crypto.Pqc.FnDsa](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-FnDsa)
     .[NoDiscard, Since("0.3.0")]
     export let verify = func(set: ParameterSet, public_key: uint8[list], message: uint8[list], signature: uint8[list])
-        -> bool {
-        trap_with_message("unsupported: Std.Crypto.Pqc.FnDsa.verify is not implemented in Neura 0.3.0 "
-            .. "(NIST had no final or initial public draft of FIPS 206 and no FN-DSA reference vectors on 2026-11-18)");
-    };
+        -> Result<bool> => Result<bool>.Err(unsupported());
 );

@@ -626,7 +626,8 @@ export let Nitro = module (
     /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Nitro)
     .[NoDiscard, Since("0.3.0")]
     export let request_attestation = func(nonce, user_data, public_key: uint8[list]) -> Result<uint8[list]> {
-        trap_with_message("unsupported: Std.Crypto.Enclave.Nitro.request_attestation is not implemented in Neura 0.3.0 "
-            .. "(the runtime has no Nitro Secure Module attestation host operation)");
+        return Result<uint8[list]>.Err(error.Error.Io {
+            kind: error.IoErrorKind.Unsupported, message: "the runtime has no Nitro Secure Module attestation host operation", path: "",
+        });
     };
 );

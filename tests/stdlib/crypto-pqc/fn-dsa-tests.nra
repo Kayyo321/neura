@@ -1,0 +1,31 @@
+// test-options: --gpu=off --deny-entropy
+let error = import:Std.Core.Error;
+let fn_dsa = import:Std.Crypto.Pqc.FnDsa;
+let test = import:Std.Test;
+
+let FnDsaTests = module (
+    let assert_unsupported = func(cause: error.Error) {
+        match (cause) {
+            error.Error.Io { kind, message, path } => {
+                test.assert(kind == error.IoErrorKind.Unsupported);
+                test.assert_equal_string("FN-DSA is not implemented", message);
+                test.assert_equal_string("", path);
+            },
+            _ => {
+                test.fail("expected a typed unsupported I/O error");
+            },
+        }
+    };
+
+    export let test_generate_key_pair = func {
+        assert_unsupported(test.assert_err(fn_dsa.generate_key_pair(fn_dsa.ParameterSet.FnDsa1024)));
+    };
+
+    export let test_sign = func {
+        assert_unsupported(test.assert_err(fn_dsa.sign(fn_dsa.ParameterSet.FnDsa512, new([1]), new([2]))));
+    };
+
+    export let test_verify = func {
+        assert_unsupported(test.assert_err(fn_dsa.verify(fn_dsa.ParameterSet.FnDsa512, new([1]), new([2]), new([3]))));
+    };
+);

@@ -260,6 +260,8 @@ export let SevSnp = module (
     /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
     .[NoDiscard, Since("0.3.0")]
     export let request_report = func(report_data: uint8[list]) -> Result<uint8[list]> {
-        trap_with_message("unsupported: Std.Crypto.Enclave.SevSnp.request_report is not implemented in Neura 0.3.0 (the runtime has no SEV-SNP guest report host service)");
+        return Result<uint8[list]>.Err(error.Error.Io {
+            kind: error.IoErrorKind.Unsupported, message: "the runtime has no SEV-SNP guest report host service", path: "",
+        });
     };
 );

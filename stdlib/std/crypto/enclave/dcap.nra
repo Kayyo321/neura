@@ -411,7 +411,8 @@ export let Dcap = module (
     /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
     .[NoDiscard, Since("0.3.0")]
     export let request_quote = func(platform: Platform, report_data: uint8[list]) -> Result<uint8[list]> {
-        trap_with_message("unsupported: Std.Crypto.Enclave.Dcap.request_quote is not implemented in Neura 0.3.0 "
-            .. "(the runtime has no SGX or TDX quote-generation host operation)");
+        return Result<uint8[list]>.Err(error.Error.Io {
+            kind: error.IoErrorKind.Unsupported, message: "the runtime has no SGX or TDX quote-generation host operation", path: "",
+        });
     };
 );
