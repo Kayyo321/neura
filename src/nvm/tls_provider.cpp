@@ -32,6 +32,7 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <unistd.h>
 #endif
 #include <openssl/err.h>
 #include <openssl/ssl.h>
@@ -505,14 +506,32 @@ struct TlsConnectTicket {
 
 } // namespace
 
+std::uint64_t current_process() {
+#ifdef _WIN32
+    return ::GetCurrentProcessId();
+#else
+    return static_cast<std::uint64_t>(::getpid());
+#endif
+}
+
 struct TlsConnectJobs {
     struct Job {
         std::shared_ptr<TlsConnectState> state;
         std::jthread worker;
     };
     std::vector<Job> entries;
+    const std::uint64_t owner = current_process();
+
+    // A fork child inherits the entries but not their threads: joining one
+    // would wait for a parent thread that never ends here. The child leaves
+    // them alone, as the fetch workers do.
+    bool inherited() const { return owner != current_process(); }
 
     ~TlsConnectJobs() {
+        if (inherited()) {
+            [[maybe_unused]] const auto* left = new std::vector<Job>(std::move(entries));
+            return;
+        }
         for (auto& job : entries) job.state->cancel();
         // Job destruction joins the workers before OpenSSL or the provider's
         // capability and path configuration can be torn down.
@@ -618,7 +637,8 @@ void add_tls_services(const Adder& add, const OverlapAdder& cancellable, Standar
             if (state->tls.size() >= max_open_ids) return fail(host_error::other);
             const auto deadline = deadline_of(timeout);
             try {
-                if (!state->tls_connect_jobs) state->tls_connect_jobs = std::make_shared<TlsConnectJobs>();
+                if (!state->tls_connect_jobs || state->tls_connect_jobs->inherited())
+                    state->tls_connect_jobs = std::make_shared<TlsConnectJobs>();
                 auto& jobs = state->tls_connect_jobs->entries;
                 std::erase_if(jobs, [](const auto& job) { return job.state->finished.load(); });
                 if (jobs.size() >= 16) return fail(host_error::busy);
