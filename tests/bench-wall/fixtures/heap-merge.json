@@ -1,0 +1,14 @@
+{
+  "builds": [[], ["--no-optimize"]],
+  "mechanism": {
+    "flags": ["--no-optimize"],
+    "argument": "nominal",
+    "parameters": 2,
+    "markers": {"exit state read-field immediate 0 ": 2, "exit state write-field immediate 1 ": 1},
+    "pattern": "^pass gvn\\.read [1-9][0-9]*$"
+  },
+  "cases": [
+    {"argument": "nominal", "output": ["16977280", "34", "24", "79", "99", "14", "65543", "4000014", "10", "65543"]},
+    {"argument": "bounds", "output": ["16977280", "34", "24", "79", "99", "14", "65543", "4000014", "10"], "status": 139, "trap": "index out of bounds: index 1 for length 1", "budget": true}
+  ]
+}

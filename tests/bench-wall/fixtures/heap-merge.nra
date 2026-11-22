@@ -1,0 +1,102 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Pair = class (
+    export let first: int = 7;
+    export let second: int = 0;
+);
+
+let disjoint_fork = func(pair: Pair, choose: bool) -> int {
+    let before = pair.first;
+    let bias = 0;
+    if (choose) {
+        pair.second = pair.second + 1;
+        bias = 10;
+    } else {
+        bias = 20;
+    }
+    return before + pair.first + bias;
+};
+
+let alias_fork = func(pair: Pair, alias: Pair, choose: bool) -> int {
+    let before = pair.first;
+    if (choose) {
+        alias.first = before + 2;
+    } else {
+        alias.second = 99;
+    }
+    return before * 10 + pair.first;
+};
+
+let collection_fork = func(values: uint64[list], alias: uint64[list], action: int) -> uint64 {
+    let before = values[0];
+    let length = values.length;
+    if (action == 1) {
+        alias[0] = 65'536u64;
+    } else if (action == 2) {
+        for (let index = 0; index < 40; index = index + 1) {
+            alias.append(65'536u64);
+        }
+    }
+    return before + values[0] + ((values.length - length) as uint64) * 100'000u64;
+};
+
+let read_tail = func(values: uint64[list], alias: uint64[list], grow: bool) -> uint64 {
+    let before = values[0];
+    let length = values.length;
+    if (grow) {
+        alias.append(65'536u64);
+    }
+    return before + values[length];
+};
+
+let loop_alias = func(values: uint64[list], alias: uint64[list], count: int) -> uint64 {
+    let total = 0u64;
+    for (let index = 0; index < count; index = index + 1) {
+        let before = values[0];
+        if (index % 2 == 0) {
+            alias[0] = before + 1u64;
+        }
+        total = total + values[0];
+    }
+    return total;
+};
+
+let HeapMerge = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let choice = "";
+        if (args.length > 0) {
+            choice = args[0];
+        }
+        let pair = new Pair();
+        let values: uint64[list] = new([7]);
+        let checksum = 0;
+        for (let warmup = 0; warmup < 256; warmup = warmup + 1) {
+            let choose = warmup % 2 == 0;
+            checksum = checksum + disjoint_fork(pair, choose);
+            checksum = checksum + alias_fork(pair, pair, false);
+            checksum = checksum + (collection_fork(values, values, 0) as int);
+            checksum = checksum + (loop_alias(values, values, 2) as int);
+            checksum = checksum + (read_tail(values, values, true) as int);
+        }
+        console.print_line(checksum.to_string());
+
+        let fresh = new Pair();
+        console.print_line(disjoint_fork(fresh, false).to_string());
+        console.print_line(disjoint_fork(fresh, true).to_string());
+        console.print_line(alias_fork(fresh, fresh, true).to_string());
+        console.print_line(alias_fork(fresh, fresh, false).to_string());
+
+        let stable: uint64[list] = new([7]);
+        let widen: uint64[list] = new([7]);
+        let append: uint64[list] = new([7]);
+        let tail: uint64[list] = new([7]);
+        let loop: uint64[list] = new([1]);
+        console.print_line(collection_fork(stable, stable, 0).to_string());
+        console.print_line(collection_fork(widen, widen, 1).to_string());
+        console.print_line(collection_fork(append, append, 2).to_string());
+        console.print_line(loop_alias(loop, loop, 4).to_string());
+        console.print_line(read_tail(tail, tail, choice != "bounds").to_string());
+        return program.ExitCode.Ok;
+    };
+);

@@ -726,10 +726,8 @@ bool value_key(const Function& f, const Inst& in, Replacements& repl, bool check
 // classes of the heap (a field index of any object, the elements of a
 // declared width, the element storage of arrays and lists, a global) and,
 // under every class, the entries that are live and the words that only a
-// helper or a call changes. A block with one predecessor starts with the
-// versions its predecessor ends with; any other block, with versions no
-// block had, so that a read or check is merged only with one on the path of
-// single-predecessor blocks above it with no write of its class between.
+// helper or a call changes. A merge inherits the immediate dominator's
+// version of an alias class only when no incoming path writes that class.
 class Memory {
 public:
     // Alias classes.
@@ -758,8 +756,11 @@ public:
     }
     void kill(std::uint64_t cls) { classes_[cls] = ++*counter_; }
 
-    // What `in` writes.
-    void apply(const Inst& in) {
+    // A wildcard invalidates all classes. Other effects invalidate only
+    // the same classes they already invalidated on a straight-line path.
+    static constexpr std::uint64_t all = 0;
+    template <typename Kill>
+    static void writes(const Inst& in, Kill kill) {
         switch (in.op) {
         case Op::StoreField: kill(field(in.imm)); break;
         case Op::StoreElement: kill(element_class(in)); break;
@@ -771,12 +772,21 @@ public:
         case Op::Helper:
         case Op::Call:
         case Op::AllocObject:
-        case Op::Append: kill_all(); break;
+        case Op::Append: kill(all); break;
         case Op::StateCall:
-            if ((in.flags & CheckReference) == 0) kill_all();
+            if ((in.flags & CheckReference) == 0) kill(all);
             break;
         default: break;
         }
+    }
+
+    void apply(const Inst& in) {
+        writes(in, [&](std::uint64_t cls) { accept_write(cls); });
+    }
+
+    void accept_write(std::uint64_t cls) {
+        if (cls == all) kill_all();
+        else kill(cls);
     }
 
 private:
@@ -863,11 +873,53 @@ bool number_pure(Function& f, Counts& counts) {
     std::vector<Frame> stack;
     std::uint64_t counter = 0;
     std::vector<Memory> ends(f.blocks.size(), Memory(counter));
+    std::vector<std::vector<std::uint64_t>> writes(f.blocks.size());
+    for (const auto b : cfg.rpo) {
+        auto& classes = writes[b];
+        for (const auto id : f.blocks[b].insts) {
+            Memory::writes(f.insts[id], [&](std::uint64_t cls) { classes.push_back(cls); });
+        }
+        std::sort(classes.begin(), classes.end());
+        classes.erase(std::unique(classes.begin(), classes.end()), classes.end());
+    }
+    std::vector<std::uint32_t> visited(f.blocks.size(), none);
+    const auto entry_memory = [&](std::uint32_t b) {
+        const auto dominator = cfg.idom[b];
+        if (dominator == cfg.root || f.blocks[b].entry != none) return Memory(counter);
+        Memory memory = ends[dominator];
+        if (f.blocks[b].preds.size() == 1 && f.blocks[b].preds[0] == dominator) return memory;
+        std::vector<std::uint32_t> work;
+        // Walk back to the dominator. Include the merge itself if a back
+        // edge can revisit it, since its previous iteration may have written.
+        // Bound compile work at big joins by forgetting memory facts there.
+        constexpr std::size_t max_work = 1024;
+        std::size_t remaining = max_work;
+        const auto queue_predecessors = [&](std::uint32_t block) {
+            const auto& predecessors = f.blocks[block].preds;
+            if (predecessors.size() > remaining) return false;
+            remaining -= predecessors.size();
+            work.insert(work.end(), predecessors.begin(), predecessors.end());
+            return true;
+        };
+        if (!queue_predecessors(b)) return Memory(counter);
+        while (!work.empty()) {
+            const auto p = work.back();
+            work.pop_back();
+            if (p == dominator || !cfg.reachable(p) || visited[p] == b) continue;
+            visited[p] = b;
+            if (writes[p].size() > remaining) return Memory(counter);
+            remaining -= writes[p].size();
+            for (const auto cls : writes[p]) {
+                if (cls == Memory::all) return Memory(counter);
+                memory.accept_write(cls);
+            }
+            if (!queue_predecessors(p)) return Memory(counter);
+        }
+        return memory;
+    };
     const auto enter = [&](std::uint32_t b) {
         Frame frame{b, 0, {}};
-        const auto& preds = f.blocks[b].preds;
-        Memory memory(counter);
-        if (preds.size() == 1 && cfg.idom[b] == preds[0] && f.blocks[b].entry == none) memory = ends[preds[0]];
+        Memory memory = entry_memory(b);
         for (const auto id : f.blocks[b].insts) {
             const auto& in = f.insts[id];
             Key own;
