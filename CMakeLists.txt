@@ -265,7 +265,7 @@ file(GLOB neura_platform_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/
 add_library(neura_platform STATIC ${neura_platform_sources})
 target_include_directories(neura_platform PUBLIC src)
 if(WIN32)
-    target_link_libraries(neura_platform PUBLIC ws2_32 mswsock bcrypt advapi32 shell32 ole32 wer psapi)
+    target_link_libraries(neura_platform PUBLIC ws2_32 mswsock bcrypt advapi32 shell32 ole32 wer psapi iphlpapi)
 else()
     target_link_libraries(neura_platform PUBLIC ${CMAKE_DL_LIBS})
 endif()

@@ -25,6 +25,7 @@
 #include "platform/windows.hpp"
 
 #include <mstcpip.h>
+#include <iphlpapi.h>
 
 // Windows 10 2004 winsock constants are missing from older MinGW headers.
 #ifndef UDP_SEND_MSG_SIZE
@@ -40,6 +41,8 @@
 #else
 #include <arpa/inet.h>
 #include <fcntl.h>
+#include <ifaddrs.h>
+#include <net/if.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -47,6 +50,9 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
+#if defined(IP_RECVIF)
+#include <net/if_dl.h>
+#endif
 #endif
 #ifdef __linux__
 #include <linux/io_uring.h>
@@ -1752,6 +1758,78 @@ std::optional<HostCompletion> send_segments(NativeSocket descriptor, sockaddr_st
 
 constexpr std::uint16_t mdns_port = 5353;
 
+// RFC 6762 section 11 deems multicast-destination responses on-link even
+// across overlay subnets; its source-subnet test applies to unicast replies.
+// Neura deliberately applies the stricter source-subnet admission policy to
+// multicast too. Match only addresses configured on the ingress interface;
+// a route or an address assigned to another interface is not sufficient.
+class MdnsLinks {
+public:
+    struct Subnet {
+        unsigned int interface_index;
+        std::uint32_t address;
+        std::uint32_t mask;
+    };
+    std::vector<Subnet> subnets;
+
+    bool allows(in_addr source, unsigned int ingress) const {
+        const auto host = ntohl(source.s_addr);
+        if (ingress == 0 || host == 0 || (host & 0xf0000000U) == 0xe0000000U || host == 0xffffffffU) return false;
+        return std::any_of(subnets.begin(), subnets.end(), [&](const auto& subnet) {
+            return subnet.interface_index == ingress &&
+                   (source.s_addr & subnet.mask) == (subnet.address & subnet.mask);
+        });
+    }
+
+    std::optional<HostCompletion> load() {
+        subnets.clear();
+#ifdef _WIN32
+        // GetAdaptersAddresses/OnLinkPrefixLength and IN_PKTINFO use the same
+        // IPv4 IfIndex. Bound retries if addresses change during enumeration.
+        ULONG needed = 15 * 1024;
+        std::vector<std::max_align_t> storage;
+        for (int attempt = 0; attempt < 3; ++attempt) {
+            if (needed > 1024 * 1024) return fail(host_error::other);
+            storage.resize((needed + sizeof(std::max_align_t) - 1) / sizeof(std::max_align_t));
+            auto* adapters = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(storage.data());
+            const ULONG result = ::GetAdaptersAddresses(AF_INET,
+                GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER,
+                nullptr, adapters, &needed);
+            if (result == ERROR_BUFFER_OVERFLOW) continue;
+            if (result == ERROR_NO_DATA) return std::nullopt;
+            if (result != NO_ERROR) return fail(host_error::from_win32(result));
+            for (const auto* adapter = adapters; adapter; adapter = adapter->Next) {
+                if (adapter->OperStatus != IfOperStatusUp || adapter->IfIndex == 0) continue;
+                for (const auto* entry = adapter->FirstUnicastAddress; entry; entry = entry->Next) {
+                    if (!entry->Address.lpSockaddr || entry->Address.iSockaddrLength < static_cast<int>(sizeof(sockaddr_in)) ||
+                        entry->Address.lpSockaddr->sa_family != AF_INET || entry->OnLinkPrefixLength > 32) continue;
+                    const auto* address = reinterpret_cast<const sockaddr_in*>(entry->Address.lpSockaddr);
+                    const auto prefix = entry->OnLinkPrefixLength;
+                    const auto mask = prefix == 0 ? 0U : 0xffffffffU << (32 - prefix);
+                    subnets.push_back({adapter->IfIndex, address->sin_addr.s_addr, htonl(mask)});
+                }
+            }
+            return std::nullopt;
+        }
+        return fail(host_error::other);
+#else
+        ifaddrs* addresses = nullptr;
+        if (::getifaddrs(&addresses) != 0) return socket_failure();
+        for (const auto* entry = addresses; entry; entry = entry->ifa_next) {
+            if (!entry->ifa_addr || !entry->ifa_netmask || entry->ifa_addr->sa_family != AF_INET ||
+                (entry->ifa_flags & IFF_UP) == 0) continue;
+            const auto index = ::if_nametoindex(entry->ifa_name);
+            if (index == 0) continue;
+            const auto* address = reinterpret_cast<const sockaddr_in*>(entry->ifa_addr);
+            const auto* mask = reinterpret_cast<const sockaddr_in*>(entry->ifa_netmask);
+            subnets.push_back({index, address->sin_addr.s_addr, mask->sin_addr.s_addr});
+        }
+        ::freeifaddrs(addresses);
+        return std::nullopt;
+#endif
+    }
+};
+
 // The wildcard bind also admits unicast traffic. Read the IP destination
 // from the ancillary data, since this querier requests multicast replies.
 class MdnsReceiver {
@@ -1759,6 +1837,7 @@ public:
     explicit MdnsReceiver(NativeSocket socket) : socket_(socket) {}
 
     std::optional<HostCompletion> enable() {
+        if (const auto failure = links_.load()) return failure;
 #ifdef _WIN32
         const DWORD enabled = 1;
         if (!set_native_option(socket_, IPPROTO_IP, IP_PKTINFO, enabled)) return socket_failure();
@@ -1767,9 +1846,10 @@ public:
         if (::WSAIoctl(socket_, SIO_GET_EXTENSION_FUNCTION_POINTER, &guid, sizeof guid, &receive_message_,
                        sizeof receive_message_, &returned, nullptr, nullptr) != 0) return socket_failure();
         if (!receive_message_) return fail(host_error::unsupported);
-#elif defined(IP_RECVDSTADDR)
+#elif defined(IP_RECVDSTADDR) && defined(IP_RECVIF)
         const int enabled = 1;
-        if (!set_native_option(socket_, IPPROTO_IP, IP_RECVDSTADDR, enabled)) return socket_failure();
+        if (!set_native_option(socket_, IPPROTO_IP, IP_RECVDSTADDR, enabled) ||
+            !set_native_option(socket_, IPPROTO_IP, IP_RECVIF, enabled)) return socket_failure();
 #elif defined(IP_PKTINFO)
         const int enabled = 1;
         if (!set_native_option(socket_, IPPROTO_IP, IP_PKTINFO, enabled)) return socket_failure();
@@ -1791,6 +1871,7 @@ public:
         sockaddr_in source{};
         std::size_t size = 0;
         bool multicast = false;
+        unsigned int ingress = 0;
 #ifdef _WIN32
         WSABUF data{static_cast<ULONG>(bytes.size()), bytes.data()};
         alignas(WSACMSGHDR) char control[WSA_CMSG_SPACE(sizeof(IN_PKTINFO))] = {};
@@ -1803,24 +1884,27 @@ public:
         DWORD got = 0;
         if (receive_message_(socket_, &message, &got, nullptr, nullptr) != 0) {
             const auto error = ::WSAGetLastError();
-            if (error != WSAEINTR && error != WSAEMSGSIZE) return fail(host_error::from_wsa(error));
+            if (error != WSAEINTR && error != WSAEMSGSIZE && error != WSAEWOULDBLOCK) {
+                return fail(host_error::from_wsa(error));
+            }
             bytes.clear();
             return std::nullopt;
         }
         size = got;
-        if ((message.dwFlags & (MSG_TRUNC | MSG_CTRUNC)) == 0 && message.namelen >= sizeof source) {
+        if ((message.dwFlags & (MSG_TRUNC | MSG_CTRUNC)) == 0 && message.namelen >= static_cast<int>(sizeof source)) {
             for (auto* header = WSA_CMSG_FIRSTHDR(&message); header; header = WSA_CMSG_NXTHDR(&message, header)) {
                 if (header->cmsg_level == IPPROTO_IP && header->cmsg_type == IP_PKTINFO &&
                     header->cmsg_len >= WSA_CMSG_LEN(sizeof(IN_PKTINFO))) {
                     IN_PKTINFO info{};
                     std::memcpy(&info, WSA_CMSG_DATA(header), sizeof info);
                     multicast = info.ipi_addr.s_addr == group.s_addr;
+                    ingress = info.ipi_ifindex;
                     break;
                 }
             }
         }
-#elif defined(IP_RECVDSTADDR) || defined(IP_PKTINFO)
-#ifdef IP_RECVDSTADDR
+#elif (defined(IP_RECVDSTADDR) && defined(IP_RECVIF)) || defined(IP_PKTINFO)
+#if defined(IP_RECVDSTADDR) && defined(IP_RECVIF)
         using Destination = in_addr;
         constexpr int message_type = IP_RECVDSTADDR;
 #else
@@ -1828,7 +1912,11 @@ public:
         constexpr int message_type = IP_PKTINFO;
 #endif
         iovec data{bytes.data(), bytes.size()};
+#if defined(IP_RECVDSTADDR) && defined(IP_RECVIF)
+        alignas(cmsghdr) char control[CMSG_SPACE(sizeof(Destination)) + CMSG_SPACE(sizeof(sockaddr_dl))] = {};
+#else
         alignas(cmsghdr) char control[CMSG_SPACE(sizeof(Destination))] = {};
+#endif
         msghdr message{};
         message.msg_name = &source;
         message.msg_namelen = sizeof source;
@@ -1838,7 +1926,7 @@ public:
         message.msg_controllen = sizeof control;
         const auto got = ::recvmsg(socket_, &message, 0);
         if (got < 0) {
-            if (errno != EINTR) return socket_failure();
+            if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK) return socket_failure();
             bytes.clear();
             return std::nullopt;
         }
@@ -1849,19 +1937,29 @@ public:
                     header->cmsg_len >= CMSG_LEN(sizeof(Destination))) {
                     Destination info{};
                     std::memcpy(&info, CMSG_DATA(header), sizeof info);
-#ifdef IP_RECVDSTADDR
+#if defined(IP_RECVDSTADDR) && defined(IP_RECVIF)
                     multicast = info.s_addr == group.s_addr;
 #else
                     multicast = info.ipi_addr.s_addr == group.s_addr;
+                    ingress = static_cast<unsigned int>(info.ipi_ifindex);
 #endif
-                    break;
                 }
+#if defined(IP_RECVDSTADDR) && defined(IP_RECVIF)
+                if (header->cmsg_level == IPPROTO_IP && header->cmsg_type == IP_RECVIF &&
+                    header->cmsg_len >= CMSG_LEN(offsetof(sockaddr_dl, sdl_data))) {
+                    sockaddr_dl info{};
+                    const auto payload = header->cmsg_len - CMSG_LEN(0);
+                    std::memcpy(&info, CMSG_DATA(header), std::min<std::size_t>(payload, sizeof info));
+                    ingress = info.sdl_index;
+                }
+#endif
             }
         }
 #else
         (void)group;
 #endif
-        if (multicast && source.sin_family == AF_INET && source.sin_port == htons(mdns_port)) {
+        if (multicast && source.sin_family == AF_INET && source.sin_port == htons(mdns_port) &&
+            links_.allows(source.sin_addr, ingress)) {
             bytes.resize(size);
         } else {
             bytes.clear();
@@ -1871,14 +1969,15 @@ public:
 
 private:
     NativeSocket socket_;
+    MdnsLinks links_;
 #ifdef _WIN32
     LPFN_WSARECVMSG receive_message_ = nullptr;
 #endif
 };
 
-HostCompletion multicast_exchange(const std::string& bytes, std::int64_t window, const std::string& interface) {
-    if (window <= 0 || bytes.size() < 12 || bytes.size() > 9000 ||
-        (!interface.empty() && !usable_text(interface))) {
+HostCompletion multicast_exchange(const std::string& bytes, std::int64_t window, const std::string& interface_address) {
+    if (window <= 0 || window > 5'000'000'000LL || bytes.size() < 12 || bytes.size() > 9000 ||
+        (!interface_address.empty() && !usable_text(interface_address))) {
         return fail(host_error::invalid_input);
     }
 #ifdef _WIN32
@@ -1886,11 +1985,12 @@ HostCompletion multicast_exchange(const std::string& bytes, std::int64_t window,
 #endif
     ip_mreq group{};
     ::inet_pton(AF_INET, "224.0.0.251", &group.imr_multiaddr);
-    if (!interface.empty() && ::inet_pton(AF_INET, interface.c_str(), &group.imr_interface) != 1) {
+    if (!interface_address.empty() && ::inet_pton(AF_INET, interface_address.c_str(), &group.imr_interface) != 1) {
         return fail(host_error::invalid_input);
     }
     const ScopedSocket socket{new_socket(AF_INET, SOCK_DGRAM)};
     if (socket.descriptor == invalid_native_socket) return socket_failure();
+    if (!platform::set_nonblocking(socket.descriptor)) return socket_failure();
     MdnsReceiver receiver(socket.descriptor);
     if (const auto failure = receiver.enable()) return *failure;
     const int enabled = 1;
@@ -1903,7 +2003,7 @@ HostCompletion multicast_exchange(const std::string& bytes, std::int64_t window,
     bound.sin_port = htons(mdns_port);
     if (::bind(socket.descriptor, reinterpret_cast<sockaddr*>(&bound), sizeof bound) != 0) return socket_failure();
     if (!set_native_option(socket.descriptor, IPPROTO_IP, IP_ADD_MEMBERSHIP, group)) return socket_failure();
-    if (!interface.empty() && !set_native_option(socket.descriptor, IPPROTO_IP, IP_MULTICAST_IF, group.imr_interface)) {
+    if (!interface_address.empty() && !set_native_option(socket.descriptor, IPPROTO_IP, IP_MULTICAST_IF, group.imr_interface)) {
         return socket_failure();
     }
 #ifdef _WIN32
@@ -1914,11 +2014,8 @@ HostCompletion multicast_exchange(const std::string& bytes, std::int64_t window,
     if (!set_native_option(socket.descriptor, IPPROTO_IP, IP_MULTICAST_TTL, ttl)) return socket_failure();
     auto target = bound;
     target.sin_addr = group.imr_multiaddr;
-    decltype(::sendto(socket.descriptor, bytes.data(), 0, 0, nullptr, 0)) sent;
-    do {
-        sent = ::sendto(socket.descriptor, bytes.data(), static_cast<int>(bytes.size()), 0,
-                        reinterpret_cast<sockaddr*>(&target), sizeof target);
-    } while (sent < 0 && platform::last_socket_error().interrupted());
+    const auto sent = ::sendto(socket.descriptor, bytes.data(), static_cast<int>(bytes.size()), 0,
+                                reinterpret_cast<sockaddr*>(&target), sizeof target);
     if (sent < 0) return socket_failure();
     if (static_cast<std::size_t>(sent) != bytes.size()) return fail(host_error::other);
 

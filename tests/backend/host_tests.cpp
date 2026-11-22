@@ -1205,6 +1205,10 @@ NEURA_TEST(host, mdns_loopback_exchange_collects_only_matching_multicast) {
     check(contains(response), "received the loopback responder's exact datagram");
     check(!contains(wrong_port), "multicast from a non-mDNS source port was discarded");
     check(!contains(wrong_destination), "same-port unicast was discarded");
+    for (const auto window : {std::int64_t{-1}, std::int64_t{0}, std::int64_t{5'000'000'001}, INT64_MAX}) {
+        expect_error(host.call("neura.net.mdns.exchange", {bytes(query), i64(window), text("127.0.0.1")}),
+                     host_error::invalid_input, "mDNS window must be positive and at most five seconds");
+    }
     Host denied({});
     expect_error(denied.call("neura.net.mdns.exchange", {bytes(query), i64(1), text("127.0.0.1")}),
                  host_error::capability_denied, "mDNS denied");

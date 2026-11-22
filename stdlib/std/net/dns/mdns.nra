@@ -14,7 +14,8 @@ let.promote _ = import:Std.Core.Result;
 /// bit of a question's class (section 5.4), the cache-flush bit, the top bit of a record's class (section
 /// 10.2), the group addresses and port (224.0.0.251 and ff02::fb, port 5353), and query and response building
 /// with ID 0, opcode 0 and RD clear (section 18). The querier joins and sends to the IPv4 multicast group.
-/// It accepts responses sent to that group from UDP port 5353.
+/// It accepts responses sent to that group from UDP port 5353 whose source is on an IPv4 subnet of the
+/// receiving interface. This is stricter than RFC 6762 section 11 for multicast destinations.
 /// @see [Std.Net.Dns.Mdns](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-Mdns)
 .Since("0.3.0")
 export let Mdns = module (
@@ -116,7 +117,7 @@ export let Mdns = module (
     /// @brief A querier on the local link.
     .[Final, NotThreadSafe]
     export let MdnsQuerier = class (
-        /// @brief How long to collect responses.
+        /// @brief How long to collect responses: positive and at most five seconds.
         export last window: durations.Duration;
 
         /// @brief A querier collecting responses for `wait`.
@@ -131,6 +132,7 @@ export let Mdns = module (
         };
 
         /// @brief Sends a query through the network interface with the given IPv4 address.
+        .Since("0.3.1")
         .NoDiscard
         export let query_all_on = func(name: names.DnsName, qtype: int, address: Ipv4Addr)
             -> Result<messages.Message[list]> => query_on(name, qtype, address.to_string());
@@ -166,7 +168,7 @@ export let Mdns = module (
         return out;
     };
 
-    /// @brief Joins 224.0.0.251 on port 5353, sends the query and collects replies for a positive window.
+    /// @brief Joins 224.0.0.251 on port 5353, sends the query and collects replies for a positive window of at most five seconds.
     let multicast_exchange = func(query: uint8[list], window_nanos: int64, address: string) -> DatagramsOutcome
         host("neura.net.mdns.exchange", 1);
 );
