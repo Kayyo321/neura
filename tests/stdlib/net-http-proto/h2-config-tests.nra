@@ -1,0 +1,48 @@
+let config = import:Std.Net.Tls.TlsConfig;
+let duration = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let h2 = import:Std.Net.Http.H2;
+let test = import:Std.Test;
+
+let H2ConfigTests = module (
+    let code = func(failure: errors.Error) -> string => match (failure) {
+        errors.Error.Custom(detail) => detail.code(),
+        _ => "other",
+    };
+
+    export let test_positive_deadline_and_exact_alpn_required = func {
+        last settings: h2.Settings = new;
+        last builder = config.builder();
+        builder.set_alpn(new(["h2"]));
+        builder.set_handshake_timeout(duration.of_nanos(0));
+        test.assert_equal_string("h2.config", code(test.assert_err<h2.H2Connection>(
+            h2.connect_with("127.0.0.1:9", settings, test.assert_ok<config.TlsConfig>(builder.build_client())))));
+        builder.set_handshake_timeout(duration.of_millis(1));
+        builder.set_alpn(new(["http/1.1"]));
+        test.assert_equal_string("h2.config", code(test.assert_err<h2.H2Connection>(
+            h2.connect_with("127.0.0.1:9", settings, test.assert_ok<config.TlsConfig>(builder.build_client())))));
+    };
+
+    export let test_settings_validated_before_wire = func {
+        last builder = config.builder();
+        builder.set_alpn(new(["h2"]));
+        builder.set_handshake_timeout(duration.of_millis(1));
+        last settings: h2.Settings = new;
+        settings.ids.append(1);
+        test.assert_equal_string("FRAME_SIZE_ERROR", code(test.assert_err<h2.H2Connection>(
+            h2.connect_with("127.0.0.1:9", settings, test.assert_ok<config.TlsConfig>(builder.build_client())))));
+        settings.values.append(-1);
+        test.assert_equal_string("PROTOCOL_ERROR", code(test.assert_err<h2.H2Connection>(
+            h2.connect_with("127.0.0.1:9", settings, test.assert_ok<config.TlsConfig>(builder.build_client())))));
+    };
+
+    export let test_authority_rejects_userinfo_and_path = func {
+        last builder = config.builder();
+        builder.set_alpn(new(["h2"]));
+        builder.set_handshake_timeout(duration.of_millis(1));
+        for (let authority in ["user@localhost:443", "localhost:443/path"]) {
+            test.assert_equal_string("h2.authority", code(test.assert_err<h2.H2Connection>(
+                h2.connect_with(authority, new, test.assert_ok<config.TlsConfig>(builder.build_client())))));
+        }
+    };
+);

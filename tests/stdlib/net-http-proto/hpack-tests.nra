@@ -1,0 +1,91 @@
+let errors = import:Std.Core.Error;
+let h2 = import:Std.Net.Http.H2;
+let headers = import:Std.Net.Http.Headers;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+
+let HpackTests = module (
+    let bytes = func(values: int[]) -> uint8[list] {
+        last data: uint8[list] = new;
+        for (let value in values) {
+            data.append(value as uint8);
+        }
+        return data;
+    };
+
+    let code = func(failure: errors.Error) -> string => match (failure) {
+        errors.Error.Custom(detail) => detail.code(),
+        _ => "other",
+    };
+
+    export let test_rfc7541_huffman_pseudo_headers = func {
+        // RFC 7541 C.4.1, decoded independently of any prior connection block.
+        last fields = test.assert_ok<[string, string][list]>(h2.hpack_decode_fields(
+            bytes([130, 134, 132, 65, 140, 241, 227, 194, 229, 242, 58, 107, 160, 171, 144, 244, 255])));
+        test.assert_equal<int>(4, fields.length);
+        let [method_name, method_value] = fields[0];
+        test.assert_equal_string(":method", method_name);
+        test.assert_equal_string("GET", method_value);
+        let [authority_name, authority_value] = fields[3];
+        test.assert_equal_string(":authority", authority_name);
+        test.assert_equal_string("www.example.com", authority_value);
+        last first = test.assert_ok<uint8[list]>(h2.hpack_encode_fields(fields));
+        last second = test.assert_ok<uint8[list]>(h2.hpack_encode_fields(fields));
+        test.assert_equal<int>(first.length, second.length);
+        for (let i in 0 .. first.length) {
+            test.assert_equal<uint8>(first[i], second[i]);
+        }
+        last decoded = test.assert_ok<[string, string][list]>(h2.hpack_decode_fields(first));
+        test.assert_equal<int>(fields.length, decoded.length);
+        for (let i in 0 .. fields.length) {
+            let [name, value] = fields[i];
+            let [back_name, back_value] = decoded[i];
+            test.assert_equal_string(name, back_name);
+            test.assert_equal_string(value, back_value);
+        }
+    };
+
+    export let test_regular_headers_keep_duplicates = func {
+        last fields: headers.Headers = new;
+        fields.add("X-Example", "first");
+        fields.add("x-example", "second");
+        last block = test.assert_ok<uint8[list]>(h2.hpack_encode(fields));
+        last back = test.assert_ok<headers.Headers>(h2.hpack_decode(block));
+        test.assert_equal<int>(2, back.size());
+        test.assert_equal_string("x-example", back.name_at(0));
+        test.assert_equal_string("first", back.value_at(0));
+        test.assert_equal_string("second", back.value_at(1));
+        test.assert_equal<int>(0, test.assert_ok<headers.Headers>(h2.hpack_decode(new)).size());
+        test.assert_equal_string("PROTOCOL_ERROR", code(test.assert_err<headers.Headers>(
+            h2.hpack_decode(bytes([136]))))); // Static :status 200 cannot be an HTTP/1 Headers name.
+    };
+
+    export let test_malformed_and_independent_table = func {
+        for (let block in new uint8[list][list]([bytes([128]), bytes([255]), bytes([0, 1, 120, 129, 255])])) {
+            test.assert_equal_string("COMPRESSION_ERROR", code(test.assert_err<[string, string][list]>(
+                h2.hpack_decode_fields(block))));
+        }
+        last repeated = test.assert_ok<[string, string][list]>(
+            h2.hpack_decode_fields(bytes([64, 1, 120, 1, 121, 190])));
+        test.assert_equal<int>(2, repeated.length);
+        test.assert_equal_string("COMPRESSION_ERROR", code(test.assert_err<[string, string][list]>(
+            h2.hpack_decode_fields(bytes([190])))));
+        last invalid: [string, string][list] = new;
+        invalid.append(["Upper", "value"]);
+        test.assert_equal_string("PROTOCOL_ERROR", code(test.assert_err<uint8[list]>(h2.hpack_encode_fields(invalid))));
+    };
+
+    export let test_bounded_expansion_and_encoded_size = func {
+        last many: uint8[list] = new;
+        for (let i in 0 .. 257) {
+            many.append(130);
+        }
+        test.assert_equal_string("hpack.limit", code(test.assert_err<[string, string][list]>(
+            h2.hpack_decode_fields(many))));
+        test.assert_equal_string("hpack.limit", code(test.assert_err<[string, string][list]>(
+            h2.hpack_decode_fields(strings.to_bytes(strings.repeat("x", 65537))))));
+        last fields: [string, string][list] = new;
+        fields.append(["x", strings.repeat("v", 65536)]);
+        test.assert_equal_string("hpack.limit", code(test.assert_err<uint8[list]>(h2.hpack_encode_fields(fields))));
+    };
+);

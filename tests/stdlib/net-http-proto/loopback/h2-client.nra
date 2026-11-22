@@ -1,0 +1,119 @@
+let config = import:Std.Net.Tls.TlsConfig;
+let console = import:Std.Io.Console;
+let duration = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let h2 = import:Std.Net.Http.H2;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let unit = import:Std.Core.Unit;
+
+export let H2Client = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        match (exercise(args)) {
+            result.Result.Ok(_) => {
+                console.print_line("ok");
+            },
+            result.Result.Err(failure) => {
+                match (failure) {
+                    errors.Error.Io { kind, message, path } => {
+                        console.print_line(kind.to_string());
+                    },
+                    errors.Error.Custom(detail) => {
+                        console.print_line(detail.code());
+                    },
+                    _ => {
+                        console.print_line(errors.message(failure));
+                    },
+                }
+            },
+        }
+        return program.ExitCode.Ok;
+    };
+
+    let exercise = func(args: string[]) -> result.Result<unit.Unit> {
+        if (args[0] == "hpack") {
+            last fields: [string, string][list] = new;
+            fields.append([":method", "GET"]);
+            fields.append(["x-trace", "roundtrip"]);
+            last decoded = h2.hpack_decode_fields(h2.hpack_encode_fields(fields)?)?;
+            if (decoded.length != 2) {
+                return result.Result<unit.Unit>.Err(errors.custom("test.hpack.trace", "wrong field count"));
+            }
+            let [name, value] = decoded[1];
+            if (name != "x-trace" || value != "roundtrip") {
+                return result.Result<unit.Unit>.Err(errors.custom("test.hpack.trace", "wrong field value"));
+            }
+            return result.Result<unit.Unit>.Ok(unit.Unit.Value);
+        }
+        last settings: h2.Settings = new;
+        settings.add(h2.SettingEnablePush, 0);
+        settings.add(h2.SettingHeaderTableSize, 0);
+        last builder = config.builder();
+        builder.set_alpn(new(["h2"]));
+        builder.set_ca_file(args[2]);
+        builder.set_server_name(args[3]);
+        builder.set_handshake_timeout(duration.of_millis(250));
+        last opened = args[0] == "default-trust" ? h2.connect(args[1], settings)
+            : h2.connect_with(args[1], settings, builder.build_client()?);
+        last connection = opened?;
+        last outcome = write_frames(connection, args[0]);
+        let _ = connection.close(h2.ErrorNoError);
+        return outcome;
+    };
+
+    let expect_code = func(outcome: result.Result<unit.Unit>, expected: string) -> result.Result<unit.Unit> {
+        match (outcome) {
+            result.Result.Err(errors.Error.Custom(detail)) => {
+                if (detail.code() == expected) {
+                    return result.Result<unit.Unit>.Ok(unit.Unit.Value);
+                }
+            },
+            _ => {},
+        }
+        return result.Result<unit.Unit>.Err(errors.custom("test.h2.validation", expected));
+    };
+
+    let write_frames = func(connection: h2.H2Connection, scenario: string) -> result.Result<unit.Unit> {
+        if (scenario == "close-timeout") {
+            last closed = connection.close(h2.ErrorNoError);
+            connection.close(h2.ErrorNoError)?;
+            return closed;
+        }
+        if (scenario == "blocked-write") {
+            last payload = strings.to_bytes(strings.repeat("x", 16384));
+            for (let i in 0 .. 1024) {
+                last sent = connection.send_frame(new h2.FrameHeader(payload.length, h2.FrameData, 0, 1), payload);
+                match (sent) {
+                    result.Result.Err(failure) => {
+                        return result.Result<unit.Unit>.Err(failure);
+                    },
+                    _ => {},
+                }
+            }
+            return result.Result<unit.Unit>.Err(errors.custom("test.h2.no-backpressure", "all writes completed"));
+        }
+        last ping = strings.to_bytes("12345678");
+        expect_code(connection.send_frame(new h2.FrameHeader(7, h2.FramePing, 0, 0), ping), "FRAME_SIZE_ERROR")?;
+        expect_code(connection.send_frame(new h2.FrameHeader(8, h2.FramePing, 0, 1), ping), "PROTOCOL_ERROR")?;
+        expect_code(connection.send_frame(new h2.FrameHeader(0, h2.FrameData, 0, 0), new), "PROTOCOL_ERROR")?;
+        expect_code(connection.send_frame(new h2.FrameHeader(7, h2.FramePing, 0, 0), strings.to_bytes("1234567")),
+            "FRAME_SIZE_ERROR")?;
+        last large = strings.to_bytes(strings.repeat("x", 16385));
+        expect_code(connection.send_frame(new h2.FrameHeader(large.length, h2.FrameData, 0, 1), large),
+            "FRAME_SIZE_ERROR")?;
+        connection.send_frame(new h2.FrameHeader(ping.length, h2.FramePing, 0, 0), ping)?;
+        connection.send_frame(new h2.FrameHeader(3, 250, 0, 0), strings.to_bytes("abc"))?;
+        connection.close(h2.ErrorNoError)?;
+        connection.close(h2.ErrorNoError)?;
+        match (connection.send_frame(new h2.FrameHeader(8, h2.FramePing, 0, 0), ping)) {
+            result.Result.Err(errors.Error.Io { kind, message, path }) => {
+                if (kind == errors.IoErrorKind.Closed) {
+                    return result.Result<unit.Unit>.Ok(unit.Unit.Value);
+                }
+            },
+            _ => {},
+        }
+        return result.Result<unit.Unit>.Err(errors.custom("test.h2.closed", "send after close must fail"));
+    };
+);

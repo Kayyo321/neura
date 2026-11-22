@@ -1,4 +1,12 @@
+let bytes = import:Std.Io.Internal.Bytes;
+let duration = import:Std.Time.Duration;
 let error = import:Std.Core.Error;
+let host = import:Std.Net.Socket.Internal.HostCalls;
+let host_error = import:Std.Core.Internal.HostError;
+let optional = import:Std.Core.Optional;
+let system_clock = import:Std.Time.SystemClock;
+let tls_config = import:Std.Net.Tls.TlsConfig;
+let uri = import:Std.Net.Core.Uri;
 let hashing = import:Std.Core.Hash;
 let header_map = import:Std.Net.Http.Headers;
 let.promote _ = import:Std.Core.Result;
@@ -6,14 +14,17 @@ let strings = import:Std.Text.Strings;
 let.promote _ = import:Std.Core.Unit;
 
 /// @brief HTTP/2 (RFC 9113) wire data: the connection preface, frame types and flags, settings and error codes,
-/// and the codecs of the 9-octet frame header and the SETTINGS payload. Connections and HPACK are stubs.
+/// and the codecs of the 9-octet frame header and the SETTINGS payload, bounded TLS frame output and HPACK.
 ///
 /// The frame header is Length (24), Type (8), Flags (8), Reserved (1), Stream Identifier (31) (section 4.1); the
 /// reserved bit is ignored on receipt and never sent. A SETTINGS payload is a sequence of 6-octet entries, a
 /// 16-bit identifier and a 32-bit value (section 6.5.1); `decode_settings` applies the value checks of section
 /// 6.5.2 and RFC 8441 section 3 and reports a violation as `error.custom(<HTTP/2 error name>, <reason>)`.
 /// Unknown identifiers are kept (receivers ignore them). Opening a connection needs TCP and TLS with ALPN "h2"
-/// from the runtime; HPACK (RFC 7541) header compression is not implemented.
+/// from the runtime. HPACK uses the pinned nghttp2 host codec when HTTP/2 is enabled; otherwise it returns
+/// Unsupported. Each codec call is an independent field section: dynamic table state is not shared across
+/// calls. Connection control and framing stay in the circuit; this low-level sender does not manage streams
+/// or consume peer SETTINGS. It conservatively sends at most the initial 16,384-byte maximum per frame.
 /// @see [Std.Net.Http.H2](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-H2)
 .Since("0.3.0")
 export let H2 = module (
@@ -302,63 +313,349 @@ export let H2 = module (
         return Result<Settings>.Ok(settings);
     };
 
-    /// @brief An HTTP/2 connection over TLS.
+    let Seal = enum (Value);
+    let EncodedOutcome = enum (Ok(uint8[list]), Error(uint32));
+    let FieldsOutcome = enum (Ok(string[list]), Error(uint32));
+    let encode_fields = func(fields: string[list]) -> EncodedOutcome host("neura.http.hpack.encode", 1);
+    let decode_fields = func(block: uint8[list]) -> FieldsOutcome host("neura.http.hpack.decode", 1);
+    let write_tls = func(stream: int64, data: uint8[list], timeout: int64) -> host.CountOutcome
+        host("neura.net.tls.write", 2);
+
+    let shutdown_tls = func(stream: int64, timeout: int64) -> host.DoneOutcome
+        host("neura.net.tls.shutdown_write", 1);
+
+    /// @brief A low-level HTTP/2 frame sender over a verified TLS connection. It does not read peer frames,
+    /// acknowledge their settings, enforce stream lifecycle, or multiplex requests; `Http.Fetch` owns that driver.
     .[Final, NotThreadSafe]
     export let H2Connection = class (
         /// @brief The authority the connection was opened to.
         export last authority: string;
+        last id: int64;
+        last timeout_nanos: int64;
+        let open_now: bool = true;
 
-        /// @brief Records the authority; only `connect` creates connections.
-        export let init = func(target: string) {
+        /// @brief Created only by `connect` or `connect_with`.
+        export let init = func(seal: Seal, target: string, stream: int64, timeout: int64) {
             authority = target;
+            id = stream;
+            timeout_nanos = timeout;
         };
 
-        /// @brief Writes one frame: its header, then the payload.
-        /// @stub needs TLS transport; connection management is not implemented
-        export let send_frame = func(header: FrameHeader, payload: uint8[list]) -> Result<Unit> =>
-            host_write(encode_frame_header(header), payload);
+        /// @brief Writes one complete frame within the connection's positive per-operation deadline.
+        /// Length/payload disagreements and fixed-size frame violations return FRAME_SIZE_ERROR; invalid
+        /// stream identifiers return PROTOCOL_ERROR. Frames remain limited to 16,384 payload bytes.
+        .[Since("0.3.1"), NoDiscard]
+        export let send_frame = func(header: FrameHeader, payload: uint8[list]) -> Result<Unit> {
+            return Result<Unit>.Err(bytes.closed("HTTP/2 connection", authority)) unless open_now;
+            validate_frame(header, payload)?;
+            last wire = encode_frame_header(header);
+            for (let b in payload) {
+                wire.append(b);
+            }
+            match (write_bytes(id, wire, timeout_nanos, authority)) {
+                Result.Ok(_) => {
+                    return bytes.ok();
+                },
+                Result.Err(failure) => {
+                    // A partial frame cannot be retried safely on the same stream.
+                    let _ = abort();
+                    return Result<Unit>.Err(failure);
+                },
+            }
+        };
 
-        /// @brief Sends GOAWAY with `error_code` and closes the connection (section 6.8).
-        /// @stub needs TLS transport; connection management is not implemented
-        export let close = func(error_code: int) -> Result<Unit> => host_close(error_code);
+        /// @brief Sends GOAWAY with last-stream-id zero, sends close_notify and discards inbound data until
+        /// peer close_notify, within one deadline. Releases TLS on success or failure. Closing again succeeds.
+        /// A negative `error_code` returns InvalidInput without closing.
+        .[Since("0.3.1"), NoDiscard]
+        export let close = func(error_code: int) -> Result<Unit> {
+            return bytes.ok() unless open_now;
+            if (error_code < 0) {
+                return Result<Unit>.Err(host_error.io(4, "negative HTTP/2 error code", authority));
+            }
+            last notified = close_wire(error_code);
+            last released = abort();
+            return match (notified) {
+                Result.Ok(_) => released,
+                Result.Err(failure) => Result<Unit>.Err(failure),
+            };
+        };
+
+        let close_wire = func(error_code: int) -> Result<Unit> {
+            last payload: uint8[list] = new([0, 0, 0, 0, (error_code >> 24) as uint8,
+                ((error_code >> 16) & 255) as uint8, ((error_code >> 8) & 255) as uint8, (error_code & 255) as uint8]);
+            last clock = system_clock.create();
+            last start = (clock.monotonic()?).to_nanos();
+            last written = send_frame(new FrameHeader(8, FrameGoaway, 0, 0), payload);
+            return match (written) {
+                Result.Ok(_) => finish_shutdown(id, timeout_nanos - ((clock.monotonic()?).to_nanos() - start), authority),
+                Result.Err(failure) => Result<Unit>.Err(failure),
+            };
+        };
+
+        let abort = func -> Result<Unit> {
+            return bytes.ok() unless open_now;
+            open_now = false;
+            return match (host.tls_close(id)) {
+                host.DoneOutcome.Ok => bytes.ok(),
+                host.DoneOutcome.Error(code) => Result<Unit>.Err(host_error.io(code, "TLS close failed", authority)),
+            };
+        };
 
         /// @brief The authority.
         export let.override to_string = func -> string => "H2Connection{" .. authority .. "}";
     );
 
-    /// @brief Opens an HTTP/2 connection to `authority` (host:port): TCP, TLS with ALPN "h2", the preface and
-    /// a SETTINGS frame holding `settings` (sections 3.2, 3.4).
-    /// @stub needs TLS transport; connection management is not implemented
-    .NoDiscard
-    export let connect = func(authority: string, settings: Settings) -> Result<H2Connection> =>
-        host_connect(authority, encode_settings(settings));
-
-    /// @brief The HPACK encoding of a field section (RFC 7541).
-    /// @stub HPACK (RFC 7541) header compression is not implemented
-    .NoDiscard
-    export let hpack_encode = func(fields: header_map.Headers) -> uint8[list] {
-        trap_with_message("unsupported: Std.Net.Http.H2.hpack_encode is not implemented in Neura 0.3.0 (HPACK (RFC 7541) header compression is not implemented)");
+    let write_bytes = func(id: int64, data: uint8[list], budget: int64, authority: string) -> Result<Unit> {
+        last clock = system_clock.create();
+        last start = (clock.monotonic()?).to_nanos();
+        let offset = 0;
+        while (offset < data.length) {
+            last remaining = budget - ((clock.monotonic()?).to_nanos() - start);
+            if (remaining <= 0) {
+                return Result<Unit>.Err(host_error.io(12, "HTTP/2 write timed out", authority));
+            }
+            match (write_tls(id, bytes.copy_range(data, offset, data.length), remaining)) {
+                host.CountOutcome.Ok(count) => {
+                    if (count <= 0 || count > data.length - offset) {
+                        return Result<Unit>.Err(host_error.io(11, "invalid TLS write count", authority));
+                    }
+                    offset += count;
+                },
+                host.CountOutcome.Error(code) => {
+                    return Result<Unit>.Err(host_error.io(code, "HTTP/2 write failed", authority));
+                },
+            }
+        }
+        return bytes.ok();
     };
 
-    /// @brief The field section of an HPACK header block (RFC 7541).
-    /// @stub HPACK (RFC 7541) header compression is not implemented
-    .NoDiscard
+    let finish_shutdown = func(id: int64, budget: int64, authority: string) -> Result<Unit> {
+        if (budget <= 0) {
+            return Result<Unit>.Err(host_error.io(12, "HTTP/2 close timed out", authority));
+        }
+        last clock = system_clock.create();
+        last start = (clock.monotonic()?).to_nanos();
+        match (shutdown_tls(id, budget)) {
+            host.DoneOutcome.Error(code) => {
+                return Result<Unit>.Err(host_error.io(code, "HTTP/2 TLS shutdown failed", authority));
+            },
+            host.DoneOutcome.Ok => {},
+        }
+        while (true) {
+            last remaining = budget - ((clock.monotonic()?).to_nanos() - start);
+            if (remaining <= 0) {
+                return Result<Unit>.Err(host_error.io(12, "HTTP/2 close timed out", authority));
+            }
+            match (host.tls_read(id, 16384, remaining)) {
+                host.BytesOutcome.Ok(data) => {
+                    if (data.length == 0) {
+                        return bytes.ok();
+                    }
+                },
+                host.BytesOutcome.Error(code) => {
+                    return Result<Unit>.Err(host_error.io(code, "HTTP/2 TLS close failed", authority));
+                },
+            }
+        }
+    };
+
+    /// @brief Opens verified TLS with ALPN h2 and system trust, then writes the preface and SETTINGS.
+    /// The complete connect operation has a thirty-second deadline. Needs net and clock capabilities.
+    .[Since("0.3.1"), NoDiscard]
+    export let connect = func(authority: string, settings: Settings) -> Result<H2Connection> {
+        last builder = tls_config.builder();
+        builder.set_alpn(new(["h2"]));
+        builder.set_handshake_timeout(duration.of_seconds(30));
+        return connect_with(authority, settings, builder.build_client()?);
+    };
+
+    /// @brief As `connect`, with explicit trust/credentials and a positive total handshake/preface deadline.
+    /// `config` must be a client configuration offering exactly h2. Later sends use the same duration as a
+    /// fresh per-operation deadline. Explicit trust/credential files also require the fs capability.
+    .[Since("0.3.1"), NoDiscard]
+    export let connect_with = func(authority: string, settings: Settings, config: tls_config.TlsConfig)
+        -> Result<H2Connection> {
+        last protocols = config.alpn();
+        last budget = config.handshake_timeout.to_nanos();
+        if (config.role != tls_config.TlsRole.Client || protocols.length != 1 || protocols[0] != "h2" || budget <= 0) {
+            return Result<H2Connection>.Err(error.custom("h2.config", "client ALPN h2 and a positive deadline are required"));
+        }
+        if (settings.ids.length != settings.values.length) {
+            return Result<H2Connection>.Err(error.custom("FRAME_SIZE_ERROR", "settings lists disagree"));
+        }
+        for (let i in 0 .. settings.ids.length) {
+            if (settings.ids[i] < 0 || settings.ids[i] > 65535 || settings.values[i] < 0 || settings.values[i] > 4294967295) {
+                return Result<H2Connection>.Err(error.custom("PROTOCOL_ERROR", "setting outside wire range"));
+            }
+        }
+        last payload = encode_settings(settings);
+        decode_settings(payload)?;
+        validate_frame(new FrameHeader(payload.length, FrameSettings, 0, 0), payload)?;
+        last parsed = uri.parse("https://" .. authority .. "/")?;
+        if (optional.value_or<string>(parsed.authority(), "") != authority || optional.is_some<string>(parsed.userinfo)
+            || parsed.path != "/" || optional.is_some<string>(parsed.query) || optional.is_some<string>(parsed.fragment)) {
+            return Result<H2Connection>.Err(error.custom("h2.authority", "expected a host and optional port"));
+        }
+        last normalized = parsed.normalize()?;
+        last target = normalized.decoded_host()?;
+        if (target.byte_length == 0) {
+            return Result<H2Connection>.Err(error.custom("h2.authority", "empty host"));
+        }
+        last port = optional.value_or<int>(normalized.port, 443);
+        last name = config.server_name.byte_length == 0 ? target : config.server_name;
+        last clock = system_clock.create();
+        last start = (clock.monotonic()?).to_nanos();
+        last opened = host.tls_connect_extended(target, port, budget, name, protocols, config.ca_file,
+            config.min_version == tls_config.TlsVersion.Tls12 ? 12 : 13,
+            config.max_version == tls_config.TlsVersion.Tls12 ? 12 : 13,
+            config.certificate_file, config.key_file, config.kernel_offload);
+        match (opened) {
+            host.TlsOutcome.Error(code) => {
+                return Result<H2Connection>.Err(host_error.io(code, "HTTP/2 TLS connect failed", authority));
+            },
+            host.TlsOutcome.Ok(connection) => {
+                let [id, selected] = connection;
+                if (selected != "h2") {
+                    let _ = host.tls_close(id);
+                    return Result<H2Connection>.Err(error.custom("h2.alpn", "peer did not negotiate h2"));
+                }
+                last wire = preface_bytes();
+                for (let b in encode_frame_header(new FrameHeader(payload.length, FrameSettings, 0, 0))) {
+                    wire.append(b);
+                }
+                for (let b in payload) {
+                    wire.append(b);
+                }
+                last remaining: int64;
+                match (clock.monotonic()) {
+                    Result.Ok(now) => {
+                        remaining = budget - (now.to_nanos() - start);
+                    },
+                    Result.Err(failure) => {
+                        let _ = host.tls_close(id);
+                        return Result<H2Connection>.Err(failure);
+                    },
+                }
+                match (write_bytes(id, wire, remaining, authority)) {
+                    Result.Ok(_) => {
+                        return Result<H2Connection>.Ok(new H2Connection(Seal.Value, authority, id, budget));
+                    },
+                    Result.Err(failure) => {
+                        let _ = host.tls_close(id);
+                        return Result<H2Connection>.Err(failure);
+                    },
+                }
+            },
+        }
+    };
+
+    /// @brief Compresses regular header fields as an independent HPACK block. Names are lowercased.
+    /// Unlike the former stub, encoding returns a Result. See `hpack_encode_fields` for limits and state.
+    .[Since("0.3.1"), NoDiscard]
+    export let hpack_encode = func(fields: header_map.Headers) -> Result<uint8[list]> {
+        last pairs: [string, string][list] = new;
+        for (let i in 0 .. fields.size()) {
+            pairs.append([strings.to_ascii_lower(fields.name_at(i)), fields.value_at(i)]);
+        }
+        return hpack_encode_fields(pairs);
+    };
+
+    /// @brief Decodes regular fields into Headers. A pseudo-header returns PROTOCOL_ERROR rather than
+    /// reaching Headers' token-name trap; use `hpack_decode_fields` for complete HTTP/2 field sections.
+    .[Since("0.3.1"), NoDiscard]
     export let hpack_decode = func(block: uint8[list]) -> Result<header_map.Headers> {
-        trap_with_message("unsupported: Std.Net.Http.H2.hpack_decode is not implemented in Neura 0.3.0 (HPACK (RFC 7541) header compression is not implemented)");
+        last fields = hpack_decode_fields(block)?;
+        last headers: header_map.Headers = new;
+        for (let field in fields) {
+            let [name, value] = field;
+            if (not header_map.is_token(name) || not header_map.is_valid_value(value)) {
+                return Result<header_map.Headers>.Err(error.custom("PROTOCOL_ERROR", "field cannot be represented by Headers"));
+            }
+            headers.add(name, value);
+        }
+        return Result<header_map.Headers>.Ok(headers);
     };
 
-    /// @brief Host binding for `connect`: a TLS connection with ALPN h2, then the preface and SETTINGS bytes.
-    let host_connect = func(authority: string, settings_payload: uint8[list]) -> Result<H2Connection> {
-        trap_with_message("unsupported: Std.Net.Http.H2.connect is not implemented in Neura 0.3.0 (needs TLS transport; connection management is not implemented)");
+    /// @brief Compresses lowercase name/value pairs, including pseudo-header names. Each call uses a new
+    /// encoder with dynamic table size zero and no indexing. At most 256 fields and 65,536 total name/value
+    /// bytes or encoded bytes; a conservative encoder allocation bound also applies. Invalid field text is
+    /// PROTOCOL_ERROR, limits are hpack.limit, and an HTTP/2-disabled provider returns typed Unsupported.
+    .[Since("0.3.1"), NoDiscard]
+    export let hpack_encode_fields = func(fields: [string, string][list]) -> Result<uint8[list]> {
+        // Host collections carry scalar text elements. Keep tuple conversion
+        // in the library so the public API retains its name/value pairs.
+        last flat: string[list] = new;
+        for (let field in fields) {
+            let [name, value] = field;
+            flat.append(name);
+            flat.append(value);
+        }
+        return match (encode_fields(flat)) {
+            EncodedOutcome.Ok(block) => Result<uint8[list]>.Ok(block),
+            EncodedOutcome.Error(code) => Result<uint8[list]>.Err(codec_error(code, "PROTOCOL_ERROR")),
+        };
     };
 
-    /// @brief Host binding for `H2Connection.send_frame`: writes the bytes to the TLS stream.
-    let host_write = func(header: uint8[list], payload: uint8[list]) -> Result<Unit> {
-        trap_with_message("unsupported: Std.Net.Http.H2.H2Connection.send_frame is not implemented in Neura 0.3.0 (needs TLS transport; connection management is not implemented)");
+    /// @brief Decodes a complete independent block with an initial 4,096-byte dynamic table, including RFC
+    /// 7541 Huffman strings and table references created within this block. No table state survives a call.
+    /// Bounds are those of `hpack_encode_fields`; malformed text/encoding is COMPRESSION_ERROR.
+    .[Since("0.3.1"), NoDiscard]
+    export let hpack_decode_fields = func(block: uint8[list]) -> Result<[string, string][list]> {
+        match (decode_fields(block)) {
+            FieldsOutcome.Ok(fields) => {
+                if (fields.length % 2 != 0) {
+                    return Result<[string, string][list]>.Err(
+                        error.custom("COMPRESSION_ERROR", "HPACK host returned an incomplete name/value pair"));
+                }
+                last pairs: [string, string][list] = new;
+                for (let i = 0; i < fields.length; i += 2) {
+                    pairs.append([fields[i], fields[i + 1]]);
+                }
+                return Result<[string, string][list]>.Ok(pairs);
+            },
+            FieldsOutcome.Error(code) => {
+                return Result<[string, string][list]>.Err(codec_error(code, "COMPRESSION_ERROR"));
+            },
+        }
     };
 
-    /// @brief Host binding for `H2Connection.close`: sends GOAWAY and closes the TLS stream.
-    let host_close = func(error_code: int) -> Result<Unit> {
-        trap_with_message("unsupported: Std.Net.Http.H2.H2Connection.close is not implemented in Neura 0.3.0 (needs TLS transport; connection management is not implemented)");
+    let codec_error = func(code: uint32, invalid: string) -> error.Error {
+        if (code == 4) {
+            return error.custom(invalid, "invalid HPACK field section");
+        }
+        if (code == 16) {
+            return error.custom("hpack.limit", "HPACK field section exceeds its size limit");
+        }
+        return host_error.io(code, "HPACK codec unavailable or failed", "");
+    };
+
+    let validate_frame = func(header: FrameHeader, payload: uint8[list]) -> Result<Unit> {
+        if (header.length != payload.length || header.length < 0 || header.length > 16384) {
+            return Result<Unit>.Err(error.custom("FRAME_SIZE_ERROR", "payload length disagrees or exceeds 16,384"));
+        }
+        if (header.frame_type < 0 || header.frame_type > 255 || header.flags < 0 || header.flags > 255
+            || header.stream_id < 0 || header.stream_id > MaxWindowSize) {
+            return Result<Unit>.Err(error.custom("PROTOCOL_ERROR", "frame header outside wire range"));
+        }
+        last kind = header.frame_type;
+        if (((kind == FrameData || kind == FrameHeaders || kind == FramePriority || kind == FrameRstStream
+            || kind == FramePushPromise || kind == FrameContinuation) && header.stream_id == 0)
+            || ((kind == FrameSettings || kind == FramePing || kind == FrameGoaway) && header.stream_id != 0)) {
+            return Result<Unit>.Err(error.custom("PROTOCOL_ERROR", "invalid stream identifier for frame type"));
+        }
+        if ((kind == FramePriority && header.length != 5) || (kind == FrameRstStream && header.length != 4)
+            || (kind == FramePing && header.length != 8) || (kind == FrameGoaway && header.length < 8)
+            || (kind == FrameWindowUpdate && header.length != 4)
+            || (kind == FrameSettings && ((header.has_flag(FlagAck) && header.length != 0) || header.length % 6 != 0))) {
+            return Result<Unit>.Err(error.custom("FRAME_SIZE_ERROR", "invalid fixed-size frame payload"));
+        }
+        if (kind == FrameSettings && not header.has_flag(FlagAck)) {
+            decode_settings(payload)?;
+        }
+        if (kind == FrameWindowUpdate && ((payload[0] & 127) | payload[1] | payload[2] | payload[3]) == 0) {
+            return Result<Unit>.Err(error.custom("PROTOCOL_ERROR", "zero window increment"));
+        }
+        return bytes.ok();
     };
 );

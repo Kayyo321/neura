@@ -296,6 +296,7 @@ set(neura_nvm_sources
     src/nvm/tls_provider.cpp
     src/nvm/client_socket.cpp
     src/nvm/http_fetch_provider.cpp
+    src/nvm/hpack_provider.cpp
     src/nvm/schedule.cpp
     src/nvm/tier1.cpp
     src/nvm/tier2.cpp
@@ -2159,7 +2160,22 @@ if(BUILD_TESTING AND NEURA_SDK)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/net-http/native-fetch.py"
         --neura "$<TARGET_FILE:neura>" ${native_fetch_options})
     set_tests_properties(stdlib-net-http-native-fetch PROPERTIES TIMEOUT 300)
+    add_executable(neura_hpack_codec_tests tests/host-standalone/hpack-codec.cpp)
+    target_link_libraries(neura_hpack_codec_tests PRIVATE neura_nvm)
+    if(TARGET neura_nghttp2)
+        target_compile_definitions(neura_hpack_codec_tests PRIVATE NEURA_NVM_HTTP2)
+    endif()
+    neura_target_defaults(neura_hpack_codec_tests)
+    add_test(NAME hpack-codec COMMAND neura_hpack_codec_tests)
     if(NEURA_ENABLE_SERVER_TLS)
+        set(h2_loopback_options)
+        if(TARGET neura_nghttp2)
+            list(APPEND h2_loopback_options --hpack)
+        endif()
+        add_test(NAME stdlib-net-http-h2-loopback COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/net-http-proto/h2-loopback.py"
+            --neura "$<TARGET_FILE:neura>" --openssl "${NEURA_SERVER_TEST_OPENSSL}" ${h2_loopback_options})
+        set_tests_properties(stdlib-net-http-h2-loopback PROPERTIES TIMEOUT 120)
         add_test(NAME stdlib-net-tls-loopback COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/net-tls/loopback.py"
             --neura "$<TARGET_FILE:neura>" --openssl "${NEURA_SERVER_TEST_OPENSSL}")
@@ -2189,7 +2205,14 @@ if(BUILD_TESTING AND NEURA_SDK)
         if(area STREQUAL "crypto-core")
             set(split_files lock-tests generic-lock-tests)
         endif()
+        if(area STREQUAL "net-http-proto")
+            set(split_files hpack-tests)
+        endif()
         string(REPLACE ";" "," skipped "${split_files}")
+        if(area STREQUAL "net-http-proto" AND NOT TARGET neura_nghttp2)
+            # The native codec test covers typed Unsupported in this configuration.
+            set(split_files)
+        endif()
         add_test(NAME stdlib-${area} COMMAND ${CMAKE_COMMAND}
             "-DNEURA=${CMAKE_CURRENT_BINARY_DIR}/stdlib-install/prefix/bin/neura${CMAKE_EXECUTABLE_SUFFIX}"
             "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"

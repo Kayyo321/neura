@@ -1,4 +1,5 @@
 #include "provider_internal.hpp"
+#include "hpack_provider.hpp"
 #include "http_fetch_provider.hpp"
 #include "generation_internal.hpp"
 
@@ -1406,6 +1407,7 @@ StandardServices::StandardServices(ConsoleSink& output, ConsoleSink& error, Cons
                                                             std::move(begin), true));
     };
     add_http_fetch_services(fetch_adder, capabilities_);
+    add_hpack_services(adder);
     add_ffi_services(adder, *tables_, capabilities_);
 }
 
