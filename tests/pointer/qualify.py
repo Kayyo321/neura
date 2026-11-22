@@ -67,10 +67,20 @@ class PointerTests(unittest.TestCase):
         return subprocess.run([str(NEURA), *map(str, arguments)], cwd=self.path, env=env,
                               capture_output=True, text=True, encoding="utf-8", timeout=120)
 
-    def build(self, source, *flags):
+    def build(self, source, *flags, warnings=()):
         self.source.write_text(source, encoding="utf-8")
-        built = self.command("build", *flags, self.source, "-o", self.image)
+        built = self.command("build", "--error-format=json", *flags, self.source, "-o", self.image)
         self.assertEqual(built.returncode, 0, built.stderr)
+        observed = []
+        for line in built.stderr.splitlines():
+            if not line.startswith("{"):
+                continue
+            diagnostic = json.loads(line)
+            if diagnostic["code"] in ("W0006", "W0007"):
+                span = next(span for span in diagnostic["spans"] if span["primary"])
+                offset = span["offset"]
+                observed.append((diagnostic["code"], source[offset:offset + span["length"]]))
+        self.assertEqual(sorted(observed), sorted(warnings), built.stderr)
 
     def run_modes(self, status, output="", error=None, args=(), limits=()):
         results = {}
@@ -175,7 +185,7 @@ let make = func -> ListPointer<int64> {
             let absent: Pointer<int> = nil;
             absent.read();
         }
-'''))
+'''), warnings=(("W0007", "absent"), ("W0006", "absent")))
         for case in ("negative", "range", "end", "max"):
             self.run_modes(139, "", "source bounds failure (trap reason 2)", (case,))
         self.run_modes(139, "", "nil class reference", ("nil",))
@@ -207,7 +217,7 @@ let make = func -> ListPointer<int64> {
 
     def test_const_pointer_can_cross_an_ordinary_task(self):
         declarations = '''
-let consume = func(view: ConstPointer<int64>) {
+let consume = func(view: ConstPointer<int64> = nil) {
     if (view) {
         console.println("{}", view.read());
     } else {

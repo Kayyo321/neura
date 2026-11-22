@@ -14,6 +14,7 @@
   "tests/stdlib/duration/duration-tests.nra": [["W0007", 212, 52, 3]],
   "tests/stdlib/hash-map/hash-map-tests.nra": [["W0007", 258, 31, 3]],
   "tests/stdlib/hash-set/hash-set-tests.nra": [["W0007", 149, 31, 3]],
+  "tests/stdlib/immutable-list/immutable-list-tests.nra": [["W0007", 100, 31, 3]],
   "tests/stdlib/immutable-map/immutable-map-tests.nra": [["W0007", 75, 31, 3]],
   "tests/stdlib/immutable-set/immutable-set-tests.nra": [["W0007", 64, 31, 3]],
   "tests/stdlib/instant/instant-tests.nra": [["W0007", 219, 72, 3]],

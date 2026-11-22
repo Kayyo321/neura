@@ -19,8 +19,14 @@ def main():
     recorded = json.loads(manifest.read_text(encoding="utf-8"))
 
     for name, expected in recorded.items():
+        source = Path(name)
+        include = []
+        if source.parts[:2] == ("tests", "stdlib"):
+            support = root.joinpath(*source.parts[:3], "support")
+            if support.is_dir():
+                include = ["-I", support]
         result = subprocess.run(
-            [neura, "check", "--error-format=json", root / name],
+            [neura, "check", "--error-format=json", *include, root / source],
             capture_output=True, encoding="utf-8", timeout=120,
         )
         if result.returncode:
