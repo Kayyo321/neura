@@ -409,8 +409,9 @@ private:
             const auto& last = g.insts[block.insts.back()];
             if (last.op != Op::Return) continue;
             if (!has_result) continue;
-            if (last.operands[1] == none ||
-                !(fits(g.insts[last.operands[1]].type, call.type) || constant_fits(g.insts[last.operands[1]], call.type))) {
+            if (last.operands[1] == none) return false;
+            const auto& first = g.insts[last.operands[1]];
+            if (!fits(first.type, call.type) && !result_constant_fits(first, call.type)) {
                 return false;
             }
             // Each word after the first fits the slot it lands in.
@@ -418,7 +419,7 @@ private:
             for (std::uint32_t w = 0; w < last.count; ++w) {
                 const auto& word = g.insts[g.extras[last.extra + w]];
                 const auto slot = f.insts[site.words[w]].type;
-                if (!fits(word.type, slot) && !constant_fits(word, slot)) return false;
+                if (!fits(word.type, slot) && !result_constant_fits(word, slot)) return false;
             }
         }
         return true;
@@ -429,6 +430,13 @@ private:
     static bool constant_fits(const Inst& argument, ValueType slot) {
         return argument.op == Op::Const && argument.type.type == Type::Int &&
                (slot.type == Type::F32 || slot.type == Type::F64) && argument.type.width <= slot.width;
+    }
+
+    // A zero word in a reference result slot is the nil handle. The splice
+    // retypes the constant before merging it with the other return values.
+    static bool result_constant_fits(const Inst& word, ValueType slot) {
+        return constant_fits(word, slot) ||
+               (slot.type == Type::Ref && word.op == Op::Const && word.type.type == Type::Int && word.imm == 0);
     }
 
     std::uint32_t add_inst(Function& f, Inst in) {
@@ -622,7 +630,7 @@ private:
             jump.origin_block = f.insts[ret].origin_block;
             jump.origin_function = f.insts[ret].origin_function;
             jump.origin_seq = f.insts[ret].origin_seq;
-            // A constant that is a float word's bits, in the slot's type.
+            // Retype float bit patterns and nil reference words to their result slots.
             std::vector<std::uint32_t> made_here;
             const auto typed = [&](std::uint32_t v, ValueType slot) {
                 if (v == none || f.insts[v].op != Op::Const || fits(f.insts[v].type, slot)) return v;

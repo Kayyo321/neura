@@ -1,0 +1,55 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let int32s = import:Std.Core.Int32;
+let result = import:Std.Core.Result;
+
+let Item = class (
+    export last value: int;
+
+    export let init = func(initial: int) {
+        value = initial;
+    };
+);
+
+let Outcome = enum (
+    Error(string),
+    Found(Item),
+);
+
+let compute = func(item: Item, mode: int) -> Outcome {
+    if (mode < 0) {
+        return Outcome.Error("negative");
+    }
+    return Outcome.Found(item);
+};
+
+export let NilResult = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last mode = result.value_or<int32>(int32s.parse(args[0]), 0);
+        last item: Item = new(7);
+        last values: int[] = [1, 2, 3];
+        let total: int64 = 0;
+        for (let i = 0; i < 4000; i++) {
+            let index = i % 3;
+            if (i == 3999 && mode == 1) {
+                index = -1;
+            }
+            last input = values[index];
+            last output = compute(item, (i % 2) - 1);
+            if (i == 3999 && mode == 2) {
+                index = 3;
+            }
+            total += values[index] as int64;
+            match (output) {
+                Outcome.Error(message) => {
+                    total += message.byte_length as int64;
+                },
+                Outcome.Found(found) => {
+                    total += (found.value + input) as int64;
+                },
+            }
+        }
+        console.println("{}", total);
+        return program.ExitCode.Ok;
+    };
+);
