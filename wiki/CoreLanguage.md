@@ -273,7 +273,51 @@ let three = count(10, 20, 30);
 
 A bare `items: ...` packs mixed types into an array of `Std.Core.Variadic.Argument`. The variants retain strings, booleans, each floating-point width, and object references. Integers are widened to signed or unsigned 64-bit values. Other values with a built-in `to_string()` use that text representation. Pass an explicit representation for types without a value member. An existing `Argument` is passed through as-is. The standard library module also exposes the type for callers that want to match the variants or construct a pack directly.
 
-`if (condition) { ... } else { ... }` selects a branch; `while (condition) { ... }` repeats while its Boolean condition is true. `break` exits the innermost loop and `continue` starts its next iteration. Conditions must be `bool`; there is no implicit truthiness. See [core.nra](https://github.com/Kayyo321/neura/blob/main/examples/guide/core.nra).
+`if (condition) { ... } else { ... }` selects a branch; `while (condition) { ... }` repeats while its Boolean condition is true. `break` exits the innermost loop and `continue` starts its next iteration. A condition is a `bool`, or a class or interface reference ([nil conditions](#nil-conditions)); no other type is a condition. See [core.nra](https://github.com/Kayyo321/neura/blob/main/examples/guide/core.nra).
+
+### If initializers
+
+An `if` condition may open with one `let` declaration and a `;` before the condition. The declaration is evaluated once, before the condition. Its names are in scope in the condition, the `if` body, and every `else` branch, and nowhere after the statement.
+
+<!-- example: check -->
+```neura
+let lookup = func(key: int32) -> [bool, int32] {
+    return [key > 0, key * 2];
+};
+
+let describe = func(key: int32) -> int32 {
+    if (let [found, value] = lookup(key); found) {
+        return value;
+    } else {
+        return -1;
+    }
+};
+```
+
+The declaration is a `let` that binds one name or destructures, under the ordinary rules for `let`. `const`, `last`, a second declaration, and any other statement are rejected there. An `else if` may carry its own initializer, and it also sees the names of the initializers before it. `while` and `return if` take no initializer.
+
+### Nil conditions
+
+A class or interface reference used as a condition is true when it refers to an instance and false when it is `nil`. `if (value)` is `if (value != nil)`, and `if (!value)` or `if (not value)` is `if (value == nil)`. The same test applies in `while`, in the condition of `? :`, and to an operand of `!` or `not`, whose result is a `bool`.
+
+<!-- example: check -->
+```neura
+let Node = class (
+    export let next: Node = nil;
+);
+
+let length = func(first: Node) -> int32 {
+    let count = 0;
+    let node = first;
+    while (node) {
+        count += 1;
+        node = node.next;
+    }
+    return count;
+};
+```
+
+Only class and interface references are conditions this way. An integer, a string, an `Optional`, or an array is not, and each is still a type error. The test reads the reference and nothing else, so it never fails, and a later access through a reference that is nil still fails with the nil-reference failure.
 
 ### Function values and closures
 
