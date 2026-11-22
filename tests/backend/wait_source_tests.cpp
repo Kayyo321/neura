@@ -15,6 +15,10 @@
 #else
 #include <fcntl.h>
 #include <unistd.h>
+#ifdef __linux__
+#include <linux/io_uring.h>
+#include <sys/syscall.h>
+#endif
 #endif
 
 namespace {
@@ -535,16 +539,17 @@ int main() {
         native_sockets();
         closed_sockets();
 #else
-        if (const char* wanted = std::getenv("NEURA_IO_BACKEND");
-            wanted && std::string_view(wanted) != neura::nvm::io_backend_name(backend)) {
-            // A container may forbid io_uring (kernel.io_uring_disabled, or
-            // a seccomp filter); the driver then keeps poll(2).
-            if (std::string_view(wanted) == "io_uring") {
-                std::cout << "skipped: io_uring is not available here\n";
-                return 0;
+#ifdef __linux__
+        if (backend == IoBackend::IoUring) {
+            io_uring_params parameters{};
+            const auto descriptor = ::syscall(__NR_io_uring_setup, 2, &parameters);
+            if (descriptor < 0) {
+                std::cout << "io_uring_setup unavailable on this host\n";
+                return 77;
             }
-            throw std::runtime_error(std::string("NEURA_IO_BACKEND=") + wanted + " was not selected");
+            ::close(static_cast<int>(descriptor));
         }
+#endif
         polled_and_external();
         external_cancel_and_deadline();
         native_events();

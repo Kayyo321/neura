@@ -35,11 +35,7 @@ Event drive(Execution& execution, const Bindings& bindings, TaskClock& clock, Dr
             if (!event.overlapping) {
                 auto answer = hooks.serve(event);
                 const auto& signature = bindings.services.at(event.request.import)->signature();
-                if (answer.success && signature.name == "neura.runtime.event_loop" && signature.version == 1) {
-                    const auto backend = available_io_backend(
-                        static_cast<std::int32_t>(event.request.arguments.at(0).bits));
-                    if (backend) pending.set_backend(*backend);
-                }
+                pending.apply_service_selection(event.request, signature, answer);
                 execution.complete(answer);
                 break;
             }

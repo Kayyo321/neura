@@ -682,57 +682,32 @@ private:
 
 } // namespace
 
-std::optional<IoBackend> available_io_backend(std::int32_t code) {
-    if (code == 4) {
+IoBackend io_backend() {
 #ifdef _WIN32
-        return IoBackend::WaitForMultipleObjects;
-#else
-        return IoBackend::Poll;
+    return IoBackend::WaitForMultipleObjects;
+#elif defined(__linux__)
+    const char* text = std::getenv("NEURA_IO_BACKEND");
+    if (text && std::string_view(text) == "epoll") return IoBackend::Epoll;
+    if (text && std::string_view(text) == "io_uring") return IoBackend::IoUring;
 #endif
-    }
-#ifdef __linux__
-    if (code == 2) {
-        const int probe = ::epoll_create1(EPOLL_CLOEXEC);
-        if (probe >= 0) {
-            ::close(probe);
-            return IoBackend::Epoll;
-        }
-    }
-    if (code == 1) {
-        io_uring_params parameters{};
-        const long probe = ::syscall(__NR_io_uring_setup, 2, &parameters);
-        if (probe >= 0) {
-            ::close(static_cast<int>(probe));
-            return IoBackend::IoUring;
-        }
-    }
-#endif
-#ifdef NEURA_HAS_KQUEUE
-    if (code == 3) {
-        const int probe = ::kqueue();
-        if (probe >= 0) {
-            ::close(probe);
-            return IoBackend::Kqueue;
-        }
-    }
-#endif
-    return std::nullopt;
+    return IoBackend::Poll;
 }
 
-IoBackend io_backend() {
-    static const IoBackend chosen = [] {
-#ifdef __linux__
-        const char* text = std::getenv("NEURA_IO_BACKEND");
-        if (text && std::string_view(text) == "epoll") {
-            if (const auto backend = available_io_backend(2)) return *backend;
-        }
-        if (text && std::string_view(text) == "io_uring") {
-            if (const auto backend = available_io_backend(1)) return *backend;
-        }
+void PendingRequests::apply_service_selection(const HostRequest& request, const HostSignature& signature,
+                                              const HostCompletion& completion) {
+    if (!completion.success || signature.name != "neura.runtime.event_loop" || signature.version != 1) return;
+    switch (request.arguments.at(0).bits) {
+    case 1: backend_ = IoBackend::IoUring; break;
+    case 2: backend_ = IoBackend::Epoll; break;
+    case 3: backend_ = IoBackend::Kqueue; break;
+    case 4:
+#ifdef _WIN32
+        backend_ = IoBackend::WaitForMultipleObjects;
+#else
+        backend_ = IoBackend::Poll;
 #endif
-        return *available_io_backend(4);
-    }();
-    return chosen;
+        break;
+    }
 }
 
 const char* io_backend_name(IoBackend backend) {

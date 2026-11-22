@@ -6,7 +6,6 @@
 // None of them overlaps: in an image with tasks a waiting call holds up the
 // other tasks for at most its timeout.
 
-#include "driver.hpp"
 #include "provider_internal.hpp"
 
 #include "platform/socket.hpp"
@@ -50,10 +49,17 @@
 #include <unistd.h>
 #endif
 #ifdef __linux__
+#include <linux/io_uring.h>
 #include <linux/udp.h>
+#include <sys/epoll.h>
+#include <sys/syscall.h>
 #include <signal.h>
 #include <sys/mman.h>
 #include <sys/sendfile.h>
+#endif
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) || defined(__DragonFly__)
+#include <sys/event.h>
+#define NEURA_HAS_KQUEUE 1
 #endif
 #ifndef IPPROTO_MPTCP
 #define IPPROTO_MPTCP 262
@@ -65,6 +71,32 @@ namespace {
 
 HostType address_result() { return tuple({byte_list(), text(), int32()}); }
 HostType segments_result() { return tuple({byte_list(), text(), int32(), int32()}); }
+// This capability check is a host observation, so replay uses its recorded
+// outcome. The drivers apply a successful selection without probing again.
+HostCompletion select_event_loop(std::int32_t code) {
+    if (code < 1 || code > 4) return fail(host_error::invalid_input);
+    if (code == 4) return HostCompletion::ok();
+#ifndef _WIN32
+    int descriptor = -1;
+#ifdef __linux__
+    if (code == 1) {
+        io_uring_params parameters{};
+        descriptor = static_cast<int>(::syscall(__NR_io_uring_setup, 2, &parameters));
+    } else if (code == 2) {
+        descriptor = ::epoll_create1(EPOLL_CLOEXEC);
+    }
+#endif
+#ifdef NEURA_HAS_KQUEUE
+    if (code == 3) descriptor = ::kqueue();
+#endif
+    if (descriptor >= 0) {
+        ::close(descriptor);
+        return HostCompletion::ok();
+    }
+#endif
+    return fail(host_error::unsupported);
+}
+
 using SocketClock = std::chrono::steady_clock;
 SocketClock::time_point socket_deadline(std::int64_t timeout_nanos) {
     const auto now = SocketClock::now();
@@ -2058,9 +2090,7 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
         });
     add(signature("neura.runtime.event_loop", {int32()}, void_type()), [=](const HostRequest& request) {
         if (!granted->net) return denied();
-        const auto code = as_int32(request.arguments.at(0));
-        if (code < 1 || code > 4) return fail(host_error::invalid_input);
-        return available_io_backend(code) ? HostCompletion::ok() : fail(host_error::unsupported);
+        return select_event_loop(as_int32(request.arguments.at(0)));
     });
     add(signature("neura.net.mdns.exchange", {byte_list(), int64(), text()},
                   HostType(Kind::List, std::vector<HostType>{byte_list()})), [=](const HostRequest& request) {

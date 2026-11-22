@@ -28,13 +28,12 @@ std::vector<std::uint8_t> host_modes_for(const nvr::Image& image, const Bindings
 // operations are applied in request sequence regardless of the backend.
 enum class IoBackend { Poll, Epoll, IoUring, Kqueue, WaitForMultipleObjects };
 IoBackend io_backend();
-std::optional<IoBackend> available_io_backend(std::int32_t code);
 const char* io_backend_name(IoBackend backend);
 
 // The overlapping requests a driver has started and not yet delivered.
 class PendingRequests {
 public:
-    explicit PendingRequests(TaskClock& clock) : clock_(clock) {}
+    explicit PendingRequests(TaskClock& clock, IoBackend backend = io_backend()) : clock_(clock), backend_(backend) {}
 
     // What a completed request reports back.
     struct Done {
@@ -63,7 +62,11 @@ public:
     // This is for a native run that can block. An event loop uses poll().
     std::vector<Done> wait(std::optional<std::int64_t> clock_deadline);
 
-    void set_backend(IoBackend backend) { backend_ = backend; }
+    // A successful event-loop host call records its selection in the response.
+    // Applying it here only selects the implementation for a live driver.
+    void apply_service_selection(const HostRequest& request, const HostSignature& signature,
+                                 const HostCompletion& completion);
+    IoBackend backend() const { return backend_; }
 
     bool empty() const { return entries_.empty(); }
     std::size_t size() const { return entries_.size(); }
@@ -83,7 +86,7 @@ private:
     std::vector<Done> collect();
 
     TaskClock& clock_;
-    IoBackend backend_ = io_backend();
+    IoBackend backend_;
     std::map<std::uint64_t, Entry> entries_;
 };
 

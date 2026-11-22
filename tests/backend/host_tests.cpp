@@ -1065,6 +1065,16 @@ NEURA_TEST(host, udp_offload_mptcp_and_splice) {
                  "MPTCP without the net group");
 }
 
+NEURA_TEST(host, event_loop_probes_requested_backends) {
+    Host host(everything());
+    expect_ok(host.call("neura.runtime.event_loop", {i32(4)}), "portable wait backend");
+#ifdef __linux__
+    expect_ok(host.call("neura.runtime.event_loop", {i32(2)}), "Linux epoll backend");
+#else
+    expect_error(host.call("neura.runtime.event_loop", {i32(2)}), host_error::unsupported, "epoll requires Linux");
+#endif
+}
+
 NEURA_TEST(host, socket_extensions_reject_bad_requests) {
     Host host(everything());
     Host denied({});

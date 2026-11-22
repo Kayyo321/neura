@@ -945,7 +945,7 @@ void Adapter::execute() {
                     // time. Use the provider's asynchronous form solely to
                     // keep adapter pause/disconnect responsive while waiting.
                     request.now = clock.now();
-                    nvm::PendingRequests synchronous(clock);
+                    nvm::PendingRequests synchronous(clock, pending.backend());
                     synchronous.add(request.sequence, service->begin(request), service->cancellable());
                     while (!terminate_.load()) {
                         const auto answers = synchronous.poll();
@@ -954,7 +954,9 @@ void Adapter::execute() {
                         std::this_thread::sleep_for(std::chrono::milliseconds(2));
                     }
                 } else {
-                    execution_->complete(service->invoke(request));
+                    const auto answer = service->invoke(request);
+                    pending.apply_service_selection(request, service->signature(), answer);
+                    execution_->complete(answer);
                 }
             } else if (at.kind == nvm::Event::Kind::Cancel) pending.cancel(at.sequence);
             else {

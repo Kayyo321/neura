@@ -1318,7 +1318,8 @@ if(BUILD_TESTING AND NEURA_SDK)
         add_test(NAME nvm-wait-source-epoll COMMAND neura_wait_source_tests)
         set_tests_properties(nvm-wait-source-epoll PROPERTIES TIMEOUT 10 ENVIRONMENT "NEURA_IO_BACKEND=epoll")
         add_test(NAME nvm-wait-source-io-uring COMMAND neura_wait_source_tests)
-        set_tests_properties(nvm-wait-source-io-uring PROPERTIES TIMEOUT 10 ENVIRONMENT "NEURA_IO_BACKEND=io_uring")
+        set_tests_properties(nvm-wait-source-io-uring PROPERTIES TIMEOUT 10 SKIP_RETURN_CODE 77
+            ENVIRONMENT "NEURA_IO_BACKEND=io_uring")
     endif()
 
     add_executable(neura_worker_wire_tests tests/server/worker_wire_tests.cpp)
