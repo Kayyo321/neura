@@ -316,14 +316,14 @@ def pair(runner, root, certificates, case, record=False):
         mutual = case in {"mutual", "missing-client-certificate"}
         ca = client_cert if mutual else ""
         server = neura_peer(stack, runner, relay, True, cert, key, ca,
-                            scenario="loss-reorder" if case == "loss-reorder" else "round-trip")
+                            scenario=case if case in {"loss-reorder", "mutual"} else "round-trip")
         trace = root / "dtls.trace"
         options = ["--record", str(trace)] if record else []
         client = neura_peer(stack, runner, relay, False,
                             client_cert if case == "mutual" else "", client_key if case == "mutual" else "",
                             wrong_ca if case == "wrong-ca" else cert,
                             "wrong.test" if case == "wrong-hostname" else "localhost",
-                            case if case in {"loss-reorder", "idle-read", "receive-error"}
+                            case if case in {"loss-reorder", "idle-read", "receive-error", "mutual"}
                             else "round-trip", options)
         if case in {"wrong-hostname", "wrong-ca"}:
             client.expect("ERROR PermissionDenied")
@@ -336,6 +336,11 @@ def pair(runner, root, certificates, case, record=False):
             server.expect("READY")
             if case in {"idle-read", "receive-error"}:
                 client.expect("READ TimedOut" if case == "idle-read" else "READ ConnectionReset")
+            if case == "mutual":
+                client.expect("CHAIN verified")
+                server.expect("CHAIN verified")
+            elif case == "round-trip":
+                server.expect("CHAIN PermissionDenied")
             relay.arm(case if case in {"duplicate", "truncate", "loss-reorder"} else "plain")
             complete_pair(client, server, case)
             expected = ["RECEIVED second", "RECEIVED first"] if case == "loss-reorder" else [

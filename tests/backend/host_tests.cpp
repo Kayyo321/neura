@@ -27,6 +27,7 @@
 #ifndef _WIN32
 #ifdef NEURA_NVM_TLS
 #include <openssl/err.h>
+#include <openssl/pem.h>
 #include <openssl/quic.h>
 #include <openssl/ssl.h>
 #endif
@@ -1739,6 +1740,10 @@ NEURA_TEST(host, dtls13_addressed_engine_roundtrip_and_deadline) {
     const auto c = client.call("neura.net.dtls.engine.open", opening(false, 12345, 54321));
     const auto s = server.call("neura.net.dtls.engine.open", opening(true, 54321, 12345));
     expect_ok(c, "DTLS client open"); expect_ok(s, "DTLS server open");
+    expect_error(client.call("neura.net.tls.peer_chain", {c.value}), host_error::permission_denied,
+                 "DTLS client chain requires a finished handshake");
+    expect_error(server.call("neura.net.tls.peer_chain", {s.value}), host_error::permission_denied,
+                 "DTLS listener has no accepted connection yet");
     expect_error(client.call("neura.net.tls.engine.exchange", {c.value, i32(0), bytes(""), bytes("")}),
                  host_error::invalid_input, "DTLS handle cannot enter TLS stream engine");
     auto step = [&](Host& host, HostValue id, int operation, const std::string& inbound, int sender,
@@ -1771,6 +1776,26 @@ NEURA_TEST(host, dtls13_addressed_engine_roundtrip_and_deadline) {
         }
     }
     check(client_done && server_done, "DTLS 1.3 handshake with address cookie");
+    // Both sides verified the other's self-signed certificate (mutual DTLS).
+    std::string expected_der;
+    {
+        std::unique_ptr<FILE, decltype(&std::fclose)> file(std::fopen(material.certificate.c_str(), "r"), std::fclose);
+        check(file != nullptr, "open loopback certificate");
+        std::unique_ptr<X509, decltype(&X509_free)> parsed(PEM_read_X509(file.get(), nullptr, nullptr, nullptr),
+                                                          X509_free);
+        check(parsed != nullptr, "parse loopback certificate");
+        unsigned char* der = nullptr;
+        const int size = i2d_X509(parsed.get(), &der);
+        check(size > 0, "encode loopback certificate");
+        expected_der.assign(reinterpret_cast<const char*>(der), static_cast<std::size_t>(size));
+        OPENSSL_free(der);
+    }
+    for (auto* side : {&client, &server}) {
+        const auto chain = side->call("neura.net.tls.peer_chain", {side == &client ? c.value : s.value});
+        expect_ok(chain, "DTLS verified chain after the handshake");
+        check_equal(chain.value.elements.size(), std::size_t{1}, "self-signed DTLS chain length");
+        check(chain.value.elements.at(0).bytes == expected_der, "DTLS chain is the verified certificate");
+    }
     expect_error(client.call("neura.net.dtls.engine.exchange", {c.value, i32(2), bytes(""), text(""), i32(0),
         bytes(std::string(16384, 'x')), i64(5'000'000'000)}), host_error::invalid_input,
         "application messages above the negotiated data MTU fail without poisoning the engine");

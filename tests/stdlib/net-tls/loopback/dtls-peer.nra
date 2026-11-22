@@ -3,8 +3,11 @@ let console = import:Std.Io.Console;
 let datagram = import:Std.Net.Socket.DatagramSocket;
 let duration = import:Std.Time.Duration;
 let errors = import:Std.Core.Error;
+let fs = import:Std.Fs.Fs;
 let handshake = import:Std.Net.Tls.Handshake;
 let optional = import:Std.Core.Optional;
+let path = import:Std.Fs.Path;
+let pem = import:Std.Crypto.Pki.Pem;
 let program = import:Std.Program;
 let result = import:Std.Core.Result;
 let socket_addr = import:Std.Net.Core.SocketAddr;
@@ -109,8 +112,37 @@ export let DtlsPeer = module:program.Entry (
         }
     };
 
+    let check_verified_chain = func(stream: transport.Transport<uint8[list], uint8[list]>, ca: string)
+        -> result.Result<unit.Unit> {
+        last chain = handshake.dtls_peer_certificate_chain(stream);
+        if (ca.byte_length == 0) {
+            match (chain) {
+                result.Result.Err(errors.Error.Io { kind, message, path }) => {
+                    if (kind == errors.IoErrorKind.PermissionDenied) {
+                        console.print_line("CHAIN PermissionDenied");
+                        return result.Result<unit.Unit>.Ok(unit.Unit.Value);
+                    }
+                },
+                _ => {},
+            }
+            return result.Result<unit.Unit>.Err(errors.custom("test.dtls.chain", "unverified chain must be denied"));
+        }
+        last verified = chain?;
+        // Each peer uses the other peer's self-signed certificate as its trust anchor.
+        last anchor = pem.decode(fs.read_text(path.of(ca))?, "CERTIFICATE")?;
+        // Compare the DER bytes through one canonical encoding, not the file's PEM layout.
+        if (verified.length != 1 || pem.encode("CERTIFICATE", verified[0]) != pem.encode("CERTIFICATE", anchor)) {
+            return result.Result<unit.Unit>.Err(errors.custom("test.dtls.chain", "unexpected verified certificate"));
+        }
+        console.print_line("CHAIN verified");
+        return result.Result<unit.Unit>.Ok(unit.Unit.Value);
+    };
+
     let exercise_open = func(stream: transport.Transport<uint8[list], uint8[list]>, server: bool, scenario: string, ca: string,
         wire: udp.UdpSocket, faulting_wire: FaultingDatagram) -> result.Result<string> {
+        if (scenario == "mutual" || (scenario == "round-trip" && server && ca.byte_length == 0)) {
+            check_verified_chain(stream, ca)?;
+        }
         if (not server && (scenario == "idle-read" || scenario == "receive-error")) {
             last idle = scenario == "idle-read";
             if (idle) {

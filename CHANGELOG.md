@@ -28,6 +28,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - `Std.Net.Http` streams bodies through the assigned server worker. The native `neura.http.fetch` service supports HTTP/1.1 and negotiates HTTP/2 over verified TLS in builds with HTTP/2. Grant it with `--allow-http-client` or the project capability `http_client`. `H2` opens a TLS connection with ALPN `h2`, writes frames and supports HPACK in builds with nghttp2. [Host services](docs/runtime/NVM.md#http-client-services)
 - `Std.Crypto` adds codec-backed generic secret locking and process generation observation for fork-safe random generation.
 - Managed-list runs batch `Lists.filled` and byte appends in `StringBuilder`, `Strings.join`, and internal I/O buffers with element-wise step, heap, and version accounting. Images that use them require NVR 1.10. [Managed list runs](docs/runtime/NVM.md#managed-list-runs)
+- `Handshake.dtls_peer_certificate_chain` returns the verified peer chain of a DTLS 1.3 transport, including a client certificate verified by a DTLS server.
 
 ### Changed
 

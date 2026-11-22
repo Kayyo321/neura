@@ -152,7 +152,8 @@ struct TlsStream {
     SSL_CTX* context = nullptr;
     SSL* ssl = nullptr;
     // Datagram engines have their own addressed BIO and (on a server) listener.
-    // They never expose a native descriptor or enter the stream TLS services.
+    // They never expose a native descriptor; of the stream services only
+    // peer_chain accepts them.
     bool datagram = false;
     SSL* listener = nullptr;
     BIO* datagram_wire = nullptr;
@@ -885,10 +886,13 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
 
     add(peer_chain(), [=](const HostRequest& request) {
         if (!granted->net) return denied();
-        const auto* stream = find(request.arguments.at(0));
-        if (!stream) return fail(host_error::invalid_input);
+        // Streams, buffer engines and DTLS engines (after their handshake).
+        const auto found = state->tls.find(as_int64(request.arguments.at(0)));
+        if (found == state->tls.end()) return fail(host_error::invalid_input);
+        const auto* stream = found->second.get();
         if (stream->terminal_error) return fail(stream->terminal_error);
-        if (!SSL_is_init_finished(stream->ssl) ||
+        if (!stream->ssl || (stream->datagram && !stream->datagram_handshake_complete) ||
+            !SSL_is_init_finished(stream->ssl) ||
             !(SSL_get_verify_mode(stream->ssl) & SSL_VERIFY_PEER) ||
             SSL_get_verify_result(stream->ssl) != X509_V_OK) return fail(host_error::permission_denied);
         const auto* chain = SSL_get0_verified_chain(stream->ssl);

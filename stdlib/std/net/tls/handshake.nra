@@ -24,6 +24,7 @@ export let Handshake = module (
     let IdOutcome = enum (Ok(int64), Error(uint32));
     let StepOutcome = enum (Ok([int, uint8[list], uint8[list], uint32]), Error(uint32));
     let DoneOutcome = enum (Ok, Error(uint32));
+    let ChainOutcome = enum (Ok(uint8[list][list]), Error(uint32));
     let engine_open = func(server: bool, name: string, alpn: string[list], ca: string, certificate: string,
         key: string) -> IdOutcome host("neura.net.tls.engine.open", 1);
 
@@ -41,6 +42,7 @@ export let Handshake = module (
         host("neura.net.dtls.engine.exchange", 1);
 
     let datagram_release = func(engine: int64) -> DoneOutcome host("neura.net.dtls.engine.release", 1);
+    let peer_chain = func(engine: int64) -> ChainOutcome host("neura.net.tls.peer_chain", 1);
     const HandshakeStep: int = 0;
     const ReadStep: int = 1;
     const WriteStep: int = 2;
@@ -229,6 +231,15 @@ export let Handshake = module (
 
         export let receive = func -> Result<Optional<uint8[list]>> => process(ReadStep, new, wire.read_timeout());
 
+        export let verified_chain = func -> Result<uint8[list][list]> {
+            return Result<uint8[list][list]>.Err(bytes.closed("DTLS transport", peer.to_string())) unless opened;
+            return match (peer_chain(id)) {
+                ChainOutcome.Ok(chain) => Result<uint8[list][list]>.Ok(chain),
+                ChainOutcome.Error(code) => Result<uint8[list][list]>.Err(
+                    host_error.io(code, "verified peer certificate chain unavailable", peer.to_string())),
+            };
+        };
+
         export let send = func(data: uint8[list]) -> Result<Unit> {
             if (data.length > 1024) {
                 return Result<Unit>.Err(host_error.io(4, "DTLS message exceeds 1024 bytes", peer.to_string()));
@@ -390,5 +401,15 @@ export let Handshake = module (
                 }
             },
         }
+    };
+
+    /// @brief Gets the verified peer certificates in leaf-first DER order, including the trust anchor,
+    /// from a transport returned by `dtls13`. A server without client verification returns PermissionDenied.
+    .[NoDiscard, Since("0.3.1")]
+    export let dtls_peer_certificate_chain = func(stream: Transport<uint8[list], uint8[list]>) -> Result<uint8[list][list]> {
+        if (stream is not datagram: DatagramTransport) {
+            return Result<uint8[list][list]>.Err(host_error.io(4, "expected a DTLS transport", ""));
+        }
+        return datagram.verified_chain();
     };
 );
