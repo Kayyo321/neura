@@ -1940,6 +1940,16 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
             if (!failure.empty()) {
                 built.reason = "inlined graph " + failure;
                 built.program.reset();
+                // The inliner can have changed the graph before rejecting
+                // it. A first build still needs a usable program, including
+                // its pending callees so settlement can rebuild it later.
+                // Rebuild from Tier 2 once, without running the inliner.
+                // A rejected rebuild already has published code to keep.
+                if (!previous) {
+                    ++inline_refusals["verification"];
+                    built = tier3::build(image_, program, tier3::verify_enabled(), variant);
+                    if (built.program) built.program->ir.variant = variant;
+                }
             }
         }
         if (built.program) {
