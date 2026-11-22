@@ -468,9 +468,10 @@ struct InlineSource {
 
 // Inlines calls into `function` (the IR of a function program, built and not
 // yet optimized), as tier3_inline.cpp describes: direct calls, and the calls
-// of dispatch and closure sites behind class tests on recorded tags. Verifies
-// the result when `verify` is set; a violation prints it and aborts.
-void inline_calls(const nvr::Image& image, Function& function, const InlineSource& source, bool verify);
+// of dispatch and closure sites behind class tests on recorded tags. Checks
+// any inlined graph and returns a violation if it is unsuitable to publish.
+// In verification mode, always checks the result and aborts on a violation.
+std::string inline_calls(const nvr::Image& image, Function& function, const InlineSource& source, bool verify);
 
 struct BuildResult {
     std::unique_ptr<Program> program;

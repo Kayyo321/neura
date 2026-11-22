@@ -1170,7 +1170,12 @@ private:
                 };
                 for (const auto v : live_after(live, b, k)) {
                     if (std::find(named.begin(), named.end(), v) != named.end()) continue;
-                    if (std::find(named.begin(), named.end(), same_value(v)) != named.end()) continue;
+                    const auto source = same_value(v);
+                    // An inlined frame can name an earlier phi on the same
+                    // chain, while a later self phi supplies the live value.
+                    if (std::any_of(named.begin(), named.end(), [&](auto id) { return same_value(id) == source; })) {
+                        continue;
+                    }
                     // The frame already holds an unchanged slot's value.
                     const auto written = written_before_.find(insts[k]);
                     if (frame_slot[v] != none && physical.caller == none && frame_slot[v] < physical.slots.size() &&

@@ -838,12 +838,13 @@ private:
 
 } // namespace
 
-void inline_calls(const nvr::Image& image, Function& function, const InlineSource& source, bool verify) {
-    if (function.region == nullptr) return;
+std::string inline_calls(const nvr::Image& image, Function& function, const InlineSource& source, bool verify) {
+    if (function.region == nullptr) return {};
     Inliner(image, source).run(function);
-    if (!verify) return;
+    if (!verify && function.inlined_calls == 0) return {};
     const auto violations = tier3::verify(image, function);
-    if (violations.empty()) return;
+    if (violations.empty()) return {};
+    if (!verify) return violations.front();
     std::fprintf(stderr, "neura: NEURA_TIER3_VERIFY: the IR of function %u is not well formed after inlining:\n",
                  function.function);
     for (const auto& violation : violations) std::fprintf(stderr, "  %s\n", violation.c_str());

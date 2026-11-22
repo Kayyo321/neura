@@ -1934,16 +1934,10 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
             source.record = [this](const tier2::Region& region, std::uint32_t table) -> const tier3::DispatchRecord* {
                 return dispatch_record(region, table);
             };
-            tier3::inline_calls(image_, built.program->ir, source, !previous && tier3::verify_enabled());
-            if (previous) {
-                // Late callees can expose an inlining shape the first build
-                // never saw. Publish a replacement only if it verifies,
-                // including the roots of references live at safepoints.
-                const auto failures = tier3::verify(image_, built.program->ir);
-                if (!failures.empty()) {
-                    built.reason = "inlined graph " + failures.front();
-                    built.program.reset();
-                }
+            const auto failure = tier3::inline_calls(image_, built.program->ir, source, tier3::verify_enabled());
+            if (!failure.empty()) {
+                built.reason = "inlined graph " + failure;
+                built.program.reset();
             }
         }
         if (built.program) {
