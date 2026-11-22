@@ -864,7 +864,7 @@ int new_socket(int family) {
     return descriptor;
 }
 
-void drain_zerocopy_notices(int descriptor);
+bool drain_zerocopy_notices(int descriptor);
 
 // Waits for `events` on `descriptor`. Returns 1 when ready, 0 on timeout,
 // and -1 with errno on failure. A deadline of zero waits without limit.
@@ -881,7 +881,10 @@ int wait_for(int descriptor, short events, std::chrono::steady_clock::time_point
         pollfd entry{descriptor, events, 0};
         const int ready = ::poll(&entry, 1, milliseconds);
         if (ready > 0 && (entry.revents & POLLERR) != 0) {
-            drain_zerocopy_notices(descriptor);
+            if (!drain_zerocopy_notices(descriptor)) {
+                if ((entry.revents & ~POLLERR) != 0) return ready;
+                continue;
+            }
             entry.revents = 0;
             const int checked = ::poll(&entry, 1, 0);
             if (checked > 0) return checked;
@@ -963,11 +966,12 @@ OwnedDescriptor duplicate(int descriptor) {
 // the application never sends again. These sockets do not enable IP_RECVERR
 // or timestamp queues: the error queue here belongs to SO_ZEROCOPY. Real
 // socket failures remain available through SO_ERROR and the next I/O call.
-void drain_zerocopy_notices(int descriptor) {
+// Returns false when the bounded drain leaves the status of the queue unknown.
+bool drain_zerocopy_notices(int descriptor) {
 #if defined(__linux__) && defined(SO_ZEROCOPY)
     int enabled = 0;
     socklen_t length = sizeof enabled;
-    if (::getsockopt(descriptor, SOL_SOCKET, SO_ZEROCOPY, &enabled, &length) != 0 || !enabled) return;
+    if (::getsockopt(descriptor, SOL_SOCKET, SO_ZEROCOPY, &enabled, &length) != 0 || !enabled) return true;
     alignas(cmsghdr) std::array<char, 512> control{};
     msghdr notice{};
     notice.msg_control = control.data();
@@ -976,10 +980,12 @@ void drain_zerocopy_notices(int descriptor) {
     for (int count = 0; count < 64; ++count) {
         notice.msg_controllen = control.size();
         notice.msg_flags = 0;
-        if (::recvmsg(descriptor, &notice, MSG_ERRQUEUE | MSG_DONTWAIT) < 0) break;
+        if (::recvmsg(descriptor, &notice, MSG_ERRQUEUE | MSG_DONTWAIT) < 0) return errno != EINTR;
     }
+    return false;
 #else
     (void)descriptor;
+    return true;
 #endif
 }
 
@@ -991,7 +997,7 @@ bool ready_now(int descriptor, short events) {
         const int ready = ::poll(&entry, 1, 0);
         if (ready >= 0) {
             if ((entry.revents & POLLERR) != 0) {
-                drain_zerocopy_notices(descriptor);
+                if (!drain_zerocopy_notices(descriptor)) return (entry.revents & ~POLLERR) != 0;
                 // Recheck after draining: a completion alone must not keep
                 // a pending read runnable. HUP and real errors remain ready.
                 entry.revents = 0;
@@ -1169,20 +1175,24 @@ void add_net_services(const Adder& add, const OverlapAdder& overlap, StandardSer
         const auto max = as_int32(request.arguments.at(1));
         const auto timeout = as_int64(request.arguments.at(2));
         if (stream == nullptr || max < 1 || timeout < 0) return fail(host_error::invalid_input);
-        if (timeout > 0) {
-            const auto deadline = std::chrono::steady_clock::now() + std::chrono::nanoseconds(timeout);
-            const int ready = wait_for(stream->descriptor, POLLIN, deadline, true);
-            if (ready == 0) return fail(host_error::timed_out);
-            if (ready < 0) return errno_failure();
-        }
+        using Clock = std::chrono::steady_clock;
+        const auto started = Clock::now();
+        const auto budget = std::chrono::duration_cast<Clock::duration>(std::chrono::nanoseconds(timeout));
+        const auto deadline = started + std::min(budget, Clock::time_point::max() - started);
         std::string buffer(std::min(static_cast<std::size_t>(max), max_read_bytes), '\0');
         for (;;) {
-            const auto count = ::recv(stream->descriptor, buffer.data(), buffer.size(), 0);
+            if (timeout > 0) {
+                const int ready = wait_for(stream->descriptor, POLLIN, deadline, true);
+                if (ready == 0) return fail(host_error::timed_out);
+                if (ready < 0) return errno_failure();
+            }
+            const auto count = ::recv(stream->descriptor, buffer.data(), buffer.size(), timeout > 0 ? MSG_DONTWAIT : 0);
             if (count >= 0) {
                 buffer.resize(static_cast<std::size_t>(count));
                 return HostCompletion::ok(bytes_value(std::move(buffer)));
             }
-            if (errno != EINTR) return errno_failure();
+            if (errno == EINTR || (timeout > 0 && (errno == EAGAIN || errno == EWOULDBLOCK))) continue;
+            return errno_failure();
         }
     };
 

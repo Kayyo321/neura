@@ -2181,6 +2181,8 @@ if(BUILD_TESTING AND NEURA_SDK)
             add_test(NAME host-${standalone} COMMAND ${standalone_target})
             set_tests_properties(host-${standalone} PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
         endforeach()
+        # Simulates a zero-copy completion backlog in front of a real notice.
+        target_link_options(neura_zerocopy_readiness_tests PRIVATE -Wl,--wrap=recvmsg)
     endif()
     add_executable(neura_hpack_codec_tests tests/host-standalone/hpack-codec.cpp)
     target_link_libraries(neura_hpack_codec_tests PRIVATE neura_nvm)
