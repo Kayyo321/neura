@@ -90,7 +90,7 @@ export let Entropy = module (
     let generation = func -> GenerationOutcome host("neura.process.generation", 1);
 
     /// @brief Observes the host generation, returning its typed error if the observation fails.
-    .NoDiscard
+    .[NoDiscard, Since("0.3.1")]
     export let try_fork_generation = func -> Result<uint64> {
         return match (generation()) {
             GenerationOutcome.Ok(value) => Result<uint64>.Ok(value),
@@ -99,8 +99,9 @@ export let Entropy = module (
     };
 
     /// @brief The current host generation token. On POSIX it changes in a forked child.
-    /// Linux checks the VMClock generation counter. Windows polls the guest generation driver.
-    /// A machine without a recognized guest driver cannot report VM restores. Requires entropy
+    /// Linux checks VMClock and vmgenid notifications on drivers that emit them. Windows polls the guest
+    /// generation driver. Missing or inaccessible optional drivers leave the remaining detectors active.
+    /// A machine without a usable recognized guest driver cannot report VM restores. Requires entropy
     /// capability and traps with the provider's error if the observation fails.
     .[NoDiscard, Since("0.3.0")]
     export let fork_generation = func -> uint64 {

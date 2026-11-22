@@ -321,6 +321,10 @@ set(neura_nvm_sources
 )
 add_library(neura_nvm STATIC ${neura_nvm_sources})
 target_link_libraries(neura_nvm PUBLIC neura_nvr neura_lift neura_platform)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(Threads REQUIRED)
+    target_link_libraries(neura_nvm PRIVATE Threads::Threads)
+endif()
 if(MSVC)
     # Float semantics stated, as for neura_lift: tier 3 folds and evaluates
     # floats, and its results must match the other tiers bit for bit.
@@ -395,6 +399,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             set(NEURA_HAS_STATIC_LAUNCHER ON)
             add_library(neura_nvm_static STATIC ${neura_nvm_sources})
             target_link_libraries(neura_nvm_static PUBLIC neura_nvr neura_lift neura_platform)
+            target_link_libraries(neura_nvm_static PRIVATE Threads::Threads)
             # A static program cannot use the C library's resolver portably,
             # so this launcher takes numeric addresses and "localhost" only.
             target_compile_definitions(neura_nvm_static PRIVATE NEURA_NO_NATIVE_INTEROP NEURA_NUMERIC_ADDRESSES_ONLY)
@@ -2177,6 +2182,17 @@ if(BUILD_TESTING AND NEURA_SDK)
             set_tests_properties(stdlib-${area}-${part} PROPERTIES FIXTURES_REQUIRED stdlib)
         endforeach()
     endforeach()
+
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        add_library(neura_vmclock_test_shim SHARED tests/backend/host/vmclock-shim.c)
+        target_link_libraries(neura_vmclock_test_shim PRIVATE ${CMAKE_DL_LIBS})
+        foreach(mode IN ITEMS denied counter)
+            add_test(NAME backend-generation-vmclock-${mode} COMMAND ${CMAKE_COMMAND} -E env
+                "LD_PRELOAD=$<TARGET_FILE:neura_vmclock_test_shim>" "VMCLOCK_MODE=${mode}"
+                "$<TARGET_FILE:neura_backend_tests>" host "${CMAKE_CURRENT_SOURCE_DIR}"
+                entropy_comes_from_the_system_generator)
+        endforeach()
+    endif()
 
     # The desktop window host and its Neura native child (docs/design/Desktop030.md). These tests need the
     # pinned Electron 45.3.3 of hosts/desktop/engine.lock, Node and xvfb-run, so they are registered only when

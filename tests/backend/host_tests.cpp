@@ -7,6 +7,7 @@
 #include "cli/source_loader.hpp"
 #include "fixtures.hpp"
 #include "nvm/app_services.hpp"
+#include "nvm/generation_internal.hpp"
 #include "nvm/secret_services.hpp"
 #include "nvm/providers.hpp"
 #include "nvm/trace.hpp"
@@ -34,6 +35,9 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#ifdef __linux__
+#include <sys/syscall.h>
+#endif
 #include <unistd.h>
 #endif
 
@@ -1314,11 +1318,85 @@ NEURA_TEST(host, entropy_comes_from_the_system_generator) {
     check(WIFEXITED(status) && WEXITSTATUS(status) == 0, "a forked child sees the next generation");
     check_equal(host.call("neura.process.generation", {}).value.bits, generation.value.bits,
                 "forking does not change the parent's generation");
+#if defined(__linux__) && defined(SYS_fork)
+    // Bypass libc's atfork callbacks: PID fallback must still change the token.
+    const auto raw_child = static_cast<pid_t>(::syscall(SYS_fork));
+    check(raw_child >= 0, "syscall fork succeeds");
+    if (raw_child == 0) {
+        const auto forked = host.call("neura.process.generation", {});
+        std::_Exit(forked.success && forked.value.bits == generation.value.bits + 1 ? 0 : 1);
+    }
+    ::waitpid(raw_child, &status, 0);
+    check(WIFEXITED(status) && WEXITSTATUS(status) == 0, "PID fallback detects a fork without atfork");
+#endif
     Host nothing({});
     expect_error(nothing.call("neura.entropy.hardware", {i32(1)}), host_error::capability_denied, "hardware denied");
     expect_error(nothing.call("neura.process.generation", {}), host_error::capability_denied, "generation denied");
 }
 
+
+NEURA_TEST(host, generation_snapshot_abi_and_uevents) {
+    namespace generation = nvm::generation_internal;
+    std::array<unsigned char, generation::vmclock_size> bytes{};
+    const auto put = [&](std::size_t offset, std::uint64_t value, std::size_t width) {
+        for (std::size_t i = 0; i < width; ++i) bytes[offset + i] = static_cast<unsigned char>(value >> (8 * i));
+    };
+    check(!generation::vmclock_generation(bytes).valid, "reject an invalid device ABI");
+    put(0, 0x4b4c4356, 4);
+    put(4, bytes.size(), 4);
+    put(8, 1, 2);
+    auto observed = generation::vmclock_generation(bytes);
+    check(observed.valid && !observed.generation, "old device with no generation field is usable");
+    put(24, 1u << 8, 8);
+    put(104, 0x0123456789abcdef, 8);
+    observed = generation::vmclock_generation(bytes);
+    check(observed.valid && observed.generation == 0x0123456789abcdef, "decode the little-endian generation");
+    check(!generation::vmclock_generation(std::span(bytes).first(104)).valid, "reject a truncated counter");
+    put(4, 104, 4);
+    check(!generation::vmclock_generation(bytes).valid, "reject a counter outside the declared device size");
+    using namespace std::string_view_literals;
+    check(generation::vmgenid_event("change@/devices/vmgenid\0NEW_VMGENID=1\0"sv), "generation event");
+    check(!generation::vmgenid_event("OTHER_NEW_VMGENID=1\0"sv), "reject a substring field");
+    check(!generation::vmgenid_event("NEW_VMGENID=10\0"sv), "reject another field value");
+}
+
+NEURA_TEST(host, library_drbg_reseeds_after_generation_change) {
+    const auto image = build_with_library(environment, environment.source_dir / "tests/backend/host/drbg-generation.nra");
+    for (const bool fail_reseed : {false, true}) {
+        std::size_t observations = 0;
+        std::size_t draws = 0;
+        nvm::HostRegistry registry;
+        nvm::FunctionService generation(
+            {"neura.process.generation", 1, {}, {nvr::TypeKind::Unsigned, 64}, {nvr::TypeKind::Unsigned, 32}},
+            [&](const nvm::HostRequest&) {
+                return HostCompletion::ok(i64(++observations < 3 ? 7 : 8));
+            });
+        nvm::HostType byte_list{nvr::TypeKind::List};
+        byte_list.components.push_back({nvr::TypeKind::Unsigned, 8});
+        nvm::FunctionService entropy(
+            {"neura.entropy.fill", 1, {{nvr::TypeKind::Signed, 32}}, byte_list, {nvr::TypeKind::Unsigned, 32}},
+            [&](const nvm::HostRequest& request) {
+                ++draws;
+                check_equal(as_i32(request.arguments.at(0)), 32, "DRBG seed request size");
+                if (fail_reseed && draws == 2) return HostCompletion::failed(i32(host_error::other));
+                check(draws <= 2, "unchanged generation must not reseed");
+                return HostCompletion::ok(bytes(std::string(32, draws == 1 ? '\x11' : '\x22')));
+            });
+        registry.add(generation);
+        registry.add(entropy);
+        const auto result = nvm::run(image, nvm::bind(image, registry), {});
+        check_equal(draws, std::size_t{2}, "generation change reaches OS reseed");
+        if (fail_reseed) {
+            check(!result.completed && result.trap.kind == nvm::TrapKind::Program, "failed reseed traps before output");
+            check(result.trap.detail.find("reseed after fork failed") != std::string::npos,
+                  "the trap identifies the failed generation-change reseed");
+            check_equal(observations, std::size_t{3}, "failure occurs on generation change");
+        } else {
+            check(result.completed && result.status == 0, "reseed stream matches explicit reference");
+            check_equal(observations, std::size_t{4}, "every output checks the generation");
+        }
+    }
+}
 
 // Secret memory (src/nvm/secret_services.cpp): locked, dump-excluded pages
 // addressed by handle, zeroed on release.

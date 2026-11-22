@@ -1,14 +1,17 @@
 #include "provider_internal.hpp"
+#include "generation_internal.hpp"
 
 #include "nvr/format.hpp"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <climits>
 #include <cstdlib>
 #include <deque>
+#include <filesystem>
 #include <optional>
 #include <thread>
 
@@ -25,12 +28,10 @@
 #include <unistd.h>
 #endif
 #ifdef __linux__
-#if __has_include(<linux/vmclock-abi.h>)
-#include <endian.h>
 #include <fcntl.h>
-#include <linux/vmclock-abi.h>
+#include <linux/netlink.h>
 #include <pthread.h>
-#endif
+#include <sys/socket.h>
 #include <sys/auxv.h>
 #include <sys/random.h>
 #elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
@@ -46,6 +47,12 @@
 #include <mutex>
 #include <winioctl.h>
 #include <string_view>
+#if defined(__MINGW32__) && defined(_UCRT)
+// Some MinGW UCRT headers omit this declaration although libucrt exports it.
+// Keep the thread-local UCRT API; a process-global CRT alias is not equivalent.
+extern "C" _CRTIMP _invalid_parameter_handler __cdecl
+_set_thread_local_invalid_parameter_handler(_invalid_parameter_handler);
+#endif
 #endif
 
 namespace neura::nvm {
@@ -963,72 +970,140 @@ bool hardware_word(std::uint64_t&) { return false; }
 bool hardware_available() { return false; }
 #endif
 
-#if defined(VMCLOCK_FLAG_VM_GEN_COUNTER_PRESENT)
-// The Linux VMClock driver's character-device read takes a coherent
-// sequence-counted snapshot. Only the explicit generation field denotes
-// restore; a clock disruption can occur during ordinary live migration.
+#if defined(__linux__)
+// Detector availability depends on the running guest, never on build headers.
+// Serialize observations with fork so the child cannot inherit a held mutex.
 struct VmGeneration {
     pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+    pid_t owner = ::getpid();
     std::uint64_t epoch = 0;
     std::optional<std::uint64_t> observed;
+    int clock = -2; // -2: not probed; -1: unavailable for this process.
+    int events = -2;
 };
 VmGeneration vm_generation;
 
 void prepare_generation_fork() { ::pthread_mutex_lock(&vm_generation.mutex); }
 void finish_generation_fork() { ::pthread_mutex_unlock(&vm_generation.mutex); }
+void reset_generation_descriptors() {
+    if (vm_generation.clock >= 0) ::close(vm_generation.clock);
+    if (vm_generation.events >= 0) ::close(vm_generation.events);
+    vm_generation.clock = vm_generation.events = -2;
+}
 void child_generation_fork() {
+    vm_generation.owner = ::getpid();
     ++vm_generation.epoch;
+    // A netlink queue shared with the parent would let one consume the other's
+    // restore notification. Each child opens its own queue on first use.
+    reset_generation_descriptors();
     finish_generation_fork();
 }
-const int vm_generation_fork_hooks =
+[[maybe_unused]] const int vm_generation_fork_hooks =
     ::pthread_atfork(prepare_generation_fork, finish_generation_fork, child_generation_fork);
 
+int vm_generation_socket() {
+    namespace fs = std::filesystem;
+    bool present = false;
+    for (const char* driver : {"/sys/bus/acpi/drivers/vmgenid", "/sys/bus/platform/drivers/vmgenid"}) {
+        std::error_code error;
+        fs::directory_iterator entry(driver, error), end;
+        while (!error && entry != end) {
+            if (entry->path().filename() != "module" && entry->is_symlink(error)) present = true;
+            entry.increment(error);
+        }
+    }
+    if (!present) return -1;
+    const int socket = ::socket(AF_NETLINK, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, NETLINK_KOBJECT_UEVENT);
+    if (socket < 0) return -1;
+    sockaddr_nl address{};
+    address.nl_family = AF_NETLINK;
+    address.nl_groups = 1;
+    if (::bind(socket, reinterpret_cast<sockaddr*>(&address), sizeof address) != 0) {
+        ::close(socket);
+        return -1;
+    }
+    return socket;
+}
+
+std::uint64_t vm_generation_events(int socket) {
+    if (socket < 0) return 0;
+    std::uint64_t count = 0;
+    // Bounded even when unrelated uevents arrive continuously. Overflow or a
+    // truncated kernel event conservatively triggers a reseed as well.
+    for (int attempt = 0; attempt < 64; ++attempt) {
+        char bytes[8192];
+        sockaddr_nl sender{};
+        iovec buffer{bytes, sizeof bytes};
+        msghdr message{};
+        message.msg_name = &sender;
+        message.msg_namelen = sizeof sender;
+        message.msg_iov = &buffer;
+        message.msg_iovlen = 1;
+        const auto got = ::recvmsg(socket, &message, MSG_DONTWAIT);
+        if (got < 0 && errno == EINTR) continue;
+        if (got < 0 && errno == ENOBUFS) ++count;
+        if (got <= 0) break;
+        // Only the kernel (port ID zero), never another userspace sender.
+        if (message.msg_namelen != sizeof sender || sender.nl_family != AF_NETLINK || sender.nl_pid != 0) continue;
+        if ((message.msg_flags & MSG_TRUNC) != 0 ||
+            generation_internal::vmgenid_event(std::string_view(bytes, static_cast<std::size_t>(got)))) ++count;
+    }
+    return count;
+}
+
 HostCompletion process_generation() {
-    if (vm_generation_fork_hooks != 0) return fail(host_error::other);
     struct Lock {
         Lock() { prepare_generation_fork(); }
         ~Lock() { finish_generation_fork(); }
     } lock;
-    const int device = ::open("/dev/vmclock0", O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
-    std::optional<std::uint64_t> observed;
-    if (device < 0) {
-        if (errno != ENOENT && errno != ENODEV) return fail(host_error::from_errno(errno));
-    } else {
-        vmclock_abi snapshot{};
-        ssize_t size = 0;
-        do {
-            size = ::read(device, &snapshot, sizeof snapshot);
-        } while (size < 0 && errno == EINTR);
-        const int read_error = errno;
-        ::close(device);
-        if (size < 0) return fail(host_error::from_errno(read_error));
-        constexpr auto flags_end = offsetof(vmclock_abi, pad);
-        constexpr auto generation_end = offsetof(vmclock_abi, vm_generation_counter) + sizeof(snapshot.vm_generation_counter);
-        const std::size_t bytes = static_cast<std::size_t>(size);
-        if (bytes < flags_end || le32toh(snapshot.magic) != VMCLOCK_MAGIC || le16toh(snapshot.version) != 1) {
-            return fail(host_error::other);
-        }
-        if ((le64toh(snapshot.flags) & VMCLOCK_FLAG_VM_GEN_COUNTER_PRESENT) != 0) {
-            if (bytes < generation_end || le32toh(snapshot.size) < generation_end) return fail(host_error::other);
-            observed = le64toh(snapshot.vm_generation_counter);
-        }
-    }
-    if (vm_generation.observed != observed) {
-        vm_generation.observed = observed;
+    // Keep this check even with atfork: syscall-level forks can bypass libc.
+    const pid_t now = ::getpid();
+    if (vm_generation.owner != now) {
+        vm_generation.owner = now;
         ++vm_generation.epoch;
+        reset_generation_descriptors();
     }
+    if (vm_generation.events == -2) vm_generation.events = vm_generation_socket();
+    vm_generation.epoch += vm_generation_events(vm_generation.events);
+    if (vm_generation.clock == -2) {
+        vm_generation.clock = ::open("/dev/vmclock0", O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    }
+    if (vm_generation.clock >= 0) {
+        std::array<unsigned char, generation_internal::vmclock_size> snapshot{};
+        // The kernel supplies a coherent snapshot with a bounded seqcount
+        // retry. pread starts at zero on the cached descriptor every time.
+        ssize_t size = ::pread(vm_generation.clock, snapshot.data(), snapshot.size(), 0);
+        if (size < 0 && errno == EINTR) size = ::pread(vm_generation.clock, snapshot.data(), snapshot.size(), 0);
+        if (size >= 0) {
+            const auto observation = generation_internal::vmclock_generation(
+                std::span(snapshot).first(static_cast<std::size_t>(size)));
+            if (!observation.valid) return fail(host_error::other);
+            if (observation.generation && vm_generation.observed != observation.generation) {
+                vm_generation.observed = observation.generation;
+                ++vm_generation.epoch;
+            }
+        } else if (errno == EACCES || errno == EPERM || errno == ENODEV || errno == ENOENT) {
+            ::close(vm_generation.clock);
+            vm_generation.clock = -1;
+        } else {
+            return fail(host_error::from_errno(errno));
+        }
+    }
+    // Missing or inaccessible optional drivers leave the remaining detectors
+    // active; they are not a failure of OS entropy or POSIX fork detection.
     return HostCompletion::ok(scalar(vm_generation.epoch));
 }
 #elif defined(_WIN32)
 HostCompletion process_generation() {
     // vmgenerationcounter.h specifies this ABI. Older SDKs and some cross
     // toolchains omit the header, so use its documented control code and POD.
+    // The IOCTL requires BOTH read and write access even in polling mode:
+    // https://learn.microsoft.com/en-us/windows/win32/hyperv_v2/virtual-machine-generation-identifier
     constexpr DWORD read_generation = CTL_CODE(FILE_DEVICE_ACPI, 1, METHOD_BUFFERED,
                                               FILE_READ_ACCESS | FILE_WRITE_ACCESS);
     struct VmGenerationId {
         ULONGLONG low;
         ULONGLONG high;
-        bool operator==(const VmGenerationId&) const = default;
     };
     static std::mutex mutex;
     static std::optional<VmGenerationId> previous;
@@ -1039,7 +1114,8 @@ HostCompletion process_generation() {
         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
     if (!device) {
         const DWORD error = ::GetLastError();
-        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) {
+        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND ||
+            error == ERROR_ACCESS_DENIED || error == ERROR_PRIVILEGE_NOT_HELD) {
             if (previous) {
                 previous.reset();
                 ++generation;
@@ -1051,10 +1127,18 @@ HostCompletion process_generation() {
     VmGenerationId observed{};
     DWORD returned = 0;
     if (!::DeviceIoControl(device.get(), read_generation, nullptr, 0, &observed, sizeof observed, &returned, nullptr)) {
-        return fail(host_error::from_win32(::GetLastError()));
+        const DWORD error = ::GetLastError();
+        if (error == ERROR_ACCESS_DENIED || error == ERROR_PRIVILEGE_NOT_HELD) {
+            if (previous) {
+                previous.reset();
+                ++generation;
+            }
+            return HostCompletion::ok(scalar(generation));
+        }
+        return fail(host_error::from_win32(error));
     }
     if (returned != sizeof observed) return fail(host_error::other);
-    if (previous != observed) {
+    if (!previous || previous->low != observed.low || previous->high != observed.high) {
         previous = observed;
         ++generation;
     }

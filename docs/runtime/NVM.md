@@ -395,7 +395,7 @@ On Windows, Winsock TCP listeners and UDP sockets bound to the IPv6 wildcard `::
 | Service | Parameters | Success | Behavior |
 | --- | --- | --- | --- |
 | `neura.entropy.hardware` | int32 count (at most 1 MiB) | uint8 list | Exactly the count of bytes from the processor's seed source: `RDSEED` on x86-64, `RNDR` on AArch64 Linux, each word retried up to 1,024 times. 13 (`Unsupported`) when the processor or platform has no such source, 100 when it keeps failing |
-| `neura.process.generation` | | uint64 | A token that changes in a POSIX fork child and for supported guest snapshot restores. Linux builds with the VMClock UAPI read `/dev/vmclock0` when the guest exposes a generation counter. Windows polls `VmGenerationCounter` with `IOCTL_VMGENCOUNTER_READ`, which can require elevated privileges. Driver errors propagate. Guests need one of these interfaces to report restores |
+| `neura.process.generation` | | uint64 | A token that changes in a POSIX fork child and for supported guest snapshot restores. Every Linux build checks the PID alongside `pthread_atfork`, reads coherent snapshots at offset zero from a cached `/dev/vmclock0` descriptor using the version-1 ABI independently of build headers, and observes kernel vmgenid uevents on drivers that emit `NEW_VMGENID=1`. Each fork child opens its own event queue. Windows polls `VmGenerationCounter` with `IOCTL_VMGENCOUNTER_READ`; its published control code requires both read and write access. Missing or inaccessible optional drivers degrade to the remaining detectors. Malformed snapshots and other read failures propagate. Guests need a usable interface to report restores |
 
 Both are recorded and replayed like every request, so a replay sees the same bytes and the same generations.
 

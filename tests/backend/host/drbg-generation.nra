@@ -1,0 +1,32 @@
+let constant_time = import:Std.Crypto.Core.ConstantTime;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let result = import:Std.Core.Result;
+let failure = import:Std.Core.Failure;
+let program = import:Std.Program;
+
+// The C++ test supplies generation 7, 7, 8, 8 and entropy 0x11, then 0x22.
+let repeated = func(byte: uint8) -> uint8[list] {
+    let bytes: uint8[list] = new;
+    for (let i = 0; i < 32; i++) {
+        bytes.append(byte);
+    }
+    return bytes;
+};
+
+let GenerationReseed = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last generator = result.expect<drbg.ChaCha20Drbg>(drbg.fork_safe(), "initial seed failed");
+        last reference = new drbg.ChaCha20Drbg(repeated(17));
+        if (not constant_time.ct_eq(generator.fill(19), reference.fill(19))) {
+            failure.trap("unexpected initial stream");
+        }
+        reference.reseed(repeated(34));
+        if (not constant_time.ct_eq(generator.fill(19), reference.fill(19))) {
+            failure.trap("generation change did not reseed");
+        }
+        if (not constant_time.ct_eq(generator.fill(19), reference.fill(19))) {
+            failure.trap("stable generation changed stream");
+        }
+        return program.ExitCode.Ok;
+    };
+);
