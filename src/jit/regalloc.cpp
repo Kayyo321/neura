@@ -951,10 +951,9 @@ private:
     // Handle the part of a vreg that starts inside a loop when it is read in that
     // loop by no instruction (frame states do not count) and needs no
     // register there: a value that only a deoptimization or code after the
-    // loop reads. For a loop-header phi read only by frame states, first
-    // try a register that is free for the whole interval. That can avoid
-    // a back-edge store. The ordinary scan can still evict it for another
-    // interval's register use.
+    // loop reads. For a loop-header phi, first try a register that is free
+    // for the whole interval. That can avoid a back-edge store. The
+    // ordinary scan can still evict it for a later register use.
     bool allocate_frame_only_loop_interval(std::uint32_t id) {
         const Interval& it = intervals_[id];
         const Pos start = it.start();
@@ -964,7 +963,7 @@ private:
         const Pos first = next_reg_use(it, start);
         if (first < loop_end) return false;
         const auto header = def_block_[it.vreg];
-        if (it.data_uses.empty() && def_inst_[it.vreg] < 0 && start == start_[header] &&
+        if (def_inst_[it.vreg] < 0 && start == start_[header] &&
             std::ranges::any_of(loops_, [header](const Loop& loop) { return loop.header == header; }) &&
             try_free(id, true)) return true;
         if (first == kNever) {
