@@ -3,7 +3,7 @@
 
 [Wiki home](https://github.com/Kayyo321/neura/wiki) · [Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · [Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)
 
-`neura build --native` packages an NVR image with a launcher. The executable carries the program and the CPU runtime that executes it, so the file can run on a machine without an installed Neura toolchain. Both launcher flavors are verified on Linux x86-64.
+`neura build --native` packages an NVR image with a launcher. The executable carries the program and the CPU runtime that executes it, so the file can run on a machine without an installed Neura toolchain. Both launcher flavors are verified on Linux x86-64. On Windows 0.3.0, build an `.nvr` image and launch it with `neura run`.
 
 ## 1. Terminology
 
@@ -109,6 +109,7 @@ Errors are printed as `neura: error: <text>` and exit with status 1. No output f
 | `--no-optimize` or `--no-source-map` with a `.nvr` input | `<option> cannot be applied to an image that is already built` |
 | No launcher found | `--native: no launcher for <triple> in <directory>; pass --launcher or install one` |
 | No launcher found, and the target is a macOS triple (`*-apple-darwin`) | `--native: Neura has no native launcher for macOS (<triple>); native executables are built for Linux targets only. Run the image with 'neura run' instead` |
+| Building on Windows in 0.3.0 | `--native: Windows has no native launcher in 0.3.0; run the image with 'neura run' instead` |
 | The file is not a launcher | `--native: <file> is not a Neura launcher` |
 | The image needs a newer runtime | `--native: the image is NVR 1.<m>; this launcher runs up to 1.<n>` |
 | The image's embedded native library was linked for a different target than the launcher | `--native: the image's native library is for <triple>; the launcher is for <triple>` |

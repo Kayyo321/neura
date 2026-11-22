@@ -11,8 +11,24 @@
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
+#include "platform/console.hpp"
+#include "platform/windows.hpp"
+#endif
+
 int main(int argc, char** argv) {
     const std::vector<std::string> arguments(argv + 1, argv + argc);
+#ifdef _WIN32
+    // What tool::start sets for every tool (W10, W19): no error dialogs and
+    // DLLs from the system directories only. The streams are set up below,
+    // the worker's once its launch gives it the caller's.
+    neura::platform::set_unattended_error_mode();
+    ::SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+    if (arguments.empty() || arguments.front() != "--worker") {
+        neura::platform::set_binary_stdio();
+        neura::platform::install_console_streams();
+    }
+#endif
     // The worker touches no stream before its launch gives it the caller's.
     if (!arguments.empty() && arguments.front() == "--worker") {
         return neura::service::worker_main({arguments.begin() + 1, arguments.end()});

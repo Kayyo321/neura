@@ -1,5 +1,7 @@
+let error = import:Std.Core.Error;
 let ips = import:Std.Net.Core.IpAddr;
 let resolv = import:Std.Net.Dns.ResolvConf;
+let result = import:Std.Core.Result;
 let strings = import:Std.Text.Strings;
 let test = import:Std.Test;
 
@@ -133,5 +135,36 @@ let ResolvConfTests = module (
         test.assert(built.equals(parsed));
         test.assert_equal<uint32>(built.hash_code(), parsed.hash_code());
         test.assert(!built.equals(resolv.defaults()));
+    };
+
+    export let test_crlf_lines = func {
+        last conf = resolv.parse("# generated\r\nnameserver 10.0.0.1\r\nsearch corp.example\r\n"
+            + "options ndots:3 rotate\r\n\r\n");
+        test.assert_equal_string("10.0.0.1", servers_text(conf));
+        test.assert_equal<int>(1, conf.search().length);
+        test.assert_equal_string("corp.example", conf.domain());
+        test.assert_equal<int>(3, conf.ndots);
+        test.assert(conf.rotate);
+        test.assert_equal<int>(0, conf.problems().length);
+        test.assert(conf.equals(resolv.parse("# generated\nnameserver 10.0.0.1\nsearch corp.example\n"
+            + "options ndots:3 rotate\n\n")));
+    };
+
+    // Reading the host's own file: Ok, or NotFound where there is none, as on Windows.
+    export let test_read_default_path = func {
+        test.assert_equal_string("/etc/resolv.conf", resolv.DefaultPath);
+        match (resolv.read(resolv.DefaultPath)) {
+            result.Result.Ok(_) => {},
+            result.Result.Err(failure) => {
+                match (failure) {
+                    error.Error.Io { kind, message, path } => {
+                        test.assert(kind == error.IoErrorKind.NotFound);
+                    },
+                    _ => {
+                        test.fail("expected an Io error: " + error.message(failure));
+                    },
+                }
+            },
+        }
     };
 );

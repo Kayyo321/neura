@@ -12,7 +12,93 @@ import os
 import socket
 import struct
 import subprocess
+import sys
 from pathlib import Path
+
+WINDOWS = sys.platform == "win32"
+
+# Windows (docs/design/Windows030.md, W29): CPython has no AF_UNIX there, so
+# a connection is made through Winsock with ctypes and then wrapped in a
+# socket object. Handles travel in-band: the sender duplicates each into the
+# receiving process and lists their values there in the extension field
+# HANDLES (u64 each), as the service's own sender does (src/service/system.hpp).
+HANDLES = 0x8001
+if WINDOWS:
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    _ws2 = ctypes.WinDLL("ws2_32", use_last_error=True)
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _ws2.socket.restype = ctypes.c_size_t
+    _ws2.socket.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int]
+    _ws2.connect.argtypes = [ctypes.c_size_t, ctypes.c_void_p, ctypes.c_int]
+    _ws2.bind.argtypes = [ctypes.c_size_t, ctypes.c_void_p, ctypes.c_int]
+    _ws2.closesocket.argtypes = [ctypes.c_size_t]
+    _ws2.WSAIoctl.argtypes = [ctypes.c_size_t, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD, ctypes.c_void_p,
+                              wintypes.DWORD, ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p, ctypes.c_void_p]
+    _kernel32.OpenProcess.restype = wintypes.HANDLE
+    _kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    _kernel32.DuplicateHandle.argtypes = [wintypes.HANDLE, wintypes.HANDLE, wintypes.HANDLE,
+                                          ctypes.POINTER(wintypes.HANDLE), wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    _kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    _kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    SIO_AF_UNIX_GETPEERPID = 0x58000100
+    PROCESS_DUP_HANDLE = 0x0040
+    DUPLICATE_SAME_ACCESS = 0x2
+
+    class _SockaddrUn(ctypes.Structure):
+        _fields_ = [("sun_family", ctypes.c_ushort), ("sun_path", ctypes.c_char * 108)]
+
+    def _address(path: Path) -> _SockaddrUn:
+        return _SockaddrUn(1, str(path).encode("utf-8"))
+
+    def unix_socket(path: Path) -> socket.socket:
+        """A connected AF_UNIX stream socket."""
+        socket.socket().close()  # Winsock is started
+        handle = _ws2.socket(1, socket.SOCK_STREAM, 0)
+        if handle == (1 << 64) - 1:
+            raise OSError(ctypes.get_last_error(), "cannot create an AF_UNIX socket")
+        address = _address(path)
+        if _ws2.connect(handle, ctypes.byref(address), ctypes.sizeof(address)) != 0:
+            error = ctypes.get_last_error()
+            _ws2.closesocket(handle)
+            raise ConnectionRefusedError(error, f"cannot connect to {path}")
+        return socket.socket(fileno=handle)
+
+    def bound_file(path: Path) -> None:
+        """Binds an AF_UNIX socket to `path` and closes it, leaving the file."""
+        socket.socket().close()
+        handle = _ws2.socket(1, socket.SOCK_STREAM, 0)
+        address = _address(path)
+        _ws2.bind(handle, ctypes.byref(address), ctypes.sizeof(address))
+        _ws2.closesocket(handle)
+
+    def peer_pid(connection: socket.socket) -> int:
+        pid = wintypes.DWORD(0)
+        size = wintypes.DWORD(0)
+        if _ws2.WSAIoctl(connection.fileno(), SIO_AF_UNIX_GETPEERPID, None, 0, ctypes.byref(pid), 4,
+                         ctypes.byref(size), None, None) != 0:
+            raise OSError(ctypes.get_last_error(), "SIO_AF_UNIX_GETPEERPID")
+        return pid.value
+
+    def give_handles(connection: socket.socket, fds: list[int]) -> bytes:
+        """Duplicates the handles of C runtime descriptors `fds` into the peer
+        and returns the value of the HANDLES field."""
+        process = _kernel32.OpenProcess(PROCESS_DUP_HANDLE, False, peer_pid(connection))
+        if not process:
+            raise OSError(ctypes.get_last_error(), "OpenProcess")
+        values = b""
+        try:
+            for fd in fds:
+                theirs = wintypes.HANDLE()
+                if not _kernel32.DuplicateHandle(_kernel32.GetCurrentProcess(), msvcrt.get_osfhandle(fd), process,
+                                                 ctypes.byref(theirs), 0, False, DUPLICATE_SAME_ACCESS):
+                    raise OSError(ctypes.get_last_error(), "DuplicateHandle")
+                values += struct.pack("<Q", theirs.value or 0)
+        finally:
+            _kernel32.CloseHandle(process)
+        return values
 
 KINDS = {
     "Hello": 1, "Welcome": 2, "Prepare": 3, "Prepared": 4, "Image": 5, "Commit": 6, "Committed": 7,
@@ -87,23 +173,35 @@ class Message:
 
 class Connection:
     def __init__(self, path: Path, timeout: float = 10):
-        self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.socket.settimeout(timeout)
-        self.socket.connect(str(path))
+        if WINDOWS:
+            self.socket = unix_socket(path)
+            self.socket.settimeout(timeout)
+        else:
+            self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self.socket.settimeout(timeout)
+            self.socket.connect(str(path))
         self.sequence = 0
 
     def close(self) -> None:
         self.socket.close()
 
     def send_raw(self, data: bytes, fds: list[int] | None = None) -> None:
+        if fds and WINDOWS:
+            raise NotImplementedError("a raw frame carries its handles in its own HANDLES field on Windows")
         if fds:
             socket.send_fds(self.socket, [data], fds)
         else:
             self.socket.sendall(data)
 
     def send(self, kind: str, fields: list[tuple[str, bytes]], fds: list[int] | None = None) -> int:
+        """Sends a message; `fds` are descriptors (C runtime descriptors on
+        Windows, whose handles are given to the peer)."""
         self.sequence += 1
-        self.send_raw(frame(KINDS[kind], [(TAG[tag], value) for tag, value in fields], self.sequence), fds)
+        numbered = [(TAG[tag], value) for tag, value in fields]
+        if fds and WINDOWS:
+            numbered.append((HANDLES, give_handles(self.socket, fds)))
+            fds = None
+        self.send_raw(frame(KINDS[kind], numbered, self.sequence), fds)
         return self.sequence
 
     def receive(self) -> Message | None:
@@ -128,7 +226,7 @@ class Connection:
         while len(data) < count:
             try:
                 chunk = self.socket.recv(count - len(data))
-            except ConnectionResetError:
+            except (ConnectionResetError, ConnectionAbortedError):
                 return None
             if not chunk:
                 return None
@@ -142,24 +240,34 @@ class Service:
     def __init__(self, bin_dir: Path, env: dict):
         self.bin = bin_dir.resolve()
         self.env = env
-        self.neurad = self.bin / "neurad"
+        self.neurad = self.bin / ("neurad.exe" if WINDOWS else "neurad")
         self.build = subprocess.run([str(self.neurad), "--build"], capture_output=True, env=env,
                                     check=True).stdout.decode().strip()
         self.root = str(self.bin)
         self.generation = "dev"
-        self.installation = hashlib.sha256(self.root.encode()).hexdigest()[:16]
-        endpoint = hashlib.sha256(self.root.encode() + b"\0" + self.generation.encode()).hexdigest()[:16]
-        self.directory = Path(env["XDG_RUNTIME_DIR"]) / "neura" / endpoint
+        # Windows names an installation by its root in generic form (W29).
+        key = self.bin.as_posix() if WINDOWS else self.root
+        self.installation = hashlib.sha256(key.encode()).hexdigest()[:16]
+        endpoint = hashlib.sha256(key.encode() + b"\0" + self.generation.encode()).hexdigest()[:16]
+        if WINDOWS:
+            self.directory = Path(env["LOCALAPPDATA"]) / "Neura" / "run" / endpoint
+            self.state = Path(env["LOCALAPPDATA"]) / "Neura" / "state" / self.installation / self.generation
+        else:
+            self.directory = Path(env["XDG_RUNTIME_DIR"]) / "neura" / endpoint
+            self.state = Path(env["XDG_STATE_HOME"]) / "neura" / self.installation / self.generation
         self.socket = self.directory / "s"
-        self.state = Path(env["XDG_STATE_HOME"]) / "neura" / self.installation / self.generation
         self.process: subprocess.Popen | None = None
 
     def start(self, extra_env: dict | None = None, **kwargs) -> subprocess.Popen:
         import time
         env = dict(self.env, **(extra_env or {}))
+        if WINDOWS:
+            kwargs.setdefault("creationflags", subprocess.CREATE_NEW_PROCESS_GROUP)
+        else:
+            kwargs.setdefault("start_new_session", True)
         self.process = subprocess.Popen([str(self.neurad), "--foreground", "--root", self.root], env=env,
                                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                        stderr=subprocess.PIPE, start_new_session=True, **kwargs)
+                                        stderr=subprocess.PIPE, **kwargs)
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
             if self.socket.exists():
@@ -197,9 +305,14 @@ def envelope(image: bytes | None = None, size: int | None = None, digest: bytes 
         fields.append(("Argument", argument))
     for name, value in (environment if environment is not None else dict(os.environ)).items():
         fields.append(("Environment", f"{name}={value}".encode()))
-    mask = os.umask(0)
-    os.umask(mask)
-    nice = os.getpriority(os.PRIO_PROCESS, 0)
+    if WINDOWS:
+        # No umask or nice value: the priority class stands in for nice (W29).
+        mask = 0o22
+        nice = ctypes.windll.kernel32.GetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess())
+    else:
+        mask = os.umask(0)
+        os.umask(mask)
+        nice = os.getpriority(os.PRIO_PROCESS, 0)
     fields += [("Policy", u8(63)), ("TaskDump", u8(0)), ("Umask", u32(mask)), ("Nice", u64(nice)),
                ("IgnoredSignals", u64(0)), ("BlockedSignals", u64(0)), ("Lifetime", u8(2 if detached else 1)),
                ("ClientClock", u64(0))]
@@ -207,6 +320,13 @@ def envelope(image: bytes | None = None, size: int | None = None, digest: bytes 
 
 
 def memory_file(data: bytes) -> int:
+    if WINDOWS:
+        # A temporary file that is removed when its last handle closes.
+        import tempfile
+        fd, name = tempfile.mkstemp(prefix="test-image-")
+        os.write(fd, data)
+        os.close(fd)
+        return os.open(name, os.O_RDONLY | os.O_BINARY | os.O_TEMPORARY)
     fd = os.memfd_create("test-image")
     view = memoryview(data)
     while view:

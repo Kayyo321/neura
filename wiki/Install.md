@@ -7,7 +7,7 @@ Install Neura from a release. A release has prebuilt archives for each supported
 
 Neura comes as two products. **Neura-sdk** is everything Neura does: compiling, running, testing, debugging and decompiling programs, the standard library, and packaging native executables. **Neura-runtime** runs images that an SDK built, with no compiler and no standard library sources, and adds the resident runtime service `neurad`. An installation is a set of *components*: `core` (the execution core and the lifecycle tools), `sdk`, and `service`. Neura-sdk is `core` and `sdk`, Neura-runtime is `core` and `service`, and both together are one installation with one copy of `core`.
 
-Each archive holds the tools of its components, a manifest for each component, and an `install.sh` that installs them for the current user. Three commands of the installed tool manage the result: `neura doctor` checks it, `neura update` replaces it with a newer release or changes its components, and `neura uninstall` removes it. A [build from source](#build-from-source) is for working on Neura itself and for platforms without an archive; `neura update` does not manage one. The design is in [the lifecycle note](https://github.com/Kayyo321/neura/blob/main/docs/design/Lifecycle030.md).
+Each archive holds the tools of its components, a manifest for each component, and an installer for the current user (`install.sh` on Linux and macOS, `install.ps1` and `install.cmd` on Windows). Three commands manage the installation. `neura doctor` checks it, `neura update` replaces it with a newer release or changes its components, and `neura uninstall` removes it. Use a [source build](#build-from-source) to work on Neura itself or on platforms without an archive. The design is in [the lifecycle note](https://github.com/Kayyo321/neura/blob/main/docs/design/Lifecycle030.md).
 
 [Tooling](Tooling) covers the compiler commands. This page covers the tool itself.
 
@@ -19,7 +19,7 @@ On Linux, on macOS, and on Windows inside a WSL 2 distribution:
 curl --proto '=https' --tlsv1.2 -fsSL https://github.com/Kayyo321/neura/releases/latest/download/install.sh | sh
 ```
 
-One installation holds everything Neura does: `neura build`, `run`, `test`, `decompile`, and `build --native`, with the standard library and the native launchers. Nothing else has to be installed to compile or run a Neura program. [C imports](#supported-platforms) are the one feature that needs system packages, and `neura doctor` names them.
+The SDK installation includes `neura build`, `run`, `test`, and `decompile`, with the standard library. On Linux it also includes the native launchers for `build --native`. [C imports](#supported-platforms) need system packages, and `neura doctor` names them.
 
 The command installs Neura-sdk, without the service. It downloads `install.sh` from the latest release and runs it. That script, [`packaging/bootstrap.sh`](https://github.com/Kayyo321/neura/blob/main/packaging/bootstrap.sh) in the repository:
 
@@ -46,40 +46,61 @@ sh install.sh
 
 When the script is piped, options follow `sh -s --`, as in `... | sh -s -- --components runtime`.
 
+### Windows installation
+
+In Windows PowerShell 5.1 or PowerShell 7, install the latest stable release with a Windows archive:
+
+```powershell
+irm https://github.com/Kayyo321/neura/releases/latest/download/install.ps1 | iex
+```
+
+For a release candidate, use its release's `install.ps1` asset and pass the same version explicitly. For example, once `v0.3.0-rc.2` is published:
+
+```powershell
+& ([scriptblock]::Create((irm https://github.com/Kayyo321/neura/releases/download/v0.3.0-rc.2/install.ps1))) -Version 0.3.0-rc.2
+```
+
+Use the script-block form to pass `-Components runtime` for Neura-runtime, `-Components 'sdk,service'` for both products, `-Force` to reinstall a generation, or `-Source` to read release files from an HTTPS URL or a local directory. The default is `-Components sdk`. To inspect the script before running it, download the `install.ps1` asset to a file with `Invoke-WebRequest -OutFile`.
+
+The release asset is [`packaging/bootstrap.ps1`](https://github.com/Kayyo321/neura/blob/main/packaging/bootstrap.ps1). It uses Windows' `curl.exe` and `tar.exe`, checks each archive's size and SHA-256 against `neura-components.txt`, and verifies build provenance when `gh` is signed in. It installs into `%LOCALAPPDATA%\Neura` on NTFS without administrator rights. `NEURA_INSTALL_ROOT` overrides the root. The installer adds `<root>\current\bin` to your user `Path`. Open a new terminal, then run `neura --version` and `neura doctor`. Use `-NoPathUpdate` to keep your user `Path` as it is.
+
+Neura 0.3.0's Windows binaries and PowerShell installers are unsigned. Microsoft Defender SmartScreen may warn about unrecognized downloads, and Smart App Control on Windows 11 can block unsigned binaries and DLLs. Verify the [archive checksum and build provenance](CodeSigning#what-a-user-can-verify). If your device's policy blocks execution, stop the native install and use a supported environment that permits it, such as the Linux archive in WSL 2 where available. [Microsoft's guidance on app reputation](https://learn.microsoft.com/windows/apps/package-and-deploy/smartscreen-reputation)
+
 ## Supported platforms
 
-A release has one archive for each supported target.
+A release has SDK and runtime archives for each supported target.
 
 | Platform | Archive target | Requirements | Notes |
 | --- | --- | --- | --- |
 | Linux on x86-64 | `x86_64-linux-gnu` | glibc 2.39 or newer | Every feature. Built and tested on Ubuntu 24.04. |
 | Linux on arm64 | `aarch64-linux-gnu` | glibc 2.39 or newer | Every feature. Built and tested on Ubuntu 24.04. C imports map `char` to `uint8` here, as the platform's C compilers do. |
-| Windows 10 and 11 on x86-64 | `x86_64-linux-gnu`, under WSL 2 | A WSL 2 distribution with glibc 2.39 or newer, such as Ubuntu 24.04 | Windows has no archive of its own. Install the Linux archive inside the distribution and run `neura` there. |
+| Windows on x86-64 | `x86_64-windows-msvc` | Windows 10 version 2004 (build 19041) or later, Windows 11, or Windows Server 2022 or later | Native SDK and runtime. The interpreter runs `.nvr` images. JIT, `build --native`, desktop hosting, TLS, HTTP/2 and PostgreSQL are deferred. |
 | macOS on Apple silicon | `aarch64-apple-darwin` | macOS 15 or newer | Built and tested on macOS 15. No native launcher: `neura build --native` reports that and stops. |
 | macOS on Intel | `x86_64-apple-darwin` | macOS 15 or newer | The same. |
 
 The archives need nothing else from the system. On Linux, `neura` and the native launchers carry the C++ runtime and libffi, and the release workflow fails if either file needs a library other than the C library, or a C library newer than glibc 2.39. On macOS, `neura` carries libffi and needs only libraries that are part of macOS, which the workflow also checks. Distributions with an older glibc, such as Debian 12 and Ubuntu 22.04, and distributions with another C library, such as Alpine, are not supported by the archives.
 
-Every archive links the server components statically, so [`neura-server-host`](Server-Host#release-archives) serves HTTPS and HTTP/2 and [`Std.Data.Sql`](Sql) reaches PostgreSQL as well as SQLite on every target, with nothing more installed: OpenSSL 3.5.9 (TLS for the host, `Std.Net.Tls` and libpq), nghttp2 1.71.0 (HTTP/2) and libpq 18.7, built from the sources [the server component lock](https://github.com/Kayyo321/neura/blob/main/packaging/server-components.lock.toml) pins. Their licence texts are in `share/doc/neura/third-party`. Their C functions are not exported (on macOS some of OpenSSL's assembly routines still are), so a program that loads its own OpenSSL or libpq through a C import binds to its own copy. The archives' OpenSSL reads its configuration from `/etc/ssl/openssl.cnf` and its trust anchors from `/etc/ssl/cert.pem` and `/etc/ssl/certs`, where Debian and Ubuntu (`/etc/ssl/certs`) and macOS (`/etc/ssl/cert.pem`) keep them; on systems that keep them elsewhere, such as Fedora (`/etc/pki/tls`), set `SSL_CERT_FILE` or `SSL_CERT_DIR` for a client that verifies with the system's trust anchors. `OPENSSL_CONF` names another configuration file.
+Linux and macOS archives link the server components statically, so [`neura-server-host`](Server-Host#release-archives) serves HTTPS and HTTP/2 and [`Std.Data.Sql`](Sql) reaches PostgreSQL as well as SQLite with nothing more installed. They contain OpenSSL 3.5.9 (TLS for the host, `Std.Net.Tls` and libpq), nghttp2 1.71.0 (HTTP/2) and libpq 18.7, built from the sources [the server component lock](https://github.com/Kayyo321/neura/blob/main/packaging/server-components.lock.toml) pins. Their licence texts are in `share/doc/neura/third-party`. Their C functions are not exported (on macOS some of OpenSSL's assembly routines still are), so a program that loads its own OpenSSL or libpq through a C import binds to its own copy. The archives' OpenSSL reads its configuration from `/etc/ssl/openssl.cnf` and its trust anchors from `/etc/ssl/cert.pem` and `/etc/ssl/certs`, where Debian and Ubuntu (`/etc/ssl/certs`) and macOS (`/etc/ssl/cert.pem`) keep them. On systems that keep them elsewhere, such as Fedora (`/etc/pki/tls`), set `SSL_CERT_FILE` or `SSL_CERT_DIR` for a client that verifies with the system's trust anchors. `OPENSSL_CONF` names another configuration file. Windows supports HTTP/1.1 and SQLite in 0.3.0.
 
 Optional features need more, and `neura doctor` reports each one:
 
 | Feature | Needs |
 | --- | --- |
-| C imports (`import:c`) | libclang 14 or newer and Clang's builtin headers; on Debian and Ubuntu, `libclang1-19` and `libclang-common-19-dev`; on macOS, the Xcode Command Line Tools (`xcode-select --install`), which supply libclang and the SDK's headers. Linking a C import also needs a C compiler. |
+| C imports (`import:c`) | libclang and Clang's builtin headers. On Debian and Ubuntu install `libclang1-19` and `libclang-common-19-dev`. On macOS the Xcode Command Line Tools (`xcode-select --install`) supply libclang and the SDK's headers. On Windows use libclang 14–21, for example the DLL from the Visual Studio C++ Clang tools, and set `NEURA_LIBCLANG` to its full path. Windows 0.3.0 supports loading and reading headers with libclang and refuses linking C imports. Linking on Linux and macOS also needs a C compiler. |
 | GPU execution | The release archives are built without the GPU backend. Build from source with the Vulkan headers and `glslangValidator` to get it. |
-| `neura update` | `curl` and `tar`; `gh` to verify build provenance. |
+| `neura update` | `curl` and `tar` (the copies in `System32` on Windows), and `gh` to verify build provenance. |
 | The service (`neurad`) | Neura-runtime, installed alone or with the SDK. |
 
 ### Platforms without an archive
 
 | Platform | State |
 | --- | --- |
-| Windows without WSL | Not supported. No Windows build has been compiled or tested. |
+| Windows on Arm64 | Use a supported archive on a qualified machine. The native x86-64 archive under Arm64 emulation is outside the qualification scope. |
+| Windows before version 2004 | Use a host that meets the Windows requirements or install a Linux archive inside a supported WSL 2 distribution. |
 
 ## Install from a release archive
 
-Each release publishes three archives for each target:
+Each release publishes SDK and runtime archives for every target. Linux and macOS also have a legacy archive for 0.2 clients.
 
 | File | Holds | For |
 | --- | --- | --- |
@@ -87,7 +108,7 @@ Each release publishes three archives for each target:
 | `neura-runtime-<version>-<target>.tar.gz` | `core` and `service` | New installations and the one-line command |
 | `neura-<version>-<target>.tar.gz` | Exactly the tree of the SDK archive | 0.2 clients, whose updater requires this name ([the 0.2 bridge](#from-02)) |
 
-The `core` files are byte-identical in the three archives of one target. The one-line command does these steps for you. To do them by hand, download the archives you need and `SHA256SUMS` from the release page, then:
+The `core` files are byte-identical in the archives of one target. The one-line command does these steps for you. On Linux or macOS, download the archives you need and `SHA256SUMS` from the release page, then:
 
 ```sh
 sha256sum -c --ignore-missing SHA256SUMS      # on macOS: shasum -a 256 -c SHA256SUMS
@@ -130,7 +151,13 @@ The installer refuses to:
 
 A refusal changes nothing. A different version, or another build of the same version, is another generation; the installation switches to it and keeps the one before as the previous generation.
 
+On Windows, download `neura-sdk-<version>-x86_64-windows-msvc.tar.gz` or `neura-runtime-<version>-x86_64-windows-msvc.tar.gz` and `SHA256SUMS`. Use `Get-FileHash -Algorithm SHA256 <archive>` and compare the result to the corresponding entry. Run `gh attestation verify <archive> --repo Kayyo321/neura`, then `tar.exe -xzf <archive>`. Run `install.cmd` from the unpacked directory, or run its `install.ps1` if your PowerShell execution policy permits it. Pass `-Add <directory>` to `install.ps1` to add the second archive of the same build or `-NoPathUpdate` to skip the user `Path` change. Archive verification on Windows checks sizes and digests; the POSIX mode fields are retained in manifests for reproducibility.
+
 ## Layout
+
+On Windows, `<root>` defaults to `%LOCALAPPDATA%\Neura`. `current` is an NTFS directory junction targeting the active generation. `<root>\current\bin` is the public directory for every tool, so `NEURA_BIN_DIR` is unavailable. Each tool uses its `.exe` name. `neura-core-<version>.dll` and, with the SDK, `neura-sdk-<version>.dll` sit beside the executables in the generation's `bin` directory. They link the MSVC C and C++ runtimes statically. Locks and leases use `LockFileEx`. See [native Windows design](https://github.com/Kayyo321/neura/blob/main/docs/design/Windows030.md#w22-install-layout).
+
+On Linux and macOS the layout is:
 
 ```text
 <root>/neura-install.txt                   the marker, schema 2
@@ -244,6 +271,8 @@ An installation is in one of four states, which the `install` line names: *compl
 | `leases` | That tools hold the lease of their generation | `warn` on a file system that cannot lock |
 | `update-notices` | Whether [update notices](#update-notices-and-privacy) are on in this environment | |
 
+On Windows the `links` check covers the `current` junction, `path` checks `<root>\current\bin`, and `curl` and `tar` check the system copies in `System32`.
+
 ## Update
 
 ```sh
@@ -288,6 +317,8 @@ A 0.3 client asks a release source for `neura-components.txt`. If the source has
 
 Every command that changes the root (the installer, `update`, `--components`, `--rollback`, `--repair`, `--migrate-install` and `uninstall --component`) runs these steps.
 
+The descriptions below use the Linux and macOS layout. On Windows, the transaction verifies hashes and sizes, retains the same journal and marker, and activates the new generation by retargeting the `current` junction. All tools become available in the same `Path` directory through that junction.
+
 1. **lock**: an exclusive `flock` on `<root>/.lock`, not waited for: a second command fails at once with `another install, update or uninstall is running (lock <path>)`. On a root with a schema 1 marker, where a 0.2 updater may run, the command also creates the 0.2 lock file `.update-lock` by the 0.2 rules and keeps it until it ends: a file that is already there means a 0.2 update is running, or is reported as stale after an hour for you to delete, and the command changes nothing. A `.update-lock` that this tool wrote (its first word is `neura-lifecycle`) is left over from an interrupted command and is removed. On a schema 2 root no 0.2 client can run, so a `.update-lock` found there is removed.
 2. **recover**: a journal that is present is from a command that ended early. If `current` already names the journal's new generation the change is completed from step 9; otherwise it is undone: removed links are restored, and the new generation's directory is deleted only when the journal says this change placed it. Staging directories and temporary files that a crash left are removed.
 3. **download**, **checksum**: for each archive, as [What is verified](#what-is-verified) describes.
@@ -316,6 +347,8 @@ The update prints which verifications ran. A SHA-256 taken from the same place a
 
 For an `https://` source, `curl` runs as a child process with an argument vector, never a shell, restricted to HTTPS (also after redirects) and TLS 1.2 or newer, writing to a temporary file in `<root>`. `curl` reads no `.curlrc`. With `--nightly` and the default source, the GitHub releases API is read first, in pages of 20 releases (at most 100 pages, 1 MiB per page, and 120 seconds total), and the source is pinned to the selected tag.
 
+On Windows the updater uses `System32\curl.exe` and `System32\tar.exe`. The system curl uses Schannel and the updater enables `--ssl-revoke-best-effort`.
+
 ### Release metadata
 
 A release has two metadata files. `neura-release.txt` stays at schema 1 and names only the legacy archive, since a 0.2 client rejects a line it does not know and a second asset for a target:
@@ -336,9 +369,11 @@ archive runtime <target> neura-runtime-<version>-<target>.tar.gz <sha256> <size>
 archive sdk <target> neura-sdk-<version>-<target>.tar.gz <sha256> <size>
 ```
 
-Both are parsed strictly: single spaces, a final newline, no unknown line, no second archive for one product and target, no size of 0 or above 1 GiB, and a file name that matches the product, version and target. [`packaging/make-release-metadata.sh`](https://github.com/Kayyo321/neura/blob/main/packaging/make-release-metadata.sh) `<directory> <version>` writes both files and `SHA256SUMS` from the three archives of each target in a directory. [`packaging/make-archive.sh`](https://github.com/Kayyo321/neura/blob/main/packaging/make-archive.sh) `--product sdk|runtime|legacy --core <prefix> [--sdk <prefix>] [--service <prefix>] [--build <commit>] <output directory> <version> <target>` makes one archive, with its manifests, from the prefixes that `cmake --install build --component <name> --prefix <prefix>` made: sorted member names, owner 0, the time `SOURCE_DATE_EPOCH` (default 0), and `gzip -n`. It needs GNU tar (`gtar` on macOS).
+Both are parsed strictly: single spaces, a final newline, no unknown line, no second archive for one product and target, no size of 0 or above 1 GiB, and a file name that matches the product, version and target. The Windows archive rows appear in `neura-components.txt`. [`packaging/make-release-metadata.sh`](https://github.com/Kayyo321/neura/blob/main/packaging/make-release-metadata.sh) `<directory> <version>` writes both files and `SHA256SUMS` from the archives in a directory. [`packaging/make-archive.sh`](https://github.com/Kayyo321/neura/blob/main/packaging/make-archive.sh) `--product sdk|runtime|legacy --core <prefix> [--sdk <prefix>] [--service <prefix>] [--build <commit>] <output directory> <version> <target>` makes one archive, with its manifests, from the prefixes that `cmake --install build --component <name> --prefix <prefix>` made: sorted member names, owner 0, the time `SOURCE_DATE_EPOCH` (default 0), and `gzip -n`. It needs GNU tar (`gtar` on macOS).
 
 ### From 0.2
+
+The 0.2 bridge applies to Linux and macOS. The first Windows archives are in 0.3.0.
 
 A 0.2 client (0.2.0, and the 0.2.1 candidates through rc.3) reads `neura-release.txt`, downloads the legacy archive, places it at `versions/<version>`, switches `current`, writes a schema 1 marker, and deletes the old version at once. It makes no link but `neura`. The installation is then *unmigrated*:
 
@@ -386,7 +421,7 @@ A full uninstall is refused while applications of this installation's service ru
 
 It prints each path it removes. It never follows a symbolic link out of the root while deleting, and it does not touch programs you built, caches elsewhere, or shell configuration, so a `PATH` line you added stays. If a path cannot be removed it exits with status 1 and lists what remains; the marker stays in that case so the command can be run again. An unmigrated installation is removed by the schema 1 rules. A package-manager or unmanaged install exits with status 3, like `update`.
 
-The running executable deletes its own file. That is safe on Linux and macOS.
+On Linux and macOS the running executable deletes its own file. On Windows, a detached helper waits for the uninstalling process to end before removing mapped files. Full uninstall removes the installation's `<root>\current\bin` entry from your user `Path`.
 
 ## Update notices and privacy
 
@@ -427,11 +462,13 @@ To turn the notice and the check off, set `NEURA_NO_UPDATE_CHECK=1` in your envi
 
 The CTest entries above run on Linux and macOS, on x86-64 and arm64. The release workflow then runs [the lifecycle checks](ReleaseProcess#what-the-release-workflow-checks) on the packed archives, including the update from the published `v0.2.1-rc.3` and `v0.2.0` with their own 0.2 clients, and for a release candidate runs the one-line install command against the published files, which covers a download over HTTPS and `gh attestation verify`.
 
-The release workflow also runs the server host's HTTPS, HTTP/2 and h2c checks, through `curl`, on the installed archive of each target (check 15). These are not tested: `neura update` downloading over HTTPS (the release workflow updates from a local copy of the published files), the update notice and its network refresh (they need a terminal, so only their absence without a terminal is tested), the interactive `uninstall` prompt, and any run on Windows outside WSL 2.
+On Linux and macOS the release workflow also runs the server host's HTTPS, HTTP/2 and h2c checks through `curl` (check 15). Windows qualification runs on `windows-2022` and checks the native installer and installed archives. The [release process](ReleaseProcess#what-the-release-workflow-checks) lists the Windows exceptions. The workflow uses a local release source for `neura update`, so the HTTPS update download, update notice in a terminal, and interactive `uninstall` prompt are manual checks.
 
 ## Build from source
 
 A source build is `unmanaged`. [Contributing](https://github.com/Kayyo321/neura/blob/main/CONTRIBUTING.md#set-up-a-checkout) lists the commands. `cmake -S . -B build -DNEURA_VERSION_PRERELEASE= -DNEURA_BUILD_COMMIT=<hash>` builds a release version; the default build reports `<version>-dev` and commit `unknown`. The `VERSION` file holds the `MAJOR.MINOR.PATCH` of the tool, and `stdlib/std/core/version.nra` must agree.
+
+On Windows, run `cmake --preset windows-msvc` and `cmake --build --preset windows-msvc` from the Visual Studio developer PowerShell. See [Windows build prerequisites](https://github.com/Kayyo321/neura/blob/main/docs/design/Windows030.md#toolchain-and-build).
 
 ## External tools
 

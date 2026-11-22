@@ -11,7 +11,9 @@
 #include <iostream>
 #include <string_view>
 
-#ifndef _WIN32
+#ifdef _WIN32
+#include "platform/console.hpp"
+#else
 #include <sys/ioctl.h>
 #include <unistd.h>
 #endif
@@ -22,11 +24,18 @@ namespace {
 
 // Whether human diagnostics are colored (Tooling.md, Diagnostics).
 bool use_color(neura::cli::ColorChoice choice) {
+#ifdef _WIN32
+    // A console shows the escape sequences as colors only with virtual
+    // terminal processing on, which --color=always turns on as well. A
+    // console that refuses it (the legacy console) gets no color from auto;
+    // NUL, pipes and files are not terminals.
+    if (choice == neura::cli::ColorChoice::Always) neura::platform::enable_terminal_colors(2);
+#endif
     if (choice != neura::cli::ColorChoice::Auto) return choice == neura::cli::ColorChoice::Always;
     if (const char* no_color = std::getenv("NO_COLOR"); no_color && *no_color) return false;
     if (const char* term = std::getenv("TERM"); term && std::string_view(term) == "dumb") return false;
 #ifdef _WIN32
-    return false;
+    return neura::platform::is_terminal(2) && neura::platform::enable_terminal_colors(2);
 #else
     return ::isatty(2) == 1;
 #endif
@@ -34,7 +43,9 @@ bool use_color(neura::cli::ColorChoice choice) {
 
 // The terminal width: the terminal's own, then COLUMNS, then 100.
 std::size_t terminal_width() {
-#ifndef _WIN32
+#ifdef _WIN32
+    if (const auto columns = neura::platform::terminal_columns(2)) return static_cast<std::size_t>(*columns);
+#else
     winsize size{};
     if (::ioctl(2, TIOCGWINSZ, &size) == 0 && size.ws_col > 0) return size.ws_col;
 #endif

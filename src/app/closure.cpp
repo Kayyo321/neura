@@ -197,7 +197,7 @@ std::optional<std::vector<std::string>> project_check_arguments(const std::vecto
     std::vector<std::string> roots;
     for (const auto& root : package_import_roots(project, *package)) {
         roots.emplace_back("-I");
-        roots.push_back(root.string());
+        roots.push_back(argument_path(root));
     }
     result.insert(result.begin() + 2, roots.begin(), roots.end());
     return result;

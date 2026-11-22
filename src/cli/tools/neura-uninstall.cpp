@@ -5,7 +5,7 @@
 #include "cli/driver.hpp"
 #include "cli/lifecycle.hpp"
 #include "cli/tool.hpp"
-#ifndef _WIN32
+#if !defined(_WIN32) || defined(NEURA_HAS_SERVICE)
 #include "service/service.hpp"
 #endif
 
@@ -39,7 +39,7 @@ int command(const Options& options) {
 int main(int argc, char** argv) {
     auto start = neura::tool::start(*neura::tool::find_tool("neura-uninstall"), argc, argv);
     if (start.status) return *start.status;
-#ifndef _WIN32
+#if !defined(_WIN32) || defined(NEURA_HAS_SERVICE)
     // The service's control client, for the applications that run and for
     // Retire (docs/design/Lifecycle030.md, decision 17).
     neura::service::install_lifecycle_hooks();

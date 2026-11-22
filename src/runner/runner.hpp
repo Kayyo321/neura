@@ -15,6 +15,9 @@
 namespace neura::runner {
 
 struct Host {
+    // The standard streams. On Windows a real console is written with
+    // WriteConsoleW and read with ReadConsoleW, as UTF-16 (W17); pipes and
+    // files carry the bytes unchanged.
     nvm::StreamSink output{stdout};
     nvm::StreamSink error{stderr};
     nvm::DescriptorSource input{0};
@@ -40,7 +43,8 @@ struct RunOptions {
     std::optional<std::filesystem::path> replay;
     // --task-dump: the full task dump of a trap, in this form.
     std::optional<nvm::TaskDumpFormat> task_dump;
-    // --trace-events: one JSON object per scheduler event, one per line.
+    // --trace-events: one JSON object per scheduler event, one per line. A
+    // symbolic link at the path is refused (any reparse point on Windows).
     std::optional<std::filesystem::path> trace_events;
     // --trace-wall-time: add wall-clock times, which differ between runs.
     bool trace_wall_time = false;
@@ -83,9 +87,10 @@ private:
 };
 
 // Task dumps for the runs made while it lives (docs/lang/Concurrency.md
-// section 14.1). SIGQUIT asks the running image for a dump on standard
-// error and the run continues; `on_trap` adds the full dump when a task
-// traps. Pass request() in RunLimits::task_dump. One at a time per process.
+// section 14.1). SIGQUIT (Ctrl+Break, the C runtime's SIGBREAK, on Windows)
+// asks the running image for a dump on standard error and the run
+// continues; `on_trap` adds the full dump when a task traps. Pass request()
+// in RunLimits::task_dump. One at a time per process.
 class TaskDumps {
 public:
     explicit TaskDumps(std::optional<nvm::TaskDumpFormat> on_trap);

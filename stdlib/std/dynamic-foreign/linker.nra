@@ -53,7 +53,7 @@ export let Linker = module (
         };
 
         /// @brief The libraries already loaded into the process, including the C library (Java's
-        /// Linker.defaultLookup).
+        /// Linker.defaultLookup); `SymbolLookup.default_lookup` gives the order on Windows.
         export let default_lookup = func -> lookups.SymbolLookup => lookups.default_lookup();
 
         /// @brief The layout of a C type on the runner's platform (Java's Linker.canonicalLayouts): "bool",
@@ -91,8 +91,9 @@ export let Linker = module (
             return value_sized(carrier, size, alignment);
         };
 
-        /// @brief Whether wchar_t is signed: it is on Linux and macOS, and unsigned on Windows.
-        let wide_signed = func -> bool => not strings.ends_with(native.triple(), "windows-msvc");
+        /// @brief Whether wchar_t is signed: it is on Linux and macOS, and unsigned on Windows (any
+        /// `*-windows-*` triple, such as `x86_64-windows-msvc`).
+        let wide_signed = func -> bool => not strings.contains(native.triple(), "-windows-");
 
         /// @brief Names the linker.
         export let.override to_string = func -> string => "Linker";

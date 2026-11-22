@@ -10,6 +10,11 @@
 #include <sys/mman.h>
 #include <sys/resource.h>
 #include <unistd.h>
+#else
+#include "platform/windows.hpp"
+
+#include <mutex>
+#include <werapi.h>
 #endif
 
 namespace neura::nvm {
@@ -22,11 +27,58 @@ namespace {
 void clear(void* data, std::size_t size) {
 #if defined(__GLIBC__) || defined(__OpenBSD__) || defined(__FreeBSD__)
     ::explicit_bzero(data, size);
+#elif defined(_WIN32)
+    ::SecureZeroMemory(data, size);
 #else
     volatile auto* bytes = static_cast<volatile unsigned char*>(data);
     for (std::size_t i = 0; i < size; ++i) bytes[i] = 0;
 #endif
 }
+
+#ifdef _WIN32
+// VirtualLock may lock at most the process's minimum working set, less a
+// few pages the system keeps, so each buffer raises the minimum and maximum
+// by its size while it lives (W20). The working set belongs to the process:
+// one lock serializes the changes of every execution.
+std::mutex working_set_lock;
+
+// Grows (or, with a negative change, shrinks) the working set limits. A
+// failure leaves them as they were and returns the Win32 error.
+DWORD change_working_set(std::ptrdiff_t change) {
+    const std::lock_guard lock(working_set_lock);
+    const HANDLE process = ::GetCurrentProcess();
+    SIZE_T minimum = 0;
+    SIZE_T maximum = 0;
+    DWORD flags = 0;
+    if (!::GetProcessWorkingSetSizeEx(process, &minimum, &maximum, &flags)) return ::GetLastError();
+    const auto bytes = static_cast<SIZE_T>(change < 0 ? -change : change);
+    if (change < 0) {
+        minimum = minimum > bytes ? minimum - bytes : minimum;
+        maximum = maximum > bytes ? maximum - bytes : maximum;
+    } else {
+        minimum += bytes;
+        maximum += bytes;
+    }
+    if (!::SetProcessWorkingSetSizeEx(process, minimum, maximum, flags)) return ::GetLastError();
+    return ERROR_SUCCESS;
+}
+
+// The answer for a failure to raise the working set or to lock: over a
+// quota or out of memory is too_large, as RLIMIT_MEMLOCK is on Linux.
+HostCompletion lock_failure(DWORD error) {
+    switch (error) {
+    case ERROR_WORKING_SET_QUOTA:
+    case ERROR_NOT_ENOUGH_MEMORY:
+    case ERROR_NOT_ENOUGH_QUOTA:
+    case ERROR_NO_SYSTEM_RESOURCES:
+    case ERROR_COMMITMENT_LIMIT:
+    case ERROR_PRIVILEGE_NOT_HELD:
+        return fail(host_error::too_large);
+    default:
+        return fail(host_error::unsupported);
+    }
+}
+#endif
 
 } // namespace
 
@@ -49,6 +101,12 @@ struct SecretServices::State {
         clear(buffer.data, buffer.mapped);
         ::munlock(buffer.data, buffer.mapped);
         ::munmap(buffer.data, buffer.mapped);
+#else
+        clear(buffer.data, buffer.mapped);
+        ::VirtualUnlock(buffer.data, buffer.mapped);
+        ::WerUnregisterExcludedMemoryBlock(buffer.data);
+        ::VirtualFree(buffer.data, 0, MEM_RELEASE);
+        change_working_set(-static_cast<std::ptrdiff_t>(buffer.mapped));
 #endif
         locked -= buffer.mapped;
         buffer.data = nullptr;
@@ -65,9 +123,44 @@ struct SecretServices::State {
     }
 
     HostCompletion create(std::int32_t size) {
-#if defined(_WIN32) || !defined(MADV_DONTDUMP) || !defined(MADV_WIPEONFORK)
+#if defined(_WIN32)
+        if (size < 1 || size > max_buffer_bytes) return fail(host_error::invalid_input);
+        if (recording) return fail(host_error::unsupported);
+        SYSTEM_INFO system{};
+        ::GetSystemInfo(&system);
+        const auto page = static_cast<std::size_t>(system.dwPageSize);
+        const auto mapped = (static_cast<std::size_t>(size) + page - 1) / page * page;
+        if (locked + mapped > max_locked_bytes) return fail(host_error::too_large);
+        void* memory = ::VirtualAlloc(nullptr, mapped, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+        if (memory == nullptr) return fail(host_error::too_large);
+        // Excluded from Windows Error Reporting's dumps before any secret byte
+        // is written, the counterpart of MADV_DONTDUMP; there is no fork, so
+        // nothing corresponds to MADV_WIPEONFORK. Then locked, so it is never
+        // written to the page file.
+        if (FAILED(::WerRegisterExcludedMemoryBlock(memory, static_cast<DWORD>(mapped)))) {
+            ::VirtualFree(memory, 0, MEM_RELEASE);
+            return fail(host_error::unsupported);
+        }
+        if (const DWORD error = change_working_set(static_cast<std::ptrdiff_t>(mapped)); error != ERROR_SUCCESS) {
+            ::WerUnregisterExcludedMemoryBlock(memory);
+            ::VirtualFree(memory, 0, MEM_RELEASE);
+            return lock_failure(error);
+        }
+        if (!::VirtualLock(memory, mapped)) {
+            // Never a silent fallback.
+            const DWORD error = ::GetLastError();
+            ::WerUnregisterExcludedMemoryBlock(memory);
+            ::VirtualFree(memory, 0, MEM_RELEASE);
+            change_working_set(-static_cast<std::ptrdiff_t>(mapped));
+            return lock_failure(error);
+        }
+        const auto handle = next++;
+        buffers[handle] = Buffer{static_cast<unsigned char*>(memory), static_cast<std::size_t>(size), mapped};
+        locked += mapped;
+        return HostCompletion::ok(int64_value(handle));
+#elif !defined(MADV_DONTDUMP) || !defined(MADV_WIPEONFORK)
         // Without both exclusions the promise of these services cannot be
-        // kept: Windows, macOS and the BSDs answer unsupported.
+        // kept: macOS and the BSDs answer unsupported.
         (void)size;
         return fail(host_error::unsupported);
 #else

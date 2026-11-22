@@ -389,6 +389,14 @@ fs::path checked_path(const fs::path& root, std::string_view relative, const Spa
         const auto status = fs::symlink_status(current, error);
         const bool leaf = std::next(it) == local.end();
         if (fs::is_symlink(status)) refuse(site, "symbolic link in bundle path '" + std::string(relative) + "'");
+#ifdef _WIN32
+        // A junction is a link too, though the standard library gives it a
+        // file type of its own; another reparse point is not a regular file.
+        if (const auto reparse = detail::reparse_at(current); reparse && *reparse != detail::Reparse::none) {
+            if (*reparse == detail::Reparse::link) refuse(site, "symbolic link in bundle path '" + std::string(relative) + "'");
+            refuse(site, "missing or non-regular bundle file '" + std::string(relative) + "': " + detail::reparse_limitation);
+        }
+#endif
         if (error || (leaf ? !fs::is_regular_file(status) : !fs::is_directory(status)))
             refuse(site, "missing or non-regular bundle file '" + std::string(relative) + "'");
     }
@@ -406,10 +414,17 @@ public:
             throw detail::ReadFailure("cannot open a regular file without following links");
         size = static_cast<std::uint64_t>(before_.st_size);
 #else
-        std::error_code error;
-        size = fs::file_size(path, error);
-        input_.open(path, std::ios::binary);
-        if (error || !input_) throw detail::ReadFailure("cannot open a regular bundle file");
+        // `path` is canonical (checked_path), so the opened file must be
+        // there: a junction or link swapped in on the way gives another
+        // final path.
+        file_ = detail::open_no_follow(path);
+        const auto state = file_.valid() ? detail::state_of(file_.get()) : std::nullopt;
+        if (state && state->reparse() == detail::Reparse::other) throw detail::ReadFailure(detail::reparse_limitation);
+        if (!state || state->directory() || state->reparse() != detail::Reparse::none ||
+            !detail::opened_at(file_.get(), path))
+            throw detail::ReadFailure("cannot open a regular file without following links");
+        before_ = *state;
+        size = state->size;
 #endif
     }
 
@@ -423,7 +438,13 @@ public:
         }
         return true;
 #else
-        return static_cast<bool>(input_.read(reinterpret_cast<char*>(output.data()), static_cast<std::streamsize>(output.size())));
+        while (!output.empty()) {
+            DWORD count = 0;
+            const auto wanted = static_cast<DWORD>(std::min<std::size_t>(output.size(), 1u << 30));
+            if (!::ReadFile(file_.get(), output.data(), wanted, &count, nullptr) || count == 0) return false;
+            output = output.subspan(count);
+        }
+        return true;
 #endif
     }
 
@@ -435,7 +456,10 @@ public:
         struct stat after{};
         return next == 0 && ::fstat(file_.get(), &after) == 0 && detail::unchanged(before_, after);
 #else
-        return input_.peek() == std::char_traits<char>::eof() && !input_.bad();
+        std::uint8_t extra;
+        DWORD next = 0;
+        const auto after = ::ReadFile(file_.get(), &extra, 1, &next, nullptr) ? detail::state_of(file_.get()) : std::nullopt;
+        return next == 0 && after && *after == before_;
 #endif
     }
 
@@ -446,7 +470,8 @@ private:
     detail::FileDescriptor file_{-1};
     struct stat before_{};
 #else
-    std::ifstream input_;
+    detail::FileHandle file_;
+    detail::FileState before_;
 #endif
 };
 
@@ -492,6 +517,12 @@ void verify_tree(const fs::path& root, const BundleManifest& manifest, const Spa
         const auto status = it->symlink_status(error);
         if (error) break;
         if (fs::is_symlink(status)) refuse(site, "symbolic link in bundle tree: '" + relative + "'");
+#ifdef _WIN32
+        if (const auto reparse = detail::reparse_at(it->path()); reparse && *reparse != detail::Reparse::none) {
+            if (*reparse == detail::Reparse::link) refuse(site, "symbolic link in bundle tree: '" + relative + "'");
+            refuse(site, "non-regular entry in bundle: '" + relative + "': " + detail::reparse_limitation);
+        }
+#endif
         if (fs::is_directory(status)) {
             if (directories.erase(relative) != 1) refuse(site, "unlisted directory in bundle: '" + relative + "'");
             continue;

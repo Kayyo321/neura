@@ -148,7 +148,8 @@ export let Abi = module (
     export let ArgumentClass = enum (Integer, Sse, FloatRegisters, GeneralRegisters, Memory, Indirect);
 
     /// @brief The target a triple names: `x86_64-...-linux-gnu`, `x86_64-apple-darwin`, `aarch64-...`,
-    /// `arm64-apple-darwin`, `x86_64-pc-windows-msvc` or `-gnu`, `wasm32-...`. Another triple returns None.
+    /// `arm64-apple-darwin`, `x86_64-windows-msvc` (any triple naming `windows` on x86-64), `wasm32-...`. Another
+    /// triple, Windows on AArch64 among them, returns None.
     #Since("0.3.0")
     export let target = func(triple: string) -> Optional<Target> {
         last arch = before(triple, "-");

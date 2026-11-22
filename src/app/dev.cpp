@@ -6,6 +6,12 @@
 // compares the digests of the project's files every 250 ms. On an interrupt,
 // a hangup, a termination request or the end of standard input it stops and
 // reaps everything it started. It registers nothing with the system.
+//
+// On Windows (W10, W32) each host runs in a new process group and a
+// kill-on-close job: it is stopped with Ctrl+Break, and the job is ended after
+// two seconds. Ctrl+C and Ctrl+Break stop neura dev, and closing the console
+// is its hangup. A host is stopped before its bundle is rebuilt, because
+// Windows does not replace a file that a running program holds.
 
 #include "app/project.hpp"
 #include "cli/tool.hpp"
@@ -31,9 +37,22 @@
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#else
+#include "platform/console.hpp"
+#include "platform/error.hpp"
+#include "platform/file.hpp"
+#include "platform/process.hpp"
+#include "platform/socket.hpp"
+#include "platform/text.hpp"
+#include "platform/windows.hpp"
+
+#include <atomic>
+#include <thread>
 #endif
 
+#ifndef _WIN32
 extern char** environ;
+#endif
 
 namespace {
 
@@ -88,11 +107,107 @@ constexpr std::string_view reload_script = R"(// neura dev: reloads the page aft
 })();
 )";
 
+#ifdef _WIN32
+// Set by the console handler and the input reader, which run on threads of
+// their own.
+std::atomic<int> stop_requested{0};
+
+// Ctrl+C is the interrupt, Ctrl+Break the termination request and closing
+// the console, logging off or shutting down the hangup (W10): each stops
+// neura dev. The system ends the process as soon as the handler returns from
+// a hangup, so the handler waits instead while the main thread stops the
+// hosts and returns; the hosts' jobs end with the process in any case.
+bool stop_on_console_event(platform::ConsoleEvent event) {
+    stop_requested = 1;
+    if (event != platform::ConsoleEvent::ctrl_c && event != platform::ConsoleEvent::ctrl_break) ::Sleep(INFINITE);
+    return true;
+}
+
+// The end of standard input stops neura dev. WSAPoll waits for sockets only,
+// so a thread reads the input; when neura dev stops for another reason, the
+// thread is left in its read and ends with the process.
+void watch_input() {
+    const HANDLE input = ::GetStdHandle(STD_INPUT_HANDLE);
+    if (input == nullptr || input == INVALID_HANDLE_VALUE || ::GetFileType(input) == FILE_TYPE_UNKNOWN) return;
+    std::thread([input] {
+        char buffer[256];
+        std::error_code error;
+        while (platform::read_some(input, buffer, sizeof buffer, error) > 0) {}
+        stop_requested = 1;
+    }).detach();
+}
+#else
 volatile std::sig_atomic_t stop_requested = 0;
 void on_signal(int) { stop_requested = 1; }
+#endif
 
 // --- Children, each the leader of its own process group ----------------------------------------------------
 
+#ifdef _WIN32
+struct Child {
+    platform::Process process;
+};
+
+// The name a message gives a host: its file name, without .exe on Windows.
+std::string host_name(const std::string& program) {
+    auto name = detail::path_text(detail::path_from_text(program).filename());
+    if (name.size() > 4) {
+        auto suffix = name.substr(name.size() - 4);
+        std::ranges::transform(suffix, suffix.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (suffix == ".exe") name.resize(name.size() - 4);
+    }
+    return name;
+}
+
+Child start_child(const std::vector<std::string>& command) {
+    platform::Spawn spawn;
+    std::error_code error;
+    try {
+        spawn.program = platform::path_from_utf8(command.front());
+    } catch (const std::system_error& invalid) {
+        error = invalid.code();
+    }
+    spawn.arguments = command;
+    spawn.new_process_group = true;
+    spawn.job = platform::JobMode::kill_on_close;
+    Child child;
+    if (!error) child.process = platform::Process::start(spawn, error);
+    if (!child.process) {
+        std::cerr << "neura dev: cannot start " << command.front() << ": " << platform::error_message(error) << '\n';
+    }
+    return child;
+}
+
+// Stops the child and everything in its job: Ctrl+Break to its process group
+// (the hosts' termination request), then the job is ended after two seconds,
+// and what the child started ends with it.
+void stop_child(Child& child) {
+    if (!child.process) return;
+    std::error_code error;
+    if (!child.process.wait(std::chrono::milliseconds(0), error)) {
+        std::error_code sent;
+        if (child.process.interrupt(platform::ConsoleEvent::ctrl_break, sent))
+            child.process.wait(std::chrono::milliseconds(2000), error);
+    }
+    child.process.kill_tree();
+    child.process.wait(std::nullopt, error);
+    child.process = platform::Process{};
+}
+
+bool child_exited(Child& child) {
+    if (!child.process) return false;
+    std::error_code error;
+    const auto status = child.process.wait(std::chrono::milliseconds(0), error);
+    if (!status) return false;
+    std::cerr << "neura dev: the host ended ("
+              << (status->kind == platform::ExitStatus::Kind::crashed ? status->describe()
+                                                                       : "status " + std::to_string(status->shell_status()))
+              << "); it starts again after the next change\n";
+    child.process.kill_tree();
+    child.process = platform::Process{};
+    return true;
+}
+#else
 struct Child {
     pid_t pid = -1;
 };
@@ -158,6 +273,7 @@ bool child_exited(Child& child) {
     }
     return false;
 }
+#endif
 
 // --- The watcher ---------------------------------------------------------------------------------------
 
@@ -248,7 +364,33 @@ bool only_styles_changed(const BuildState& before, const BuildState& after) {
     return any;
 }
 
-void send_all(int fd, std::string_view data) {
+#ifdef _WIN32
+using Socket = platform::native_socket;
+constexpr Socket no_socket = platform::invalid_socket;
+#else
+using Socket = int;
+constexpr Socket no_socket = -1;
+#endif
+
+void close_listener(Socket fd) {
+#ifdef _WIN32
+    platform::close_socket(fd);
+#else
+    ::close(fd);
+#endif
+}
+
+void send_all(Socket fd, std::string_view data) {
+#ifdef _WIN32
+    while (!data.empty()) {
+        const auto sent = ::send(fd, data.data(), static_cast<int>(std::min<std::size_t>(data.size(), 1 << 30)), 0);
+        if (sent <= 0) {
+            if (sent < 0 && platform::last_socket_error().interrupted()) continue;
+            return;
+        }
+        data.remove_prefix(static_cast<std::size_t>(sent));
+    }
+#else
     while (!data.empty()) {
 #ifdef MSG_NOSIGNAL
         const auto sent = ::send(fd, data.data(), data.size(), MSG_NOSIGNAL);
@@ -261,9 +403,10 @@ void send_all(int fd, std::string_view data) {
         }
         data.remove_prefix(static_cast<std::size_t>(sent));
     }
+#endif
 }
 
-void respond(int fd, int status, std::string_view reason, std::string_view type, std::string_view body, bool head) {
+void respond(Socket fd, int status, std::string_view reason, std::string_view type, std::string_view body, bool head) {
     std::string response = "HTTP/1.1 " + std::to_string(status) + " " + std::string(reason) + "\r\n" +
                            "Content-Type: " + std::string(type) + "\r\nContent-Length: " + std::to_string(body.size()) +
                            "\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";
@@ -287,15 +430,22 @@ std::string percent_decode(std::string_view text) {
 
 // One request per connection, read with a short deadline; answered from the
 // current bundle directory.
-void serve_request(int fd, const fs::path& bundle, const BuildState& state) {
+void serve_request(Socket fd, const fs::path& bundle, const BuildState& state) {
     std::string request;
     char buffer[4096];
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     while (request.find("\r\n\r\n") == std::string::npos && request.size() < 65536) {
+#ifdef _WIN32
+        platform::PollItem p{fd, platform::poll_in, 0};
+        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count();
+        if (left <= 0 || platform::poll(std::span(&p, 1), static_cast<int>(left)) <= 0) return;
+        const auto count = ::recv(fd, buffer, static_cast<int>(sizeof buffer), 0);
+#else
         pollfd p{fd, POLLIN, 0};
         const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count();
         if (left <= 0 || ::poll(&p, 1, static_cast<int>(left)) <= 0) return;
         const auto count = ::recv(fd, buffer, sizeof buffer, 0);
+#endif
         if (count <= 0) return;
         request.append(buffer, static_cast<std::size_t>(count));
     }
@@ -331,6 +481,34 @@ void serve_request(int fd, const fs::path& bundle, const BuildState& state) {
     }
 }
 
+#ifdef _WIN32
+// The development server's socket on 127.0.0.1. SO_EXCLUSIVEADDRUSE keeps any
+// other socket from binding the port while it is open (Windows' SO_REUSEADDR
+// would let another program take it over).
+Socket open_listener(std::uint16_t port, std::uint16_t& bound, std::error_code& error) {
+    if ((error = platform::ensure_sockets())) return no_socket;
+    const SOCKET fd = ::WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP, nullptr, 0, WSA_FLAG_NO_HANDLE_INHERIT);
+    if (fd == INVALID_SOCKET) {
+        error = platform::last_socket_error().error_code();
+        return no_socket;
+    }
+    const BOOL on = TRUE;
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_port = ::htons(port);
+    address.sin_addr.s_addr = ::htonl(INADDR_LOOPBACK);
+    if (::setsockopt(fd, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, reinterpret_cast<const char*>(&on), sizeof on) != 0 ||
+        ::bind(fd, reinterpret_cast<sockaddr*>(&address), sizeof address) != 0 || ::listen(fd, 64) != 0) {
+        error = platform::last_socket_error().error_code();
+        platform::close_socket(fd);
+        return no_socket;
+    }
+    int size = sizeof address;
+    ::getsockname(fd, reinterpret_cast<sockaddr*>(&address), &size);
+    bound = ::ntohs(address.sin_port);
+    return fd;
+}
+#else
 int open_listener(std::uint16_t port, std::uint16_t& bound) {
     const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) return -1;
@@ -352,6 +530,7 @@ int open_listener(std::uint16_t port, std::uint16_t& bound) {
     bound = ntohs(address.sin_port);
     return fd;
 }
+#endif
 
 // --- The loop -----------------------------------------------------------------------------------------------
 
@@ -371,8 +550,8 @@ std::optional<app::BuildResult> build(app::Project& project, const Options& opti
     build_options.dev = true;
     build_options.dev_reload = std::string(reload_script);
     build_options.web_runtime = options.web_runtime;
-    build_options.neura = app::tool_directory() / "neura";
     try {
+        build_options.neura = app::tool_directory() / tool::executable_file("neura");
         return app::build_target(project, build_options);
     } catch (const Diagnostic& diagnostic) {
         app::print_diagnostic(std::cerr, diagnostic);
@@ -396,26 +575,40 @@ int develop(const Options& options) {
     }
     const auto kind = project.manifest.targets.at(options.target).kind.value;
 
+#ifdef _WIN32
+    platform::on_console_event(stop_on_console_event);
+#else
     std::signal(SIGINT, on_signal);
     std::signal(SIGTERM, on_signal);
     std::signal(SIGHUP, on_signal);
     std::signal(SIGPIPE, SIG_IGN);
+#endif
 
     // A web target's port is bound before the first build, so a busy port
     // fails at once and nothing is left behind.
-    int listener = -1;
+    Socket listener = no_socket;
     std::uint16_t bound = 0;
     if (kind == TargetKind::Web) {
+#ifdef _WIN32
+        std::error_code error;
+        listener = open_listener(options.port, bound, error);
+        if (listener == no_socket) {
+            std::cerr << "neura dev: cannot listen on 127.0.0.1:" << options.port << ": " << platform::error_message(error)
+                      << '\n';
+            return 1;
+        }
+#else
         listener = open_listener(options.port, bound);
         if (listener < 0) {
             std::cerr << "neura dev: cannot listen on 127.0.0.1:" << options.port << ": " << std::strerror(errno) << '\n';
             return 1;
         }
+#endif
     }
     auto files = snapshot(project);
     auto result = build(project, options);
     if (!result) {
-        if (listener >= 0) ::close(listener);
+        if (listener != no_socket) close_listener(listener);
         return 1;
     }
     BuildState state = kind == TargetKind::Web ? read_state(result->directory) : BuildState{};
@@ -430,8 +623,13 @@ int develop(const Options& options) {
             const auto command = app::host_command(result->directory, host_arguments, std::cerr, true);
             if (command) {
                 host = start_child(*command);
+#ifdef _WIN32
+                if (host.process) std::cout << "neura dev: started " << host_name(command->front()) << " (process "
+                                            << host.process.pid() << ")" << std::endl;
+#else
                 if (host.pid > 0) std::cout << "neura dev: started " << fs::path(command->front()).filename().string()
                                             << " (process " << host.pid << ")" << std::endl;
+#endif
             }
         } catch (const Diagnostic& diagnostic) {
             app::print_diagnostic(std::cerr, diagnostic);
@@ -443,10 +641,33 @@ int develop(const Options& options) {
         start_host();
     }
 
+#ifdef _WIN32
+    watch_input();
+#else
     const bool watch_input = ::isatty(STDIN_FILENO) || ::fcntl(STDIN_FILENO, F_GETFL) >= 0;
+#endif
     auto next_poll = std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
     int status = 0;
     while (!stop_requested) {
+#ifdef _WIN32
+        const auto wait = std::max<long long>(0, std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                     next_poll - std::chrono::steady_clock::now()).count());
+        if (listener != no_socket) {
+            platform::PollItem item{listener, platform::poll_in, 0};
+            const int ready = platform::poll(std::span(&item, 1), static_cast<int>(wait));
+            if (ready < 0 && !platform::last_socket_error().interrupted()) break;
+            if (ready > 0 && item.revents) {
+                const auto client = ::accept(listener, nullptr, nullptr);
+                if (client != INVALID_SOCKET) {
+                    platform::set_no_inherit(client);
+                    serve_request(client, result->directory, state);
+                    platform::close_socket(client);
+                }
+            }
+        } else {
+            std::this_thread::sleep_for(std::chrono::milliseconds(std::min<long long>(wait, 50)));
+        }
+#else
         std::vector<pollfd> watched;
         if (listener >= 0) watched.push_back({listener, POLLIN, 0});
         if (watch_input) watched.push_back({STDIN_FILENO, POLLIN, 0});
@@ -469,6 +690,7 @@ int develop(const Options& options) {
                 if (count == 0 || (count < 0 && errno != EINTR && errno != EAGAIN)) stop_requested = 1;
             }
         }
+#endif
         child_exited(host);
         if (std::chrono::steady_clock::now() < next_poll) continue;
         next_poll = std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
@@ -485,8 +707,21 @@ int develop(const Options& options) {
             continue;
         }
         files = snapshot(project);
+#ifdef _WIN32
+        // The running host holds files of dist/dev/<name>, which Windows does
+        // not let the build replace, so it stops first; when the build fails,
+        // the previous bundle, still in place, runs again (W32).
+        const bool was_running = static_cast<bool>(host.process);
+        if (kind != TargetKind::Web) stop_child(host);
+        auto rebuilt = build(project, options);
+        if (!rebuilt) {
+            if (was_running) start_host();
+            continue;
+        }
+#else
         auto rebuilt = build(project, options);
         if (!rebuilt) continue;
+#endif
         result = rebuilt;
         if (kind == TargetKind::Web) {
             auto next = read_state(result->directory);
@@ -501,7 +736,7 @@ int develop(const Options& options) {
         }
     }
     stop_child(host);
-    if (listener >= 0) ::close(listener);
+    if (listener != no_socket) close_listener(listener);
     std::cout << "neura dev: stopped" << std::endl;
     return status;
 }
@@ -562,15 +797,10 @@ int dev(const std::vector<std::string>& arguments) {
 int main(int argc, char** argv) {
     auto start = neura::tool::start(*neura::tool::find_tool("neura-dev"), argc, argv);
     if (start.status) return *start.status;
-#ifdef _WIN32
-    std::cerr << "neura dev runs on POSIX systems only in Neura 0.3.0\n";
-    return 1;
-#else
     try {
         return dev(start.arguments);
     } catch (const std::exception& error) {
         std::cerr << "neura dev: " << error.what() << '\n';
         return 1;
     }
-#endif
 }

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "neura",
+  "description": "Third-party libraries of the native Windows build (docs/design/Windows030.md, decision W01).",
+  "builtin-baseline": "9eec002df1cd109f8f104cd966a763daf9751489",
+  "dependencies": [
+    "libffi"
+  ],
+  "features": {
+    "gpu": {
+      "description": "The Vulkan headers and glslangValidator for GPU graph execution (NEURA_GPU)",
+      "dependencies": [
+        "vulkan-headers",
+        {
+          "name": "glslang",
+          "host": true,
+          "features": [
+            "tools"
+          ]
+        }
+      ]
+    }
+  }
+}

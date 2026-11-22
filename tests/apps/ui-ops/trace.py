@@ -25,7 +25,7 @@ def copy_tools(bin_dir: Path) -> None:
     """Copies `neura` with the tools it starts and their shared libraries
     (docs/design/Products030.md), as the build tree lays them out."""
     source = NEURA.parent
-    for tool in [NEURA, *sorted(source.glob("neura-*")), source / "neurac"]:
+    for tool in [NEURA, *sorted(source.glob("neura-*")), source / f"neurac{NEURA.suffix}"]:
         if tool.is_file():
             shutil.copy2(tool, bin_dir / tool.name)
     if (source / "lib/neura").is_dir():

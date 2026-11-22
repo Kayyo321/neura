@@ -39,6 +39,7 @@ from pathlib import Path
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 SUFFIX = ".exe" if os.name == "nt" else ""
+WINDOWS = os.name == "nt"
 
 failures: list[str] = []
 
@@ -47,6 +48,38 @@ def check(condition: bool, message: str) -> None:
     if not condition:
         failures.append(message)
         print("FAIL", message)
+
+
+def system_path() -> str:
+    """The directories of the system's own programs, for a PATH a test sets."""
+    if WINDOWS:
+        return str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32")
+    return f"/usr/bin{os.pathsep}/bin"
+
+
+def on_path(name: str, env: dict[str, str]) -> str:
+    """The program a shell starts for `name` with env's PATH. On Windows,
+    CreateProcess searches the PATH of this process instead, and the current
+    directory first, so the test looks the program up itself."""
+    if not WINDOWS:
+        return name
+    for directory in env["PATH"].split(os.pathsep):
+        candidate = Path(directory) / f"{name}{SUFFIX}"
+        if directory and candidate.is_file():
+            return str(candidate)
+    return name
+
+
+def absent_tools(bin_dir: Path, tools) -> set[str]:
+    """The registry's tools that this build did not make. Every tool is built
+    on POSIX; on Windows the tools of an area whose port has not landed are
+    not built yet (docs/design/Windows030.md), and are named, not checked."""
+    if not WINDOWS:
+        return set()
+    absent = {tool for tool in tools if not (bin_dir / f"{tool}{SUFFIX}").is_file()}
+    if absent:
+        print(f"not built in {bin_dir}, so not checked: {', '.join(sorted(absent))}")
+    return absent
 
 
 # --------------------------------------------------------------------------
@@ -255,6 +288,7 @@ def parity(bin_dir: Path) -> None:
         if command != "runtime":
             check(command in covered, f"a parity case runs `neura {command}`")
     neura = bin_dir / f"neura{SUFFIX}"
+    absent = absent_tools(bin_dir, tools)
     with tempfile.TemporaryDirectory() as temporary:
         # The tools print canonical paths (/private/var/... on macOS).
         work = Path(temporary).resolve()
@@ -264,6 +298,8 @@ def parity(bin_dir: Path) -> None:
             unified = expand(arguments, paths)
             tool, word, _ = commands[unified[0]]
             reference = outcome([str(neura)] + unified, work / f"{index}-neura", stdin, files)
+            if tool in absent:
+                continue
             forms = [[str(bin_dir / f"{tool}{SUFFIX}"), word] + unified[1:]]
             default = tools[tool][1][0]
             rest = unified[1:]
@@ -277,7 +313,7 @@ def parity(bin_dir: Path) -> None:
                 compared += 1
         # The forms `neura` answers itself.
         version = run([str(neura), "--version"], work, None)
-        for tool in tools:
+        for tool in (tool for tool in tools if tool not in absent):
             check(run([str(bin_dir / f"{tool}{SUFFIX}"), "--version"], work, None) == version,
                   f"{tool} --version prints neura --version")
             status, out, _ = run([str(bin_dir / f"{tool}{SUFFIX}"), "--help"], work, None)
@@ -322,13 +358,20 @@ def copy_tools(bin_dir: Path, destination: Path, names: list[str], neura: Path |
     for library in (bin_dir / "lib/neura").glob("libneura-*"):
         if sdk or library.name.startswith("libneura-core"):
             shutil.copy2(library, destination / "lib/neura" / library.name)
+    # On Windows the tools load neura-core-<version>.dll or
+    # neura-sdk-<version>.dll from their own directory.
+    if WINDOWS:
+        for library in bin_dir.glob("neura-*.dll"):
+            if sdk or library.name.startswith("neura-core-"):
+                shutil.copy2(library, destination / library.name)
     return destination / f"neura{SUFFIX}"
 
 
 def components(bin_dir: Path, mixed: Path) -> None:
     commands, tools = registry()
-    core = [name for name, (component, _) in tools.items() if component == "Core"]
-    sdk = [name for name, (component, _) in tools.items() if component == "Sdk"]
+    absent = absent_tools(bin_dir, tools)
+    core = [name for name, (component, _) in tools.items() if component == "Core" and name not in absent]
+    sdk = [name for name, (component, _) in tools.items() if component == "Sdk" and name not in absent]
     with tempfile.TemporaryDirectory() as temporary:
         # The tools print canonical paths (/private/var/... on macOS).
         work = Path(temporary).resolve()
@@ -367,14 +410,14 @@ def components(bin_dir: Path, mixed: Path) -> None:
         check(run([str(neura), "run", paths["HELLO_NVR"]], work, None) == (1, b"", expected.encode()),
               "missing neura-run")
         status, out, _ = run([str(neura), "doctor"], work, None)
-        check(status == 1 and f"FAIL  components: the Neura core is incomplete: neura-run missing from {neura.parent}. "
+        check(status == 1 and f"FAIL  components: the Neura core is incomplete: neura-run missing from {neura.parent.as_posix()}. "
               "Reinstall Neura\n".encode() in out, f"doctor reports the missing core tool\n{out.decode()}")
 
         # Part of the SDK missing.
         neura = copy_tools(bin_dir, work / "no-fmt", [name for name in core + sdk if name != "neura-fmt"])
         status, out, _ = run([str(neura), "doctor"], work, None)
         check(status == 1 and f"FAIL  components: the Neura-sdk component is incomplete: neura-fmt missing from "
-              f"{neura.parent}. Reinstall Neura\n".encode() in out, f"doctor reports the incomplete SDK\n{out.decode()}")
+              f"{neura.parent.as_posix()}. Reinstall Neura\n".encode() in out, f"doctor reports the incomplete SDK\n{out.decode()}")
 
         # The service component of `neura runtime`, in a copy without neurad.
         core_dir = work / "core"
@@ -387,9 +430,9 @@ def components(bin_dir: Path, mixed: Path) -> None:
         neura = copy_tools(bin_dir, work / "mixed", core + sdk, mixed)
         own = run([str(bin_dir / "neura"), "--version"], work, None)[1].decode().strip()
         for command, (tool, _, component) in commands.items():
-            if component == "Service":
+            if component == "Service" or tool in absent:
                 continue
-            expected = (f"neura: error: {neura.parent / tool} is from {own}, but the neura that started it is "
+            expected = (f"neura: error: {neura.parent / (tool + SUFFIX)} is from {own}, but the neura that started it is "
                         f"neura 0.0.0-mixed (test, commit test); every tool in {neura.parent} must come from one build. "
                         "Reinstall Neura\n")
             check(run([str(neura), command, paths["HELLO_NVR"]], work, None) == (1, b"", expected.encode()),
@@ -409,15 +452,28 @@ def install(build: Path, cmake: str) -> None:
         subprocess.run([cmake, "--install", str(build), "--prefix", str(prefix)], check=True, capture_output=True)
         links = work / "link bin"
         links.mkdir()
-        (links / "neura").symlink_to(prefix / "bin/neura")
-        env = dict(os.environ, PATH=f"{links}{os.pathsep}/usr/bin{os.pathsep}/bin")
-        built = build / "neura"
+        try:
+            (links / f"neura{SUFFIX}").symlink_to(prefix / f"bin/neura{SUFFIX}")
+        except OSError:
+            if not WINDOWS:
+                raise
+            # A symbolic link needs Developer Mode or a privilege on Windows;
+            # a junction to bin/ needs neither, and the dispatcher resolves
+            # its real path through either.
+            import _winapi
+            links.rmdir()
+            _winapi.CreateJunction(str(prefix / "bin"), str(links))
+        env = dict(os.environ, PATH=f"{links}{os.pathsep}{system_path()}")
+        built = build / f"neura{SUFFIX}"
         paths = prepare(built, work / "inputs")
 
         def normal(result, bin_dir: Path, library: Path):
             status, out, err, written = result
             def clean(data: bytes) -> bytes:
-                return data.replace(str(bin_dir).encode(), b"<bin>").replace(str(library).encode(), b"<stdlib>")
+                data = data.replace(str(bin_dir).encode(), b"<bin>").replace(str(library).encode(), b"<stdlib>")
+                # Windows tools print source paths in generic form (C:/...).
+                return data.replace(bin_dir.as_posix().encode(), b"<bin>").replace(library.as_posix().encode(),
+                                                                                  b"<stdlib>")
             # A .nir file records the absolute paths of its standard library
             # sources, which differ by design; images do not.
             written = {name: data for name, data in written.items() if not name.endswith(".nir")}
@@ -428,7 +484,7 @@ def install(build: Path, cmake: str) -> None:
             unified = expand(arguments, paths)
             tree = normal(outcome([str(built)] + unified, work / f"{index}-tree", stdin, files, env),
                           build.resolve(), REPOSITORY / "stdlib")
-            installed = normal(outcome(["neura"] + unified, work / f"{index}-installed", stdin, files, env),
+            installed = normal(outcome([on_path("neura", env)] + unified, work / f"{index}-installed", stdin, files, env),
                                prefix / "bin", prefix / "share/neura/stdlib")
             if unified[0] == "doctor":
                 # The install's own lines name different files; compare the rest.
@@ -441,12 +497,13 @@ def install(build: Path, cmake: str) -> None:
             compared += 1
 
         # Each direct tool is found by name when the install's bin/ is on PATH.
-        direct_env = dict(os.environ, PATH=f"{prefix / 'bin'}{os.pathsep}/usr/bin{os.pathsep}/bin")
-        for tool in tools:
-            check(run([tool, "--version"], work, None, direct_env) == run([str(built), "--version"], work, None),
-                  f"installed {tool} on PATH")
-        out = outcome(["neurac", paths["HELLO"].replace("\\", "/"), "-o", "out.nvr"], work / "direct", None,
-                      ["out.nvr"], direct_env)
+        direct_env = dict(os.environ, PATH=f"{prefix / 'bin'}{os.pathsep}{system_path()}")
+        absent = absent_tools(prefix / "bin", tools)
+        for tool in (tool for tool in tools if tool not in absent):
+            check(run([on_path(tool, direct_env), "--version"], work, None, direct_env) ==
+                  run([str(built), "--version"], work, None), f"installed {tool} on PATH")
+        out = outcome([on_path("neurac", direct_env), paths["HELLO"].replace("\\", "/"), "-o", "out.nvr"],
+                      work / "direct", None, ["out.nvr"], direct_env)
         check(out[0] == 0 and out[3]["out.nvr"] == Path(paths["HELLO_NVR"]).read_bytes(),
               "installed neurac on PATH builds the same image")
 
@@ -462,16 +519,25 @@ def install(build: Path, cmake: str) -> None:
         # which `neura` from the other one must not run.
         other = work / "other"
         shutil.copytree(moved, other, symlinks=True)
-        (other / "bin/neurac").unlink()
-        (other / "bin/neurac").write_text("#!/bin/sh\necho 'the other installation'\n")
-        (other / "bin/neurac").chmod(0o755)
-        both = dict(os.environ, PATH=f"{other / 'bin'}{os.pathsep}{moved / 'bin'}{os.pathsep}/usr/bin{os.pathsep}/bin")
+        (other / f"bin/neurac{SUFFIX}").unlink()
+        if WINDOWS:
+            # Windows starts no script as an executable. The stand-in is the
+            # test dispatcher, which refuses the dispatch token as a command.
+            shutil.copy2(build / f"test-tools/neura_test_mixed_dispatcher{SUFFIX}", other / f"bin/neurac{SUFFIX}")
+        else:
+            (other / "bin/neurac").write_text("#!/bin/sh\necho 'the other installation'\n")
+            (other / "bin/neurac").chmod(0o755)
+        both = dict(os.environ, PATH=f"{other / 'bin'}{os.pathsep}{moved / 'bin'}{os.pathsep}{system_path()}")
         out = outcome([str(moved / "bin/neura"), "build", paths["HELLO"], "-o", "out.nvr"], work / "pinned", None,
                       ["out.nvr"], both)
         check(out[0] == 0 and out[1] == b"" and out[3]["out.nvr"] is not None,
               "neura runs the compiler of its own installation, not the one first on PATH")
-        out = run(["neura", "build", paths["HELLO"], "-o", "x.nvr"], work, None, both)
-        check(out == (0, b"the other installation\n", b""), "the shell finds the other installation's neura by PATH")
+        out = run([on_path("neura", both), "build", paths["HELLO"], "-o", "x.nvr"], work, None, both)
+        if WINDOWS:
+            found = out[0] == 1 and out[1] == b"" and out[2].startswith(b"neura: error: expected check, docs,")
+        else:
+            found = out == (0, b"the other installation\n", b"")
+        check(found, "the shell finds the other installation's neura by PATH")
         print(f"install: {compared} cases compared between the build tree and an install on PATH")
 
 

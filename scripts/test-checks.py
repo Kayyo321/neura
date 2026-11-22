@@ -15,11 +15,13 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import io
 import json
 import re
 import subprocess
 import sys
 import tempfile
+from contextlib import redirect_stdout
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parent
@@ -470,6 +472,32 @@ def report(label: str, cases: str | None, minimum: int, problem: str | None) -> 
                                          "--minimum", str(minimum)], problem)
 
 
+def windows_binaries() -> None:
+    binary = load_script("check-windows-binaries")
+    dependencies = "    KERNEL32.dll\n    MSWSOCK.dll\n    neura-core-0.3.0.dll\n  Summary\n"
+    same("Windows imports: exact DLL names", ", ".join(sorted(binary.imports(dependencies))),
+         "kernel32.dll, mswsock.dll, neura-core-0.3.0.dll")
+    export_table = "  ordinal hint RVA      name\n        1    0 00001000 neura_tool_run\n  Summary\n"
+    same("Windows exports: tool ABI", ", ".join(sorted(binary.exports(export_table))), "neura_tool_run")
+    same("Windows exports: executable with no exports", ", ".join(binary.exports("  Summary\n")), "")
+
+    core = load_script("check-core-closure")
+    link_map = "neura_compiler:c_import.cpp.obj\nneura_libclang.lib(libclang_loader.c.obj)\n"
+    unexpected = "neura_compiler:lexer.cpp.obj"
+    with tempfile.TemporaryDirectory() as directory:
+        build = Path(directory)
+        core_map = build / "neura-core-0.3.0.map"
+        core_map.write_text(link_map, encoding="utf-8", newline="\n")
+        with redirect_stdout(io.StringIO()):
+            accepted = core.windows_closure(build)
+        same("Windows core closure: doctor probe objects", str(accepted), "0")
+        core_map.write_text(link_map + unexpected + "\n", encoding="utf-8", newline="\n")
+        with redirect_stdout(io.StringIO()) as output:
+            rejected = core.windows_closure(build)
+        same("Windows core closure: other compiler objects", str(rejected), "1")
+        same("Windows core closure: identifies the unexpected object", str(unexpected in output.getvalue()), "True")
+
+
 RULESET = {"name": "main", "target": "branch", "enforcement": "active", "bypass_actors": [],
            "rules": [{"type": "deletion"}, {"type": "pull_request", "parameters": {"required_approving_review_count": 0}}]}
 
@@ -692,6 +720,7 @@ def main() -> int:
     report("a disabled test", ran + '<testcase name="c" status="disabled"/>', 2, "c: status `disabled`, not run")
     report("a failed test", ran + '<testcase name="c" status="fail"><failure message="x"/></testcase>', 2, "c: failed")
     report("a missing report", None, 1, "cannot read the test report")
+    windows_binaries()
 
     site("a site that follows the rules", {}, None)
     home("a missing file", 'src="assets/logo.png"', 'src="assets/none.png"', "site/assets/none.png does not exist")

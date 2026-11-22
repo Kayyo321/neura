@@ -477,7 +477,8 @@ IrNode Lowering::copy(const Expr& expr, Context& context) {
         const auto index = static_cast<std::size_t>(
             std::ranges::find_if(fields, [&](SymbolId id) { return symbol(id).name == expr.labels[i]; }) -
             fields.begin());
-        const auto& field_type = symbol(fields[index]).type;
+        // A copy: lowering the value can add symbols and move the table.
+        const auto field_type = symbol(fields[index]).type;
         expected_origin_ = ExpectedOrigin{name_span(fields[index]), "field '" + symbol(fields[index]).name +
                                                                         "' is declared here"};
         auto replacement = value(expr.operands[i], context, &field_type, true);

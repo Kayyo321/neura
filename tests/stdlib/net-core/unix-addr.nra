@@ -4,7 +4,8 @@ let test = import:Std.Test;
 let unix = import:Std.Net.Core.UnixAddr;
 
 // UnixAddr: paths and Linux abstract names, the 108-byte sun_path limit of unix(7) (107 bytes plus the NUL for a
-// path; 107 bytes after the leading NUL for an abstract name).
+// path; 107 bytes after the leading NUL for an abstract name). The address is the same value on every host: a
+// Windows drive path is an ordinary path, and whether a host serves an address is decided when a socket uses it.
 let UnixAddrTests = module (
     let kind_of = func(e: errors.Error) -> errors.ParseErrorKind => match (e) {
         errors.Error.Parse { kind, offset, message } => kind,
@@ -49,6 +50,11 @@ let UnixAddrTests = module (
         test.assert_equal_int64(107, longest.byte_length as int64);
         test.assert_equal_string(longest, unix.of_path(longest).to_string());
         test.assert_equal_string(longest, test.assert_ok<unix.UnixAddr>(unix.parse(longest)).path);
+        last drive = test.assert_ok<unix.UnixAddr>(unix.parse("C:/Users/me/app.sock"));
+        test.assert(!drive.is_abstract);
+        test.assert_equal_string("C:/Users/me/app.sock", drive.to_string());
+        test.assert(drive.equals(unix.of_path("C:/Users/me/app.sock")));
+        test.assert_equal_string("C:\\run\\app.sock", unix.of_path("C:\\run\\app.sock").path);
     };
 
     export let test_abstract_names = func {

@@ -49,7 +49,9 @@ Flow fork(const Flow& input) {
 void add_assignment(std::vector<Span>& assignments, const Span& span) {
     const auto same = [&](const Span& other) { return other.file == span.file && other.offset == span.offset; };
     if (std::ranges::none_of(assignments, same)) assignments.push_back(span);
-    std::ranges::sort(assignments, {}, &Span::offset);
+    // Stable, so that spans at the same offset in different files keep their
+    // order whatever the standard library (W13).
+    std::ranges::stable_sort(assignments, {}, &Span::offset);
 }
 
 // Merges one reachable arm of a branch into `output`. `reason` describes the

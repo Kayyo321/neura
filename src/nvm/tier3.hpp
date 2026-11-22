@@ -696,6 +696,29 @@ struct CalleeCell {
     std::uint64_t frames = 0;
 };
 
+#ifdef _WIN32
+// MSVC checked iterators make std::vector non-standard-layout. Keep the
+// executor-owned arrays behind a pointer so Context's native ABI and all
+// offsetof assertions remain valid, including in Debug builds.
+class ValuePool {
+public:
+    ValuePool() = default;
+    ~ValuePool() { delete values_; }
+    ValuePool(const ValuePool&) = delete;
+    ValuePool& operator=(const ValuePool&) = delete;
+    bool empty() const { return values_ == nullptr || values_->empty(); }
+    void resize(std::size_t size) {
+        if (values_ == nullptr) values_ = new std::vector<std::vector<std::uint64_t>>;
+        values_->resize(size);
+    }
+    std::vector<std::uint64_t>& operator[](std::size_t index) { return (*values_)[index]; }
+
+private:
+    std::vector<std::vector<std::uint64_t>>* values_ = nullptr;
+};
+static_assert(std::is_standard_layout_v<ValuePool>);
+#endif
+
 // What a native activation chain reads and writes. The fields up to
 // `functions` are native code's, at the offsets of `offsets` below (asserted
 // after the struct); the rest are the executor's.
@@ -756,7 +779,11 @@ struct Context {
     // Why it deoptimized.
     Reason reason = Reason::Budget;
     // One value array per native depth, reused.
+#ifdef _WIN32
+    ValuePool pool;
+#else
     std::vector<std::vector<std::uint64_t>> pool;
+#endif
 
     // The heap and the globals, as the executor publishes them (heap.hpp,
     // "Published layout"): the handle table and allocator records, the

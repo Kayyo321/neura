@@ -4,11 +4,13 @@
 
 #include <array>
 #include <atomic>
+#ifndef _WIN32
 #include <netdb.h>
 #include <netinet/in.h>
+#include <unistd.h>
+#endif
 #include <stdexcept>
 #include <system_error>
-#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -17,25 +19,37 @@ namespace {
 
 class Socket {
 public:
-    explicit Socket(int descriptor) : descriptor_(descriptor) {}
+    explicit Socket(platform::native_socket descriptor) : descriptor_(descriptor) {}
     Socket(Socket&& other) noexcept : descriptor_(other.release()) {}
     ~Socket() { close(); }
 
-    int get() const { return descriptor_; }
-    int release() { return std::exchange(descriptor_, -1); }
+    platform::native_socket get() const { return descriptor_; }
+    bool valid() const { return descriptor_ != platform::invalid_socket; }
+    platform::native_socket release() { return std::exchange(descriptor_, platform::invalid_socket); }
+#ifdef _WIN32
+    void close() { if (valid()) (void)platform::close_socket(release()); }
+#else
     void close() { if (descriptor_ >= 0) ::close(release()); }
+#endif
 
 private:
-    int descriptor_;
+    platform::native_socket descriptor_;
 };
 
 struct ConnectionSlots {
     std::atomic<std::size_t> used{0};
 };
 
+#ifdef _WIN32
+// Winsock's error codes are Win32 codes (WSAEADDRINUSE and so on).
+[[noreturn]] void system_failure(const std::string& operation) {
+    throw std::system_error(platform::last_socket_error().code, std::system_category(), operation);
+}
+#else
 [[noreturn]] void system_failure(const std::string& operation) {
     throw std::system_error(errno, std::generic_category(), operation);
 }
+#endif
 
 void validate_limits(const ListenerLimits& limits) {
     using namespace std::chrono_literals;
@@ -61,7 +75,11 @@ std::vector<TlsContextHandle> load_contexts(std::span<const ListenEndpoint> endp
         contexts.push_back(load_tls_context(endpoint.tls->certificate_chain, endpoint.tls->private_key, offer_http2));
 #else
         (void)offer_http2;
+#ifdef _WIN32
+        throw std::invalid_argument("TLS listeners are unavailable on Windows in Neura 0.3.0");
+#else
         throw std::invalid_argument("this server build has no TLS adapter");
+#endif
 #endif
     }
     return contexts;
@@ -69,8 +87,13 @@ std::vector<TlsContextHandle> load_contexts(std::span<const ListenEndpoint> endp
 
 std::string numeric_peer(const sockaddr_storage& address, socklen_t size) {
     std::array<char, NI_MAXHOST> host{};
+#ifdef _WIN32
+    const auto result = ::getnameinfo(reinterpret_cast<const sockaddr*>(&address), size, host.data(),
+                                      static_cast<DWORD>(host.size()), nullptr, 0, NI_NUMERICHOST);
+#else
     const auto result = ::getnameinfo(reinterpret_cast<const sockaddr*>(&address), size, host.data(), host.size(),
                                       nullptr, 0, NI_NUMERICHOST);
+#endif
     if (result != 0) throw std::runtime_error("could not read the accepted peer address");
     return host.data();
 }
@@ -88,6 +111,27 @@ Socket bind_socket(const ListenEndpoint& config) {
         throw std::invalid_argument("HTTP listener address must be a numeric IPv4 or IPv6 address");
     }
     const std::unique_ptr<addrinfo, decltype(&::freeaddrinfo)> address(resolved, ::freeaddrinfo);
+#ifdef _WIN32
+    // Not inherited by the request workers (W27). SO_EXCLUSIVEADDRUSE stands
+    // for SO_REUSEADDR (W14): on Windows SO_REUSEADDR lets another socket
+    // take over a bound port, and a listener needs nothing for TIME_WAIT.
+    Socket socket(::WSASocketW(address->ai_family, SOCK_STREAM, IPPROTO_TCP, nullptr, 0,
+                               WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT));
+    if (!socket.valid() || !socket_io::configure(socket.get())) system_failure("configure HTTP listener socket");
+    const BOOL enabled = TRUE;
+    if (::setsockopt(socket.get(), SOL_SOCKET, SO_EXCLUSIVEADDRUSE, reinterpret_cast<const char*>(&enabled),
+                     sizeof enabled) != 0) {
+        system_failure("configure HTTP listener address reuse");
+    }
+    const DWORD v6_only = 1;
+    if (address->ai_family == AF_INET6 &&
+        ::setsockopt(socket.get(), IPPROTO_IPV6, IPV6_V6ONLY, reinterpret_cast<const char*>(&v6_only),
+                     sizeof v6_only) != 0) {
+        system_failure("configure HTTP listener IPv6 address");
+    }
+    if (::bind(socket.get(), address->ai_addr, static_cast<int>(address->ai_addrlen)) != 0) system_failure(description);
+    return socket;
+#else
 #ifdef __linux__
     Socket socket(::socket(address->ai_family, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, IPPROTO_TCP));
     if (socket.get() < 0) system_failure("create HTTP listener socket");
@@ -105,9 +149,10 @@ Socket bind_socket(const ListenEndpoint& config) {
     }
     if (::bind(socket.get(), address->ai_addr, address->ai_addrlen) < 0) system_failure(description);
     return socket;
+#endif
 }
 
-std::uint16_t bound_port(int socket) {
+std::uint16_t bound_port(platform::native_socket socket) {
     sockaddr_storage address{};
     socklen_t size = sizeof address;
     if (::getsockname(socket, reinterpret_cast<sockaddr*>(&address), &size) < 0) system_failure("read HTTP listener port");
@@ -115,6 +160,17 @@ std::uint16_t bound_port(int socket) {
     return ntohs(reinterpret_cast<const sockaddr_in*>(&address)->sin_port);
 }
 
+#ifdef _WIN32
+// A connection the peer reset before it was accepted, and a socket that is
+// not ready after all.
+bool retry_accept(int error) {
+    return error == WSAEWOULDBLOCK || error == WSAEINTR || error == WSAECONNRESET || error == WSAECONNABORTED;
+}
+
+platform::native_socket accept_socket(platform::native_socket listener, sockaddr_storage& address, socklen_t& size) {
+    return ::accept(listener, reinterpret_cast<sockaddr*>(&address), &size);
+}
+#else
 bool retry_accept(int error) {
     if (error == EINTR || error == EAGAIN || error == EWOULDBLOCK || error == ECONNABORTED) return true;
 #ifdef __linux__
@@ -133,6 +189,7 @@ int accept_socket(int listener, sockaddr_storage& address, socklen_t& size) {
     return ::accept(listener, reinterpret_cast<sockaddr*>(&address), &size);
 #endif
 }
+#endif
 
 } // namespace
 
@@ -195,6 +252,9 @@ ListenerSet::ListenerSet(std::span<const ListenEndpoint> endpoints, ListenerLimi
     : state_(std::make_unique<State>()) {
     if (endpoints.empty()) throw std::invalid_argument("at least one HTTP listener is required");
     validate_limits(limits);
+#ifdef _WIN32
+    if (const auto error = platform::ensure_sockets()) throw std::system_error(error, "start Winsock");
+#endif
     auto& state = *state_;
     state.limits = limits;
     state.configurations.assign(endpoints.begin(), endpoints.end());
@@ -236,10 +296,17 @@ AcceptResult ListenerSet::accept_until(ConnectionClock::time_point deadline) {
             sockaddr_storage address{};
             socklen_t length = sizeof address;
             Socket accepted(accept_socket(entry.fd, address, length));
+#ifdef _WIN32
+            if (!accepted.valid()) {
+                if (retry_accept(platform::last_socket_error().code)) continue;
+                system_failure("accept HTTP connection");
+            }
+#else
             if (accepted.get() < 0) {
                 if (retry_accept(errno)) continue;
                 system_failure("accept HTTP connection");
             }
+#endif
             state.next = (index + 1) % count;
             if (state.slots->used.load(std::memory_order_relaxed) >= state.limits.connections) {
                 return {AcceptStatus::Refused, std::nullopt};

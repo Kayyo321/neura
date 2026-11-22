@@ -53,6 +53,15 @@ void write_file_text(const fs::path &path, const std::string &text) {
     output << text;
     if (!output) throw std::runtime_error("cannot write " + path.string());
 }
+// The offset in `text` of what is at `offset` in util::normalize_crlf(text)
+// (W08): an offset at the LF of a CR LF pair is the CR's.
+std::size_t unnormalized_offset(std::string_view text, std::size_t offset) {
+    std::size_t at = 0;
+    for (std::size_t normalized = 0; at < text.size() && normalized < offset; ++at)
+        if (text[at] != '\r' || at + 1 >= text.size() || text[at + 1] != '\n')
+            ++normalized;
+    return at;
+}
 
 class Server {
   public:
@@ -715,10 +724,27 @@ class Server {
                                      " could not be searched completely (more than 5000 .nra files, or a directory "
                                      "that could not be read), so a reference could be missed; run 'neura rename' "
                                      "from the project's directory");
+        // The edits apply to the files' bytes: the analysis reads them with
+        // CR LF normalized to LF (W08), so the offsets are mapped back and
+        // the text takes each file's line ending, leaving the rest of the
+        // file as it was.
         std::map<std::string, std::string> contents;
+        std::map<std::string, std::pair<std::string, EditorDocument>> files;
         for (const auto &edit : plan.edits) {
-            if (!contents.contains(edit.span.file)) contents[edit.span.file] = session_.documents.at(edit.span.file).source;
-            contents[edit.span.file].replace(edit.span.offset, edit.span.length, edit.replacement);
+            auto [file, added] = files.try_emplace(edit.span.file);
+            auto &[original, document] = file->second;
+            if (added) {
+                original = file_text(edit.span.file);
+                document.set_text(original, false);
+                if (document.source != session_.documents.at(edit.span.file).source)
+                    throw std::runtime_error("rename: " + edit.span.file + " changed while the rename was planned");
+                contents[edit.span.file] = original;
+            }
+            // The edits of a file come in decreasing order, so the offsets in
+            // the file as read are the offsets in the text edited so far.
+            const auto begin = unnormalized_offset(original, edit.span.offset);
+            const auto end = unnormalized_offset(original, edit.span.offset + edit.span.length);
+            contents[edit.span.file].replace(begin, end - begin, document.editor_text(edit.replacement));
         }
         for (const auto &[target, text] : contents) {
             const auto destination = plan.moved && plan.moved->first == target ? plan.moved->second : target;
@@ -934,7 +960,7 @@ class Server {
             // Full-document edits preserve formatter context even when the
             // requested selection cuts through a declaration or comment.
             return Json::Array{Json{{"range", source_range(doc->source, Span{doc->path, 1, 1, 0, doc->source.size()})},
-                                    {"newText", formatted}}};
+                                    {"newText", doc->editor_text(formatted)}}};
         }
         if (method == "textDocument/rename")
             return rename(*doc, params);
@@ -1145,6 +1171,9 @@ int run_lsp(const std::vector<std::string> &arguments) {
     for (const auto &argument : arguments)
         if (argument != "--stdio")
             throw std::runtime_error("neura lsp accepts only --stdio");
+#ifdef _WIN32
+    require_binary_stdio({0, 1});
+#endif
     std::ios::sync_with_stdio(false);
     std::cin.tie(nullptr);
     return Server{}.run();

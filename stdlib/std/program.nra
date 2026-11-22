@@ -14,7 +14,9 @@ export let Program = module (
     /// OutOfMemory 137 (SIGKILL, as sent by an out-of-memory killer), BusError 138 (SIGBUS), SegmentationFault
     /// 139 (SIGSEGV), CpuTimeExceeded 152 (SIGXCPU), and FileSizeExceeded 153 (SIGXFSZ). Platforms that number
     /// SIGXCPU and SIGXFSZ 30 and 31, such as MIPS, report 158 and 159 for those signals instead. A runtime trap
-    /// ends the run with the status of the variant that names its class.
+    /// ends the run with the status of the variant that names its class. On Windows these statuses are ordinary
+    /// exit codes with the same numbers, and a trap ends the run with them too; a process that an unhandled native
+    /// exception ends exits with its NTSTATUS (such as 0xC0000005) instead of 139.
     export let ExitCode = enum (
         Ok,
         Failure,

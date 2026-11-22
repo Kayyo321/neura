@@ -1,7 +1,13 @@
 # Helpers of the CMake-script lifecycle tests (version.cmake). The scenario
 # suites of the install lifecycle are in scenarios.py.
 #
-# Every child process reads its standard input from /dev/null.
+# Every child process reads its standard input from the null device:
+# /dev/null, or NUL on Windows.
+if(CMAKE_HOST_WIN32)
+    set(lc_null_device NUL)
+else()
+    set(lc_null_device /dev/null)
+endif()
 
 # lc_exec(<prefix> [ENV NAME=value...] [WORKING_DIRECTORY dir] COMMAND args...)
 # Runs the command and sets <prefix>_STATUS, <prefix>_OUT, and <prefix>_ERR.
@@ -14,7 +20,7 @@ function(lc_exec prefix)
     execute_process(
         COMMAND "${CMAKE_COMMAND}" -E env ${ARG_ENV} ${ARG_COMMAND}
         ${directory}
-        INPUT_FILE /dev/null
+        INPUT_FILE "${lc_null_device}"
         RESULT_VARIABLE status
         OUTPUT_VARIABLE out
         ERROR_VARIABLE err)

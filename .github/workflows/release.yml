@@ -46,10 +46,9 @@ jobs:
       - name: Decide the version
         id: plan
         env:
-          REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
         run: |
-          if [ "$REF_TYPE" = tag ]; then
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
             if ! python3 scripts/check-release-tag.py "$REF_NAME" > plan.txt; then
               cat plan.txt
               exit 1
@@ -67,7 +66,6 @@ jobs:
         id: previous
         env:
           GH_TOKEN: ${{ github.token }}
-          REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
           VERSION: ${{ steps.plan.outputs.version }}
         run: |
@@ -75,7 +73,7 @@ jobs:
           # candidate of the same version: it updates from the most recent
           # release of an earlier version, so check 9 runs in a trial as it
           # does for a tag whose previous release is of an earlier version.
-          if [ "$REF_TYPE" = tag ]; then
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
             tag=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 20 --json tagName \
               --jq "[.[].tagName | select(. != \"$REF_NAME\")][0] // \"\"")
           else
@@ -130,6 +128,15 @@ jobs:
             minimum: 174
             exclude: "^(server-sql-postgres|stdlib-crypto-advanced|stdlib-crypto-asymmetric|stdlib-crypto-pqc(-.*)?)$"
             timeout-scale: 12
+          # Windows runs the interpreter. Tests for the deferred server
+          # transports, PostgreSQL and native launcher are not registered,
+          # and the crypto suites are left out as on x86-64 macOS: 321 of the
+          # 327 tests CMake registers on Windows.
+          - triple: x86_64-windows-msvc
+            runner: windows-2022
+            minimum: 321
+            exclude: "^(stdlib-crypto-advanced|stdlib-crypto-asymmetric|stdlib-crypto-pqc(-.*)?)$"
+            timeout-scale: 12
     env:
       NEURA_LIBCLANG_REQUIRED: "1"
       NEURA_USERNS_REQUIRED: "1"
@@ -138,6 +145,11 @@ jobs:
       TRIPLE: ${{ matrix.triple }}
       TIMEOUT_SCALE: ${{ matrix.timeout-scale }}
     steps:
+      - name: Keep LF line endings before checkout
+        if: ${{ runner.os == 'Windows' }}
+        shell: pwsh
+        run: git config --global core.autocrlf false
+
       - name: Check out the repository and its submodule
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -166,7 +178,11 @@ jobs:
           echo "PKG_CONFIG_PATH=$(brew --prefix libffi)/lib/pkgconfig" >> "$GITHUB_ENV"
           echo "JOBS=$(sysctl -n hw.ncpu)" >> "$GITHUB_ENV"
 
-      # The server components that every archive links statically: OpenSSL
+      - name: Select the Windows build environment
+        if: ${{ runner.os == 'Windows' }}
+        uses: ./.github/actions/windows
+
+      # The server components that each POSIX archive links statically: OpenSSL
       # (TLS), nghttp2 (HTTP/2) and libpq (the PostgreSQL provider), built
       # from the sources packaging/server-components.lock.toml pins
       # (docs/runtime/ServerHost.md, "Release archives"). For a tag only the
@@ -174,6 +190,7 @@ jobs:
       # lock's SHA-256 before it builds, so a restored cache cannot change
       # what is linked.
       - name: Restore the server component sources
+        if: ${{ runner.os != 'Windows' }}
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: server-downloads
@@ -187,7 +204,7 @@ jobs:
       # part of the key.
       - name: Name the built server components (trials only)
         id: server-key
-        if: ${{ github.ref_type != 'tag' }}
+        if: ${{ runner.os != 'Windows' && github.event_name == 'workflow_dispatch' }}
         env:
           RECIPE: ${{ hashFiles('packaging/server-components.lock.toml', 'packaging/build-server-components.sh') }}
         run: |
@@ -198,14 +215,14 @@ jobs:
 
       - name: Restore the built server components (trials only)
         id: server-built
-        if: ${{ github.ref_type != 'tag' }}
+        if: ${{ runner.os != 'Windows' && github.event_name == 'workflow_dispatch' }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/server-components
           key: ${{ steps.server-key.outputs.key }}
 
       - name: Build the server components
-        if: ${{ steps.server-built.outputs.cache-hit != 'true' }}
+        if: ${{ runner.os != 'Windows' && steps.server-built.outputs.cache-hit != 'true' }}
         run: |
           sh packaging/build-server-components.sh --downloads server-downloads --jobs "$JOBS" \
             "$RUNNER_TEMP/server-components" 2>&1 | tee server-components.log
@@ -213,16 +230,18 @@ jobs:
       # Saved at once, not at the end of the job, so a trial whose tests
       # fail still leaves the components for the next one.
       - name: Save the built server components (trials only)
-        if: ${{ github.ref_type != 'tag' && steps.server-built.outputs.cache-hit != 'true' }}
+        if: ${{ runner.os != 'Windows' && github.event_name == 'workflow_dispatch' && steps.server-built.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/server-components
           key: ${{ steps.server-key.outputs.key }}
 
       - name: Locate the server components
+        if: ${{ runner.os != 'Windows' }}
         run: echo "SERVER_COMPONENTS=$RUNNER_TEMP/server-components" >> "$GITHUB_ENV"
 
-      - name: Configure
+      - name: Configure (Linux and macOS)
+        if: ${{ runner.os != 'Windows' }}
         run: >
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
           -DNEURA_PORTABLE_RELEASE=ON
@@ -237,11 +256,21 @@ jobs:
           "-DNEURA_SERVER_TEST_OPENSSL=$SERVER_COMPONENTS/openssl/bin/openssl"
           "-DNEURA_TEST_TIMEOUT_SCALE=$TIMEOUT_SCALE"
 
+      - name: Configure (Windows)
+        if: ${{ runner.os == 'Windows' }}
+        shell: pwsh
+        run: >
+          cmake --preset windows-release -B build
+          "-DNEURA_VERSION_PRERELEASE=$env:PRERELEASE"
+          "-DNEURA_BUILD_COMMIT=$env:GITHUB_SHA"
+          "-DNEURA_TEST_TIMEOUT_SCALE=$env:TIMEOUT_SCALE"
+
       # The build must compile against and link the pinned libraries, never a
       # system or Homebrew OpenSSL: FindOpenSSL may take the headers from the
       # pkg-config file of Homebrew's OpenSSL, so the include directory is
       # given too.
       - name: Require the pinned server components
+        if: ${{ runner.os != 'Windows' }}
         run: |
           status=0
           for entry in OPENSSL_SSL_LIBRARY OPENSSL_CRYPTO_LIBRARY OPENSSL_INCLUDE_DIR NEURA_NGHTTP2_LIBRARY; do
@@ -260,6 +289,7 @@ jobs:
       # (docs/Install.md): a verifying connection with no CA file given
       # shows that the runner's system keeps them there.
       - name: Require the default trust anchors to verify a public server
+        if: ${{ runner.os != 'Windows' }}
         run: |
           ls -ld /etc/ssl/cert.pem /etc/ssl/certs 2> /dev/null || true
           echo | "$SERVER_COMPONENTS/openssl/bin/openssl" s_client -connect github.com:443 -servername github.com \
@@ -272,11 +302,17 @@ jobs:
         run: cmake --build build --parallel "$JOBS" 2>&1 | tee build/build.log
 
       - name: Require a build of Neura's sources without compiler warnings
+        if: ${{ runner.os != 'Windows' }}
         run: |
           if grep -F "warning:" build/build.log | grep -v -F "/third_party/"; then
             echo "::error::The build reported the compiler warnings above in Neura's sources."
             exit 1
           fi
+
+      - name: Require an MSVC build without Neura compiler warnings
+        if: ${{ runner.os == 'Windows' }}
+        shell: pwsh
+        run: ./.github/scripts/check-msvc-warnings.ps1 build/build.log
 
       # The install and the checks of what it holds run before the tests and
       # whenever the build succeeded, so a failing or slow test does not hide
@@ -284,8 +320,8 @@ jobs:
       # stage holds the core and the SDK, for the dependency checks below;
       # `cmake --install` without a component leaves the service out
       # (docs/design/Service030.md). Each stage-<component> holds one install
-      # component, which make-archive.sh packs into the three archives of the
-      # target and describes with a manifest (docs/design/Lifecycle030.md).
+      # component, which make-archive.sh packs into the target's archives
+      # and describes with a manifest (docs/design/Lifecycle030.md).
       # stage-service is empty in a build without neurad.
       - name: Install into new prefixes
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
@@ -352,7 +388,7 @@ jobs:
       # OpenSSL are global symbols of the objects; the check covers the C
       # interfaces there.
       - name: Require the server components to stay private
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && runner.os != 'Windows' }}
         run: |
           status=0
           if [ "$RUNNER_OS" = Linux ]; then
@@ -376,12 +412,40 @@ jobs:
           done
           exit "$status"
 
+      - name: Require the documented PE imports, DLL exports and static CRT
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && runner.os == 'Windows' }}
+        run: |
+          python scripts/check-core-closure.py build
+          sh scripts/check-kernels.sh build
+          python scripts/check-windows-binaries.py build --stage stage --service-bin stage-service/bin
+
+      - name: Build and hash the cross-host test images
+        if: ${{ matrix.triple == 'x86_64-linux-gnu' || runner.os == 'Windows' }}
+        run: |
+          tool=stage/bin/neura
+          if [ "$RUNNER_OS" = Windows ]; then tool="$tool.exe"; fi
+          mkdir identity
+          for source in examples/hello-world/hello-world.nra examples/types/class-hooks.nra examples/concurrency/monitor.nra; do
+            "$tool" build --no-source-map "$source" -o "identity/$(basename "$source" .nra).nvr"
+          done
+          # --tag, because without it the Windows sha256sum marks each name
+          # with '*' (binary mode) and the Linux one does not.
+          (cd identity && sha256sum --tag *.nvr) | tee image-sha256.txt
+
+      - name: Upload the cross-host image hashes
+        if: ${{ matrix.triple == 'x86_64-linux-gnu' || runner.os == 'Windows' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image-hashes-${{ matrix.triple }}
+          path: image-sha256.txt
+          if-no-files-found: error
+
       # The archive sizes against rc.3's archive, before the tests: on the
       # slower targets the packing below comes hours later. Only a report;
       # check 14 of packaging/qualify.sh, with its per-target budget, is the
       # gate.
       - name: Report the archive sizes before the tests
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && runner.os != 'Windows' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -412,7 +476,7 @@ jobs:
       # uploaded at once. Neither decides the job: the full suite and the
       # qualify job do.
       - name: Run the earlier trials' red tests (trials only)
-        if: ${{ !cancelled() && steps.build.outcome == 'success' && github.ref_type != 'tag' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && github.event_name == 'workflow_dispatch' && runner.os != 'Windows' }}
         continue-on-error: true
         run: >
           ctest --test-dir build --parallel "$JOBS" --output-on-failure
@@ -420,7 +484,7 @@ jobs:
           2>&1 | tee early/red-tests.txt; test "${PIPESTATUS[0]}" = 0
 
       - name: Qualify the packed archives on this runner (trials only)
-        if: ${{ !cancelled() && steps.build.outcome == 'success' && github.ref_type != 'tag' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && github.event_name == 'workflow_dispatch' && runner.os != 'Windows' }}
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
@@ -438,7 +502,7 @@ jobs:
             2>&1 | tee early/qualify.txt; test "${PIPESTATUS[0]}" = 0
 
       - name: Upload the early evidence (trials only)
-        if: ${{ !cancelled() && steps.build.outcome == 'success' && github.ref_type != 'tag' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && github.event_name == 'workflow_dispatch' && runner.os != 'Windows' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: evidence-early-${{ matrix.triple }}
@@ -463,23 +527,30 @@ jobs:
         if: ${{ !cancelled() }}
         env:
           MINIMUM: ${{ matrix.minimum }}
-        run: python3 scripts/check-test-report.py build/ctest-junit.xml --minimum "$MINIMUM"
+        run: |
+          python=python3
+          if [ "$RUNNER_OS" = Windows ]; then python=python; fi
+          "$python" scripts/check-test-report.py build/ctest-junit.xml --minimum "$MINIMUM"
 
       - name: Require the built version to be the planned one
         run: |
-          reported=$(stage/bin/neura --version)
+          tool=stage/bin/neura
+          if [ "$RUNNER_OS" = Windows ]; then tool="$tool.exe"; fi
+          reported=$("$tool" --version)
           echo "$reported"
           case "$reported" in
             "neura $FULL ($TRIPLE, commit $GITHUB_SHA)") ;;
             *) echo "::error::expected neura $FULL ($TRIPLE, commit $GITHUB_SHA)"; exit 1 ;;
           esac
 
-      # Neura-sdk, Neura-runtime, and the legacy archive that 0.2 updaters
-      # read: the tree of the SDK archive under the 0.2 name.
+      # Neura-sdk, Neura-runtime, and (on POSIX) the legacy archive that 0.2
+      # updaters read: the tree of the SDK archive under the 0.2 name.
       - name: Pack the archives
         run: |
           mkdir dist
-          for product in sdk runtime legacy; do
+          set -- sdk runtime
+          if [ "$RUNNER_OS" != Windows ]; then set -- "$@" legacy; fi
+          for product do
             case "$product" in
               runtime) parts="--service stage-service" ;;
               *) parts="--sdk stage-sdk" ;;
@@ -493,6 +564,7 @@ jobs:
       # stripped size, and each archive's size (the qualify job checks the
       # archives against rc.3's).
       - name: Report the sizes
+        if: ${{ runner.os != 'Windows' }}
         run: |
           mkdir sizes
           for file in $(find stage-core stage-sdk stage-service -type f \( -perm -u+x -o -name '*.so' -o -name '*.dylib' \) | sort); do
@@ -501,6 +573,10 @@ jobs:
             printf '%s %s stripped %s\n' "$file" "$(wc -c < "$file" | tr -d ' ')" "$(wc -c < sizes/item | tr -d ' ')"
           done | tee sizes.txt
           ls -l dist | tee -a sizes.txt
+
+      - name: Report the Windows binary and archive sizes
+        if: ${{ runner.os == 'Windows' }}
+        run: ls -l stage/bin/*.exe stage/bin/*.dll stage-service/bin/*.exe dist/*.tar.gz | tee sizes.txt
 
       - name: Upload the archives
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -524,6 +600,20 @@ jobs:
           if-no-files-found: warn
           retention-days: 90
 
+  image-identity:
+    name: Compare Linux and Windows image hashes
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Download the image hashes
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: image-hashes-*
+          path: identity
+      - name: Require byte-identical images
+        run: diff -u identity/image-hashes-x86_64-linux-gnu/image-sha256.txt identity/image-hashes-x86_64-windows-msvc/image-sha256.txt
+
   qualify:
     name: Qualify the archive (${{ matrix.triple }})
     needs: [plan, build]
@@ -541,11 +631,18 @@ jobs:
             runner: macos-15
           - triple: x86_64-apple-darwin
             runner: macos-15-intel
+          - triple: x86_64-windows-msvc
+            runner: windows-2022
     env:
       FULL: ${{ needs.plan.outputs.full }}
       PREVIOUS: ${{ needs.plan.outputs.previous }}
       TRIPLE: ${{ matrix.triple }}
     steps:
+      - name: Keep LF line endings before checkout
+        if: ${{ runner.os == 'Windows' }}
+        shell: pwsh
+        run: git config --global core.autocrlf false
+
       # Only the qualification script and the examples are used from the
       # checkout. Nothing is built on this runner.
       - name: Check out the repository
@@ -559,12 +656,25 @@ jobs:
           name: archive-${{ matrix.triple }}
           path: dist
 
+      - name: Select Python for Windows qualification
+        if: ${{ runner.os == 'Windows' }}
+        uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+        with:
+          python-version: '3.12'
+
+      - name: Download the same-build Linux archive size references
+        if: ${{ runner.os == 'Windows' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: archive-x86_64-linux-gnu
+          path: reference
+
       # A target that the previous release did not have has nothing to
       # update from, and its upgrade check is reported as not run. A 0.3
       # release has three archives; the upgrade starts from its SDK archive,
       # and from a 0.2 release's only archive.
       - name: Download the previous release's archive
-        if: ${{ env.PREVIOUS != '' }}
+        if: ${{ runner.os != 'Windows' && env.PREVIOUS != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -581,10 +691,28 @@ jobs:
           done
           [ -f previous/chosen ] || echo "$PREVIOUS has no archive for $TRIPLE"
 
+      - name: Download the previous Windows SDK archive when available
+        if: ${{ runner.os == 'Windows' && env.PREVIOUS != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir previous
+          gh release download "$PREVIOUS" --repo "$GITHUB_REPOSITORY" --dir previous --pattern SHA256SUMS
+          file="neura-sdk-${PREVIOUS#v}-$TRIPLE.tar.gz"
+          awk -v file="$file" '$2 == file' previous/SHA256SUMS > previous/expected
+          if [ -s previous/expected ]; then
+            gh release download "$PREVIOUS" --repo "$GITHUB_REPOSITORY" --dir previous --pattern "$file"
+            (cd previous && sha256sum --check expected)
+            echo "$file" > previous/chosen
+          else
+            echo "$PREVIOUS has no archive for $TRIPLE"
+          fi
+
       # The 0.2 bridge (docs/design/Lifecycle030.md): the published 0.2
       # clients update into this release with their own neura update, then
       # migrate. rc.3 is also the size reference of the baseline.
       - name: Download the 0.2 archives for the bridge
+        if: ${{ runner.os != 'Windows' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -596,7 +724,8 @@ jobs:
             (cd "bridge/$tag" && grep -F -- "  $file" SHA256SUMS | shasum -a 256 --check)
           done
 
-      - name: Run the lifecycle checks
+      - name: Run the lifecycle checks (Linux and macOS)
+        if: ${{ runner.os != 'Windows' }}
         run: |
           set -- --archive "dist/neura-$FULL-$TRIPLE.tar.gz" --sdk-archive "dist/neura-sdk-$FULL-$TRIPLE.tar.gz" \
             --runtime-archive "dist/neura-runtime-$FULL-$TRIPLE.tar.gz" --version "$FULL" --triple "$TRIPLE" --examples examples \
@@ -607,12 +736,24 @@ jobs:
           fi
           # A trial builds a -dev version, which may sort before rc.3; a tag
           # must update from both 0.2 clients.
-          if [ "$GITHUB_REF_TYPE" = tag ]; then
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
             set -- "$@" --require-bridge
           fi
           # Every archive links the server components (the build job above).
           set -- "$@" --server-components
           sh packaging/qualify.sh "$@" | tee "qualify-$TRIPLE.txt"
+
+      - name: Run the lifecycle checks (Windows)
+        if: ${{ runner.os == 'Windows' }}
+        run: |
+          set -- --sdk-archive "dist/neura-sdk-$FULL-$TRIPLE.tar.gz" --runtime-archive "dist/neura-runtime-$FULL-$TRIPLE.tar.gz" \
+            --version "$FULL" --triple "$TRIPLE" --examples examples \
+            --size-reference-sdk "reference/neura-sdk-$FULL-x86_64-linux-gnu.tar.gz" \
+            --size-reference-runtime "reference/neura-runtime-$FULL-x86_64-linux-gnu.tar.gz"
+          if [ -f previous/chosen ]; then
+            set -- "$@" --previous "previous/$(cat previous/chosen)" --require-previous
+          fi
+          python packaging/qualify.py "$@" 2>&1 | tee "qualify-$TRIPLE.txt"
 
       - name: Upload the qualification report
         if: ${{ !cancelled() }}
@@ -625,8 +766,8 @@ jobs:
 
   publish:
     name: Publish
-    if: ${{ github.ref_type == 'tag' }}
-    needs: [plan, build, qualify]
+    if: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}
+    needs: [plan, build, qualify, image-identity]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: release
@@ -653,14 +794,12 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Write the checksums and the update metadata
+      - name: Add the install scripts and write the release metadata
         run: |
+          cp packaging/bootstrap.sh dist/install.sh
+          cp packaging/bootstrap.ps1 dist/install.ps1
           sh packaging/make-release-metadata.sh dist "$FULL"
           cat dist/SHA256SUMS dist/neura-release.txt dist/neura-components.txt
-
-      # The one-line install command downloads this script from the release.
-      - name: Add the install script
-        run: cp packaging/bootstrap.sh dist/install.sh
 
       - name: Attest the build provenance of each file
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
@@ -688,13 +827,13 @@ jobs:
           mkdir check
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir check
           (cd check && sha256sum --check SHA256SUMS)
-          for file in check/*.tar.gz; do
+          for file in check/*.tar.gz check/install.sh check/install.ps1; do
             cmp "$file" "dist/$(basename "$file")"
             gh attestation verify "$file" --repo "$GITHUB_REPOSITORY"
           done
+          cmp check/SHA256SUMS dist/SHA256SUMS
           cmp check/neura-release.txt dist/neura-release.txt
           cmp check/neura-components.txt dist/neura-components.txt
-          cmp check/install.sh dist/install.sh
 
       # A published release candidate can be downloaded by anyone, so the
       # documented install command is run against it as a user would. A final
@@ -716,3 +855,30 @@ jobs:
             *) echo "::error::the installed neura is not $FULL built from $GITHUB_SHA"; exit 1 ;;
           esac
           env -i HOME="$home" PATH="$home/.local/bin:/usr/bin:/bin" neura doctor
+
+  install-candidate-windows:
+    name: Install the published candidate (Windows)
+    if: ${{ github.event_name == 'push' && github.ref_type == 'tag' && needs.plan.outputs.prerelease != '' }}
+    needs: [plan, publish]
+    runs-on: windows-2022
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      FULL: ${{ needs.plan.outputs.full }}
+    steps:
+      - name: Install the candidate with the PowerShell command
+        shell: pwsh
+        run: |
+          $env:NEURA_INSTALL_ROOT = Join-Path $env:RUNNER_TEMP 'neura-candidate'
+          $uri = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:GITHUB_REF_NAME/install.ps1"
+          $install = & ([scriptblock]::Create((Invoke-RestMethod $uri))) -Version $env:FULL -NoPathUpdate
+          $install | Write-Output
+          if (-not ($install | Select-String -SimpleMatch 'Verified: build provenance')) {
+            throw 'The installer did not verify the archive attestation'
+          }
+          $neura = Join-Path $env:NEURA_INSTALL_ROOT 'current/bin/neura.exe'
+          $reported = & $neura --version
+          if ($LASTEXITCODE -ne 0 -or $reported -ne "neura $env:FULL (x86_64-windows-msvc, commit $env:GITHUB_SHA)") {
+            throw "Unexpected installed version [$reported]"
+          }
+          & $neura doctor

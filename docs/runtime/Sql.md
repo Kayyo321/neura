@@ -2,6 +2,8 @@
 
 `Std.Data.Sql` reaches SQLite and PostgreSQL through connection pools that live in the host. Under [`neura-server-host`](ServerHost.md) the host owns every connection: a request's worker holds only numbered leases, and when the request ends the host rolls back whatever the request left open and returns its connections to their pools. `neura run` and `neura test` serve the same calls in process with `--sql-pool`, so repository code is tested the way it runs. The contract is the SQL section of [the backend design note](../design/Backend030.md#sql); this page describes what 0.3.0 does.
 
+Windows 0.3.0 includes SQLite. Configuring a PostgreSQL pool reports that the PostgreSQL provider is unavailable on Windows in 0.3.0.
+
 ## A repository
 
 <!-- example: check -->

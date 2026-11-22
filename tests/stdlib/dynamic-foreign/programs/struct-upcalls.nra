@@ -1,0 +1,61 @@
+// run-options: --allow-native
+// args: @NATIVE_DIR@/libmathops.so
+let arenas = import:Std.DynamicForeign.Arena;
+let console = import:Std.Io.Console;
+let descriptors = import:Std.DynamicForeign.FunctionDescriptor;
+let layouts = import:Std.DynamicForeign.ValueLayout;
+let linkers = import:Std.DynamicForeign.Linker;
+let lookups = import:Std.DynamicForeign.SymbolLookup;
+let memory = import:Std.DynamicForeign.MemoryLayout;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let values = import:Std.DynamicForeign.ForeignValue;
+
+// A 24-byte struct travels by reference in the Win64 ABI.
+export let Main = module:program.Entry (
+    let weigh = func(arguments: values.ForeignValue[list]) -> values.ForeignValue {
+        let input = values.as_segment(arguments[0]);
+        let tag = input.get_int8(0) as float64;
+        let count = input.get_int16(16) as float64;
+        return values.ForeignValue.Float64(input.get_float64(8) * count + tag);
+    };
+
+    let grow = func(arguments: values.ForeignValue[list]) -> values.ForeignValue {
+        let input = values.as_segment(arguments[0]);
+        let output = arenas.global().allocate(size: 24, alignment: 8);
+        output.set_int8(0, (input.get_int8(0) + 1) as int8);
+        output.set_float64(8, input.get_float64(8) * 2.0);
+        output.set_int16(16, (input.get_int16(16) * 3) as int16);
+        return values.ForeignValue.Struct(output);
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let arena = arenas.of_confined();
+        let library = result.expect<lookups.SymbolLookup>(lookups.library_lookup(args[0], arena), "load libmathops");
+        let linker = linkers.native_linker();
+        let mixed = memory.struct_layout(layouts.Int8.with_name("tag"), layouts.Float64.with_name("weight"),
+            layouts.Int16.with_name("count"));
+        console.print_line("size " + mixed.byte_size().to_string());
+        let make_mixed = linker.downcall_handle(library.find_or_trap("make_mixed"),
+            descriptors.of(mixed, layouts.Int8, layouts.Float64, layouts.Int16));
+        let c_weight = linker.downcall_handle(library.find_or_trap("mixed_weight"),
+            descriptors.of(layouts.Float64, mixed));
+        let input = values.as_segment(make_mixed.invoke_with(arena, 65, 0.25, 8));
+        console.print_line("c weight " + values.describe(c_weight.invoke(input)));
+
+        let weigh_signature = descriptors.of(layouts.Float64, mixed);
+        let weigh_stub = linker.upcall_stub(weigh, weigh_signature, arena);
+        let weigh_call = linker.downcall_handle(weigh_stub, weigh_signature);
+        console.print_line("upcall weight " + values.describe(weigh_call.invoke(input)));
+
+        let grow_signature = descriptors.of(mixed, mixed);
+        let grow_stub = linker.upcall_stub(grow, grow_signature, arena);
+        let grow_call = linker.downcall_handle(grow_stub, grow_signature);
+        let grown = values.as_segment(grow_call.invoke_with(arena, input));
+        console.println("grown {} {} {}", grown.get_int8(0), grown.get_float64(8), grown.get_int16(16));
+        console.print_line("c weight of grown " + values.describe(c_weight.invoke(grown)));
+        console.println("input unchanged {} {} {}", input.get_int8(0), input.get_float64(8), input.get_int16(16));
+        arena.close();
+        return program.ExitCode.Ok;
+    };
+);

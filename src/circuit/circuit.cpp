@@ -441,8 +441,14 @@ Column split(Circuit& circuit, Signal value, std::int64_t maximum, const std::ve
         return result;
     }
     // One identity neuron sums the column, so each threshold below reads
-    // that wire instead of every partial product.
-    const Circuit::Gadget column = parts ? Circuit::Gadget(circuit, *parts) : Circuit::Gadget(circuit, {&value});
+    // that wire instead of every partial product. The instance is opened by
+    // a function returning it by value, since a conditional of two
+    // noncopyable prvalues is not accepted by every compiler.
+    const auto open_column = [&]() -> Circuit::Gadget {
+        if (parts) return Circuit::Gadget(circuit, *parts);
+        return Circuit::Gadget(circuit, {&value});
+    };
+    const Circuit::Gadget column = open_column();
     value = circuit.compact(value);
     const Circuit::Gadget digits(circuit, {&value}, true);
     const auto bits = static_cast<int>(std::bit_width(static_cast<std::uint64_t>(maximum)));

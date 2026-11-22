@@ -50,3 +50,15 @@ int bump_counter(void) { return ++mathops_counter; }
 void sort_ints(int* values, int count, mathops_compare compare) {
     qsort(values, (size_t)count, sizeof(int), compare);
 }
+
+// Used by the FFI trap fixture. Keep the C import fixture header unchanged.
+typedef struct mathops_short_triple {
+    int16_t first;
+    int16_t second;
+    int16_t third;
+} mathops_short_triple;
+
+void check_zero_short_triple(mathops_short_triple (*callback)(void)) {
+    const mathops_short_triple result = callback();
+    if (result.first != 0 || result.second != 0 || result.third != 0) abort();
+}

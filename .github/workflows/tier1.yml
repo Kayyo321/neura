@@ -199,6 +199,116 @@ jobs:
           fi
           grep -F "part of the Neura-sdk component" build/missing.txt
 
+  # Added provisionally: add these to tier1.needs after the first green
+  # Windows run. Interpreter-only Windows uses the same scale as macOS/arm64.
+  build-and-test-windows:
+    name: Build and test (Windows x86-64)
+    runs-on: windows-2022
+    timeout-minutes: 360
+    steps:
+      - name: Keep LF line endings before checkout
+        shell: pwsh
+        run: git config --global core.autocrlf false
+      - name: Check out the repository and its submodule
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+      - name: Select the Windows build environment
+        uses: ./.github/actions/windows
+      - name: Run the repository checks on Windows
+        run: |
+          python scripts/test-checks.py
+          python scripts/check-workflows.py
+          python scripts/check-docs.py
+          python scripts/check-diagnostics.py
+          python scripts/update-stdlib-wiki-api.py --check
+          python scripts/generate-wiki.py --check
+          python scripts/gen-kernels.py --check
+          python scripts/build-site.py --check
+      - name: Configure
+        run: cmake --preset windows-msvc -DNEURA_TEST_TIMEOUT_SCALE=12
+      - name: Build
+        run: cmake --build --preset windows-msvc --parallel 4 2>&1 | tee build-windows-msvc/build.log
+      - name: Require an MSVC build without Neura compiler warnings
+        shell: pwsh
+        run: ./.github/scripts/check-msvc-warnings.ps1 build-windows-msvc/build.log
+      - name: Check the execution core, kernels and PE layout
+        run: |
+          python scripts/check-core-closure.py build-windows-msvc
+          sh scripts/check-kernels.sh build-windows-msvc
+          python scripts/check-windows-binaries.py build-windows-msvc
+      # Windows has no JIT, and on the interpreter the twelve tests left out
+      # here take most of the suite's time: about 400 of its 494 test-minutes
+      # on arm64 macOS, where stdlib-crypto-asymmetric alone ran for two
+      # hours. Tier 2 and release.yml run them on Windows, all but the crypto
+      # suites that x86-64 macOS also leaves out. This job runs the other 315
+      # of the 327 tests that CMake registers on Windows.
+      - name: Test
+        run: >
+          ctest --test-dir build-windows-msvc --parallel 6 --no-tests=error
+          --output-on-failure --output-junit ctest-junit.xml
+          -E "^(stdlib-crypto-asymmetric|stdlib-crypto-advanced|stdlib-crypto-pqc(-.*)?|stdlib-crypto-token|stdlib-crypto-enclave|stdlib-crypto-pki|stdlib-character|backend-reference|lifetime-programs)$"
+      - name: Require every selected test to have run
+        if: ${{ !cancelled() }}
+        run: python scripts/check-test-report.py build-windows-msvc/ctest-junit.xml --minimum 315
+      - name: Build an image for the runtime-only job
+        run: build-windows-msvc/neura.exe build examples/hello-world/hello-world.nra -o hello-windows.nvr
+      - name: Upload the runtime-only input
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-runtime-input
+          path: hello-windows.nvr
+          if-no-files-found: error
+      - name: Upload the build and test evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tier1-windows
+          path: |
+            build-windows-msvc/build.log
+            build-windows-msvc/ctest-junit.xml
+            build-windows-msvc/Testing/Temporary/LastTest.log
+          if-no-files-found: warn
+          retention-days: 30
+
+  runtime-only-windows:
+    name: Runtime-only build (Windows x86-64)
+    needs: build-and-test-windows
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Keep LF line endings before checkout
+        shell: pwsh
+        run: git config --global core.autocrlf false
+      - name: Check out the repository without its submodule
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Select the Windows build environment
+        uses: ./.github/actions/windows
+      - name: Download the SDK-built image
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: windows-runtime-input
+      - name: Configure without the SDK
+        run: cmake --preset windows-msvc -DNEURA_SDK=OFF -DBUILD_TESTING=OFF
+      - name: Build
+        run: cmake --build --preset windows-msvc --parallel 4 2>&1 | tee build-windows-msvc/build.log
+      - name: Require an MSVC build without Neura compiler warnings
+        shell: pwsh
+        run: ./.github/scripts/check-msvc-warnings.ps1 build-windows-msvc/build.log
+      - name: Check the runtime-only installation
+        run: |
+          python scripts/check-core-closure.py build-windows-msvc
+          cmake --install build-windows-msvc --component core --prefix stage
+          stage/bin/neura.exe --version
+          stage/bin/neura.exe doctor
+          stage/bin/neura.exe run hello-windows.nvr | tee hello.txt
+          grep -Fx 'Hello, World!' hello.txt
+          if stage/bin/neura.exe build x.nra -o x.nvr 2> missing.txt; then exit 1; fi
+          grep -F 'part of the Neura-sdk component' missing.txt
+
   # The one status check that branch rules require. It fails unless every
   # job above succeeded, so a skipped or cancelled job cannot pass for it.
   tier1:
@@ -208,6 +318,8 @@ jobs:
       - repository
       - build-and-test
       - runtime-only
+      - build-and-test-windows
+      - runtime-only-windows
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

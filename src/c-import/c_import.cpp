@@ -23,10 +23,49 @@
 extern char** environ;
 #endif
 
+#ifdef _WIN32
+#include "platform/windows.hpp"
+
+#include <cstddef>
+#include <cwchar>
+#include <fstream>
+#endif
+
 namespace neura {
 namespace {
 
 namespace fs = std::filesystem;
+
+// The text of a path as libclang takes it, and as generated C and Neura
+// source and messages hold it: UTF-8 on every host. On Windows libclang reads
+// file names as UTF-8, while path::string() would use the process code page.
+std::string utf8_text(const fs::path& path) {
+#ifdef _WIN32
+    const auto text = path.u8string();
+    return {reinterpret_cast<const char*>(text.data()), text.size()};
+#else
+    return path.string();
+#endif
+}
+
+// The same in generic form, with '/' separators.
+std::string utf8_generic(const fs::path& path) {
+#ifdef _WIN32
+    const auto text = path.generic_u8string();
+    return {reinterpret_cast<const char*>(text.data()), text.size()};
+#else
+    return path.generic_string();
+#endif
+}
+
+// A path from UTF-8 text, such as a file name libclang reports.
+fs::path utf8_path(const std::string& text) {
+#ifdef _WIN32
+    return fs::path(std::u8string(text.begin(), text.end()));
+#else
+    return fs::path(text);
+#endif
+}
 
 // Names a Neura program cannot use for a declaration: the keywords and the
 // built-in type names. A C name that collides gets a trailing underscore.
@@ -50,10 +89,18 @@ NeuraLibclang& libclang(const CImportOptions& options, const Span& site) {
     auto library = std::make_unique<NeuraLibclang>();
     if (!neura_libclang_load(library.get(), options.libclang.empty() ? nullptr : options.libclang.c_str())) {
         failure = library->error;
+#ifdef _WIN32
+        throw Diagnostic(site, "C imports need libclang, which could not be loaded: " + failure +
+                                   "; install LLVM (winget install LLVM.LLVM) or the C++ Clang tools of Visual "
+                                   "Studio, or name libclang.dll with --libclang or the NEURA_LIBCLANG "
+                                   "environment variable")
+            .with_code("E0708");
+#else
         throw Diagnostic(site, "C imports need libclang, which could not be loaded: " + failure +
                                    "; install libclang (for example the libclang1-19 package), or name the "
                                    "library with --libclang or the NEURA_LIBCLANG environment variable")
             .with_code("E0708");
+#endif
     }
     loaded = std::move(library);
     return *loaded;
@@ -128,10 +175,249 @@ fs::path macos_sdk() {
 }
 #endif
 
+#ifdef _WIN32
+// The value of an environment variable, read from the UTF-16 environment;
+// empty when it is not set.
+std::wstring environment_value(const wchar_t* name) {
+    const wchar_t* value = ::_wgetenv(name);
+    return value != nullptr ? std::wstring(value) : std::wstring{};
+}
+
+// Whether a directory names a fixed location: a drive root (C:\ or C:/) or a
+// UNC path. A relative entry, or a drive-relative one such as C:include,
+// would depend on the current directory.
+bool fixed_directory(const std::wstring& text) {
+    const auto separator = [](wchar_t c) { return c == L'\\' || c == L'/'; };
+    if (text.size() >= 2 && separator(text[0]) && separator(text[1])) return true;
+    const bool drive = text.size() >= 3 && ((text[0] >= L'A' && text[0] <= L'Z') || (text[0] >= L'a' && text[0] <= L'z'));
+    return drive && text[1] == L':' && separator(text[2]);
+}
+
+// The directories of a list such as INCLUDE: separated by ';', surrounding
+// quotes removed, empty and relative entries left out.
+void append_directory_list(std::vector<fs::path>& directories, const std::wstring& list) {
+    std::size_t start = 0;
+    while (start <= list.size()) {
+        const auto end = std::min(list.find(L';', start), list.size());
+        auto entry = list.substr(start, end - start);
+        if (entry.size() >= 2 && entry.front() == L'"' && entry.back() == L'"') entry = entry.substr(1, entry.size() - 2);
+        if (fixed_directory(entry)) directories.emplace_back(entry);
+        start = end + 1;
+    }
+}
+
+// The first line `vswhere` prints for `arguments`, run without a shell and
+// without a window, with only its output pipe and NUL inherited; empty when
+// vswhere is missing, fails, prints nothing or more than 64 KiB, or runs for
+// longer than 30 seconds (it is then ended), so that a vswhere that hangs,
+// as during an update of the Visual Studio installer, cannot hang an import.
+// vswhere is installed with Visual Studio 2017 and later at
+// %ProgramFiles(x86)%\Microsoft Visual Studio\Installer.
+//
+// This is raw Win32 rather than platform::run_capture because neura_compiler
+// does not link neura_platform.
+std::wstring vswhere(const std::wstring& arguments) {
+    constexpr ULONGLONG timeout_ms = 30000;
+    constexpr std::size_t cap = 65536;
+    const auto root = environment_value(L"ProgramFiles(x86)");
+    std::error_code ignored;
+    if (!fixed_directory(root)) return {};
+    const auto program = fs::path(root) / L"Microsoft Visual Studio" / L"Installer" / L"vswhere.exe";
+    if (!fs::is_regular_file(program, ignored)) return {};
+    std::wstring command = L"\"" + program.native() + L"\" " + arguments;
+
+    SECURITY_ATTRIBUTES inheritable{sizeof inheritable, nullptr, TRUE};
+    HANDLE read_end = nullptr;
+    HANDLE write_end = nullptr;
+    if (!::CreatePipe(&read_end, &write_end, &inheritable, 0)) return {};
+    ::SetHandleInformation(read_end, HANDLE_FLAG_INHERIT, 0);
+    HANDLE null = ::CreateFileW(L"NUL", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &inheritable,
+                                OPEN_EXISTING, 0, nullptr);
+    PROCESS_INFORMATION process{};
+    BOOL started = FALSE;
+    SIZE_T size = 0;
+    ::InitializeProcThreadAttributeList(nullptr, 1, 0, &size);
+    std::vector<std::byte> storage(size);
+    const auto attributes = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(storage.data());
+    if (null != INVALID_HANDLE_VALUE && size > 0 && ::InitializeProcThreadAttributeList(attributes, 1, 0, &size)) {
+        HANDLE inherited[] = {write_end, null};
+        if (::UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited, sizeof inherited,
+                                        nullptr, nullptr)) {
+            STARTUPINFOEXW startup{};
+            startup.StartupInfo.cb = sizeof startup;
+            startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+            startup.StartupInfo.hStdInput = null;
+            startup.StartupInfo.hStdOutput = write_end;
+            startup.StartupInfo.hStdError = null;
+            startup.lpAttributeList = attributes;
+            started = ::CreateProcessW(program.c_str(), command.data(), nullptr, nullptr, TRUE,
+                                       EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW, nullptr, nullptr,
+                                       &startup.StartupInfo, &process);
+        }
+        ::DeleteProcThreadAttributeList(attributes);
+    }
+    // Only the child holds the write end now.
+    ::CloseHandle(write_end);
+    if (null != INVALID_HANDLE_VALUE) ::CloseHandle(null);
+    std::string output;
+    DWORD status = 1;
+    if (started) {
+        // Drain the pipe while waiting, so that vswhere never blocks on a full
+        // pipe, and read only what PeekNamedPipe reports, so that no read
+        // blocks past the deadline. The pipe is drained once more after the
+        // exit; then PeekNamedPipe fails with ERROR_BROKEN_PIPE.
+        const auto deadline = ::GetTickCount64() + timeout_ms;
+        bool exited = false;
+        bool failed = false;
+        for (;;) {
+            DWORD available = 0;
+            if (!::PeekNamedPipe(read_end, nullptr, 0, nullptr, &available, nullptr)) available = 0;
+            if (available > 0) {
+                char buffer[512];
+                DWORD count = 0;
+                if (!::ReadFile(read_end, buffer, std::min<DWORD>(available, sizeof buffer), &count, nullptr)) {
+                    failed = true;
+                    break;
+                }
+                if (output.size() + count > cap) {
+                    failed = true;
+                    break;
+                }
+                output.append(buffer, count);
+                continue;
+            }
+            if (exited) break;
+            const auto now = ::GetTickCount64();
+            if (now >= deadline) {
+                failed = true;
+                break;
+            }
+            exited = ::WaitForSingleObject(process.hProcess, static_cast<DWORD>(std::min<ULONGLONG>(deadline - now, 20))) ==
+                     WAIT_OBJECT_0;
+        }
+        if (!exited) {
+            ::TerminateProcess(process.hProcess, 1);
+            ::WaitForSingleObject(process.hProcess, 5000);
+        } else if (!failed) {
+            ::GetExitCodeProcess(process.hProcess, &status);
+        }
+        ::CloseHandle(process.hThread);
+        ::CloseHandle(process.hProcess);
+    }
+    ::CloseHandle(read_end);
+    if (status != 0) return {};
+    output.resize(std::min(output.find_first_of("\r\n"), output.size()));
+    const int length = ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, output.data(),
+                                             static_cast<int>(output.size()), nullptr, 0);
+    if (length <= 0) return {};
+    std::wstring line(static_cast<std::size_t>(length), L'\0');
+    ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, output.data(), static_cast<int>(output.size()), line.data(),
+                          length);
+    return line;
+}
+
+// The C headers of the MSVC tools: the default tools version of the newest
+// Visual Studio 2017 or later that has them.
+std::vector<fs::path> msvc_include_directories() {
+    const auto installation =
+        vswhere(L"-latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 "
+                L"-property installationPath -utf8");
+    if (!fixed_directory(installation)) return {};
+    const fs::path vc = fs::path(installation) / L"VC";
+    std::ifstream file(vc / L"Auxiliary" / L"Build" / L"Microsoft.VCToolsVersion.default.txt", std::ios::binary);
+    std::string version;
+    std::getline(file, version);
+    while (!version.empty() && (version.back() == '\r' || version.back() == ' ' || version.back() == '\t'))
+        version.pop_back();
+    if (version.empty() || version.find_first_not_of("0123456789.") != std::string::npos) return {};
+    const auto include = vc / L"Tools" / L"MSVC" / fs::path(version) / L"include";
+    std::error_code ignored;
+    if (!fs::is_directory(include, ignored)) return {};
+    return {include};
+}
+
+// The numbers of a version such as 10.0.26100.0, or nothing for another name.
+std::optional<std::vector<unsigned long>> version_numbers(const std::wstring& name) {
+    std::vector<unsigned long> numbers;
+    std::size_t start = 0;
+    while (start <= name.size()) {
+        const auto end = std::min(name.find(L'.', start), name.size());
+        if (end == start || end - start > 9) return std::nullopt;
+        unsigned long number = 0;
+        for (auto i = start; i < end; ++i) {
+            if (name[i] < L'0' || name[i] > L'9') return std::nullopt;
+            number = number * 10 + static_cast<unsigned long>(name[i] - L'0');
+        }
+        numbers.push_back(number);
+        start = end + 1;
+    }
+    return numbers;
+}
+
+// The C headers of the newest Windows 10 or 11 SDK that has the Universal C
+// Runtime's (ucrt), from the installation root the SDK records in the
+// registry: its ucrt, shared, um, winrt, and cppwinrt directories.
+std::vector<fs::path> windows_sdk_include_directories() {
+    wchar_t root[1024];
+    DWORD size = sizeof root;
+    if (::RegGetValueW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows Kits\\Installed Roots", L"KitsRoot10",
+                       RRF_RT_REG_SZ, nullptr, root, &size) != ERROR_SUCCESS ||
+        !fixed_directory(root))
+        return {};
+    std::error_code error;
+    std::optional<std::vector<unsigned long>> newest;
+    fs::path chosen;
+    for (auto entry = fs::directory_iterator(fs::path(root) / L"Include", error);
+         !error && entry != fs::directory_iterator(); entry.increment(error)) {
+        const auto numbers = version_numbers(entry->path().filename().native());
+        std::error_code ignored;
+        if (!numbers || numbers->front() != 10 || !fs::is_regular_file(entry->path() / L"ucrt" / L"stdlib.h", ignored))
+            continue;
+        if (!newest || *numbers > *newest) {
+            newest = numbers;
+            chosen = entry->path();
+        }
+    }
+    std::vector<fs::path> directories;
+    if (chosen.empty()) return directories;
+    for (const auto* name : {L"ucrt", L"shared", L"um", L"winrt", L"cppwinrt"}) {
+        std::error_code ignored;
+        if (fs::is_directory(chosen / name, ignored)) directories.push_back(chosen / name);
+    }
+    return directories;
+}
+#endif
+
 // libclang finds its builtin headers (stddef.h, stdarg.h) relative to where it
 // is installed; Debian's layout needs the directory named.
 std::string clang_resource_dir(const NeuraLibclang& lib) {
     const auto major = std::to_string(lib.major);
+#ifdef _WIN32
+    // An LLVM or Visual Studio installation keeps libclang.dll in bin and the
+    // builtin headers in lib\clang\<version>, which LLVM 16 and later name by
+    // the major version and older releases by the full one (15.0.7). Take the
+    // directory of the major version, else the highest of that major version
+    // (of any, when the version is unknown) that has the headers.
+    if (lib.path[0] == '\0') return {};
+    const auto clang = utf8_path(lib.path).parent_path().parent_path() / L"lib" / L"clang";
+    std::error_code ignored;
+    if (lib.major != 0 && fs::exists(clang / major / L"include" / L"stddef.h", ignored)) return utf8_text(clang / major);
+    std::optional<std::vector<unsigned long>> newest;
+    fs::path chosen;
+    std::error_code error;
+    for (auto entry = fs::directory_iterator(clang, error); !error && entry != fs::directory_iterator();
+         entry.increment(error)) {
+        const auto numbers = version_numbers(entry->path().filename().native());
+        if (!numbers || (lib.major != 0 && numbers->front() != static_cast<unsigned long>(lib.major)) ||
+            !fs::exists(entry->path() / L"include" / L"stddef.h", ignored))
+            continue;
+        if (!newest || *numbers > *newest) {
+            newest = numbers;
+            chosen = entry->path();
+        }
+    }
+    return chosen.empty() ? std::string{} : utf8_text(chosen);
+#else
     std::vector<fs::path> candidates{fs::path("/usr/lib/llvm-" + major) / "lib/clang" / major,
                                      fs::path("/usr/lib/clang") / major, fs::path("/usr/local/lib/clang") / major};
     if (lib.path[0] != '\0') candidates.push_back(fs::path(lib.path).parent_path() / "clang" / major);
@@ -156,7 +442,53 @@ std::string clang_resource_dir(const NeuraLibclang& lib) {
     }
 #endif
     return {};
+#endif
 }
+
+// Whether `text` ends with `suffix`, which is not longer. Windows file names
+// do not depend on case, so there ASCII letters compare without it.
+bool same_suffix(const std::string& text, const std::string& suffix) {
+    const auto start = text.size() - suffix.size();
+#ifdef _WIN32
+    const auto lower = [](char c) { return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c; };
+    for (std::size_t i = 0; i < suffix.size(); ++i)
+        if (lower(text[start + i]) != lower(suffix[i])) return false;
+    return true;
+#else
+    return text.compare(start, suffix.size(), suffix) == 0;
+#endif
+}
+
+// Whether an included file named `name` can hold declarations of the public
+// header that includes it (ForeignInterop.md, C imports): its name begins
+// with an underscore, as in Apple's and glibc's C libraries. On Windows a name
+// that begins with corecrt_ or vcruntime_ counts too: the Universal C Runtime
+// keeps the declarations of stdlib.h, stdio.h, string.h and the other
+// standard headers in such files (corecrt_malloc.h, corecrt_search.h,
+// corecrt_wstdio.h), and the Visual C++ runtime those of string.h's memory
+// and search functions, memcpy, memset and strchr among them, in
+// vcruntime_string.h. corecrt.h and vcruntime.h themselves, which every one
+// of these headers includes, do not count.
+bool declaration_file(const std::string& name) {
+#ifdef _WIN32
+    const auto lower = [](char c) { return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c; };
+    for (const std::string_view prefix : {std::string_view("corecrt_"), std::string_view("vcruntime_")})
+        if (name.size() > prefix.size() &&
+            std::equal(prefix.begin(), prefix.end(), name.begin(), [&](char a, char b) { return a == lower(b); }))
+            return true;
+#endif
+    return name.rfind('_', 0) == 0;
+}
+
+#ifdef _WIN32
+// Whether `file`, a file name libclang reports, is a header of the Universal
+// C Runtime: one in a ucrt directory among the system header directories.
+bool ucrt_file(const std::string& file) {
+    if (file.empty()) return false;
+    const auto directory = utf8_path(file).parent_path();
+    return ::_wcsicmp(directory.filename().c_str(), L"ucrt") == 0 && is_system_header_directory(directory);
+}
+#endif
 
 class Importer {
 public:
@@ -168,7 +500,7 @@ public:
     CImportResult run() {
         arguments_ = {"-x", "c", "-std=gnu11"};
         if (!is_system_header_directory(header_.parent_path()))
-            arguments_.push_back("-I" + header_.parent_path().string());
+            arguments_.push_back("-I" + utf8_text(header_.parent_path()));
         for (const auto& dir : options_.include_dirs) arguments_.push_back("-I" + dir);
         for (const auto& define : options_.defines) arguments_.push_back("-D" + define);
         if (const auto resource = resource_dir(); !resource.empty()) {
@@ -182,8 +514,21 @@ public:
             arguments_.push_back(sdk.string());
         }
 #endif
+#ifdef _WIN32
+        // The headers of the MSVC tools and the Windows SDK are read from the
+        // directories the header search used (system_header_directories),
+        // after libclang's builtin headers, rather than from those libclang
+        // would find on its own.
+        if (const auto system = system_header_directories(); !system.empty()) {
+            arguments_.push_back("-nostdlibinc");
+            for (const auto& directory : system) {
+                arguments_.push_back("-idirafter");
+                arguments_.push_back(utf8_text(directory));
+            }
+        }
+#endif
         index_ = lib_.clang_createIndex(0, 0);
-        unit_ = parse(header_.string(), nullptr);
+        unit_ = parse(utf8_text(header_), nullptr);
         const auto root = lib_.clang_getTranslationUnitCursor(unit_);
         // The #include directives, which say what files hold this header's declarations.
         visit(root, [&](CXCursor cursor) {
@@ -276,23 +621,22 @@ private:
     bool is_header_file(const std::string& file, std::set<std::string>& visiting) {
         if (const auto known = header_files_.find(file); known != header_files_.end()) return known->second;
         std::error_code ignored;
+        const auto path = utf8_path(file);
         // The same file under another spelling counts, such as through a
         // symbolic link in an SDK path.
-        if (fs::weakly_canonical(file, ignored) == fs::weakly_canonical(header_, ignored) ||
-            fs::equivalent(file, header_, ignored))
+        if (fs::weakly_canonical(path, ignored) == fs::weakly_canonical(header_, ignored) ||
+            fs::equivalent(path, header_, ignored))
             return header_files_[file] = true;
-        const fs::path path(file);
-        if (path.filename().string().rfind('_', 0) != 0) return header_files_[file] = false;
+        if (!declaration_file(utf8_text(path.filename()))) return header_files_[file] = false;
         if (!visiting.insert(file).second) return false;
-        const auto text_path = path.generic_string();
+        const auto text_path = utf8_generic(path);
         bool found = false;
         for (const auto& [includer, spelled] : inclusions_) {
             fs::path tail;
-            for (const auto& part : fs::path(spelled).lexically_normal())
+            for (const auto& part : utf8_path(spelled).lexically_normal())
                 if (part != ".." && part != ".") tail /= part;
-            const auto wanted = "/" + tail.generic_string();
-            if (tail.empty() || text_path.size() < wanted.size() ||
-                text_path.compare(text_path.size() - wanted.size(), wanted.size(), wanted) != 0)
+            const auto wanted = "/" + utf8_generic(tail);
+            if (tail.empty() || text_path.size() < wanted.size() || !same_suffix(text_path, wanted))
                 continue;
             if (is_header_file(includer, visiting)) {
                 found = true;
@@ -331,7 +675,7 @@ private:
                                                             static_cast<int>(argv.size()), unsaved, unsaved ? 1 : 0,
                                                             NEURA_LIBCLANG_HEADER_PARSE_OPTIONS, &unit);
         if (error != CXError_Success || unit == nullptr)
-            throw Diagnostic(site_, "cannot parse C header " + header_.string()).with_code("E0708");
+            throw Diagnostic(site_, "cannot parse C header " + utf8_text(header_)).with_code("E0708");
         if (report) {
             for (unsigned i = 0; i < lib_.clang_getNumDiagnostics(unit); ++i) {
                 auto diagnostic = lib_.clang_getDiagnostic(unit, i);
@@ -390,8 +734,14 @@ private:
         case CXType_Short:
         case CXType_Int:
         case CXType_Long:
-        case CXType_LongLong:
+        case CXType_LongLong: return integer(canonical, true);
+        // wchar_t is an unsigned 16-bit type on Windows (ForeignInterop.md,
+        // C imports); a signed one elsewhere.
+#ifdef _WIN32
+        case CXType_WChar: return integer(canonical, false);
+#else
         case CXType_WChar: return integer(canonical, true);
+#endif
         case CXType_Char_U:
         case CXType_UChar:
         case CXType_UShort:
@@ -668,8 +1018,8 @@ private:
                 const auto where = file_of(cursor);
                 if (!where.empty())
                     elsewhere_.emplace(neura_name(text(lib_.clang_getCursorSpelling(cursor))),
-                                       "declared in " + fs::path(where).filename().generic_string() +
-                                           ", not in the imported header " + header_.filename().generic_string());
+                                       "declared in " + utf8_generic(utf8_path(where).filename()) +
+                                           ", not in the imported header " + utf8_generic(header_.filename()));
             }
             return;
         }
@@ -799,6 +1149,16 @@ private:
         std::string target = c_name;
         if (lib_.clang_Cursor_isFunctionInlined(cursor)) {
             if (variadic) {
+#ifdef _WIN32
+                // The Universal C Runtime defines printf, scanf and the rest
+                // of their families inline in its headers, and ucrtbase.dll
+                // does not export them.
+                if (ucrt_file(file_of(cursor))) {
+                    unsupported_.emplace(name, "a variadic inline function of the Universal C Runtime, which does "
+                                               "not export it; use Std.Io");
+                    return;
+                }
+#endif
                 unsupported_.emplace(name, "a variadic inline function");
                 return;
             }
@@ -910,10 +1270,10 @@ private:
         if (macro_names_.empty()) return;
         // Evaluate each object-like macro as the initializer of a variable in
         // a translation unit that includes the header.
-        std::string source = "#include \"" + fs::absolute(header_).generic_string() + "\"\n";
+        std::string source = "#include \"" + utf8_generic(fs::absolute(header_)) + "\"\n";
         for (const auto& name : macro_names_)
             source += "static const __auto_type neura_macro_" + name + " = (" + name + ");\n";
-        const std::string file = (header_.parent_path() / "neura-macros.c").string();
+        const std::string file = utf8_text(header_.parent_path() / "neura-macros.c");
         CXUnsavedFile unsaved{file.c_str(), source.c_str(), static_cast<unsigned long>(source.size())};
         auto unit = parse(file, &unsaved, false);
         std::map<std::string, CXCursor> variables;
@@ -1053,12 +1413,12 @@ private:
         CImportResult result;
         result.module_name = module_name_;
         if (!shim_.str().empty())
-            result.shim = "#include \"" + fs::absolute(header_).generic_string() + "\"\n" + shim_.str();
+            result.shim = "#include \"" + utf8_generic(fs::absolute(header_)) + "\"\n" + shim_.str();
         result.unsupported = unsupported_;
         result.symbols.assign(symbols_.begin(), symbols_.end());
         const bool embedded = linked_ || !result.shim.empty();
         std::ostringstream out;
-        out << "// Generated by neura from the C header " << header_.filename().generic_string() << ". Do not edit.\n";
+        out << "// Generated by neura from the C header " << utf8_generic(header_.filename()) << ". Do not edit.\n";
         for (const auto& [name, reason] : unsupported_) out << "// Not imported: " << name << ": " << reason << "\n";
         out << "let c_arena = import:Std.DynamicForeign.Arena;\n"
                "let c_descriptor = import:Std.DynamicForeign.FunctionDescriptor;\n"
@@ -1072,7 +1432,7 @@ private:
                "let c_value = import:Std.DynamicForeign.ForeignValue;\n"
                "let c_value_layout = import:Std.DynamicForeign.ValueLayout;\n"
                "let c_variadic = import:Std.Core.Variadic;\n\n";
-        out << "/// @brief The declarations of the C header " << header_.filename().generic_string()
+        out << "/// @brief The declarations of the C header " << utf8_generic(header_.filename())
             << " (ForeignInterop.md, C imports). Calls need the native capability.\n";
         out << "export let " << module_name_ << " = module (\n";
         out << "    let neura_lookup: c_lookup.SymbolLookup = nil;\n";
@@ -1127,6 +1487,23 @@ std::vector<std::filesystem::path> system_header_directories() {
     std::vector<fs::path> directories{"/usr/local/include"};
     if (const auto sdk = macos_sdk(); !sdk.empty()) directories.push_back(sdk / "usr/include");
     return directories;
+#elif defined(_WIN32)
+    // The C headers of the MSVC tools and the Windows SDK, found once per
+    // process. A developer environment of Visual Studio names them in
+    // INCLUDE (and EXTERNAL_INCLUDE), which clang honors too; without it they
+    // are found as clang finds them.
+    static const std::vector<fs::path> directories = [] {
+        std::vector<fs::path> found;
+        append_directory_list(found, environment_value(L"INCLUDE"));
+        if (!found.empty()) {
+            append_directory_list(found, environment_value(L"EXTERNAL_INCLUDE"));
+            return found;
+        }
+        found = msvc_include_directories();
+        for (auto& directory : windows_sdk_include_directories()) found.push_back(std::move(directory));
+        return found;
+    }();
+    return directories;
 #else
     return {"/usr/local/include", "/usr/include/x86_64-linux-gnu", "/usr/include/aarch64-linux-gnu", "/usr/include"};
 #endif
@@ -1140,6 +1517,14 @@ bool is_system_header_directory(const std::filesystem::path& directory) {
     const auto canonical = fs::weakly_canonical(directory, ignored);
     for (const auto& system : system_header_directories())
         if (canonical == fs::weakly_canonical(system, ignored)) return true;
+#elif defined(_WIN32)
+    // The header search found the header there, and the import names the
+    // directory with -idirafter. Compared as files, so that the case of a
+    // name and the spelling of the separators do not matter.
+    for (const auto& system : system_header_directories()) {
+        std::error_code ignored;
+        if (fs::equivalent(directory, system, ignored)) return true;
+    }
 #else
     (void)directory;
 #endif

@@ -17,12 +17,15 @@ let.promote _ = import:Std.Core.Result;
 ///   but a TCP listener or UDP socket, `SO_REUSEADDR` on a Unix socket, broadcast on anything but UDP;
 /// - the user timeout negative, not whole milliseconds, or above 2,147,483,647 milliseconds;
 /// - a keepalive timer without keepalive enabled; the idle time or interval not whole seconds or outside 1
-///   through 32,767 seconds, the probe count outside 1 through 127 (the limits of Linux `tcp(7)`);
+///   through 32,767 seconds, the probe count outside 1 through 127 (the limits of Linux `tcp(7)`, checked on
+///   every host);
 /// - a fast-open queue length or buffer size below 1.
 ///
 /// Applying the set calls the host's option service once per option in option-number order. An option the
 /// platform lacks fails with Unsupported; an empty set needs no host call. The operating system may adjust a value (Linux doubles buffer
-/// sizes).
+/// sizes). On Windows, `reuse_address` gives the semantics of `SO_EXCLUSIVEADDRUSE`, because `SO_REUSEADDR` there
+/// lets another socket take over a bound port, and `reuse_port`, `user_timeout` and multipath fail with
+/// Unsupported; the others set the Windows option of the same name.
 /// @see [Std.Net.Socket.SocketOptions](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-SocketOptions)
 #Since("0.3.0")
 export let SocketOptions = module (
@@ -158,12 +161,13 @@ export let SocketOptions = module (
             }
         };
 
-        /// @brief `SO_REUSEADDR`.
+        /// @brief `SO_REUSEADDR` (on Windows, the semantics of `SO_EXCLUSIVEADDRUSE`).
         export let set_reuse_address = func(enabled: bool) {
             put(1, flag(enabled));
         };
 
-        /// @brief `SO_REUSEPORT`: several sockets bind the same port and the kernel spreads the load.
+        /// @brief `SO_REUSEPORT`: several sockets bind the same port and the kernel spreads the load. Unsupported
+        /// on Windows.
         export let set_reuse_port = func(enabled: bool) {
             put(2, flag(enabled));
         };
@@ -179,7 +183,7 @@ export let SocketOptions = module (
         };
 
         /// @brief `TCP_USER_TIMEOUT`: how long sent data may stay unacknowledged before the connection is
-        /// dropped; zero keeps the system default.
+        /// dropped; zero keeps the system default. Unsupported on Windows.
         export let set_user_timeout = func(timeout: Duration) {
             put(5, timeout.to_nanos());
         };
@@ -219,7 +223,8 @@ export let SocketOptions = module (
             put(12, flag(enabled));
         };
 
-        /// @brief Creates the socket with Multipath TCP (`IPPROTO_MPTCP`, Linux 5.6 and later).
+        /// @brief Creates the socket with Multipath TCP (`IPPROTO_MPTCP`, Linux 5.6 and later; Unsupported on
+        /// Windows).
         export let set_multipath = func(enabled: bool) {
             put(MultipathSlot, flag(enabled));
         };

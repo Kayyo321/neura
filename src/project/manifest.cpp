@@ -144,7 +144,27 @@ ProjectIdentity read_identity(const TomlTable& table) {
     return info;
 }
 
-// Compare as slash-separated paths independently of the build host's rules.
+// Why a path component cannot name the same file on every host, or nothing.
+// These are the rules of bundle file paths: Windows reads ':' as the start of
+// a stream name, opens a device for a reserved name with any extension, and
+// drops a trailing dot or space.
+std::optional<std::string> unportable(std::string_view part) {
+    if (part.find(':') != std::string_view::npos) return "contains ':', which Windows reads as a stream name";
+    if (part.ends_with('.') || part.ends_with(' ')) return "ends with a dot or a space, which Windows removes";
+    std::string stem(part.substr(0, part.find('.')));
+    for (auto& c : stem) {
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    }
+    const bool numbered = stem.size() == 4 && (stem.starts_with("com") || stem.starts_with("lpt")) && stem.back() >= '1' &&
+                          stem.back() <= '9';
+    if (numbered || stem == "con" || stem == "prn" || stem == "aux" || stem == "nul") {
+        return "is a device name that Windows reserves";
+    }
+    return std::nullopt;
+}
+
+// Compare as slash-separated paths independently of the build host's rules,
+// and accept only names that every host can create.
 Text local_path(Text path, bool outside = false) {
     const std::string_view value = path.value;
     const bool drive = value.size() >= 2 && letter(value[0]) && value[1] == ':';
@@ -161,6 +181,9 @@ Text local_path(Text path, bool outside = false) {
             if (depth == 0) escapes = true;
             else --depth;
         } else if (!part.empty() && part != ".") {
+            if (const auto reason = unportable(part)) {
+                throw Diagnostic(path.span, "path component '" + std::string(part) + "' " + *reason).with_code("E1025");
+            }
             ++depth;
         }
     }
@@ -401,8 +424,8 @@ WebSettings read_web(const TomlDocument& doc, const TomlTable& table) {
     WebSettings web;
     web.styles = paths(table, "styles");
     if (const auto value = text(table, "routing")) {
-        if (value->value == "hash") web.routing = Located{Routing::Hash, value->span};
-        else if (value->value == "history") web.routing = Located{Routing::History, value->span};
+        if (value->value == "hash") web.routing = Located<Routing>{Routing::Hash, value->span};
+        else if (value->value == "history") web.routing = Located<Routing>{Routing::History, value->span};
         else malformed(value->span, "routing must be 'hash' or 'history'");
     }
     web.origins = read_origins(doc, find(table, "origins"));
@@ -424,8 +447,8 @@ Named<SqlPool> read_sql(const TomlDocument& doc, const TomlEntry* entry) {
         keys(table, {"provider", "migrations", "migrate"});
         SqlPool pool{as_text(required(table, "provider")), path(table, "migrations"), std::nullopt};
         if (const auto mode = text(table, "migrate")) {
-            if (mode->value == "manual") pool.migrate = Located{MigrationMode::Manual, mode->span};
-            else if (mode->value == "on_start") pool.migrate = Located{MigrationMode::OnStart, mode->span};
+            if (mode->value == "manual") pool.migrate = Located<MigrationMode>{MigrationMode::Manual, mode->span};
+            else if (mode->value == "on_start") pool.migrate = Located<MigrationMode>{MigrationMode::OnStart, mode->span};
             else malformed(mode->span, "migration mode must be 'manual' or 'on_start'");
         }
         result.emplace(name, std::move(pool));

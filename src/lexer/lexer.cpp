@@ -447,14 +447,16 @@ private:
         const std::string text(source_.substr(before, invalid.length));
         auto error = Diagnostic(invalid, "invalid source character").with_code("E0101")
             .label(name + " is not valid here");
-        // Typographic quotes, as a word processor writes them.
-        if (text == "\u201C" || text == "\u201D")
+        // Typographic quotes, as a word processor writes them. The characters
+        // are spelled as their UTF-8 bytes, so that the comparisons do not
+        // depend on the compiler's execution character set.
+        if (text == "\xE2\x80\x9C" || text == "\xE2\x80\x9D") // U+201C, U+201D
             error.suggest("use an ASCII double quote", invalid, "\"", Applicability::MaybeIncorrect);
-        else if (text == "\u2018" || text == "\u2019")
+        else if (text == "\xE2\x80\x98" || text == "\xE2\x80\x99") // U+2018, U+2019
             error.note("a character literal uses the ASCII quote ', as in 'a', and a string uses '\"'");
-        else if (text == "\u2212" || text == "\u2013")
+        else if (text == "\xE2\x88\x92" || text == "\xE2\x80\x93") // U+2212, U+2013
             error.suggest("use an ASCII minus sign", invalid, "-", Applicability::MaybeIncorrect);
-        else if (text == "\u00A0")
+        else if (text == "\xC2\xA0") // U+00A0
             error.suggest("use an ordinary space", invalid, " ", Applicability::MachineApplicable);
         report(std::move(error));
         skip_code_point();

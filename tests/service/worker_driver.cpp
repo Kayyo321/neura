@@ -20,17 +20,35 @@
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
+#include "platform/console.hpp"
+#include "platform/process.hpp"
+#include "platform/windows.hpp"
+#else
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 extern char** environ;
+#endif
 
 using namespace neura::service;
 
 namespace {
 
+#ifdef _WIN32
+std::string build_of(const std::string& neurad) {
+    neura::platform::Spawn spawn;
+    spawn.program = neurad;
+    spawn.arguments = {neurad, "--build"};
+    spawn.input = neura::platform::Stdio::null();
+    const auto capture = neura::platform::run_capture(spawn, std::chrono::milliseconds(60'000), 1 << 16);
+    std::string text = capture.out;
+    while (!text.empty() && (text.back() == '\n' || text.back() == '\r')) text.pop_back();
+    return text;
+}
+#else
 std::string build_of(const std::string& neurad) {
     const std::string command = "'" + neurad + "' --build";
     std::FILE* pipe = ::popen(command.c_str(), "r");
@@ -42,6 +60,7 @@ std::string build_of(const std::string& neurad) {
     while (!text.empty() && text.back() == '\n') text.pop_back();
     return text;
 }
+#endif
 
 int fail(const std::string& message) {
     std::fprintf(stderr, "worker driver: %s\n", message.c_str());
@@ -51,6 +70,10 @@ int fail(const std::string& message) {
 } // namespace
 
 int main(int argc, char** argv) {
+#ifdef _WIN32
+    neura::platform::set_unattended_error_mode();
+    neura::platform::set_binary_stdio();
+#endif
     if (argc < 3) return fail("usage: neura_service_worker_driver NEURAD [options] -- RUN-OPTIONS... IMAGE");
     const std::string neurad = argv[1];
     std::vector<std::string> supervisor_environment;
@@ -83,18 +106,33 @@ int main(int argc, char** argv) {
         const auto bytes = neura::cli::image_bytes_of(neura::runner::read_file(options.files.front()));
         const auto envelope = make_envelope(options, bytes, Lifetime::Foreground, start);
 
+#ifdef _WIN32
+        // The image, as a supervisor's cache would hold it: a section.
+        const auto capacity = std::max<std::uint64_t>(bytes.size(), 1);
+        UniqueFd image(reinterpret_cast<Descriptor>(
+            ::CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, static_cast<DWORD>(capacity >> 32),
+                                 static_cast<DWORD>(capacity & 0xFFFFFFFFu), nullptr)));
+        void* view = image ? ::MapViewOfFile(reinterpret_cast<HANDLE>(image.get()), FILE_MAP_WRITE, 0, 0, capacity)
+                           : nullptr;
+        if (view == nullptr) return fail("cannot hold the image");
+        std::memcpy(view, bytes.data(), bytes.size());
+        ::UnmapViewOfFile(view);
+        const auto own_environment = environment_entries();
+#else
         // The image, as a supervisor's cache would hold it.
         const int memory = ::memfd_create("driver-image", MFD_CLOEXEC);
         if (memory < 0 || ::write(memory, bytes.data(), bytes.size()) != static_cast<ssize_t>(bytes.size())) {
             return fail("cannot hold the image");
         }
         UniqueFd image(memory);
+        std::vector<std::string> own_environment;
+        for (char** entry = environ; entry && *entry; ++entry) own_environment.emplace_back(*entry);
+#endif
 
         // The worker starts with the "supervisor's" environment: the
         // driver's, with the given variables replaced or added.
         std::vector<std::string> environment;
-        for (char** entry = environ; entry && *entry; ++entry) {
-            const std::string text = *entry;
+        for (const auto& text : own_environment) {
             const auto name = text.substr(0, text.find('='));
             bool replaced = false;
             for (const auto& extra : supervisor_environment) {
@@ -108,16 +146,42 @@ int main(int argc, char** argv) {
         auto ready = receive_message(worker.channel.get(), Clock::now() + std::chrono::seconds(10));
         if (!ready || ready->message.kind != Kind::WorkerReady) return fail("the worker did not report ready");
 
+#ifdef _WIN32
+        UniqueFd cwd(reinterpret_cast<Descriptor>(
+            ::CreateFileW(L".", FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                          OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr)));
+        if (remove_cwd) {
+            // A directory that is a process's working directory cannot be
+            // removed on Windows: the driver leaves it first.
+            const auto here = std::filesystem::current_path();
+            std::error_code error;
+            std::filesystem::current_path(here.parent_path(), error);
+            if (error || !::RemoveDirectoryW(here.c_str())) {
+                return fail("cannot remove the directory (" + std::to_string(::GetLastError()) + ")");
+            }
+        }
+        const std::vector<Descriptor> streams{image.get(), cwd.get(),
+                                              reinterpret_cast<Descriptor>(::GetStdHandle(STD_INPUT_HANDLE)),
+                                              reinterpret_cast<Descriptor>(::GetStdHandle(STD_OUTPUT_HANDLE)),
+                                              reinterpret_cast<Descriptor>(::GetStdHandle(STD_ERROR_HANDLE))};
+        const auto assign = [&](const Message& message) {
+            send_message(worker.channel.get(), message, streams, std::nullopt, worker.process.native_handle());
+        };
+#else
         UniqueFd cwd(::open(".", O_RDONLY | O_DIRECTORY | O_CLOEXEC));
         if (remove_cwd) {
             char here[4096];
             if (::getcwd(here, sizeof here) == nullptr || ::rmdir(here) != 0) return fail("cannot remove the directory");
         }
+        const auto assign = [&](const Message& message) {
+            send_message(worker.channel.get(), message, {image.get(), cwd.get(), 0, 1, 2});
+        };
+#endif
         Message assignment;
         assignment.kind = Kind::WorkerAssign;
         assignment.add_u8(Tag::Descriptors, 5).add(Tag::ApplicationId, "dev.00000000.1");
         put_envelope(assignment, envelope);
-        send_message(worker.channel.get(), assignment, {image.get(), cwd.get(), 0, 1, 2});
+        assign(assignment);
 
         std::string terminal = "worker-lost";
         int status = -1;
@@ -144,9 +208,18 @@ int main(int argc, char** argv) {
                 for (const auto value : message.all(Tag::Time)) times.push_back(read_named_value(value).first);
             }
         }
+        int signal = 0;
+#ifdef _WIN32
+        // A crash (an exception code) is the Windows form of a fatal signal;
+        // the driver ends no worker itself.
+        const auto ended = worker.process.wait();
+        if (status < 0 && ended) {
+            if (ended->kind == neura::platform::ExitStatus::Kind::crashed) terminal = "signaled";
+            status = ended->shell_status();
+        }
+#else
         int wait_status = 0;
         ::waitpid(worker.pid, &wait_status, 0);
-        int signal = 0;
         if (WIFSIGNALED(wait_status)) {
             signal = WTERMSIG(wait_status);
             if (status < 0) {
@@ -156,11 +229,14 @@ int main(int argc, char** argv) {
         } else if (status < 0) {
             status = WEXITSTATUS(wait_status);
         }
+#endif
         std::string second = "not tried";
         if (second_assignment) {
             try {
+#ifndef _WIN32
                 std::signal(SIGPIPE, SIG_IGN);
-                send_message(worker.channel.get(), assignment, {image.get(), cwd.get(), 0, 1, 2});
+#endif
+                assign(assignment);
                 second = "accepted";
             } catch (const std::exception&) {
                 second = "refused";

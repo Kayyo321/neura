@@ -320,7 +320,7 @@ def main():
         if updated != text:
             stale.append(page.relative_to(ROOT))
             if not args.check:
-                page.write_text(updated, encoding="utf-8")
+                page.write_text(updated, encoding="utf-8", newline="\n")
     for page in WIKI.glob("Stdlib-*.md"):
         if page.name in expected:
             continue

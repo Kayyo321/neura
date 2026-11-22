@@ -7,6 +7,7 @@
 #include "neura-ir/nominal.hpp"
 #include "neura-ir/tags.hpp"
 #include "parser/html_template.hpp"
+#include "util/line_endings.hpp"
 
 #include <algorithm>
 #include <array>
@@ -36,6 +37,27 @@ std::string read_text(const fs::path &path) {
     if (!input)
         throw std::runtime_error("cannot read " + path.string());
     return {std::istreambuf_iterator<char>{input}, {}};
+}
+// The first line ending of `text`: "\r\n", "\r" or "\n", and "\n" when it
+// has none.
+std::string first_line_ending(std::string_view text) {
+    const auto first = text.find_first_of("\r\n");
+    return first == std::string_view::npos || text[first] == '\n' ? "\n"
+           : first + 1 < text.size() && text[first + 1] == '\n'   ? "\r\n"
+                                                                  : "\r";
+}
+// The first line ending of the file at `path`, read up to its first LF, and
+// "\n" when it cannot be read. The compiler's text of a file has its CR LF
+// as LF (W08), so a document built from that text takes from here the line
+// ending of the edits it sends.
+std::string file_line_ending(const fs::path &path) {
+    std::ifstream input(path, std::ios::binary);
+    std::string line;
+    if (!input || !std::getline(input, line, '\n'))
+        return "\n";
+    if (!input.eof())
+        line += '\n';
+    return first_line_ending(line);
 }
 std::string type_text(const IrType &type) {
     if (type.kind == TypeKind::Array || type.kind == TypeKind::List)
@@ -386,8 +408,20 @@ std::string default_text(const IrProgram &program, const IrSymbol &parameter) {
 std::string path_uri(std::string_view path) {
     constexpr char digits[] = "0123456789ABCDEF";
     std::string uri = "file://";
+#ifdef _WIN32
+    // The generic form: C:/a is file:///C:/a, and the UNC path //server/a is
+    // file://server/a, whose authority is the server.
+    std::string generic(path);
+    std::replace(generic.begin(), generic.end(), '\\', '/');
+    path = generic;
+    if (path.starts_with("//"))
+        path.remove_prefix(2);
+    else if (path.empty() || path.front() != '/')
+        uri += '/';
+#else
     if (path.empty() || path.front() != '/')
         uri += '/';
+#endif
     for (unsigned char c : path) {
         if (std::isalnum(c) || c == '/' || c == '-' || c == '_' || c == '.' || c == '~' || c == ':')
             uri += static_cast<char>(c);
@@ -403,11 +437,21 @@ std::string uri_path(std::string_view uri) {
     if (!uri.starts_with("file://"))
         return {};
     uri.remove_prefix(7);
+#ifdef _WIN32
+    bool share = false;
+#endif
     if (!uri.empty() && uri.front() != '/') {
         if (uri.starts_with("localhost/"))
             uri.remove_prefix(9);
+#ifdef _WIN32
+        // Another host is the server of a UNC path: file://server/a is
+        // //server/a.
+        else
+            share = true;
+#else
         else
             return {};
+#endif
     }
     std::string path;
     const auto hex = [](char c) -> int {
@@ -433,10 +477,20 @@ std::string uri_path(std::string_view uri) {
             path += uri[i];
     }
 #ifdef _WIN32
-    if (path.size() > 2 && path[0] == '/' && path[2] == ':')
+    if (share)
+        path.insert(0, "//");
+    else if (path.size() > 2 && path[0] == '/' && path[2] == ':')
         path.erase(0, 1);
-#endif
+    // Documents are keyed with one drive-letter case, the uppercase that a
+    // canonical path and so the compiler's file names have; editors send
+    // file:///c%3A/a for C:/a.
+    auto key = fs::weakly_canonical(fs::absolute(path)).generic_string();
+    if (key.size() >= 2 && key[1] == ':' && key[0] >= 'a' && key[0] <= 'z')
+        key[0] = static_cast<char>(key[0] - 'a' + 'A');
+    return key;
+#else
     return fs::weakly_canonical(fs::absolute(path)).generic_string();
+#endif
 }
 Json source_position(std::string_view source, std::size_t offset) {
     offset = std::min(offset, source.size());
@@ -509,6 +563,26 @@ Json EditorDocument::position(std::size_t offset) const {
 Json EditorDocument::range(const Span &span) const {
     return Json{{"start", position(span.offset)}, {"end", position(span.offset + span.length)}};
 }
+void EditorDocument::set_text(std::string text, bool keep_editor_source) {
+    newline = first_line_ending(text);
+    source = util::normalize_crlf(text);
+    if (keep_editor_source && source.size() != text.size())
+        editor_source = std::move(text);
+    else
+        editor_source.clear();
+}
+std::string EditorDocument::editor_text(std::string_view text) const {
+    if (newline != "\r\n")
+        return std::string(text);
+    std::string result;
+    result.reserve(text.size());
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        if (text[i] == '\n' && (i == 0 || text[i - 1] != '\r'))
+            result += '\r';
+        result += text[i];
+    }
+    return result;
+}
 
 void AnalysisSession::parse_document(EditorDocument &document) {
     document.line_starts.assign(1, 0);
@@ -531,7 +605,7 @@ EditorDocument &AnalysisSession::open(std::string uri, std::string source, std::
     auto &document = documents[path];
     document.uri = std::move(uri);
     document.path = path;
-    document.source = std::move(source);
+    document.set_text(std::move(source), true);
     document.version = version;
     document.open = true;
     parse_document(document);
@@ -550,7 +624,7 @@ EditorDocument *AnalysisSession::document(std::string_view uri) {
     EditorDocument doc;
     doc.uri = path_uri(path);
     doc.path = path;
-    doc.source = read_text(path);
+    doc.set_text(read_text(path), false);
     parse_document(doc);
     return &documents.emplace(path, std::move(doc)).first->second;
 }
@@ -566,16 +640,20 @@ void AnalysisSession::change(const Json &params) {
     const auto version = params["textDocument"]["version"].integer(doc->version + 1);
     if (version <= doc->version)
         return;
+    // The changes apply to the editor's text, in its coordinates, and the
+    // result is normalized again.
+    auto text = doc->editor_source.empty() ? doc->source : doc->editor_source;
     for (const auto &change : params["contentChanges"].items()) {
         if (change["range"].is_object()) {
-            auto begin = source_offset(doc->source, change["range"]["start"]),
-                 end = source_offset(doc->source, change["range"]["end"]);
+            auto begin = source_offset(text, change["range"]["start"]),
+                 end = source_offset(text, change["range"]["end"]);
             if (end < begin)
                 throw std::runtime_error("invalid change range");
-            doc->source.replace(begin, end - begin, change["text"].string());
+            text.replace(begin, end - begin, change["text"].string());
         } else
-            doc->source = change["text"].string();
+            text = change["text"].string();
     }
+    doc->set_text(std::move(text), true);
     doc->version = version;
     parse_document(*doc);
     invalidate();
@@ -651,6 +729,10 @@ void AnalysisSession::analyze(std::string_view uri) {
             doc.uri = path_uri(doc.path);
             doc.source = file->text();
             doc.library = file->kind() != SourceKind::User;
+            // Edits to a user file the editor has not opened, such as a
+            // rename's, keep the file's line ending.
+            if (!doc.library)
+                doc.newline = file_line_ending(doc.path);
             parse_document(doc);
             documents.emplace(doc.path, std::move(doc));
         } else
@@ -1841,7 +1923,7 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
                 try {
                     EditorDocument next;
                     next.path = key;
-                    next.source = read_text(path);
+                    next.set_text(read_text(path), false);
                     next.library = name.starts_with("Std.");
                     next.tokens = lex_recovering(next.source, key, next.syntax_diagnostics);
                     next.syntax = parse_recovering(next.tokens, next.syntax_diagnostics);
@@ -2961,7 +3043,7 @@ Json AnalysisSession::workspace_edit(const std::vector<DiagnosticEdit> &edits) c
         if (doc == documents.end() || doc->second.library)
             continue;
         by_file[edit.span.file].emplace_back(
-            Json{{"range", doc->second.range(edit.span)}, {"newText", edit.replacement}});
+            Json{{"range", doc->second.range(edit.span)}, {"newText", doc->second.editor_text(edit.replacement)}});
     }
     Json::Array changes;
     for (const auto &[path, file_edits] : by_file) {

@@ -9,6 +9,7 @@
 #include "neura-ir/storage.hpp"
 #include "nvr/format.hpp"
 #include "parser/html_template.hpp"
+#include "util/line_endings.hpp"
 #include "util/sha256.hpp"
 #include "util/source_map.hpp"
 #include "util/suggest.hpp"
@@ -33,18 +34,60 @@ thread_local const std::map<std::string, std::string, std::less<>>* source_overl
 thread_local bool overlay_c_imports = true;
 thread_local const std::set<std::string>* overlay_hidden_sources = nullptr;
 
+// The text of a path as source names, import targets and messages hold it:
+// UTF-8 in generic form, with '/' separators, on every host (W09). On
+// Windows generic_string() would use the process code page.
+std::string path_name(const fs::path& path) {
+#ifdef _WIN32
+    const auto text = path.generic_u8string();
+    return {reinterpret_cast<const char*>(text.data()), text.size()};
+#else
+    return path.generic_string();
+#endif
+}
+
+// A path from UTF-8 text, such as the header and library names of a C
+// import. On Windows a std::string would be read in the process code page.
+fs::path utf8_path(std::string_view text) {
+#ifdef _WIN32
+    return fs::path(std::u8string(text.begin(), text.end()));
+#else
+    return fs::path(text);
+#endif
+}
+
+// `path` relative to the source root `root`. Both are canonical, so that two
+// spellings of the root (c:/app and C:/app on Windows) agree.
+fs::path relative_to_root(const fs::path& path, const fs::path& root) {
+    std::error_code error;
+    const auto canonical_root = fs::weakly_canonical(root, error);
+    return path.lexically_relative(error ? root : canonical_root);
+}
+
+// Source text as the lexer reads it (W08): each CR LF is LF, so a file
+// checked out with CR LF line endings has the spans, the diagnostics and the
+// image of its LF original. Every source and template read from the disk
+// passes through here before it is recorded and parsed; the text of an
+// overlay is the language server's, which normalizes it itself. Stylesheets
+// do not: their text is bundled byte for byte (docs/apps/Css.md), and the
+// bundle digests are digests of those bytes.
+std::string lf_source(std::string text) {
+    if (text.find('\r') == std::string::npos) return text;
+    return util::normalize_crlf(text);
+}
+
 fs::path source_canonical(const fs::path& path) {
-    if (overlay_hidden_sources && overlay_hidden_sources->contains(fs::weakly_canonical(fs::absolute(path)).generic_string()))
-        throw std::runtime_error("source file was moved: " + path.string());
+    if (overlay_hidden_sources && overlay_hidden_sources->contains(path_name(fs::weakly_canonical(fs::absolute(path)))))
+        throw std::runtime_error("source file was moved: " + path_name(path));
     if (source_overlays) {
         const auto actual = fs::weakly_canonical(fs::absolute(path));
-        if (source_overlays->contains(actual.generic_string())) return actual;
+        if (source_overlays->contains(path_name(actual))) return actual;
     }
     return fs::canonical(path);
 }
 bool source_exists(const fs::path& path) {
-    if (overlay_hidden_sources && overlay_hidden_sources->contains(fs::weakly_canonical(fs::absolute(path)).generic_string())) return false;
-    if (source_overlays && source_overlays->contains(fs::weakly_canonical(fs::absolute(path)).generic_string())) return true;
+    if (overlay_hidden_sources && overlay_hidden_sources->contains(path_name(fs::weakly_canonical(fs::absolute(path))))) return false;
+    if (source_overlays && source_overlays->contains(path_name(fs::weakly_canonical(fs::absolute(path))))) return true;
     return fs::is_regular_file(path);
 }
 
@@ -64,10 +107,10 @@ struct CImports {
 // include directory, or in the system include directories.
 fs::path find_c_header(const std::string& header, const fs::path& base, const std::vector<fs::path>& roots,
                        const Span& span) {
-    const fs::path name(header);
+    const auto name = utf8_path(header);
     std::vector<fs::path> directories{base};
     directories.insert(directories.end(), roots.begin(), roots.end());
-    for (const auto& dir : c_import_options.include_dirs) directories.emplace_back(dir);
+    for (const auto& dir : c_import_options.include_dirs) directories.push_back(utf8_path(dir));
     for (auto& dir : system_header_directories()) directories.push_back(std::move(dir));
     if (name.is_absolute() && fs::is_regular_file(name)) return fs::canonical(name);
     for (const auto& dir : directories) {
@@ -93,23 +136,23 @@ void collect_imports(const Expr& expression, SourceDependencies& dependencies);
 
 [[noreturn]] void template_file_error(const Token& path, const fs::path& root, std::string reason) {
     throw Diagnostic(path.span, "template or stylesheet file cannot be used").with_code("E1011")
-        .label(std::move(reason)).note("allowed source root: " + root.generic_string() + '/');
+        .label(std::move(reason)).note("allowed source root: " + path_name(root) + '/');
 }
 
 ResolvedTemplate read_template(const Token& path, const fs::path& root) {
     constexpr std::size_t maximum = 1024 * 1024;
     const auto written = decode_string_literal(path.text);
-    const fs::path relative(written);
+    const auto relative = utf8_path(written);
     if (relative.empty() || relative.has_root_path() || written.find(':') != std::string::npos ||
         written.find('\\') != std::string::npos)
         template_file_error(path, root, "write a relative path using '/' separators");
-    const auto requested = fs::path(path.span.file).parent_path() / relative;
+    const auto requested = utf8_path(path.span.file).parent_path() / relative;
     std::error_code error;
     const auto normalized = fs::weakly_canonical(requested, error);
     if (error) template_file_error(path, root, "cannot resolve this path");
-    const auto within = normalized.lexically_relative(root);
+    const auto within = relative_to_root(normalized, root);
     if (within.empty() || *within.begin() == "..") template_file_error(path, root, "this path leaves the source root");
-    const auto name = normalized.generic_string();
+    const auto name = path_name(normalized);
     std::string source;
     if (source_overlays && source_overlays->contains(name) &&
         (!overlay_hidden_sources || !overlay_hidden_sources->contains(name))) {
@@ -118,10 +161,13 @@ ResolvedTemplate read_template(const Token& path, const fs::path& root) {
         if (!source_exists(normalized)) template_file_error(path, root, "no template file exists at this path");
         std::ifstream input(normalized, std::ios::binary);
         if (!input) template_file_error(path, root, "cannot open this template");
-        source.resize(maximum + 1);
+        // The limit applies to the text with LF line endings, which CR LF
+        // endings at most double.
+        source.resize(2 * maximum + 1);
         input.read(source.data(), static_cast<std::streamsize>(source.size()));
         source.resize(static_cast<std::size_t>(input.gcount()));
         if (input.bad()) template_file_error(path, root, "cannot read this template");
+        source = lf_source(std::move(source));
     }
     if (source.size() > maximum) template_file_error(path, root, "the template exceeds 1 MiB");
     if (!nvr::valid_utf8(source)) template_file_error(path, root, "the template must contain valid UTF-8");
@@ -134,7 +180,7 @@ ResolvedTemplate read_template(const Token& path, const fs::path& root) {
 // The bytes of a file the build reads, from an overlay or the disk, or
 // nullopt when there is none. `too_large` is set when it exceeds `maximum`.
 std::optional<std::string> read_input_file(const fs::path& normalized, std::size_t maximum, bool& too_large) {
-    const auto name = normalized.generic_string();
+    const auto name = path_name(normalized);
     std::string source;
     too_large = false;
     if (source_overlays && source_overlays->contains(name) &&
@@ -187,18 +233,18 @@ fs::path local_reference(std::string_view target, const fs::path& directory, con
     if (written.front() == '/' || written.find('\\') != std::string_view::npos)
         style_reference_error(span, "write a path relative to this file, using '/' separators");
     std::error_code error;
-    const auto normalized = fs::weakly_canonical(directory / fs::path(written), error);
+    const auto normalized = fs::weakly_canonical(directory / utf8_path(written), error);
     if (error) style_reference_error(span, "cannot resolve this path");
-    const auto within = normalized.lexically_relative(root);
+    const auto within = relative_to_root(normalized, root);
     if (within.empty() || *within.begin() == "..")
-        style_reference_error(span, "this path leaves the source root " + root.generic_string() + '/');
+        style_reference_error(span, "this path leaves the source root " + path_name(root) + '/');
     return normalized;
 }
 
 // The extension of a bundled asset: the file's own, lowercased, when it is
 // short and alphanumeric; otherwise none.
 std::string asset_extension(const fs::path& file) {
-    auto extension = lowercase_ascii(file.extension().generic_string());
+    auto extension = lowercase_ascii(path_name(file.extension()));
     if (extension.size() < 2 || extension.size() > 11) return {};
     for (std::size_t i = 1; i < extension.size(); ++i) {
         const char c = extension[i];
@@ -260,8 +306,8 @@ std::pair<BundleFileSyntax, std::vector<BundleFileSyntax>> import_stylesheet(con
         found != dependencies.active_styles.end()) {
         std::string chain;
         for (auto it = found; it != dependencies.active_styles.end(); ++it)
-            chain += it->lexically_relative(dependencies.root).generic_string() + " -> ";
-        chain += file.lexically_relative(dependencies.root).generic_string();
+            chain += path_name(it->lexically_relative(dependencies.root)) + " -> ";
+        chain += path_name(file.lexically_relative(dependencies.root));
         style_reference_error(span, "these stylesheets import each other: " + chain);
     }
     if (const auto cached = dependencies.imported_styles.find(file); cached != dependencies.imported_styles.end())
@@ -272,13 +318,13 @@ std::pair<BundleFileSyntax, std::vector<BundleFileSyntax>> import_stylesheet(con
     if (!source) style_reference_error(span, "no stylesheet exists at this path");
     if (too_large) style_reference_error(span, "the stylesheet exceeds 1 MiB");
     if (!nvr::valid_utf8(*source)) style_reference_error(span, "the stylesheet must contain valid UTF-8");
-    const auto name = file.generic_string();
+    const auto name = path_name(file);
     SourceMap::global().add(name, *source, SourceKind::User);
     const auto bom = source->starts_with("\xEF\xBB\xBF") ? 3u : 0u;
     ResolvedStylesheet sheet;
     sheet.text = source->substr(bom);
     sheet.body = parse_stylesheet(sheet.text, {name, 1, 1, bom, sheet.text.size()}, false);
-    sheet.path = file.lexically_relative(dependencies.root).generic_string();
+    sheet.path = path_name(relative_to_root(file, dependencies.root));
     sheet.external = true;
     dependencies.active_styles.push_back(file);
     resolve_style_references(sheet, file.parent_path(), dependencies);
@@ -299,35 +345,35 @@ void resolve_stylesheet(StylesheetSyntax& syntax, SourceDependencies& dependenci
         sheet.text = syntax.source.text;
         sheet.body = *syntax.body;
         sheet.external = false;
-        const fs::path declaring(syntax.source.span.file);
+        const auto declaring = utf8_path(syntax.source.span.file);
         directory = declaring.parent_path();
-        sheet.path = declaring.lexically_relative(dependencies.root).generic_string();
+        sheet.path = path_name(relative_to_root(declaring, dependencies.root));
     } else {
         const auto& path = syntax.source;
         const auto& root = dependencies.root;
         constexpr std::size_t maximum = 1024 * 1024;
         const auto written = decode_string_literal(path.text);
-        const fs::path relative(written);
+        const auto relative = utf8_path(written);
         if (relative.empty() || relative.has_root_path() || written.find(':') != std::string::npos ||
             written.find('\\') != std::string::npos)
             template_file_error(path, root, "write a relative path using '/' separators");
         std::error_code error;
-        const auto normalized = fs::weakly_canonical(fs::path(path.span.file).parent_path() / relative, error);
+        const auto normalized = fs::weakly_canonical(utf8_path(path.span.file).parent_path() / relative, error);
         if (error) template_file_error(path, root, "cannot resolve this path");
-        const auto within = normalized.lexically_relative(root);
+        const auto within = relative_to_root(normalized, root);
         if (within.empty() || *within.begin() == "..") template_file_error(path, root, "this path leaves the source root");
         bool too_large = false;
         auto source = read_input_file(normalized, maximum, too_large);
         if (!source) template_file_error(path, root, "no stylesheet file exists at this path");
         if (too_large) template_file_error(path, root, "the stylesheet exceeds 1 MiB");
         if (!nvr::valid_utf8(*source)) template_file_error(path, root, "the stylesheet must contain valid UTF-8");
-        const auto name = normalized.generic_string();
+        const auto name = path_name(normalized);
         SourceMap::global().add(name, *source, SourceKind::User);
         const auto bom = source->starts_with("\xEF\xBB\xBF") ? 3u : 0u;
         sheet.text = source->substr(bom);
         sheet.body = parse_stylesheet(sheet.text, {name, 1, 1, bom, sheet.text.size()}, syntax.module);
         sheet.external = true;
-        sheet.path = within.generic_string();
+        sheet.path = path_name(within);
         directory = normalized.parent_path();
         dependencies.active_styles.push_back(normalized);
     }
@@ -375,7 +421,7 @@ void resolve_media(const TemplateElement& element, TemplateAttribute& attribute,
             const auto target = std::string_view(*value).substr(begin, end - begin);
             if (!local_media(target)) continue;
             std::string suffix;
-            const auto local = local_reference(target, fs::path(span.file).parent_path(), dependencies.root, span, suffix);
+            const auto local = local_reference(target, utf8_path(span.file).parent_path(), dependencies.root, span, suffix);
             auto asset = std::make_shared<BundleFileSyntax>(read_asset(local, span));
             rewritten += value->substr(copied, begin - copied);
             rewritten += bundled_reference(*asset, suffix);
@@ -434,7 +480,7 @@ void collect_imports(const Expr& expression, SourceDependencies& dependencies) {
         } else {
             const auto& path = std::get<Token>(factory.source);
             factory.external = read_template(path, dependencies.root);
-            const fs::path actual = factory.external->body.span.file;
+            const auto actual = utf8_path(factory.external->body.span.file);
             if (!dependencies.active_templates.insert(actual).second)
                 template_file_error(path, dependencies.root, "this template is already being loaded");
             collect_template_imports(factory.external->body.nodes, dependencies);
@@ -487,7 +533,7 @@ std::string library_path(const fs::path& path, const fs::path& library) {
     if (library.empty()) return {};
     const auto relative = path.lexically_relative(library);
     if (relative.empty() || *relative.begin() != "std") return {};
-    return relative.generic_string();
+    return path_name(relative);
 }
 
 bool internal_module(std::string_view name) {
@@ -545,7 +591,7 @@ fs::path find_module(const Expr& import, const std::vector<fs::path>& roots, con
             const auto actual = fs::canonical(path);
             // Resolve within the trusted tree without allowing an alias
             // to bypass an Internal component of the actual module path.
-            if (library_path(actual, library) == relative.generic_string()) return actual;
+            if (library_path(actual, library) == path_name(relative)) return actual;
         }
         auto error = Diagnostic(import.span, "cannot resolve standard library import '" + import.text + "'")
             .with_code("E0701").label("no standard library module has this name");
@@ -571,7 +617,7 @@ fs::path find_module(const Expr& import, const std::vector<fs::path>& roots, con
             }
         }
     };
-    search(fs::path(import.span.file).parent_path());
+    search(utf8_path(import.span.file).parent_path());
     for (const auto& root : roots) {
         search(root);
     }
@@ -582,14 +628,14 @@ fs::path find_module(const Expr& import, const std::vector<fs::path>& roots, con
 }
 
 fs::path find_artifact(const Expr& import, const std::vector<fs::path>& roots) {
-    const fs::path path(*import.import_path);
+    const auto path = utf8_path(*import.import_path);
     if (path.extension() != ".nir")
         throw Diagnostic(import.span, "an artifact import needs a .nir file").with_code("E0706");
     std::set<fs::path> candidates;
     const auto search = [&](const fs::path& root) {
         if (fs::is_regular_file(root / path)) candidates.insert(fs::canonical(root / path));
     };
-    search(fs::path(import.span.file).parent_path());
+    search(utf8_path(import.span.file).parent_path());
     if (path.is_relative()) {
         for (const auto& root : roots) search(root);
     }
@@ -617,7 +663,7 @@ std::vector<fs::path> find_wildcard_modules(const Expr& import, const std::vecto
         if (source_overlays) {
             const auto actual_directory = fs::weakly_canonical(fs::absolute(directory));
             for (const auto& [name, source] : *source_overlays) {
-                const fs::path candidate(name);
+                const auto candidate = utf8_path(name);
                 if (candidate.parent_path() == actual_directory && source_exists(candidate)) entries.insert(candidate);
             }
         }
@@ -626,7 +672,7 @@ std::vector<fs::path> find_wildcard_modules(const Expr& import, const std::vecto
             if (filename.extension() != ".nra") continue;
             const auto trusted_path = library_path(actual, library);
             if (standard) {
-                if (trusted_path != (relative / filename).generic_string() ||
+                if (trusted_path != path_name(relative / filename) ||
                     (!from_library && filename == "internal.nra")) continue;
             } else if (!trusted_path.empty()) {
                 continue;
@@ -642,7 +688,7 @@ std::vector<fs::path> find_wildcard_modules(const Expr& import, const std::vecto
                 .with_code("E0702");
         if (!library.empty()) search(library);
     } else {
-        search(fs::path(import.span.file).parent_path());
+        search(utf8_path(import.span.file).parent_path());
         for (const auto& root : roots) search(root);
     }
     std::vector<fs::path> modules;
@@ -662,14 +708,14 @@ struct ArtifactInput {
 
 ArtifactInput read_artifact(const fs::path& path, const Span& span) {
     std::ifstream input(path, std::ios::binary);
-    if (!input) throw Diagnostic(span, "cannot read NeuraIR artifact '" + path.generic_string() + "'")
+    if (!input) throw Diagnostic(span, "cannot read NeuraIR artifact '" + path_name(path) + "'")
         .with_code("E0706");
     const std::vector<std::uint8_t> bytes(std::istreambuf_iterator<char>{input}, {});
-    if (input.bad()) throw Diagnostic(span, "error reading NeuraIR artifact '" + path.generic_string() + "'")
+    if (input.bad()) throw Diagnostic(span, "error reading NeuraIR artifact '" + path_name(path) + "'")
         .with_code("E0706");
     try {
         ArtifactInput artifact{path, span, {}};
-        artifact.program = read_nir(bytes, path.generic_string(), &artifact.minor_version);
+        artifact.program = read_nir(bytes, path_name(path), &artifact.minor_version);
         return artifact;
     } catch (const NirError& error) {
         throw Diagnostic(span, error.what()).with_code("E0706");
@@ -690,7 +736,7 @@ std::vector<ParsedFile> read_sources_impl(const std::vector<fs::path>& files, co
             continue;
         }
         std::string source;
-        const auto name = file.generic_string();
+        const auto name = path_name(file);
         const auto in_library = !library_path(file, trusted).empty();
         if (c_imports && c_imports->sources.contains(file)) {
             source = c_imports->sources.at(file);
@@ -700,16 +746,17 @@ std::vector<ParsedFile> read_sources_impl(const std::vector<fs::path>& files, co
             SourceMap::global().add(name, source, in_library ? SourceKind::Library : SourceKind::User);
         } else {
             if (!fs::is_regular_file(file)) {
-                throw std::runtime_error("not a regular input file: " + file.string());
+                throw std::runtime_error("not a regular input file: " + path_name(file));
             }
             std::ifstream input(file, std::ios::binary);
             if (!input) {
-                throw std::runtime_error("cannot read " + file.string());
+                throw std::runtime_error("cannot read " + path_name(file));
             }
             source.assign(std::istreambuf_iterator<char>{input}, {});
             if (input.bad()) {
-                throw std::runtime_error("error reading " + file.string());
+                throw std::runtime_error("error reading " + path_name(file));
             }
+            source = lf_source(std::move(source));
             SourceMap::global().add(name, source, in_library ? SourceKind::Library : SourceKind::User);
         }
         auto syntax = parse(lex(source, name));
@@ -723,7 +770,7 @@ std::vector<ParsedFile> read_sources_impl(const std::vector<fs::path>& files, co
             const Expr dependency{Expr::Kind::Import, *syntax.untyped_variadic,
                                   "Std.Core.Variadic", {}, {}, std::nullopt};
             auto path = find_module(dependency, roots, trusted, !syntax.library_path.empty());
-            syntax.imports.push_back({dependency.text, path.generic_string()});
+            syntax.imports.push_back({dependency.text, path_name(path)});
             seen_imports.emplace(dependency.text, std::string{});
             pending.push_back(std::move(path));
         }
@@ -734,7 +781,7 @@ std::vector<ParsedFile> read_sources_impl(const std::vector<fs::path>& files, co
             }
             if (import->text.ends_with(".*")) {
                 for (auto& dependency : find_wildcard_modules(*import, roots, trusted, !syntax.library_path.empty())) {
-                    syntax.imports.push_back({import->text, dependency.generic_string()});
+                    syntax.imports.push_back({import->text, path_name(dependency)});
                     pending.push_back(std::move(dependency));
                 }
                 continue;
@@ -748,33 +795,34 @@ std::vector<ParsedFile> read_sources_impl(const std::vector<fs::path>& files, co
                 const auto header = find_c_header(import->c_import.front(), file.parent_path(), roots, import->span);
                 std::vector<std::string> libraries;
                 for (std::size_t l = 1; l < import->c_import.size(); ++l) {
-                    const auto path = file.parent_path() / import->c_import[l];
+                    const auto path = file.parent_path() / utf8_path(import->c_import[l]);
                     if (!fs::is_regular_file(path))
                         throw Diagnostic(import->span, "cannot find C library '" + import->c_import[l] + "'")
                             .with_code("E0709");
-                    const auto extension = path.extension().string();
+                    const auto extension = path_name(path.extension());
                     if (extension != ".a" && extension != ".o" && extension != ".lib" && extension != ".obj")
                         throw Diagnostic(import->span, "a C import links static libraries (.a, .lib) and object "
                                                        "files (.o, .obj); load shared libraries with "
                                                        "Std.DynamicForeign.SymbolLookup").with_code("E0708");
-                    libraries.push_back(fs::canonical(path).string());
+                    libraries.push_back(path_name(fs::canonical(path)));
                 }
                 const auto module = import->text.substr(2);
-                const fs::path generated(header.string() + "." + module + ".nra");
+                auto generated = header;
+                generated += "." + module + ".nra";
                 if (!c_imports->sources.contains(generated)) {
                     auto imported = import_c_header(header, !libraries.empty(), module, c_import_options, import->span);
                     c_imports->sources.emplace(generated, std::move(imported.source));
-                    c_imports->headers.emplace(generated, header.string());
-                    c_imports->units.push_back({header.string(), std::move(libraries), std::move(imported.shim),
+                    c_imports->headers.emplace(generated, path_name(header));
+                    c_imports->units.push_back({path_name(header), std::move(libraries), std::move(imported.shim),
                                                 std::move(imported.symbols)});
                     c_imports->unsupported[module] = std::move(imported.unsupported);
                 } else if (!libraries.empty()) {
-                    auto& unit = *std::ranges::find(c_imports->units, header.string(), &IrNativeUnit::header);
+                    auto& unit = *std::ranges::find(c_imports->units, path_name(header), &IrNativeUnit::header);
                     for (auto& added : libraries)
                         if (std::ranges::find(unit.libraries, added) == unit.libraries.end())
                             unit.libraries.push_back(std::move(added));
                 }
-                syntax.imports.push_back({import->text, generated.generic_string()});
+                syntax.imports.push_back({import->text, path_name(generated)});
                 pending.push_back(generated);
                 continue;
             }
@@ -798,10 +846,10 @@ std::vector<ParsedFile> read_sources_impl(const std::vector<fs::path>& files, co
                 auto selector = import->import_path ? import->text
                     : import->text.substr(import->text.find_last_of('.') + 1);
                 found->selectors.try_emplace(selector, import->span);
-                syntax.imports.push_back({import->text, dependency.generic_string(), std::move(selector), true,
+                syntax.imports.push_back({import->text, path_name(dependency), std::move(selector), true,
                                           requested_path});
             } else {
-                syntax.imports.push_back({import->text, dependency.generic_string()});
+                syntax.imports.push_back({import->text, path_name(dependency)});
                 pending.push_back(std::move(dependency));
             }
         }
@@ -812,7 +860,7 @@ std::vector<ParsedFile> read_sources_impl(const std::vector<fs::path>& files, co
     for (auto& source : parsed) {
         for (auto& import : source.imports) {
             if (!import.name.ends_with(".*")) continue;
-            const auto filename = fs::path(import.file).filename();
+            const auto filename = utf8_path(import.file).filename();
             for (const auto& statement : by_path.at(import.file)->statements) {
                 const auto& decl = statement.declaration;
                 if (decl && decl->kind == Declaration::Kind::Module && module_path(decl->name) == filename) {
@@ -842,7 +890,7 @@ SymbolId artifact_module(const ArtifactInput& artifact, std::string_view selecto
     }
     if (matching.size() == 1) return matching.front();
     if (matching.empty() && selector.empty() && candidates.size() == 1) return candidates.front();
-    const auto path = artifact.path.generic_string();
+    const auto path = path_name(artifact.path);
     if (!selector.empty() && matching.empty())
         throw Diagnostic(span, "artifact '" + path + "' does not declare module '" + std::string(selector) + "'")
             .with_code("E0705");
@@ -858,9 +906,9 @@ IrProgram lower_with_artifacts(std::vector<ParsedFile> parsed, std::vector<Artif
     std::vector<fs::path> trusted_files;
     std::set<fs::path> trusted_paths;
     const auto add_trusted = [&](const std::string& relative, const Span& span) {
-        const fs::path name(relative);
+        const auto name = utf8_path(relative);
         if (!relative.starts_with("std/") || name.extension() != ".nra" ||
-            name.lexically_normal().generic_string() != relative)
+            path_name(name.lexically_normal()) != relative)
             throw Diagnostic(span, "invalid standard library identity '" + relative + "' in NeuraIR artifact")
                 .with_code("E0706");
         if (library.empty() || !fs::is_regular_file(library / name))
@@ -906,7 +954,7 @@ IrProgram lower_with_artifacts(std::vector<ParsedFile> parsed, std::vector<Artif
         link_ir(linked.program, builtin_reference_ir(name, span), span);
     }
     for (auto& artifact : artifacts) {
-        const auto path = artifact.path.generic_string();
+        const auto path = path_name(artifact.path);
         std::map<std::string, SymbolId> selectors;
         for (const auto& [selector, site] : artifact.selectors)
             selectors.emplace(selector, artifact_module(artifact, selector, site));
@@ -959,8 +1007,8 @@ std::vector<ParsedFile> read_sources(const std::vector<fs::path>& files,
 void set_c_import_options(CImportOptions options) { c_import_options = std::move(options); }
 
 std::string c_import_source(const fs::path& header, const std::vector<fs::path>& roots, bool linked) {
-    const auto found = find_c_header(header.string(), fs::current_path(), roots, Span{header.string()});
-    std::string stem = found.stem().string();
+    const auto found = find_c_header(path_name(header), fs::current_path(), roots, Span{path_name(header)});
+    std::string stem = path_name(found.stem());
     std::string name;
     bool upper = true;
     for (const char c : stem) {
@@ -975,7 +1023,7 @@ std::string c_import_source(const fs::path& header, const std::vector<fs::path>&
         upper = false;
     }
     if (name.empty()) name = "Header";
-    auto imported = import_c_header(found, linked, name, c_import_options, Span{found.string()});
+    auto imported = import_c_header(found, linked, name, c_import_options, Span{path_name(found)});
     if (!imported.shim.empty()) {
         imported.source += "\n// Native wrappers compiled into the image's library:\n";
         std::istringstream lines(imported.shim);

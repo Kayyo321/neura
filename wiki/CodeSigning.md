@@ -16,19 +16,19 @@ Every file on a [release page](https://github.com/Kayyo321/neura/releases) is bu
 | `SHA256SUMS` | The archive is the file the release workflow uploaded. | `sha256sum --check --ignore-missing SHA256SUMS` |
 | Build provenance attestation | The archive was built by this repository's release workflow from the tagged commit. The attestation is signed through Sigstore with the workflow's identity, not with a key a maintainer holds. | `gh attestation verify <archive> --repo Kayyo321/neura` |
 
-`neura update` checks the size and SHA-256 of what it downloads against the release's `neura-release.txt`, and checks the attestation when the GitHub CLI is installed. [Install and update](Install) states exactly what is verified in each case.
+`neura update` checks the size and SHA-256 of what it downloads against the release's `neura-components.txt` and checks the attestation when the GitHub CLI is installed and signed in. The Windows archives and the PowerShell bootstrap are included in `SHA256SUMS` and the release's build-provenance attestations. Use `Get-FileHash -Algorithm SHA256 <file>` on Windows to compare a downloaded file with `SHA256SUMS`. See [Install and update](Install#what-is-verified) for the conditions of each check.
 
 ## What is not signed
 
 Release files carry no signature from an operating-system vendor's program: no Authenticode signature and no Apple Developer ID signature or notarization.
 
 - **Linux.** Linux has no vendor signing step for a downloaded archive. The checksum and the attestation are the evidence.
-- **Windows.** Neura has no native Windows build. On Windows, Neura is the Linux x86-64 archive run under WSL 2, where Windows does not check Authenticode signatures. There is no Windows executable or installer to sign.
+- **Windows.** The native 0.3.0 executables, DLLs and installers ship without Authenticode signatures. Microsoft Defender SmartScreen may warn about an unrecognized download. Smart App Control on Windows 11 may block execution when it cannot establish trust in an unsigned file. See [Windows installation](Install#windows-installation) and [Microsoft's app reputation guidance](https://learn.microsoft.com/windows/apps/package-and-deploy/smartscreen-reputation).
 - **macOS.** The macOS archives are not signed with an Apple Developer ID and are not notarized. The linker gives each executable an ad hoc signature, which is what Apple silicon requires to run a program and identifies nobody. macOS marks a file that a web browser downloads as quarantined and refuses to run an unsigned program from it. `curl` does not set that mark, so the [one-line install](Install#install-with-one-command) works. For an archive downloaded with a browser, remove the mark before unpacking it: `xattr -d com.apple.quarantine neura-<version>-<target>.tar.gz`. An ad hoc signature does not enable the hardened runtime, so `neura` can map memory for the native code it generates for tier 2 regions ([native compilation](NVM#native-compilation)), which `--jit=on` enables on macOS. A future Developer ID signature with the hardened runtime would need the `com.apple.security.cs.allow-jit` entitlement for that (the code generator uses a `MAP_JIT` mapping on Apple silicon); without it, `--jit=on` fails at the start of a run and `--jit=auto` interprets regions.
 
 ### SignPath Foundation
 
-The project is not enrolled in the [SignPath Foundation](https://signpath.org) code signing program for open-source projects, and no release file is signed by it. The program signs Windows binaries, and its [conditions](https://signpath.org/terms) require that a project "must already be released in the form that should be signed". Neura has never published a Windows binary. The project can apply once a native Windows build exists and has been released; from then on this page names SignPath Foundation as the certificate's publisher.
+The project is not enrolled in the [SignPath Foundation](https://signpath.org) code signing program for open-source projects. The program signs Windows binaries and its [conditions](https://signpath.org/terms) require that the project already have a release in the form to be signed. The project can apply after publishing a native Windows release. If it begins using SignPath, this page will name the certificate's publisher.
 
 ## Roles
 

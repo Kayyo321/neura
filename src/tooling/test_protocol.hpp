@@ -48,9 +48,10 @@ private:
 // Capture both operating-system descriptors, rather than just ConsoleSink:
 // this also catches printf/write from native imports. Spooling to temporary
 // files keeps large test output out of the runner's memory. With a live
-// callback, POSIX clients receive bounded chunks while the test runs, including
+// callback, clients receive bounded chunks while the test runs, including
 // before cancellation. Otherwise finish() drains the output. Descriptors
-// restore on failure.
+// restore on failure. On Windows the process's standard handles follow the
+// descriptors, and the capture files are read through a second handle.
 class TestOutputCapture {
 public:
     using Emitter = std::function<void(std::string_view, std::string_view)>;

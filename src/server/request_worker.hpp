@@ -2,6 +2,7 @@
 
 #include "nvm/providers.hpp"
 #include "nvr/format.hpp"
+#include "platform/socket.hpp"
 #include "server/worker_wire.hpp"
 
 #include <filesystem>
@@ -11,9 +12,18 @@
 
 namespace neura::server {
 
-// What the host tells a request worker on its command line. The worker's
-// channel is descriptor 3.
+// The worker's channel on POSIX, where the host makes it descriptor 3.
+inline constexpr int worker_channel_descriptor = 3;
+
+// What the host tells a request worker on its command line.
 struct WorkerOptions {
+    // The worker's end of its channel: descriptor 3 on POSIX; on Windows the
+    // inherited socket that --channel=<value> names (W27).
+#ifdef _WIN32
+    platform::native_socket channel = platform::invalid_socket;
+#else
+    platform::native_socket channel = worker_channel_descriptor;
+#endif
     std::filesystem::path image;
     // The groups the host grants beyond http_server and app (and the
     // console, clock and entropy, which every worker has).
@@ -34,8 +44,6 @@ struct WorkerOptions {
     bool refuse_assign = false;
 };
 
-inline constexpr int worker_channel_descriptor = 3;
-
 // An image read, hashed, loaded and verified: everything a worker does
 // before its greeting. No Neura code has run.
 struct PreparedImage {
@@ -46,7 +54,7 @@ struct PreparedImage {
 
 PreparedImage prepare_image(const WorkerOptions& options);
 
-// Greets the host on descriptor 3, waits for one Assign and its request
+// Greets the host on options.channel, waits for one Assign and its request
 // body, runs the image once, and returns the process status. Runs no Neura
 // code before the Assign.
 int serve_assignment(const WorkerOptions& options, const PreparedImage& prepared);

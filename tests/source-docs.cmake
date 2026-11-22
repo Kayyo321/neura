@@ -60,7 +60,7 @@ let increment = func(value: &int) {
 };
 ]=])
 string(ASCII 239 187 191 bom)
-file(WRITE "${windows}" "${bom}/// First line\r\n///\r\n/// Third line\r\nlet value = 1;\r\n")
+file(CONFIGURE OUTPUT "${windows}" CONTENT "${bom}/// First line\r\n///\r\n/// Third line\r\nlet value = 1;\r\n" NEWLINE_STYLE CRLF)
 
 function(run_docs output_var)
     execute_process(COMMAND "${NEURA}" docs ${ARGN}

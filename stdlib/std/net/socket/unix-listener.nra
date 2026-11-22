@@ -13,7 +13,8 @@ let.promote _ = import:Std.Core.Unit;
 /// namespace. Needs the net capability.
 ///
 /// `bind` uses the host's `neura.net.unix.listen`; the host refuses a path that already exists. Accepting uses the host's shared accept
-/// service. Closing does not remove the socket file. After close, `accept` fails with Closed.
+/// service. Closing does not remove the socket file. After close, `accept` fails with Closed. On Windows a listener
+/// is bound to a path; an abstract name fails with Unsupported there, as on every system but Linux.
 /// @see [Std.Net.Socket.UnixListener](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-UnixListener)
 #Since("0.3.0")
 export let UnixListener = module (

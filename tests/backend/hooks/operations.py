@@ -21,14 +21,21 @@ import tempfile
 NEURA = str(pathlib.Path(sys.argv[1]).resolve())
 SOURCE = pathlib.Path(sys.argv[2]).resolve()
 
+# Windows 0.3.0 runs tier 3 through the interpreter even for the shadow check.
+NATIVE_JIT = os.name != "nt"
+SHADOW_ARGS = ["--jit=on"] if NATIVE_JIT else ["--jit=off"]
+SHADOW_ENV = {"NEURA_TIER_EAGER": "1", "NEURA_TIER_CHECK": "2"}
+if not NATIVE_JIT:
+    SHADOW_ENV["NEURA_TIER3"] = "interp"
+
 MODES = [
     ("tier 0", ["--tier=0"], {}),
     ("tier 1", ["--tier=1"], {}),
     ("tier 2", ["--tier=2"], {}),
     ("jit off", ["--jit=off"], {}),
-    ("jit on", ["--jit=on"], {}),
+    *([("jit on", ["--jit=on"], {})] if NATIVE_JIT else []),
     ("tier 3 interp", [], {"NEURA_TIER3": "interp", "NEURA_TIER_EAGER": "1"}),
-    ("eager check 2", ["--jit=on"], {"NEURA_TIER_EAGER": "1", "NEURA_TIER_CHECK": "2"}),
+    ("eager check 2", SHADOW_ARGS, SHADOW_ENV),
     ("programs", [], {"NEURA_TIER_PROGRAMS": "1", "NEURA_TIER_EAGER": "1"}),
 ]
 
@@ -38,7 +45,7 @@ failures = []
 def run(args, env=None, cwd=None):
     environment = dict(os.environ, NEURA_GPU="off")
     environment.update(env or {})
-    return subprocess.run([NEURA, *args], capture_output=True, text=True, env=environment, cwd=cwd, timeout=120)
+    return subprocess.run([NEURA, *args], capture_output=True, encoding="utf-8", env=environment, cwd=cwd, timeout=120)
 
 
 def check(condition, message):
@@ -78,7 +85,8 @@ def main():
         check(result.returncode == 0, "build failed: " + result.stderr)
         result = run(["disassemble", str(base), "-o", str(work / "operations.nvra")])
         check(result.returncode == 0, "disassemble failed: " + result.stderr)
-        text = (work / "operations.nvra").read_text()
+        with (work / "operations.nvra").open(encoding="utf-8", newline=None) as stream:
+            text = stream.read()
         text = re.sub(r"^nvr 1\.\d+ ", "nvr 1.8 ", text, count=1, flags=re.M)
         i32 = re.search(r"^type (\d+) signed 32$", text, re.M)[1]
         u32 = re.search(r"^type (\d+) unsigned 32$", text, re.M)[1]
@@ -106,7 +114,8 @@ def main():
         CASES["limit"] = (deep, 139, r"trap: class hook nesting limit exceeded: 64 events are open")
         for name, (blocks, status, pattern) in CASES.items():
             source = work / f"{name}.nvra"
-            source.write_text(touch.sub(function(blocks, policy, header, types), text, count=1))
+            source.write_text(touch.sub(function(blocks, policy, header, types), text, count=1),
+                              encoding="utf-8", newline="\n")
             image = work / f"{name}.nvr"
             result = run(["assemble", str(source), "-o", str(image)])
             if result.returncode != 0:
@@ -137,7 +146,8 @@ def main():
               "policy Session" in decompiled.stdout,
               "the decompiler names the operations: " + "\n".join(l for l in decompiled.stdout.split("\n") if "hook" in l))
         # Malformed uses: the loader rejects them before anything runs.
-        balanced = (work / "balanced.nvra").read_text()
+        with (work / "balanced.nvra").open(encoding="utf-8", newline=None) as stream:
+            balanced = stream.read()
         malformed = {
             "an older version": (balanced.replace("nvr 1.8 ", "nvr 1.7 ", 1), "require NVR 1.8"),
             "a third kind": (balanced.replace("hook-enter immediate 0", "hook-enter immediate 2", 1),
@@ -149,7 +159,7 @@ def main():
         }
         for name, (source, fragment) in malformed.items():
             path = work / "malformed.nvra"
-            path.write_text(source)
+            path.write_text(source, encoding="utf-8", newline="\n")
             result = run(["assemble", str(path), "-o", str(work / "malformed.nvr")])
             message = result.stderr
             if result.returncode == 0:

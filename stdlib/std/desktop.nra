@@ -227,7 +227,8 @@ export let Desktop = module (
             return Result<Window>.Err(failure(100, "unreachable"));
         };
 
-        /// @brief The application's own data directory (`$XDG_DATA_HOME/<id>` on Linux).
+        /// @brief The application's own data directory (`$XDG_DATA_HOME/<id>` on Linux, `%LOCALAPPDATA%/<id>` on
+        /// Windows).
         export let data_directory = func -> Result<string> {
             last empty: uint8[list] = new;
             return match (request("neura.desktop.data_directory", empty)) {
@@ -964,7 +965,8 @@ export let Desktop = module (
         /// Windows a bridge operation opened through its own `Host` are not listed.
         export let open_windows = func -> Window[list] => windows;
 
-        /// @brief The application's own data directory (`$XDG_DATA_HOME/<id>` on Linux).
+        /// @brief The application's own data directory (`$XDG_DATA_HOME/<id>` on Linux, `%LOCALAPPDATA%/<id>` on
+        /// Windows).
         export let data_directory = func -> Result<string> => services.data_directory();
 
         /// @brief Shows a system notification: Shown, Denied (notifications turned off), or Unsupported (no

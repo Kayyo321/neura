@@ -1,0 +1,35 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): struct callback failed
+// run-options: --allow-native
+// args: @NATIVE_DIR@/libmathops.so
+let arenas = import:Std.DynamicForeign.Arena;
+let console = import:Std.Io.Console;
+let descriptors = import:Std.DynamicForeign.FunctionDescriptor;
+let layouts = import:Std.DynamicForeign.ValueLayout;
+let linkers = import:Std.DynamicForeign.Linker;
+let lookups = import:Std.DynamicForeign.SymbolLookup;
+let memory = import:Std.DynamicForeign.MemoryLayout;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let values = import:Std.DynamicForeign.ForeignValue;
+
+// Win64 returns this six-byte struct through the caller's result buffer.
+export let Main = module:program.Entry (
+    let failing = func(arguments: values.ForeignValue[list]) -> values.ForeignValue {
+        console.print_line("in struct callback");
+        trap_with_message("struct callback failed");
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let arena = arenas.of_confined();
+        let library = result.expect<lookups.SymbolLookup>(lookups.library_lookup(args[0], arena), "load libmathops");
+        let linker = linkers.native_linker();
+        let triple = memory.struct_layout(layouts.Int16, layouts.Int16, layouts.Int16);
+        let stub = linker.upcall_stub(failing, descriptors.of(triple), arena);
+        let check_zeros = linker.downcall_handle(library.find_or_trap("check_zero_short_triple"),
+            descriptors.of_void(layouts.Address));
+        check_zeros.invoke(stub);
+        console.print_line("unreachable");
+        return program.ExitCode.Ok;
+    };
+);

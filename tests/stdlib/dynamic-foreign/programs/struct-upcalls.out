@@ -1,0 +1,6 @@
+size 24
+c weight Float64(67.0)
+upcall weight Float64(67.0)
+grown 66 0.5 24
+c weight of grown Float64(78.0)
+input unchanged 65 0.25 8

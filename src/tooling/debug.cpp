@@ -23,6 +23,7 @@
 #include "nvr/format.hpp"
 #include "nvr/names.hpp"
 #include "runner/runner.hpp"
+#include "util/line_endings.hpp"
 #include "util/sha256.hpp"
 #include "util/source_map.hpp"
 
@@ -50,7 +51,15 @@
 #include <utility>
 #include <vector>
 
-#ifndef _WIN32
+#ifdef _WIN32
+#include "platform/environment.hpp"
+#include "platform/error.hpp"
+#include "platform/windows.hpp"
+
+#include <fcntl.h>
+#include <io.h>
+#include <iostream>
+#else
 #include <fcntl.h>
 #include <unistd.h>
 #endif
@@ -63,13 +72,45 @@ std::string path_key(const fs::path& path, const fs::path& base = fs::current_pa
     std::error_code error;
     auto absolute = path.is_absolute() ? path : base / path;
     auto result = fs::weakly_canonical(absolute, error);
+#ifdef _WIN32
+    // One drive-letter case, the uppercase of a canonical path and so of the
+    // compiler's file names: a client may send c:\a for C:/a.
+    auto key = (error ? absolute.lexically_normal() : result).generic_string();
+    if (key.size() >= 2 && key[1] == ':' && key[0] >= 'a' && key[0] <= 'z')
+        key[0] = static_cast<char>(key[0] - 'a' + 'A');
+    return key;
+#else
     return (error ? absolute.lexically_normal() : result).generic_string();
+#endif
 }
 
 std::string read_text(const fs::path& path) {
     std::ifstream input(path, std::ios::binary);
     if (!input) throw std::runtime_error("cannot read " + path.string());
     return {std::istreambuf_iterator<char>(input), {}};
+}
+
+// Whether the file at `path` no longer holds `compiled`, the text the
+// compiler read from it. The compiler reads CR LF line endings as LF (W08),
+// so a file that differs from it only in those is unchanged.
+bool changed_since_compilation(const fs::path& path, const SourceFile& compiled) {
+    return util::normalize_crlf(read_text(path)) != compiled.text();
+}
+
+// The SHA-256 a source reports in DAP Source.checksums. It describes the
+// file at the source's path as the client sees it: the hash of its bytes on
+// disk, CR LF line endings included, when they still hold the compiled text.
+// When the file cannot be read or has changed since compilation, it is the
+// hash of the compiled text, which the "source" request returns.
+std::string source_checksum(const SourceFile& compiled) {
+    std::error_code error;
+    const fs::path path(compiled.name());
+    if (fs::is_regular_file(path, error)) {
+        std::ifstream input(path, std::ios::binary);
+        std::string bytes{std::istreambuf_iterator<char>(input), {}};
+        if (input && !input.bad() && util::normalize_crlf(bytes) == compiled.text()) return util::sha256_hex(bytes);
+    }
+    return util::sha256_hex(compiled.text());
 }
 
 // SMAP columns count Unicode scalar values. DAP columns count UTF-16 code
@@ -90,6 +131,7 @@ struct Source {
     std::string path;
     std::shared_ptr<const SourceFile> snapshot;
     int reference = 0;
+    // See source_checksum.
     std::string checksum;
 };
 
@@ -127,12 +169,37 @@ public:
         ::fcntl(read_, F_SETFD, FD_CLOEXEC);
         ::fcntl(write_, F_SETFD, FD_CLOEXEC);
         ::fcntl(write_, F_SETFL, ::fcntl(write_, F_GETFL) | O_NONBLOCK);
+#else
+        // An anonymous pipe that no child inherits, with the 64 KiB of a
+        // Linux pipe. The program reads its end through a C runtime
+        // descriptor, as it reads standard input; the write end does not wait
+        // (PIPE_NOWAIT), so a write that does not fit fails at once.
+        HANDLE read = nullptr;
+        HANDLE write = nullptr;
+        if (!::CreatePipe(&read, &write, nullptr, 64 * 1024))
+            throw std::runtime_error("cannot open debuggee input pipe: " + platform::error_message(platform::last_error()));
+        DWORD mode = PIPE_READMODE_BYTE | PIPE_NOWAIT;
+        if (!::SetNamedPipeHandleState(write, &mode, nullptr, nullptr)) {
+            const auto error = platform::last_error();
+            ::CloseHandle(read);
+            ::CloseHandle(write);
+            throw std::runtime_error("cannot open debuggee input pipe: " + platform::error_message(error));
+        }
+        read_ = ::_open_osfhandle(reinterpret_cast<std::intptr_t>(read), _O_RDONLY | _O_BINARY);
+        if (read_ < 0) {
+            ::CloseHandle(read);
+            ::CloseHandle(write);
+            throw std::runtime_error("cannot open debuggee input pipe");
+        }
+        write_ = write;
 #endif
     }
     ~ProgramInput() {
         close_input();
 #ifndef _WIN32
         if (read_ >= 0) ::close(read_);
+#else
+        if (read_ >= 0) ::_close(read_);
 #endif
     }
     int descriptor() const { return read_; }
@@ -146,18 +213,28 @@ public:
         if (written < 0 || static_cast<std::size_t>(written) != bytes.size())
             throw std::runtime_error("program input buffer is full");
 #else
-        (void)bytes;
-        throw std::runtime_error("debug console input requires a POSIX workspace host");
+        if (!write_) throw std::runtime_error("program input is closed");
+        if (bytes.size() > 4096) throw std::runtime_error("send input in chunks of at most 4096 bytes");
+        DWORD written = 0;
+        if (!::WriteFile(write_, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr) ||
+            written != bytes.size())
+            throw std::runtime_error("program input buffer is full");
 #endif
     }
     void close_input() {
 #ifndef _WIN32
         if (write_ >= 0) { ::close(write_); write_ = -1; }
+#else
+        if (write_) { ::CloseHandle(write_); write_ = nullptr; }
 #endif
     }
 private:
     int read_ = -1;
+#ifdef _WIN32
+    HANDLE write_ = nullptr;
+#else
     int write_ = -1;
+#endif
 };
 
 struct InspectedValue {
@@ -504,6 +581,13 @@ void Adapter::launch(const Json& arguments) {
         if (value.is_null()) ::unsetenv(name.c_str());
         else if (value.is_string() && value.string().find('\0') == std::string::npos) ::setenv(name.c_str(), value.string().c_str(), 1);
         else throw std::runtime_error("environment values must be strings or null");
+#else
+        // The UTF-16 environment and the C runtime's copy (W18).
+        std::error_code error;
+        if (value.is_null()) platform::unset_env(name, error);
+        else if (value.is_string() && value.string().find('\0') == std::string::npos) platform::set_env(name, value.string(), error);
+        else throw std::runtime_error("environment values must be strings or null");
+        if (error) throw std::runtime_error("cannot set environment variable " + name + ": " + platform::error_message(error));
 #endif
     }
     auto files = array_strings(arguments["testFiles"]);
@@ -534,7 +618,7 @@ void Adapter::launch(const Json& arguments) {
             throw std::runtime_error("source debugging of C imports needs a prebuilt .nvr image");
         for (const auto& file : source_map.files()) {
             const auto label = backend::source_label(program, file->name());
-            sources_.emplace(label, Source{file->name(), file, source_sequence_++, util::sha256_hex(file->text())});
+            sources_.emplace(label, Source{file->name(), file, source_sequence_++, source_checksum(*file)});
         }
         const auto test_filter = arguments["testFilter"].string(arguments["testId"].string());
         if (test_filter.empty()) {
@@ -619,7 +703,7 @@ Json Adapter::set_breakpoints(const Json& arguments, bool preserve_ids) {
                     const auto line = found->second.snapshot->line_text(static_cast<std::size_t>(point.line - 1));
                     point.column = static_cast<int>(utf16_column(line, chosen->column));
                     std::error_code error;
-                    if (fs::is_regular_file(path, error) && util::sha256_hex(read_text(path)) != found->second.checksum) {
+                    if (fs::is_regular_file(path, error) && changed_since_compilation(path, *found->second.snapshot)) {
                         point.verified = false;
                         point.message = "source changed since compilation; restart debugging to rebuild";
                     }
@@ -1413,6 +1497,10 @@ void Adapter::handle(const Json& request) {
 } // namespace
 
 int run_debug(std::istream& input, std::ostream& output, const std::filesystem::path& executable) {
+#ifdef _WIN32
+    if (&input == &std::cin) require_binary_stdio({0});
+    if (&output == &std::cout) require_binary_stdio({1});
+#endif
     return Adapter(input, output, executable).run();
 }
 

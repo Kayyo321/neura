@@ -10,6 +10,7 @@
 #include "neura-ir/control_flow.hpp"
 
 #include <algorithm>
+#include <iterator>
 #include <map>
 #include <optional>
 #include <string>

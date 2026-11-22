@@ -21,13 +21,22 @@
 //   streams     --count requests to --path sent before the server's
 //               SETTINGS are read, ignoring its stream limit
 //   drain       --count requests to --path; SIGTERM to --pid after
-//               --after-ms; one more request once GOAWAY has arrived
+//               --after-ms (Ctrl+Break to its process group on
+//               Windows); one more request once GOAWAY has arrived
 //   load        keeps --count streams to --path in flight on one connection
 //               for --seconds (closed loop); prints the rate and latency
 //               percentiles instead of the streams
 
 #include <nghttp2/nghttp2.h>
 
+#ifdef _WIN32
+// This client links no Neura library, so it starts Winsock itself.
+#include "../../src/platform/windows.hpp"
+
+#include <fcntl.h>
+#include <io.h>
+#pragma comment(lib, "ws2_32.lib")
+#else
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -36,6 +45,7 @@
 #include <sys/socket.h>
 #include <fcntl.h>
 #include <unistd.h>
+#endif
 
 #include <algorithm>
 #include <cerrno>
@@ -53,10 +63,43 @@
 #ifdef MSG_NOSIGNAL
 constexpr int send_flags = MSG_NOSIGNAL;
 #else
-constexpr int send_flags = 0; // SO_NOSIGPIPE is set on the socket instead.
+constexpr int send_flags = 0; // SO_NOSIGPIPE is set on the socket instead (Windows has no SIGPIPE).
 #endif
 
 namespace {
+
+// The calls that differ on Winsock: a SOCKET, WSAPoll, int lengths,
+// WSAGetLastError and closesocket.
+#ifdef _WIN32
+using native_socket = SOCKET;
+constexpr native_socket no_socket = INVALID_SOCKET;
+int poll_one(pollfd& entry, int timeout) { return ::WSAPoll(&entry, 1, timeout); }
+int send_some(native_socket socket, const std::uint8_t* data, std::size_t size) {
+    return ::send(socket, reinterpret_cast<const char*>(data), static_cast<int>(std::min<std::size_t>(size, INT_MAX)),
+                  send_flags);
+}
+int receive_some(native_socket socket, char* data, std::size_t size) {
+    return ::recv(socket, data, static_cast<int>(size), 0);
+}
+bool interrupted() { return ::WSAGetLastError() == WSAEINTR; }
+bool would_block() { return ::WSAGetLastError() == WSAEWOULDBLOCK; }
+void close_socket(native_socket socket) { ::closesocket(socket); }
+// SIGTERM's counterpart (W10): Ctrl+Break to the host's process group,
+// which the test starts with CREATE_NEW_PROCESS_GROUP.
+void terminate_host(int pid) { (void)::GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, static_cast<DWORD>(pid)); }
+#else
+using native_socket = int;
+constexpr native_socket no_socket = -1;
+int poll_one(pollfd& entry, int timeout) { return ::poll(&entry, 1, timeout); }
+ssize_t send_some(native_socket socket, const std::uint8_t* data, std::size_t size) {
+    return ::send(socket, data, size, send_flags);
+}
+ssize_t receive_some(native_socket socket, char* data, std::size_t size) { return ::recv(socket, data, size, 0); }
+bool interrupted() { return errno == EINTR; }
+bool would_block() { return errno == EAGAIN; }
+void close_socket(native_socket socket) { ::close(socket); }
+void terminate_host(int pid) { ::kill(pid, SIGTERM); }
+#endif
 
 using Clock = std::chrono::steady_clock;
 
@@ -98,7 +141,7 @@ struct Request {
 
 class Client {
 public:
-    Client(const Options& options, int socket) : options_(options), socket_(socket), started_(Clock::now()) {}
+    Client(const Options& options, native_socket socket) : options_(options), socket_(socket), started_(Clock::now()) {}
 
     ~Client() {
         if (session_) nghttp2_session_del(session_);
@@ -166,12 +209,12 @@ public:
             if (size == 0) return true;
             std::size_t sent = 0;
             while (sent < static_cast<std::size_t>(size)) {
-                const auto wrote = ::send(socket_, data + sent, static_cast<std::size_t>(size) - sent, send_flags);
+                const auto wrote = send_some(socket_, data + sent, static_cast<std::size_t>(size) - sent);
                 if (wrote < 0) {
-                    if (errno == EINTR) continue;
-                    if (errno == EAGAIN) {
+                    if (interrupted()) continue;
+                    if (would_block()) {
                         pollfd entry{socket_, POLLOUT, 0};
-                        (void)::poll(&entry, 1, 100);
+                        (void)poll_one(entry, 100);
                         continue;
                     }
                     return false;
@@ -186,12 +229,12 @@ public:
     bool pump(int wait_ms) {
         if (!flush()) return end("write failed");
         pollfd entry{socket_, POLLIN, 0};
-        const int ready = ::poll(&entry, 1, wait_ms);
+        const int ready = poll_one(entry, wait_ms);
         if (ready <= 0) return true;
         char buffer[16384];
-        const auto got = ::recv(socket_, buffer, sizeof buffer, 0);
+        const auto got = receive_some(socket_, buffer, sizeof buffer);
         if (got == 0) return end("peer closed");
-        if (got < 0) return errno == EINTR || errno == EAGAIN ? true : end("read failed");
+        if (got < 0) return interrupted() || would_block() ? true : end("read failed");
         if (nghttp2_session_mem_recv2(session_, reinterpret_cast<const std::uint8_t*>(buffer),
                                       static_cast<std::size_t>(got)) < 0) {
             return end("protocol error");
@@ -379,7 +422,7 @@ private:
     }
 
     const Options& options_;
-    int socket_;
+    native_socket socket_;
     Clock::time_point started_;
     nghttp2_session* session_ = nullptr;
     std::map<std::int32_t, StreamResult> streams_;
@@ -394,7 +437,24 @@ private:
     std::string problem_;
 };
 
-int connect_to(int port) {
+native_socket connect_to(int port) {
+#ifdef _WIN32
+    WSADATA data{};
+    if (::WSAStartup(MAKEWORD(2, 2), &data) != 0) return no_socket;
+    const native_socket descriptor = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (descriptor == no_socket) return no_socket;
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_port = htons(static_cast<std::uint16_t>(port));
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (::connect(descriptor, reinterpret_cast<sockaddr*>(&address), sizeof address) != 0) {
+        close_socket(descriptor);
+        return no_socket;
+    }
+    const BOOL on = TRUE;
+    (void)::setsockopt(descriptor, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&on), sizeof on);
+    return descriptor;
+#else
 #ifdef SOCK_CLOEXEC
     const int descriptor = ::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (descriptor < 0) return -1;
@@ -417,6 +477,7 @@ int connect_to(int port) {
     const int on = 1;
     (void)::setsockopt(descriptor, IPPROTO_TCP, TCP_NODELAY, &on, sizeof on);
     return descriptor;
+#endif
 }
 
 bool read_options(int argc, char** argv, Options& options) {
@@ -481,8 +542,13 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "usage: neura_http2_test_client --port P --scenario S [options]\n");
         return 2;
     }
-    const int socket = connect_to(options.port);
-    if (socket < 0) {
+#ifdef _WIN32
+    // The body comes as bytes and the JSON leaves with LF line ends.
+    (void)::_setmode(::_fileno(stdin), _O_BINARY);
+    (void)::_setmode(::_fileno(stdout), _O_BINARY);
+#endif
+    const native_socket socket = connect_to(options.port);
+    if (socket == no_socket) {
         std::fprintf(stderr, "cannot connect to port %d\n", options.port);
         return 1;
     }
@@ -549,7 +615,7 @@ int main(int argc, char** argv) {
         std::string late_result = "\"not tried\"";
         run_until(client, options, [&](double now) {
             if (!signalled && now >= options.after_ms) {
-                if (options.pid > 0) ::kill(options.pid, SIGTERM);
+                if (options.pid > 0) terminate_host(options.pid);
                 signalled = true;
             }
             if (!late && client.goaway()) {
@@ -583,13 +649,13 @@ int main(int argc, char** argv) {
                     latencies.size(), static_cast<unsigned long long>(other), took / 1000,
                     static_cast<double>(latencies.size()) * 1000 / took, at(0.5), at(0.95), at(0.99),
                     Client::quote(client.ended() ? "ended" : "").c_str());
-        ::close(socket);
+        close_socket(socket);
         return 0;
     } else {
         std::fprintf(stderr, "unknown scenario: %s\n", scenario.c_str());
         return 2;
     }
     std::printf("%s\n", client.json(extra).c_str());
-    ::close(socket);
+    close_socket(socket);
     return 0;
 }

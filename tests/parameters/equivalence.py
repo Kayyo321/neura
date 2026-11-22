@@ -16,6 +16,7 @@ before the trap.
 
 Usage: equivalence.py <neura> <directory>
 """
+import os
 import pathlib
 import subprocess
 import sys
@@ -25,10 +26,22 @@ import unittest
 NEURA = pathlib.Path(sys.argv[1]).resolve()
 DIRECTORY = pathlib.Path(sys.argv[2]).resolve()
 
+# Keep Windows' launch environment. POSIX cases use the fixed executable search path.
+BASE_ENV = dict(os.environ) if os.name == 'nt' else {'PATH': '/usr/bin:/bin'}
+NATIVE_JIT = os.name != 'nt'
+SHADOW_ARGS = ['--jit=on'] if NATIVE_JIT else ['--jit=off']
+SHADOW_ENV = {'NEURA_TIER_CHECK': '2', 'NEURA_TIER_EAGER': '1'}
+if not NATIVE_JIT:
+    SHADOW_ENV['NEURA_TIER3'] = 'interp'
+
+
+# NEURA_TEST_TIMEOUT_SCALE comes from CMake (docs/ContinuousIntegration.md).
+TIMEOUT = 120 * int(os.environ.get('NEURA_TEST_TIMEOUT_SCALE', '1'))
+
 
 def run(*arguments, env=None):
-    return subprocess.run([str(NEURA), *arguments], capture_output=True, text=True, timeout=120,
-                          env={'NEURA_GPU': 'off', 'PATH': '/usr/bin:/bin', **(env or {})})
+    return subprocess.run([str(NEURA), *arguments], capture_output=True, encoding='utf-8', timeout=TIMEOUT,
+                          env={**BASE_ENV, 'NEURA_GPU': 'off', **(env or {})})
 
 
 class EquivalenceTests(unittest.TestCase):
@@ -57,6 +70,8 @@ class EquivalenceTests(unittest.TestCase):
     def test_programs_without_a_written_out_form_run(self):
         with tempfile.TemporaryDirectory() as scratch:
             for expected in sorted(DIRECTORY.glob('*.expected')):
+                with expected.open(encoding='utf-8', newline=None) as stream:
+                    expected_stdout = stream.read()
                 source = expected.with_suffix('.nra')
                 module = pathlib.Path(scratch) / (source.name + '.nir')
                 result = run('emit-ir', str(source), '-o', str(module))
@@ -64,7 +79,8 @@ class EquivalenceTests(unittest.TestCase):
                 trap_file = expected.with_suffix('.trap')
                 status, trap = 0, ''
                 if trap_file.exists():
-                    first, message = trap_file.read_text().split('\n', 1)
+                    with trap_file.open(encoding='utf-8', newline=None) as stream:
+                        first, message = stream.read().split('\n', 1)
                     status, trap = int(first), message.rstrip('\n')
                 builds = {'source': [str(source)], 'unoptimized': ['--no-optimize', str(source)],
                           'nir': [str(module)], 'nir-unoptimized': ['--no-optimize', str(module)], 'stripped': ['--no-source-map', str(source)]}
@@ -79,18 +95,20 @@ class EquivalenceTests(unittest.TestCase):
                     if build == 'stripped':
                         listing = run('disassemble', str(image), '-o', str(image) + '.nvra')
                         self.assertEqual(listing.returncode, 0, listing.stderr)
-                        self.assertNotIn('section "NAME"', pathlib.Path(str(image) + '.nvra').read_text())
+                        with pathlib.Path(str(image) + '.nvra').open(encoding='utf-8', newline=None) as stream:
+                            self.assertNotIn('section "NAME"', stream.read())
                     modes = [([], {}), (['--tier=0'], {})]
                     if source.name.startswith('hook-'):
-                        modes += [(['--tier=1'], {}), (['--tier=2'], {}), (['--jit=off'], {}), (['--jit=on'], {}),
+                        modes += [(['--tier=1'], {}), (['--tier=2'], {}), (['--jit=off'], {}),
+                                  *([(['--jit=on'], {})] if NATIVE_JIT else []),
                                   ([], {'NEURA_TIER3': 'interp', 'NEURA_TIER_EAGER': '1'}),
-                                  (['--jit=on'], {'NEURA_TIER_CHECK': '2', 'NEURA_TIER_EAGER': '1'})]
+                                  (SHADOW_ARGS, SHADOW_ENV)]
                         modes = [(tier, {**env, 'NEURA_TIER3_VERIFY': '1'}) for tier, env in modes]
                     for tier, env in modes:
                         with self.subTest(program=source.name, build=build, tier=tier, env=env):
                             result = run('run', *tier, str(image), env=env)
                             self.assertEqual(result.returncode, status, result.stderr)
-                            self.assertEqual(result.stdout, expected.read_text())
+                            self.assertEqual(result.stdout, expected_stdout)
                             if trap:
                                 self.assertIn(trap, result.stderr)
 

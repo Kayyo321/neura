@@ -17,7 +17,8 @@ let.promote _ = import:Std.Core.Unit;
 /// `bind` names the socket and `unbound` leaves it unnamed (it can send but nobody can address a reply to it).
 /// A datagram from an unnamed sender has no sender address (`Datagram.sender` is `None`). Opening one uses the
 /// host's `neura.net.unix.datagram`.
-/// After close every operation except close fails with Closed.
+/// After close every operation except close fails with Closed. Windows has no Unix-domain datagram sockets (its
+/// `AF_UNIX` implements streams only), so there `bind` and `unbound` fail with Unsupported for every address.
 /// @see [Std.Net.Socket.UnixDatagram](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-UnixDatagram)
 #Since("0.3.0")
 export let UnixDatagram = module (

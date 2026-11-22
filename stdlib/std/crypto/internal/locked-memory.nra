@@ -1,9 +1,10 @@
 /// @brief The secret-memory host services (docs/runtime/NVM.md, "Secret memory"): secret bytes held by the host
 /// in page memory it locks with mlock, excludes from core dumps and forked children, and zeroes when the buffer is
-/// released or the execution ends. Only Std.Crypto uses them. The guarantee covers the host buffer only: bytes
-/// written into it, and bytes read back, are ordinary copies in the NVM heap. Every service is in the entropy
-/// capability group; without it each call fails with error 14 (CapabilityDenied). A run that records a trace
-/// cannot create a buffer (error 13, Unsupported), because the trace would hold the secret.
+/// released or the execution ends; on Windows it locks the pages with VirtualLock and excludes them from Windows
+/// Error Reporting dumps, and there is no fork. Only Std.Crypto uses them. The guarantee covers the host buffer
+/// only: bytes written into it, and bytes read back, are ordinary copies in the NVM heap. Every service is in the
+/// entropy capability group; without it each call fails with error 14 (CapabilityDenied). A run that records a
+/// trace cannot create a buffer (error 13, Unsupported), because the trace would hold the secret.
 export let LockedMemory = module (
     /// @brief A new handle or an unsigned host error code.
     export let HandleOutcome = enum (Ok(int64), Error(uint32));

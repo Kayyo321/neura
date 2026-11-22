@@ -18,19 +18,19 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **UnixListener** · [`export let UnixListener = class implements Listener<UnixAddr, UnixStream>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-listener.nra#L22)
+- **UnixListener** · [`export let UnixListener = class implements Listener<UnixAddr, UnixStream>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-listener.nra#L23)
   A listening Unix-domain stream socket. Tagged `#Final`, `#NoDiscard(reason: "a listener must be closed")`, `#NotThreadSafe`.
-- **UnixListener.UnixListener** · [`export let init = func(opened: int64, address: UnixAddr)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-listener.nra#L31)
+- **UnixListener.UnixListener** · [`export let init = func(opened: int64, address: UnixAddr)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-listener.nra#L32)
   Use `bind`; the ID comes from the library.
-- **UnixListener.UnixListener** · [`export let address = func -> UnixAddr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-listener.nra#L37)
+- **UnixListener.UnixListener** · [`export let address = func -> UnixAddr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-listener.nra#L38)
   The bound address.
-- **UnixListener.UnixListener** · [`export let accept = func -> Result<UnixStream>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-listener.nra#L41)
+- **UnixListener.UnixListener** · [`export let accept = func -> Result<UnixStream>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-listener.nra#L42)
   Waits for the next connection; its local address is this listener's and its peer is unknown. Tagged `#NoDiscard`.
-- **UnixListener.UnixListener** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-listener.nra#L53)
+- **UnixListener.UnixListener** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-listener.nra#L54)
   Releases the listener. Closing again returns Ok.
-- **UnixListener.UnixListener** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-listener.nra#L64)
+- **UnixListener.UnixListener** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-listener.nra#L65)
   Text such as "UnixListener(/run/app.sock)".
-- **UnixListener** · [`export let bind = func(address: UnixAddr) -> Result<UnixListener>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-listener.nra#L69)
+- **UnixListener** · [`export let bind = func(address: UnixAddr) -> Result<UnixListener>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-listener.nra#L70)
   Listens on `address`. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

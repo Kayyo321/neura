@@ -5,6 +5,7 @@
 
 #include "cli/tool.hpp"
 #include "nvr/format.hpp"
+#include "platform/text.hpp"
 #include "runner/runner.hpp"
 #include "server/http_listener.hpp"
 #include "server/json_line.hpp"
@@ -24,24 +25,38 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
-#include <fcntl.h>
 #include <fstream>
 #include <future>
 #include <iostream>
 #include <map>
 #include <mutex>
 #include <optional>
-#include <poll.h>
 #include <random>
 #include <set>
-#include <spawn.h>
 #include <sstream>
 #include <string>
+#include <thread>
+#include <vector>
+
+#ifdef _WIN32
+// The Windows host (docs/design/Windows030.md, W27): workers start with exec
+// through platform::Process, every worker is in one job, and every pollable
+// is a socket that WSAPoll waits on.
+#include "platform/console.hpp"
+#include "platform/environment.hpp"
+#include "platform/error.hpp"
+#include "platform/process.hpp"
+#include "platform/self.hpp"
+#include "platform/socket.hpp"
+#include "platform/windows.hpp"
+#else
+#include <fcntl.h>
+#include <poll.h>
+#include <spawn.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
-#include <thread>
 #include <unistd.h>
-#include <vector>
+#endif
 
 #ifdef __linux__
 #include <sys/syscall.h>
@@ -51,7 +66,9 @@
 #include <mach-o/dyld.h>
 #endif
 
+#ifndef _WIN32
 extern char** environ;
+#endif
 
 namespace {
 
@@ -70,7 +87,11 @@ constexpr std::string_view usage =
     "\n"
     "  --listen <address>:<port>      plain HTTP listener (repeatable; port 0 asks for one)\n"
     "  --tls-listen <address>:<port>  HTTPS listener; needs --cert and --key (repeatable)\n"
+#ifdef _WIN32
+    "  --cert <file> --key <file>     PEM certificate chain and private key, reread on --reload\n"
+#else
     "  --cert <file> --key <file>     PEM certificate chain and private key, reread on SIGHUP\n"
+#endif
     "  --no-http2                     TLS listeners offer only http/1.1 (default: h2 and http/1.1)\n"
     "  --h2c                          plain listeners also accept HTTP/2 with prior knowledge\n"
     "  --max-streams N                S-14, concurrent HTTP/2 streams per connection (default 100)\n"
@@ -102,7 +123,12 @@ constexpr std::string_view usage =
     "  --no-startup-check             skip the startup check request\n"
     "\n"
     "neura-server-host migrate [options] <image.nvr> applies the pools' pending migrations and exits.\n"
+#ifdef _WIN32
+    "Ctrl+C and Ctrl+Break (and closing the console) drain and exit; neura-server-host --reload <pid>\n"
+    "makes the host with that process identifier reread the TLS files.\n";
+#else
     "SIGTERM and SIGINT drain and exit; SIGHUP reloads the TLS files.\n";
+#endif
 
 // ---------------------------------------------------------------------------
 // Options
@@ -160,8 +186,13 @@ http::ListenEndpoint parse_endpoint(std::string_view option, std::string_view te
 }
 
 void read_config_file(const fs::path& path, HostOptions& options) {
+#ifdef _WIN32
+    const auto display = neura::platform::utf8_path(path);
+#else
+    const auto display = path.string();
+#endif
     std::ifstream input(path);
-    if (!input) throw std::runtime_error("cannot read the configuration file " + path.string());
+    if (!input) throw std::runtime_error("cannot read the configuration file " + display);
     std::string line;
     std::size_t number = 0;
     while (std::getline(input, line)) {
@@ -171,7 +202,7 @@ void read_config_file(const fs::path& path, HostOptions& options) {
         if (first == std::string::npos || line[first] == '#') continue;
         const auto equals = line.find('=');
         if (equals == std::string::npos || equals == first) {
-            throw std::runtime_error(path.string() + ":" + std::to_string(number) + ": expected key=value");
+            throw std::runtime_error(display + ":" + std::to_string(number) + ": expected key=value");
         }
         auto key = line.substr(first, equals - first);
         while (!key.empty() && (key.back() == ' ' || key.back() == '\t')) key.pop_back();
@@ -207,13 +238,13 @@ HostOptions read_options(int argc, char** argv) {
         } else if (is(arg, "--admin-listen")) {
             options.admin_endpoints.push_back(parse_endpoint("--admin-listen", value_of(i, arg, "--admin-listen")));
         } else if (is(arg, "--cert")) {
-            options.certificate = value_of(i, arg, "--cert");
+            options.certificate = neura::platform::path_from_utf8(value_of(i, arg, "--cert"));
         } else if (is(arg, "--key")) {
-            options.key = value_of(i, arg, "--key");
+            options.key = neura::platform::path_from_utf8(value_of(i, arg, "--key"));
         } else if (is(arg, "--config")) {
             config_values.push_back(value_of(i, arg, "--config"));
         } else if (is(arg, "--config-file")) {
-            config_files.emplace_back(value_of(i, arg, "--config-file"));
+            config_files.push_back(neura::platform::path_from_utf8(value_of(i, arg, "--config-file")));
         } else if (is(arg, "--config-env-prefix")) {
             options.env_prefix = value_of(i, arg, "--config-env-prefix");
         } else if (is(arg, "--max-workers")) {
@@ -269,7 +300,7 @@ HostOptions read_options(int argc, char** argv) {
         } else if (arg == "--allow-env") {
             options.capabilities.env = true;
         } else if (is(arg, "--record-dir")) {
-            options.record_directory = fs::absolute(value_of(i, arg, "--record-dir"));
+            options.record_directory = fs::absolute(neura::platform::path_from_utf8(value_of(i, arg, "--record-dir")));
         } else if (arg == "--no-startup-check") {
             options.startup_check = false;
         } else if (is(arg, "--sql-pool")) {
@@ -289,12 +320,19 @@ HostOptions read_options(int argc, char** argv) {
         } else if (!options.image.empty()) {
             throw std::runtime_error("neura-server-host takes one image");
         } else {
-            options.image = fs::absolute(arg);
+            options.image = fs::absolute(neura::platform::path_from_utf8(arg));
         }
     }
     if (options.image.empty()) throw std::runtime_error(std::string(usage));
+#if defined(_WIN32) && !defined(NEURA_SERVER_TLS_ENABLED)
+    if (!tls_endpoints.empty()) throw std::runtime_error("TLS listeners are unavailable on Windows in Neura 0.3.0");
+#endif
 #ifndef NEURA_SERVER_HTTP2_ENABLED
+#ifdef _WIN32
+    if (options.h2c) throw std::runtime_error("--h2c: HTTP/2 is unavailable on Windows in Neura 0.3.0");
+#else
     if (options.h2c) throw std::runtime_error("--h2c: this server build has no HTTP/2");
+#endif
 #endif
     if (options.endpoints.empty() && !options.migrate_only) {
         throw std::runtime_error("at least one --listen or --tls-listen is required");
@@ -330,14 +368,39 @@ fs::path host_executable(const char* argv0) {
     _NSGetExecutablePath(nullptr, &size);
     std::string buffer(size, '\0');
     if (_NSGetExecutablePath(buffer.data(), &size) == 0) return fs::canonical(buffer.c_str());
+#elif defined(_WIN32)
+    // The module's own path (GetModuleFileNameW): argv[0] may lack the
+    // directory and the .exe that CreateProcessW needs.
+    std::error_code error;
+    auto path = neura::platform::executable_path(error);
+    if (!error && !path.empty()) return path;
 #endif
     return fs::absolute(argv0);
 }
 
+// A path in a worker's command line.
+std::string argument_path(const fs::path& path) {
+#ifdef _WIN32
+    return neura::platform::native_utf8_path(path);
+#else
+    return path.string();
+#endif
+}
+
+#ifdef _WIN32
+// A worker's process: its identifier, and its handle, which the host's set
+// of live workers owns and closes only once the worker has been reaped.
+struct Worker {
+    worker_pid pid = 0;
+    HANDLE handle = nullptr;
+    std::unique_ptr<Channel> channel;
+};
+#else
 struct Worker {
     pid_t pid = -1;
     std::unique_ptr<Channel> channel;
 };
+#endif
 
 std::atomic<bool> draining{false};
 
@@ -356,12 +419,26 @@ public:
             refusals_left_ = std::strtol(text, nullptr, 10);
         }
         worker_arguments_ = worker_arguments();
+#ifdef _WIN32
+        job_ = create_worker_job();
+        // WSAPoll waits on sockets only, so the reaper's wake-up is a socket
+        // pair, not a pipe.
+        std::error_code error;
+        const auto pair = neura::platform::socket_pair(error);
+        if (error) {
+            throw std::runtime_error("cannot create the reaper's wake sockets: " + neura::platform::error_message(error));
+        }
+        wake_[0] = pair[0];
+        wake_[1] = pair[1];
+        for (const auto end : wake_) (void)neura::platform::set_nonblocking(end);
+#else
         if (options_.zygote) start_zygote();
         if (::pipe(wake_) != 0) throw std::runtime_error("cannot create the reaper's wake pipe");
         for (const int end : wake_) {
             ::fcntl(end, F_SETFD, FD_CLOEXEC);
             ::fcntl(end, F_SETFL, ::fcntl(end, F_GETFL) | O_NONBLOCK);
         }
+#endif
         reaper_ = std::jthread([this](std::stop_token stop) { reap(stop); });
         if (options_.ready_workers > 0) spawner_ = std::jthread([this](std::stop_token stop) { keep_ready(stop); });
     }
@@ -377,8 +454,19 @@ public:
         reaper_.request_stop();
         wake_reaper();
         if (reaper_.joinable()) reaper_.join();
+#ifdef _WIN32
+        // Closing the job ends the workers that remain (the ready ones the
+        // reaper never had); the wake sockets go after the reaper.
+        {
+            std::lock_guard lock(pids_mutex_);
+            live_.clear();
+        }
+        if (job_ != nullptr) ::CloseHandle(job_);
+        for (const auto end : wake_) (void)neura::platform::close_socket(end);
+#else
         std::lock_guard lock(zygote_mutex_);
         zygote_.reset();
+#endif
     }
 
     // The startup check (Backend030): one worker runs `serve`, which answers
@@ -399,6 +487,11 @@ public:
                                std::chrono::system_clock::now().time_since_epoch()).count() + timeout.count();
         RecordingWriter writer;
         const auto outcome = exchange(*worker, request, nullptr, writer, Clock::now() + options_.limits.http.request_timeout);
+#ifdef _WIN32
+        worker->channel.reset();
+        const auto status = reap_now(*worker);
+        const bool exited = status.success();
+#else
         const pid_t pid = worker->pid;
         worker->channel.reset();
         int status = 0;
@@ -408,6 +501,7 @@ public:
             live_.erase(pid);
         }
         const bool exited = WIFEXITED(status) && WEXITSTATUS(status) == 0;
+#endif
         if (!outcome.done || writer.status >= 400 || !exited) {
             log(4, request.request_id, "startup check failed",
                 {{"status", std::to_string(writer.status)}, {"worker_exit", describe_exit(status)}});
@@ -470,10 +564,17 @@ public:
         for (int attempt = 0; attempt < 2; ++attempt) {
             worker = attempt == 0 ? take_worker() : spawn();
             if (!worker) break;
+#ifdef _WIN32
+            writer.on_cancel([this, pid = worker->pid, &cancelled] {
+                cancelled = true;
+                kill_worker(pid);
+            });
+#else
             writer.on_cancel([pid = worker->pid, &cancelled] {
                 cancelled = true;
                 ::kill(pid, SIGKILL);
             });
+#endif
             outcome = exchange(*worker, request, &body, writer, deadline);
             writer.on_cancel({});
             // A request the client cancelled is not given a new worker.
@@ -491,13 +592,17 @@ public:
             if (!writer.started()) write_buffered(writer, error_response(500));
             return;
         }
-        const pid_t pid = worker->pid;
+        const worker_pid pid = worker->pid;
         // A worker past its deadline, one that broke the protocol, one whose
         // client or request body failed, is killed; one that closed its
         // channel is left its grace period to exit.
         if (outcome.timed_out || outcome.body_failed || outcome.client_failed || outcome.too_large ||
             worker->channel->status() == Channel::Status::Failed) {
+#ifdef _WIN32
+            kill_worker(pid);
+#else
             ::kill(pid, SIGKILL);
+#endif
         }
         worker->channel.reset();
         hand_to_reaper(pid, request.request_id, outcome.done, true);
@@ -576,6 +681,20 @@ public:
         return running_;
     }
 
+#ifdef _WIN32
+    void kill_all() {
+        std::lock_guard lock(pids_mutex_);
+        for (auto& [pid, process] : live_) (void)process.terminate(kill_signal);
+    }
+
+    // Ends a worker as SIGKILL would: exit code 128 + 9, which its status
+    // then describes as signal 9 (W10). A worker already reaped is left
+    // alone; its handle is closed.
+    void kill_worker(worker_pid pid) {
+        std::lock_guard lock(pids_mutex_);
+        if (const auto found = live_.find(pid); found != live_.end()) (void)found->second.terminate(kill_signal);
+    }
+#else
     void kill_all() {
         {
             std::lock_guard lock(pids_mutex_);
@@ -584,6 +703,7 @@ public:
         std::lock_guard lock(zygote_mutex_);
         if (zygote_) ::kill(zygote_->pid(), SIGKILL);
     }
+#endif
 
 private:
     struct Outcome {
@@ -624,11 +744,17 @@ private:
         }
     }
 
+#ifdef _WIN32
+    // "exited N", "signal N" (a worker the host ended) or "crashed 0x..."
+    // (an NTSTATUS), W10.
+    static std::string describe_exit(const neura::platform::ExitStatus& status) { return status.describe(); }
+#else
     static std::string describe_exit(int status) {
         if (WIFEXITED(status)) return "status " + std::to_string(WEXITSTATUS(status));
         if (WIFSIGNALED(status)) return "signal " + std::to_string(WTERMSIG(status));
         return "unknown";
     }
+#endif
 
     std::string next_id() {
         const auto number = sequence_.fetch_add(1) + 1;
@@ -694,20 +820,13 @@ private:
         if (caps.net) arguments.emplace_back("--allow-net");
         if (caps.env) arguments.emplace_back("--allow-env");
         if (caps.sql) arguments.emplace_back("--allow-sql");
-        if (options_.record_directory) arguments.push_back("--record-dir=" + options_.record_directory->string());
+        if (options_.record_directory) arguments.push_back("--record-dir=" + argument_path(*options_.record_directory));
         arguments.push_back("--max-response-bytes=" + std::to_string(options_.limits.http.response_bytes));
         if (options_.max_steps) arguments.push_back("--max-steps=" + std::to_string(*options_.max_steps));
         if (options_.worker_tier) arguments.push_back("--tier=" + std::to_string(*options_.worker_tier));
         if (options_.worker_jit) arguments.push_back("--jit=" + *options_.worker_jit);
-        arguments.push_back(options_.image.string());
+        arguments.push_back(argument_path(options_.image));
         return arguments;
-    }
-
-    // Called with zygote_mutex_ held, or before any other thread runs.
-    void start_zygote() {
-        std::string problem;
-        zygote_ = ZygoteClient::start(executable_, worker_arguments_, problem);
-        if (!zygote_) log(4, {}, "the worker zygote did not start; starting workers with exec", {{"reason", problem}});
     }
 
     // The test hook NEURA_SERVER_TEST_REFUSE_ASSIGN=N: the first N workers
@@ -716,6 +835,136 @@ private:
         auto left = refusals_left_.load();
         while (left > 0 && !refusals_left_.compare_exchange_weak(left, left - 1)) {}
         return left > 0;
+    }
+
+#ifdef _WIN32
+    // The job of every worker (W27): it ends them when its last handle
+    // closes, with the host however the host ends, and ends a worker that
+    // raises an unhandled exception without an error report dialog.
+    static HANDLE create_worker_job() {
+        const HANDLE job = ::CreateJobObjectW(nullptr, nullptr);
+        if (job == nullptr) {
+            throw std::runtime_error("cannot create the job of the request workers: " +
+                                     neura::platform::error_message(neura::platform::last_error()));
+        }
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+        limits.BasicLimitInformation.LimitFlags =
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION;
+        if (!::SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof limits)) {
+            const auto code = neura::platform::last_error();
+            ::CloseHandle(job);
+            throw std::runtime_error("cannot configure the job of the request workers: " +
+                                     neura::platform::error_message(code));
+        }
+        return job;
+    }
+
+    // Starts `neura-server-host --worker --channel=<socket>` with `channel`
+    // (the worker's end) inherited through the handle list and nothing else
+    // but the standard streams. The image's console output goes to the
+    // host's standard error, as on POSIX. In a new process group, so a Ctrl+C
+    // or Ctrl+Break the host is sent is not sent to its workers; they ignore
+    // the console's own events too (read_worker_options). The worker joins
+    // the job before it is used: one that cannot is ended and not used.
+    std::optional<neura::platform::Process> exec_worker(neura::platform::native_socket channel, bool refuse) {
+        namespace platform = neura::platform;
+        std::vector<std::string> arguments{argument_path(executable_), "--worker",
+                                           "--channel=" + std::to_string(channel)};
+        if (refuse) arguments.emplace_back("--test-refuse-assign");
+        arguments.insert(arguments.end(), worker_arguments_.begin(), worker_arguments_.end());
+        platform::Spawn spawn;
+        spawn.program = executable_;
+        spawn.arguments = std::move(arguments);
+        const HANDLE error_stream = ::GetStdHandle(STD_ERROR_HANDLE);
+        spawn.output = error_stream == nullptr || error_stream == INVALID_HANDLE_VALUE ? platform::Stdio::null()
+                                                                                       : platform::Stdio::from(error_stream);
+        spawn.inherit.push_back(reinterpret_cast<platform::native_file>(channel));
+        spawn.new_process_group = true;
+        std::error_code error;
+        auto process = platform::Process::start(spawn, error);
+        if (!process) {
+            // The reason is logged once; each request that then gets no
+            // worker is answered 500 and logged by handle().
+            if (!start_failure_logged_.exchange(true)) {
+                log(4, {}, "cannot start a request worker", {{"reason", platform::error_message(error)}});
+            }
+            return std::nullopt;
+        }
+        if (!::AssignProcessToJobObject(job_, process.native_handle())) {
+            const auto code = platform::last_error();
+            (void)process.terminate(kill_signal);
+            (void)process.wait();
+            log(4, {}, "cannot place a request worker in the host's job; it was ended",
+                {{"reason", platform::error_message(code)}});
+            return std::nullopt;
+        }
+        return process;
+    }
+
+    std::optional<Worker> spawn() {
+        namespace platform = neura::platform;
+        std::error_code error;
+        const auto pair = platform::socket_pair(error);
+        if (error) return std::nullopt;
+        const bool refuse = take_refusal();
+        auto process = exec_worker(pair[1], refuse);
+        (void)platform::close_socket(pair[1]);
+        if (!process) {
+            (void)platform::close_socket(pair[0]);
+            return std::nullopt;
+        }
+        Worker worker{process->pid(), process->native_handle(), nullptr};
+        {
+            std::lock_guard lock(pids_mutex_);
+            live_.emplace(worker.pid, std::move(*process));
+        }
+        ++metrics_.starts;
+        worker.channel = std::make_unique<Channel>(pair[0], worker::PeerRole::Host, worker::server_identity(image_digest_));
+        worker::Hello hello;
+        hello.role = worker::PeerRole::Host;
+        hello.identity = worker::server_identity(image_digest_);
+        if (worker.channel->greet(hello, Clock::now() + 10s) != Channel::Status::Ok) {
+            log(4, {}, "request worker failed its greeting");
+            discard(worker);
+            return std::nullopt;
+        }
+        return worker;
+    }
+
+    // Waits for a worker the reaper does not watch and forgets it: its
+    // handle is closed and its status returned. A status that cannot be read
+    // counts as exited 0, as waitpid's failure does on POSIX.
+    neura::platform::ExitStatus reap_now(const Worker& worker) {
+        (void)::WaitForSingleObject(worker.handle, INFINITE);
+        std::lock_guard lock(pids_mutex_);
+        const auto found = live_.find(worker.pid);
+        if (found == live_.end()) return neura::platform::ExitStatus::exited(0);
+        std::error_code error;
+        const auto status = found->second.wait(std::chrono::milliseconds{0}, error);
+        live_.erase(found);
+        return status.value_or(neura::platform::ExitStatus::exited(0));
+    }
+
+    // Kills a worker that ran nothing and waits for it, here: it holds no
+    // slot of its own, so it is gone before anything replaces it.
+    void discard(Worker& worker) {
+        kill_worker(worker.pid);
+        worker.channel.reset();
+        (void)reap_now(worker);
+        ++metrics_.abnormal;
+    }
+
+    // Whether a socket is readable now: 1, 0, or -1 on an error.
+    static int poll_now(neura::platform::native_socket socket) {
+        pollfd entry{socket, POLLIN, 0};
+        return ::WSAPoll(&entry, 1, 0);
+    }
+#else
+    // Called with zygote_mutex_ held, or before any other thread runs.
+    void start_zygote() {
+        std::string problem;
+        zygote_ = ZygoteClient::start(executable_, worker_arguments_, problem);
+        if (!zygote_) log(4, {}, "the worker zygote did not start; starting workers with exec", {{"reason", problem}});
     }
 
     // A worker forked by the zygote, or -1. A zygote that has ended is
@@ -812,6 +1061,13 @@ private:
         ++metrics_.abnormal;
     }
 
+    // Whether a descriptor is readable now: 1, 0, or -1 on an error.
+    static int poll_now(int descriptor) {
+        pollfd entry{descriptor, POLLIN, 0};
+        return ::poll(&entry, 1, 0);
+    }
+#endif
+
     // A ready worker, or a new one. A ready worker whose channel is readable
     // has ended (it sends nothing after its greeting) and is discarded.
     std::optional<Worker> take_worker() {
@@ -826,8 +1082,7 @@ private:
             }
             ready_changed_.notify_all();
             if (!worker) return spawn();
-            pollfd entry{worker->channel->descriptor(), POLLIN, 0};
-            if (::poll(&entry, 1, 0) == 0) return worker;
+            if (poll_now(worker->channel->descriptor()) == 0) return worker;
             log(3, {}, "a ready worker had ended; discarding it");
             ++metrics_.retried;
             discard(*worker);
@@ -902,14 +1157,11 @@ private:
                     continue;
                 }
                 stashed = std::move(frame);
-                body->wake_on(-1);
+                body->wake_on(http::no_wake);
             }
             return true;
         };
-        const auto channel_readable = [&] {
-            pollfd entry{channel.descriptor(), POLLIN, 0};
-            return ::poll(&entry, 1, 0) > 0;
-        };
+        const auto channel_readable = [&] { return poll_now(channel.descriptor()) > 0; };
         if (body) body->wake_on(channel.descriptor());
         while (body) {
             const auto piece = body->read();
@@ -934,7 +1186,7 @@ private:
             // also answered between pieces.
             if (!stashed && channel_readable() && !answer_ready_calls()) return failed();
         }
-        if (body) body->wake_on(-1);
+        if (body) body->wake_on(http::no_wake);
         if (channel.send(FrameKind::BodyEnd, {}, deadline) != Channel::Status::Ok) return failed();
         bool started = false;
         for (;;) {
@@ -1063,7 +1315,14 @@ private:
             return out;
         }
         if (options_.env_prefix) {
+#ifdef _WIN32
+            // GetEnvironmentVariableW (W18): names match without case, and
+            // a value that is not text is left out.
+            std::error_code error;
+            value = neura::platform::get_env(*options_.env_prefix + key, error);
+#else
             if (const char* text = std::getenv((*options_.env_prefix + key).c_str())) value = text;
+#endif
         }
         if (!value) {
             if (const auto found = options_.config.find(key); found != options_.config.end()) value = found->second;
@@ -1145,6 +1404,125 @@ private:
         return text;
     }
 
+#ifdef _WIN32
+    struct Exiting {
+        worker_pid pid;
+        std::string id;
+        bool answered;
+        bool slot; // Holds an S-1 slot until it is reaped.
+        Clock::time_point kill_at;
+        // The thread pool's wait for the worker's exit, which wakes the
+        // reaper; null when it could not be registered (the reaper then
+        // looks every 2 ms).
+        HANDLE wait = nullptr;
+        bool killed = false;
+    };
+
+    void hand_to_reaper(worker_pid pid, std::string id, bool answered, bool slot) {
+        {
+            std::lock_guard lock(reap_mutex_);
+            exiting_.push_back({pid, std::move(id), answered, slot, Clock::now() + options_.grace});
+        }
+
+        wake_reaper();
+    }
+
+    void wake_reaper() {
+        const char byte = 1;
+        (void)::send(wake_[1], &byte, 1, 0); // A full socket already wakes it.
+    }
+
+    // Runs on a thread of the pool when a watched worker has exited.
+    static void CALLBACK worker_exited(void* context, BOOLEAN timed_out) {
+        (void)timed_out;
+        static_cast<Host*>(context)->wake_reaper();
+    }
+
+    void watch(Exiting& entry) {
+        std::lock_guard lock(pids_mutex_);
+        const auto found = live_.find(entry.pid);
+        if (found == live_.end() ||
+            !::RegisterWaitForSingleObject(&entry.wait, found->second.native_handle(), worker_exited, this, INFINITE,
+                                           WT_EXECUTEONLYONCE)) {
+            entry.wait = nullptr;
+        }
+    }
+
+    // Waits for every finished worker as it exits (its wait callback wakes
+    // the reaper), releases the S-1 slot it held, and logs traps and
+    // failures. A worker that does not exit within the grace period is
+    // killed. The workers' handles are not waited on here: WSAPoll waits on
+    // sockets only, and a WaitForMultipleObjects would be limited to 64.
+    void reap(std::stop_token stop) {
+        std::vector<Exiting> pending;
+        for (;;) {
+            {
+                std::lock_guard lock(reap_mutex_);
+                for (auto& entry : exiting_) {
+                    watch(entry);
+                    pending.push_back(std::move(entry));
+                }
+                exiting_.clear();
+            }
+            const bool stopping = stop.stop_requested();
+            if (stopping && pending.empty()) return;
+            const auto now = Clock::now();
+            std::erase_if(pending, [&](Exiting& entry) {
+                if (!finish(entry)) {
+                    if (!entry.killed && (stopping || now >= entry.kill_at)) {
+                        kill_worker(entry.pid);
+                        entry.killed = true;
+                    }
+                    return false;
+                }
+                return true;
+            });
+            auto next = now + 1s;
+            bool unwatched = false;
+            for (const auto& entry : pending) {
+                if (entry.wait == nullptr) unwatched = true;
+                if (!entry.killed) next = std::min(next, entry.kill_at);
+            }
+            auto timeout = std::chrono::ceil<std::chrono::milliseconds>(next - Clock::now()).count();
+            if (unwatched) timeout = std::min<long long>(timeout, 2);
+            pollfd watched{wake_[0], POLLIN, 0};
+            (void)::WSAPoll(&watched, 1, static_cast<int>(std::max<long long>(0, timeout)));
+            if (watched.revents != 0) {
+                char drain[64];
+                while (::recv(wake_[0], drain, sizeof drain, 0) > 0) {}
+            }
+        }
+    }
+
+    // Reaps the worker if it has exited: true when it is gone. Its wait is
+    // unregistered (after its callback, if that runs) before its handle
+    // closes.
+    bool finish(Exiting& entry) {
+        std::optional<neura::platform::ExitStatus> status;
+        {
+            // With the set locked, kill_all never uses a closed handle.
+            std::lock_guard lock(pids_mutex_);
+            const auto found = live_.find(entry.pid);
+            if (found != live_.end()) {
+                std::error_code error;
+                status = found->second.wait(std::chrono::milliseconds{0}, error);
+                if (!status && !error) return false;
+            }
+            if (entry.wait != nullptr) {
+                (void)::UnregisterWaitEx(entry.wait, INVALID_HANDLE_VALUE);
+                entry.wait = nullptr;
+            }
+            if (found != live_.end()) live_.erase(found);
+        }
+        if (entry.slot) release();
+        const bool abnormal = status && !status->success();
+        if (abnormal) ++metrics_.abnormal;
+        if (abnormal && !entry.id.empty()) {
+            log(entry.answered ? 3 : 4, entry.id, "request worker ended abnormally", {{"worker_exit", describe_exit(*status)}});
+        }
+        return true;
+    }
+#else
     struct Exiting {
         pid_t pid;
         std::string id;
@@ -1250,6 +1628,7 @@ private:
         }
         return true;
     }
+#endif
 
     HostOptions options_;
     fs::path executable_;
@@ -1268,6 +1647,22 @@ private:
     std::condition_variable ready_changed_;
     std::deque<Worker> ready_;
 
+#ifdef _WIN32
+    // SIGKILL's number: a worker the host ends exits with 128 + 9.
+    static constexpr int kill_signal = 9;
+
+    std::mutex pids_mutex_;
+    // Every started worker until it is reaped, with its process handle.
+    std::map<worker_pid, neura::platform::Process> live_;
+    HANDLE job_ = nullptr;
+    std::atomic<bool> start_failure_logged_{false};
+
+    std::mutex reap_mutex_;
+    std::vector<Exiting> exiting_;
+    neura::platform::native_socket wake_[2] = {neura::platform::invalid_socket, neura::platform::invalid_socket};
+
+    std::vector<std::string> worker_arguments_;
+#else
     std::mutex pids_mutex_;
     std::set<pid_t> live_;
 
@@ -1279,6 +1674,7 @@ private:
     std::mutex zygote_mutex_;
     std::unique_ptr<ZygoteClient> zygote_;
     int zygote_restarts_ = 0;
+#endif
     std::atomic<long> refusals_left_{0};
 
     struct Metrics {
@@ -1309,6 +1705,84 @@ private:
 // ---------------------------------------------------------------------------
 // Signals and the foreground loop
 
+#ifdef _WIN32
+// Set from the console handler's thread and from the reload event.
+std::atomic<bool> stop_requested{false};
+std::atomic<bool> reload_requested{false};
+
+// Console events stand for signals (W10): Ctrl+C and Ctrl+Break drain, as
+// SIGINT and SIGTERM do. Closing the console, logoff and shutdown drain too,
+// within the time the system gives: it ends a process once the handler of
+// such an event returns, so this handler returns only when the drain has
+// ended the process (or the system has).
+bool drain_on_console_event(neura::platform::ConsoleEvent event) {
+    stop_requested = true;
+    if (event == neura::platform::ConsoleEvent::ctrl_c || event == neura::platform::ConsoleEvent::ctrl_break) {
+        return true;
+    }
+    for (;;) ::Sleep(INFINITE);
+}
+
+void install_signals() {
+    neura::platform::on_console_event(drain_on_console_event);
+}
+
+// Windows has no SIGHUP: the host rereads its TLS files when its reload
+// event is set, which `neura-server-host --reload <pid>` does (W27). The
+// event lives in the session's namespace, as a signal reaches only the
+// processes its sender may signal.
+std::wstring reload_event_name(neura::platform::process_id pid) {
+    return L"Local\\neura-server-host-reload-" + std::to_wstring(pid);
+}
+
+// This host's reload event (auto-reset), or null with the reason.
+HANDLE create_reload_event(std::string& problem) {
+    const auto name = reload_event_name(neura::platform::current_process_id());
+    const HANDLE event = ::CreateEventW(nullptr, FALSE, FALSE, name.c_str());
+    if (event == nullptr) {
+        problem = neura::platform::error_message(neura::platform::last_error());
+        return nullptr;
+    }
+    if (::GetLastError() == ERROR_ALREADY_EXISTS) {
+        // Another process made the event first and could set it at will.
+        ::CloseHandle(event);
+        problem = "another process created the event first";
+        return nullptr;
+    }
+    return event;
+}
+
+// neura-server-host --reload <pid>: sets the reload event of that host.
+int request_reload(std::string_view text) {
+    neura::platform::process_id pid = 0;
+    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), pid);
+    if (error != std::errc{} || end != text.data() + text.size() || pid == 0) {
+        std::cerr << "neura-server-host: --reload expects the process identifier of a server host\n";
+        return 1;
+    }
+    const HANDLE event = ::OpenEventW(EVENT_MODIFY_STATE, FALSE, reload_event_name(pid).c_str());
+    if (event == nullptr) {
+        const auto code = neura::platform::last_error();
+        if (code == ERROR_FILE_NOT_FOUND) {
+            std::cerr << "neura-server-host: no server host with process identifier " << pid
+                      << " runs in this session\n";
+        } else {
+            std::cerr << "neura-server-host: cannot reach the server host " << pid << ": "
+                      << neura::platform::error_message(code) << '\n';
+        }
+        return 1;
+    }
+    const bool set = ::SetEvent(event) != 0;
+    const auto code = neura::platform::last_error();
+    ::CloseHandle(event);
+    if (!set) {
+        std::cerr << "neura-server-host: cannot ask the server host " << pid << " to reload: "
+                  << neura::platform::error_message(code) << '\n';
+        return 1;
+    }
+    return 0;
+}
+#else
 volatile std::sig_atomic_t stop_requested = 0;
 volatile std::sig_atomic_t reload_requested = 0;
 
@@ -1326,6 +1800,7 @@ void install_signals() {
     ignore.sa_handler = SIG_IGN;
     ::sigaction(SIGPIPE, &ignore, nullptr);
 }
+#endif
 
 struct Active {
     std::jthread thread;
@@ -1399,6 +1874,13 @@ int serve(HostOptions options, const char* argv0) {
     }
     if (sql.enabled()) options.capabilities.sql = true;
     auto host = std::make_unique<Host>(options, host_executable(argv0), sql);
+#ifdef _WIN32
+    std::string reload_problem;
+    const HANDLE reload_event = create_reload_event(reload_problem);
+    if (reload_event == nullptr) {
+        host->log(3, {}, "no reload event; --reload cannot reach this host", {{"reason", reload_problem}});
+    }
+#endif
     // The admin listener answers /livez, and /readyz with 503, while the
     // startup check runs.
     std::unique_ptr<AdminListener> admin;
@@ -1432,6 +1914,9 @@ int serve(HostOptions options, const char* argv0) {
 
     std::vector<Active> active;
     while (!stop_requested) {
+#ifdef _WIN32
+        if (reload_event != nullptr && ::WaitForSingleObject(reload_event, 0) == WAIT_OBJECT_0) reload_requested = true;
+#endif
         if (reload_requested) {
             reload_requested = 0;
             try {
@@ -1522,7 +2007,11 @@ WorkerOptions read_worker_options(int argc, char** argv) {
         } else if (arg == "--allow-sql") {
             options.capabilities.sql = true;
         } else if (arg.starts_with("--record-dir=")) {
+#ifdef _WIN32
+            options.record_directory = neura::platform::path_from_utf8(arg.substr(13));
+#else
             options.record_directory = std::string(arg.substr(13));
+#endif
         } else if (arg.starts_with("--max-response-bytes=")) {
             options.response_bytes = std::stoull(std::string(arg.substr(21)));
         } else if (arg.starts_with("--max-steps=")) {
@@ -1533,21 +2022,87 @@ WorkerOptions read_worker_options(int argc, char** argv) {
             options.jit = std::string(arg.substr(6));
         } else if (arg == "--test-refuse-assign") {
             options.refuse_assign = true;
+#ifdef _WIN32
+        } else if (arg.starts_with("--channel=")) {
+            // The inherited socket of the worker's channel, by its value.
+            const auto value = arg.substr(10);
+            neura::platform::native_socket channel = neura::platform::invalid_socket;
+            const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), channel);
+            if (error == std::errc{} && end == value.data() + value.size()) options.channel = channel;
+        } else {
+            options.image = neura::platform::path_from_utf8(arg);
+        }
+#else
         } else {
             options.image = arg;
         }
+#endif
     }
+#ifdef _WIN32
+    // A worker leaves console events to the host: it ends when its channel
+    // does. It runs in a process group of its own, so the host's Ctrl+Break
+    // does not reach it, and it ignores the events the console sends to all.
+    neura::platform::ignore_console_events();
+#else
     // A worker leaves signals to the host: it ends when its channel does.
     // A zygote's workers inherit this.
     ::signal(SIGINT, SIG_IGN);
     ::signal(SIGPIPE, SIG_IGN);
+#endif
     return options;
 }
+
+#ifdef _WIN32
+// Until the host's drain or a worker's ignoring handler replaces it: the
+// statuses a POSIX shell reports for the signals the events stand for (W10).
+bool end_on_console_event(neura::platform::ConsoleEvent event) {
+    switch (event) {
+    case neura::platform::ConsoleEvent::ctrl_c: std::_Exit(130);
+    case neura::platform::ConsoleEvent::ctrl_break: std::_Exit(131);
+    default: std::_Exit(129);
+    }
+}
+
+// What every Neura tool sets up first on Windows (tool::start, W10 and
+// W17), for the host and its workers alike: no error dialogs, binary
+// standard streams (the JSON log lines and the image's output keep their LF),
+// UTF-8 console output, DLLs from the system directories only, and the
+// default console handler. False on a Windows older than 10 version 2004
+// (W03).
+bool prepare_windows_process() {
+    neura::platform::set_unattended_error_mode();
+    neura::platform::set_binary_stdio();
+    neura::platform::install_console_streams();
+    ::SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+    neura::platform::on_console_event(end_on_console_event);
+    using GetVersion = LONG(WINAPI*)(OSVERSIONINFOW*);
+    const HMODULE ntdll = ::GetModuleHandleW(L"ntdll.dll");
+    const auto symbol = ntdll ? reinterpret_cast<void (*)()>(::GetProcAddress(ntdll, "RtlGetVersion")) : nullptr;
+    const auto get_version = reinterpret_cast<GetVersion>(symbol);
+    if (get_version == nullptr) return true;
+    OSVERSIONINFOW info{};
+    info.dwOSVersionInfoSize = sizeof info;
+    if (get_version(&info) != 0) return true;
+    return info.dwMajorVersion > 10 || (info.dwMajorVersion == 10 && info.dwBuildNumber >= 19041);
+}
+#endif
 
 } // namespace
 
 int main(int argc, char** argv) {
+#ifdef _WIN32
+    if (!prepare_windows_process()) {
+        std::cerr << "neura: Neura needs Windows 10 version 2004 or later\n";
+        return 1;
+    }
+#endif
     try {
+#ifdef _WIN32
+        if (argc >= 2 && std::string_view(argv[1]) == "--reload") return request_reload(argc == 3 ? argv[2] : "");
+        if (argc >= 2 && std::string_view(argv[1]).starts_with("--reload=")) {
+            return request_reload(argc == 2 ? std::string_view(argv[1]).substr(9) : "");
+        }
+#endif
         if (argc >= 2 && std::string_view(argv[1]) == "--worker") return run_request_worker(read_worker_options(argc, argv));
         if (argc >= 2 && std::string_view(argv[1]) == "--zygote") return run_worker_zygote(read_worker_options(argc, argv));
         // A core tool (docs/design/Products030.md): `--version` alone prints
@@ -1560,8 +2115,13 @@ int main(int argc, char** argv) {
         auto options = read_options(argc, argv);
         bool removed = false;
         const auto self = neura::tool::executable_path(argv[0]);
+#ifdef _WIN32
+        // The handle stays open (not inherited) until the host exits.
+        [[maybe_unused]] const auto lease = neura::tool::take_lease(self, removed);
+#else
         // The descriptor stays open (close-on-exec) until the host exits.
         [[maybe_unused]] const int lease = neura::tool::take_lease(self.c_str(), removed);
+#endif
         if (removed) {
             std::cerr << neura::tool::removed_generation_message;
             return 1;

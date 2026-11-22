@@ -23,6 +23,7 @@
 #include "nvm/tier3_passes.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <functional>
 #include <map>
 #include <string>
@@ -1858,7 +1859,7 @@ private:
                     if (kind != Kind::WriteBack && kind != Kind::Helper && kind != Kind::Call) continue;
                     for (std::size_t w = 0; w < words; ++w) {
                         for (auto bits = here[w] | after[w]; bits != 0; bits &= bits - 1) {
-                            read_by_reference[64 * w + static_cast<unsigned>(__builtin_ctzll(bits))] = 1;
+                            read_by_reference[64 * w + static_cast<unsigned>(std::countr_zero(bits))] = 1;
                         }
                     }
                 }
@@ -1921,7 +1922,7 @@ private:
                 };
                 for (std::size_t w = 0; w < words; ++w) {
                     for (auto bits = around[w]; bits != 0; bits &= bits - 1) {
-                        check(static_cast<std::uint32_t>(64 * w + static_cast<unsigned>(__builtin_ctzll(bits))));
+                        check(static_cast<std::uint32_t>(64 * w + static_cast<unsigned>(std::countr_zero(bits))));
                     }
                 }
             }

@@ -1,5 +1,11 @@
 #include "tooling/test_protocol.hpp"
 
+#ifdef _WIN32
+#include "platform/windows.hpp"
+
+#include <io.h>
+#endif
+
 #include <cstdio>
 #include <condition_variable>
 #include <mutex>
@@ -38,7 +44,6 @@ int main() try {
     }
     CHECK(output == long_text);
     CHECK(error == binary);
-#ifndef _WIN32
     std::mutex mutex;
     std::condition_variable ready;
     std::string live_output;
@@ -63,6 +68,22 @@ int main() try {
     }
     CHECK(live_stream_valid);
     CHECK(live_output == "live before completion and final");
+#ifdef _WIN32
+    // Output written through the process's standard handles, as native code
+    // and the console write it, is captured too, and the handles are the
+    // descriptors' again afterwards.
+    output.clear(); error.clear();
+    {
+        TestOutputCapture capture;
+        DWORD written = 0;
+        CHECK(::WriteFile(::GetStdHandle(STD_OUTPUT_HANDLE), "handle out", 10, &written, nullptr) && written == 10);
+        CHECK(::WriteFile(::GetStdHandle(STD_ERROR_HANDLE), "handle err", 10, &written, nullptr) && written == 10);
+        capture.finish(append);
+    }
+    CHECK(output == "handle out");
+    CHECK(error == "handle err");
+    CHECK(::GetStdHandle(STD_OUTPUT_HANDLE) == reinterpret_cast<HANDLE>(_get_osfhandle(1)));
+    CHECK(::GetStdHandle(STD_ERROR_HANDLE) == reinterpret_cast<HANDLE>(_get_osfhandle(2)));
 #endif
     bool unwound = false;
     try {

@@ -1,6 +1,7 @@
 #include "tier3_passes.hpp"
 
 #include "lift/evaluate.hpp"
+#include "util/int128.hpp"
 
 #include <algorithm>
 #include <optional>
@@ -15,8 +16,8 @@
 namespace neura::nvm::tier3::detail {
 namespace {
 
-__extension__ typedef __int128 i128;
-__extension__ typedef unsigned __int128 u128;
+using i128 = neura::Int128;
+using u128 = neura::UInt128;
 
 struct Iv {
     i128 lo = 0;

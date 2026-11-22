@@ -5,7 +5,9 @@
 // executable, with an argument vector: never through a shell, never from
 // the working directory or PATH. It links the tool registry and nothing of
 // the compiler or the runtime, and uses no streams or std::filesystem, so it
-// stays small when a portable release links the C++ runtime into it.
+// stays small when a portable release links the C++ runtime into it. On
+// Windows, which has no exec, it starts the tool with the platform layer's
+// process code and std::filesystem paths, waits, and returns its status.
 
 #include "tool.hpp"
 #include "neura/version.hpp"
@@ -20,8 +22,15 @@
 #include <vector>
 
 #ifdef _WIN32
+#include "platform/console.hpp"
+#include "platform/error.hpp"
+#include "platform/process.hpp"
+#include "platform/text.hpp"
+#include "platform/windows.hpp"
+
 #include <filesystem>
-#include <process.h>
+#include <io.h>
+#include <optional>
 #else
 #include <climits>
 #include <dirent.h>
@@ -38,6 +47,22 @@ namespace {
 namespace tool = neura::tool;
 
 void print(std::FILE* stream, std::string_view text) {
+#ifdef _WIN32
+    // A console shows UTF-8 text correctly only through WriteConsoleW, and
+    // its code page is left as the user set it (W17). Pipes and files get
+    // the bytes.
+    const int descriptor = ::_fileno(stream);
+    if (neura::platform::is_terminal(descriptor)) {
+        if (const auto wide = neura::platform::try_to_utf16(text)) {
+            std::fflush(stream);
+            DWORD written = 0;
+            if (::WriteConsoleW(reinterpret_cast<HANDLE>(::_get_osfhandle(descriptor)), wide->data(),
+                                static_cast<DWORD>(wide->size()), &written, nullptr)) {
+                return;
+            }
+        }
+    }
+#endif
     std::fwrite(text.data(), 1, text.size(), stream);
 }
 
@@ -62,14 +87,30 @@ int builtin(std::string_view name, int argc, char** argv) {
 }
 
 #ifdef _WIN32
+namespace fs = std::filesystem;
+namespace platform = neura::platform;
+
+// The real path of this executable, kept for its lease.
+fs::path self_path;
+
+// The directory as UTF-8 in native form, which messages show; the other
+// functions turn it back into a path.
 std::string directory_of_self(const char* launch) {
-    const auto path = tool::executable_path(launch);
-    return path.empty() ? std::string() : path.parent_path().string();
+    self_path = tool::executable_path(launch ? launch : "");
+    return self_path.empty() ? std::string() : platform::native_utf8_path(self_path.parent_path());
+}
+
+fs::path in_bin(const std::string& bin, std::string_view name) {
+    return platform::path_from_utf8(bin) / tool::executable_file(name);
+}
+
+bool regular_file(const fs::path& path) {
+    std::error_code error;
+    return fs::is_regular_file(path, error);
 }
 
 bool present(const std::string& bin, std::string_view name) {
-    std::error_code error;
-    return !bin.empty() && std::filesystem::is_regular_file(std::filesystem::path(bin) / tool::executable_file(name), error);
+    return !bin.empty() && regular_file(in_bin(bin, name));
 }
 #else
 // The real path of this executable, as tool::executable_path resolves it:
@@ -123,7 +164,51 @@ bool present(const std::string& bin, std::string_view name) {
 }
 #endif
 
-#ifndef _WIN32
+#ifdef _WIN32
+// The text of `path`, at most about 4 MiB of it; nullopt when it cannot be
+// opened.
+std::optional<std::string> read_text(const fs::path& path) {
+    std::FILE* stream = ::_wfopen(path.c_str(), L"rb");
+    if (stream == nullptr) return std::nullopt;
+    std::string text;
+    char buffer[4096];
+    std::size_t count;
+    while ((count = std::fread(buffer, 1, sizeof buffer, stream)) > 0 && text.size() < (std::size_t{4} << 20)) text.append(buffer, count);
+    std::fclose(stream);
+    return text;
+}
+
+// As the POSIX functions below, with std::filesystem paths: whether the
+// generation of `bin` is an unmigrated one that a 0.2 updater placed.
+bool unmigrated_generation(const std::string& bin) {
+    const auto generation = platform::path_from_utf8(bin).parent_path();
+    const auto versions = generation.parent_path();
+    if (versions.filename() != L"versions" || !regular_file(generation / L"share/neura/components/core.txt")) return false;
+    const auto marker = read_text(versions.parent_path() / L"neura-install.txt");
+    return marker && marker->starts_with("neura-install 1\n");
+}
+
+// Whether the generation of `bin` has component manifests; `declared` is set
+// when one of them has the line `tool <name>`.
+bool manifests_declare(const std::string& bin, std::string_view name, bool& declared) {
+    declared = false;
+    const auto directory = platform::path_from_utf8(bin).parent_path() / L"share/neura/components";
+    std::error_code error;
+    fs::directory_iterator listing(directory, error);
+    if (error) return false;
+    const std::string wanted = "tool " + std::string(name) + "\n";
+    bool any = false;
+    for (; listing != fs::directory_iterator(); listing.increment(error)) {
+        const auto file = listing->path().filename().native();
+        if (file.size() < 5 || !file.ends_with(L".txt")) continue;
+        const auto text = read_text(listing->path());
+        if (!text) continue;
+        any = true;
+        if (text->find(wanted) != std::string::npos) declared = true;
+    }
+    return any;
+}
+#else
 // Whether the generation of `bin` is one that a 0.2 updater placed and that
 // is not migrated: a schema 1 marker at the root and a core component
 // manifest in the generation (docs/Install.md, "From 0.2"), the lifecycle's
@@ -178,7 +263,7 @@ bool manifests_declare(const std::string& bin, std::string_view name, bool& decl
 
 std::string join(const std::string& bin, std::string_view name) {
 #ifdef _WIN32
-    return (std::filesystem::path(bin) / tool::executable_file(name)).string();
+    return platform::native_utf8_path(in_bin(bin, name));
 #else
     return (bin == "/" ? bin : bin + "/") + tool::executable_file(name);
 #endif
@@ -205,12 +290,10 @@ int capabilities(const std::string& bin, int argc, char** argv) {
     // migrated (a schema 1 marker and a core manifest) refuses every service
     // start, so the component is reported as unmigrated there.
     std::string service = "{\"installed\":false,\"state\":\"missing\"}";
-#ifndef _WIN32
     if (present(bin, tool::service_executable)) {
         service = std::string("{\"installed\":true,\"protocol\":\"1.0\",\"state\":\"") +
                   (unmigrated_generation(bin) ? "unmigrated" : "ready") + "\"}";
     }
-#endif
     // The version holds only letters, digits, '.' and '-', which JSON needs
     // no escapes for (CMakeLists.txt checks it).
     text += std::string("},\"schemaVersion\":1,\"service\":") + service + ",\"version\":\"" + neura::version::full +
@@ -225,36 +308,39 @@ int forward(const std::string& program, const tool::Command& command, int argc, 
     std::fflush(stdout);
     std::fflush(stderr);
 #ifdef _WIN32
-    // Windows has no exec: start the tool, wait, and return its status.
-    // _spawnv joins the arguments into one command line, so each is quoted.
-    std::vector<std::string> quoted;
-    for (const auto& argument : arguments) {
-        std::string text = "\"";
-        std::size_t slashes = 0;
-        for (const char c : argument) {
-            if (c == '\\') { ++slashes; continue; }
-            text.append(c == '"' ? slashes * 2 + 1 : slashes, '\\');
-            slashes = 0;
-            text += c;
-        }
-        text.append(slashes * 2, '\\');
-        quoted.push_back(text + "\"");
-    }
-    auto quoted_pointers = tool::argv_of(quoted);
-    const auto status = _spawnv(_P_WAIT, program.c_str(), quoted_pointers.data());
-    if (status != -1) return static_cast<int>(status);
+    // Windows has no exec: start the tool, wait, and return its exit code
+    // unchanged (W10). The tool runs in a job that ends with this process,
+    // so a client that kills `neura lsp` ends neura-lsp too. Console events
+    // reach both processes; this one ignores them and lets the tool decide.
+    platform::Spawn spawn;
+    spawn.program = platform::path_from_utf8(program);
+    spawn.arguments = std::move(arguments);
+    spawn.job = platform::JobMode::kill_on_close;
+    platform::ignore_console_events();
+    std::error_code error;
+    auto child = platform::Process::start(spawn, error);
+    if (!child) return fail("cannot run " + program + ": " + platform::error_message(error));
+    const auto status = child.wait(std::nullopt, error);
+    if (!status) return fail("cannot wait for " + program + ": " + platform::error_message(error));
+    return status->shell_status();
 #else
     std::vector<char*> pointers;
     for (auto& argument : arguments) pointers.push_back(argument.data());
     pointers.push_back(nullptr);
     ::execv(program.c_str(), pointers.data());
-#endif
     return fail("cannot run " + program + ": " + std::strerror(errno));
+#endif
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
+#ifdef _WIN32
+    // As tool::start sets up every tool: no error dialogs, and "\n" written
+    // as one byte (W10, W17).
+    neura::platform::set_unattended_error_mode();
+    neura::platform::set_binary_stdio();
+#endif
     if (argc < 2) {
         print(stderr, tool::usage_text());
         return 1;
@@ -265,21 +351,23 @@ int main(int argc, char** argv) {
     if (name == "capabilities") return capabilities(bin, argc, argv);
     const auto* command = tool::find_command(name);
     if (!command) return fail(tool::command_list);
-#ifndef _WIN32
     // The dispatcher holds the lease of its generation until it becomes the
-    // tool, which takes its own (close-on-exec).
+    // tool, which takes its own (close-on-exec). On Windows it holds it while
+    // the tool runs; the tool does not inherit it.
     {
         bool removed = false;
+#ifdef _WIN32
+        if (!self_path.empty()) tool::take_lease(self_path, removed);
+#else
         tool::take_lease(self_path.c_str(), removed);
+#endif
         if (removed) {
             print(stderr, tool::removed_generation_message);
             return 1;
         }
     }
-#endif
     const auto where = bin.empty() ? std::string("the directory of neura (its path could not be determined)") : bin;
     if (command->component == tool::Component::Service && !present(bin, tool::service_executable)) {
-#ifndef _WIN32
         // An installation that a 0.2 updater produced has no neurad (the
         // legacy archive holds none), and every service start there is
         // refused with the migration instruction first, as `run --runtime`
@@ -289,13 +377,11 @@ int main(int argc, char** argv) {
             print(stderr, "neura: runtime: finish the 0.3.0 install first: run \"neura update --migrate-install\"\n");
             return 5;
         }
-#endif
         return fail("'neura " + std::string(name) + "' needs the Neura-runtime service component (" +
                     std::string(tool::service_executable) + "), which is not in " + where +
                     ". 'neura run' runs images directly without it");
     }
     if (!present(bin, command->tool)) {
-#ifndef _WIN32
         // In an installed generation the manifests say which components are
         // there: a tool that none declares belongs to a product that is not
         // installed here.
@@ -304,7 +390,6 @@ int main(int argc, char** argv) {
             print(stderr, "neura: \"" + std::string(name) + "\" needs Neura-sdk, which is not installed here\n");
             return 1;
         }
-#endif
         const auto* entry = tool::find_tool(command->tool);
         const bool core = entry && entry->component == tool::Component::Core;
         return fail("'neura " + std::string(name) + "' needs " + std::string(command->tool) + ", which is not in " + where +

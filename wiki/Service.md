@@ -5,7 +5,7 @@
 
 `neurad` is an optional, per-user service that runs images on request. A command opts in with `neura run --runtime=auto` or `--runtime=required`; without that option `neura run`, `neura test`, `neura debug` and the editor run directly, as before, and never look for the service. The [design note](https://github.com/Kayyo321/neura/blob/main/docs/design/Service030.md) holds the rules, the protocol and the edge cases; this page describes the service as it is built.
 
-The service changes no compiler stage and no image. It is a way to launch an image: an image runs under it as it runs directly, with the same output, status, traps, step counts and trace events. It is not a sandbox and has no network listener. Linux is the qualified platform; the macOS code paths (login start through `launchctl`, a thread that watches the supervisor in place of the Linux parent-death signal, `_NSGetEnviron`) are written but not tested.
+The service changes no compiler stage and no image. It is a way to launch an image: an image runs under it as it runs directly, with the same output, status, traps, step counts and trace events. It is not a sandbox and has no network listener. Linux is qualified. Windows x86-64 has a native service and separate Windows CI checks. The macOS implementation uses `launchctl` for login start and a thread to watch the supervisor where Linux uses a parent-death signal. macOS service qualification remains open.
 
 ## Using it
 
@@ -81,6 +81,8 @@ Terminal states: `exited`, `trapped`, `load-failed`, `stopped`, `client-lost` (t
 | `~/.config/systemd/user/neurad-<id>.service`, `~/Library/LaunchAgents/net.neura.neurad-<id>.plist` | Login start |
 
 `<id>` is 16 hexadecimal digits of the SHA-256 of the real path of the install root, or of a source build's `bin` directory, whose generation is `dev`. No record holds an argument, an environment value or program output, and nothing mutable is written under the install root. The image cache is in the supervisor's memory: at most 256 MiB, an image in use is never evicted, and a worker validates the bytes every time.
+
+On Windows, the owner-only socket directory is under `%LOCALAPPDATA%\Neura\run`, with a short path under `%TEMP%` as a fallback if the socket address exceeds 107 bytes. Service state lives under `%LOCALAPPDATA%\Neura\state`. Login starts through `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. See [the Windows service design](https://github.com/Kayyo321/neura/blob/main/docs/design/Windows030.md#w29-neurad).
 
 ## Limits
 

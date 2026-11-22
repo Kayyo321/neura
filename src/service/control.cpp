@@ -6,6 +6,7 @@
 #include "service.hpp"
 
 #include "cli/lifecycle.hpp"
+#include "cli/tool.hpp"
 #include "tooling/json.hpp"
 
 #include <algorithm>
@@ -15,9 +16,13 @@
 #include <sstream>
 #include <thread>
 
+#ifdef _WIN32
+#include "platform/file.hpp"
+#else
 #include <fcntl.h>
 #include <sys/file.h>
 #include <unistd.h>
+#endif
 
 namespace neura::service {
 
@@ -178,8 +183,8 @@ int status(const Installation& installation, std::vector<std::string> arguments)
     const bool json = flag(arguments, "--json");
     no_more(arguments, "status");
     std::error_code error;
-    const bool installed = fs::exists(installation.bin / "neurad", error);
-    const bool login = fs::exists(login_unit_path(installation), error);
+    const bool installed = fs::exists(installation.bin / tool::executable_file("neurad"), error);
+    const bool login = login_registered(installation);
     Json::Array supervisors;
     for (const auto& generation : live_generations(installation)) {
         Json::Object entry{{"generation", Json(generation)}};
@@ -388,9 +393,16 @@ int stop(const Installation& installation, std::vector<std::string> arguments) {
 bool supervisor_holds_lock(const Installation& installation, const std::string& generation) {
     try {
         const auto endpoint = endpoint_files(run_directory(false), installation.root, generation);
+#ifdef _WIN32
+        std::error_code error;
+        const auto lock = platform::FileLock::acquire(endpoint.lock, platform::LockMode::shared,
+                                                      platform::LockWait::try_once, error, false);
+        return !lock && error == std::errc::resource_unavailable_try_again;
+#else
         UniqueFd fd(::open(endpoint.lock.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW));
         if (!fd) return false;
         return ::flock(fd.get(), LOCK_SH | LOCK_NB) != 0 && errno == EWOULDBLOCK;
+#endif
     } catch (const std::exception&) {
         return false;
     }

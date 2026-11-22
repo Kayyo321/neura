@@ -1,6 +1,7 @@
 // Lexer-level tests for the HTML and CSS island boundary. Parser validation
 // of the contents belongs to the template and stylesheet tests.
 #include "lexer/lexer.hpp"
+#include "util/line_endings.hpp"
 
 #include <iostream>
 #include <string>
@@ -151,6 +152,41 @@ void unterminated(std::string_view prefix, std::string_view body, std::string_vi
     CHECK(found_next == (suffix.find("next") != std::string_view::npos));
     CHECK(tokens.back().kind == TokenKind::End);
 }
+
+// Source text is read with LF line endings (W08): the loader replaces each
+// CR LF with LF before lexing, keeps a CR that no LF follows, and a CR LF
+// source then lexes to the tokens and spans of its LF original, islands
+// included.
+void line_endings() {
+    CHECK(util::normalize_crlf("") == "");
+    CHECK(util::normalize_crlf("a\r\nb\r\n") == "a\nb\n");
+    CHECK(util::normalize_crlf("a\rb\r") == "a\rb\r");
+    CHECK(util::normalize_crlf("\r\r\n") == "\r\n");
+    CHECK(util::normalize_crlf("\n\r") == "\n\r");
+    CHECK(!util::only_line_endings_differ("a\nb", "a\nb"));
+    CHECK(util::only_line_endings_differ("a\r\nb\r\n", "a\nb\n"));
+    CHECK(util::only_line_endings_differ("a\nb", "a\r\nb"));
+    CHECK(!util::only_line_endings_differ("x\r", "x"));
+    CHECK(!util::only_line_endings_differ("a\r\nb", "a\nc"));
+
+    const std::string lf = "/// A view.\nlet view = html(x: string) {\n  <p>{x}</p>\n};\n"
+                           "let total = 1 +\n    2; // done\nlet styles = css {\n  .a { color: red; }\n};\n";
+    std::string crlf;
+    for (const char c : lf) crlf += c == '\n' ? std::string("\r\n") : std::string(1, c);
+    const auto normalized = util::normalize_crlf(crlf);
+    CHECK(normalized == lf);
+    const auto expected = lex(lf, "lines.nra");
+    const auto actual = lex(normalized, "lines.nra");
+    CHECK(expected.size() == actual.size());
+    for (std::size_t i = 0; i < expected.size() && i < actual.size(); ++i) {
+        CHECK(expected[i].kind == actual[i].kind);
+        CHECK(expected[i].text == actual[i].text);
+        CHECK(expected[i].span.offset == actual[i].span.offset);
+        CHECK(expected[i].span.line == actual[i].span.line);
+        CHECK(expected[i].span.column == actual[i].span.column);
+        CHECK(expected[i].span.length == actual[i].span.length);
+    }
+}
 } // namespace
 
 int main() {
@@ -165,6 +201,7 @@ int main() {
         unterminated("    let broken = html() ", "\n        <!-- unfinished\n",
                      "}\nexport let next = 1;\n", TokenKind::HtmlIsland);
         unterminated("let broken = html() ", " unfinished", "", TokenKind::HtmlIsland);
+        line_endings();
     } catch (const neura::Diagnostic& diagnostic) {
         ++failures;
         std::cerr << "unexpected " << diagnostic.code() << ": " << diagnostic.what() << '\n';

@@ -1,5 +1,7 @@
+let error = import:Std.Core.Error;
 let hosts = import:Std.Net.Dns.HostsFile;
 let ips = import:Std.Net.Core.IpAddr;
+let result = import:Std.Core.Result;
 let test = import:Std.Test;
 
 // The /etc/hosts parser: comments, several names per line, both families, lookups, and skipped lines.
@@ -114,5 +116,35 @@ let HostsTests = module (
         last table = hosts.parse("10.0.0.1 a\r\n10.0.0.2 b\r\n");
         test.assert_equal<int>(2, table.size());
         test.assert_equal_string("10.0.0.2", texts(table.lookup("b")));
+        // A Windows table: CRLF line ends, comment lines, a CR before a comment and a blank CRLF line.
+        last windows = hosts.parse("# Copyright\r\n#\r\n\r\n127.0.0.1 localhost\r\n::1 localhost\r # loopback\r\n");
+        test.assert_equal<int>(2, windows.size());
+        test.assert_equal<int>(0, windows.problems().length);
+        test.assert_equal_string("127.0.0.1,::1", texts(windows.lookup("localhost")));
+        test.assert_equal_string("localhost", windows.entries()[1].canonical_name());
+    };
+
+    // Reading the host's own table: Ok, or NotFound where the file does not exist, as DefaultPath on Windows
+    // and the Windows location elsewhere.
+    let assert_read_or_missing = func(file: string) {
+        match (hosts.read(file)) {
+            result.Result.Ok(_) => {},
+            result.Result.Err(failure) => {
+                match (failure) {
+                    error.Error.Io { kind, message, path } => {
+                        test.assert(kind == error.IoErrorKind.NotFound);
+                    },
+                    _ => {
+                        test.fail("expected an Io error: " + error.message(failure));
+                    },
+                }
+            },
+        }
+    };
+
+    export let test_read_default_paths = func {
+        test.assert_equal_string("/etc/hosts", hosts.DefaultPath);
+        assert_read_or_missing(hosts.DefaultPath);
+        assert_read_or_missing("C:/Windows/System32/drivers/etc/hosts");
     };
 );

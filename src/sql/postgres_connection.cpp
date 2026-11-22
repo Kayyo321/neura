@@ -29,19 +29,31 @@ namespace host_error = nvm::host_error;
 
 #ifndef NEURA_SQL_POSTGRES
 
+#ifdef _WIN32
+constexpr auto postgres_unavailable = "the PostgreSQL provider is unavailable on Windows in Neura 0.3.0";
+#endif
+
 bool postgres_available() { return false; }
 
 Status check_postgres_url(const PoolConfig& config) {
     if (config.url.starts_with("postgresql://") || config.url.starts_with("postgres://") ||
         config.url.find('=') != std::string::npos) {
+#ifdef _WIN32
+        return Status::failure(host_error::unsupported, postgres_unavailable);
+#else
         return Status::failure(host_error::unsupported,
                                "this build has no PostgreSQL provider; configure it with -DNEURA_ENABLE_POSTGRES=ON");
+#endif
     }
     return Status::failure(host_error::invalid_input, "the url is sqlite:<path> or a postgresql:// URI");
 }
 
 Status open_postgres(const PoolConfig&, const Wait&, std::unique_ptr<Connection>&) {
+#ifdef _WIN32
+    return Status::failure(host_error::unsupported, postgres_unavailable);
+#else
     return Status::failure(host_error::unsupported, "this build has no PostgreSQL provider");
+#endif
 }
 
 #else

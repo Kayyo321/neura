@@ -756,17 +756,20 @@ Substitution Lowering::infer_type_arguments(SymbolId target, const Expr& expr, s
             throw Diagnostic(solution.source, "a value of type " + describe(actual) +
                                                   " cannot leave its scope: it cannot be a type argument")
                 .with_code("E0605");
-        const auto& parameter = symbol(generic);
+        // Copies: a check by conformance can add symbols and move the table
+        // (as in type_arguments).
+        const auto parameter_name = symbol(generic).name;
+        auto bounds = symbol(generic).additional_bounds;
+        if (symbol(generic).bound) bounds.insert(bounds.begin(), *symbol(generic).bound);
         const auto check = [&](const IrType& declared) {
             const auto bound = substitute(declared, result);
             if (!assignable(actual, bound) && !satisfies_by_conformance(actual, bound, solution.source, context))
                 throw Diagnostic(solution.source, "type argument " + describe(actual) + " does not satisfy the bound " +
-                                                      describe(bound) + " of type parameter '" + parameter.name + "'")
+                                                      describe(bound) + " of type parameter '" + parameter_name + "'")
                     .with_code("E0418")
-                    .label("'" + parameter.name + "' is inferred as " + describe(actual) + " from this argument");
+                    .label("'" + parameter_name + "' is inferred as " + describe(actual) + " from this argument");
         };
-        if (parameter.bound) check(*parameter.bound);
-        for (const auto& bound : parameter.additional_bounds) check(bound);
+        for (const auto& bound : bounds) check(bound);
     }
     if (std::ranges::any_of(lowered_arguments, [](const auto& item) { return item.has_value(); }))
         inferred_[&expr] = std::move(lowered_arguments);

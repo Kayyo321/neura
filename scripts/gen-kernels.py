@@ -245,7 +245,8 @@ def leading_comment(lines: list[str], index: int) -> str:
 
 
 def parse_header(path: Path, relative: str) -> list[Kernel]:
-    lines = path.read_text().split("\n")
+    with path.open(encoding="utf-8", newline=None) as source:
+        lines = source.read().split("\n")
     kernels = []
     i = 0
     while i < len(lines):
@@ -762,14 +763,17 @@ def main() -> int:
     stale = []
     for relative, text in outputs.items():
         path = root / relative
-        current = path.read_text() if path.exists() else None
+        current = None
+        if path.exists():
+            with path.open(encoding="utf-8", newline="") as source:
+                current = source.read()
         if current == text:
             continue
         if options.check:
             stale.append(relative.as_posix())
         else:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text)
+            path.write_text(text, encoding="utf-8", newline="\n")
             print(f"wrote {relative.as_posix()}")
     if stale:
         for name in stale:

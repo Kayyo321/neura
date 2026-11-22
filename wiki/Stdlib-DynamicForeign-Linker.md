@@ -24,11 +24,11 @@ The following public declarations are taken from the module source; each links t
 - **Linker.Linker** · [`export let upcall_stub = func(target: func(ForeignValue[list]) -> ForeignValue, descriptor: FunctionDescriptor, arena: Arena) -> MemorySegment`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/linker.nra#L47)
   A native function pointer that calls `target` with the C signature `descriptor` (Java's Linker.upcallStub), owned by `arena`. Native code may call it only during a downcall from this program and while the arena is open; a call at any other time ends the process with status 134. `target` receives the arguments as ForeignValues and returns the result, or ForeignValue.Void for a void descriptor; a struct argument is a copy that lives until `target` returns. A trap in `target` ends the run when the downcall returns. A variadic signature cannot be an upcall.
 - **Linker.Linker** · [`export let default_lookup = func -> lookups.SymbolLookup`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/linker.nra#L57)
-  The libraries already loaded into the process, including the C library (Java's Linker.defaultLookup).
+  The libraries already loaded into the process, including the C library (Java's Linker.defaultLookup); `SymbolLookup.default_lookup` gives the order on Windows.
 - **Linker.Linker** · [`export let canonical_layout = func(name: string) -> Optional<MemoryLayout>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/linker.nra#L62)
   The layout of a C type on the runner's platform (Java's Linker.canonicalLayouts): "bool", "char", "short", "int", "long", "long long", "float", "double", "void*", "size_t", or "wchar_t". None for any other name.
-- **Linker.Linker** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/linker.nra#L98)
+- **Linker.Linker** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/linker.nra#L99)
   Names the linker.
-- **Linker** · [`export let native_linker = func -> Linker`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/linker.nra#L113)
+- **Linker** · [`export let native_linker = func -> Linker`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/linker.nra#L114)
   The linker for the runner's platform C ABI.
 <!-- END SOURCE API -->

@@ -327,7 +327,8 @@ std::vector<IrNode> Lowering::generator_factory(const Declaration& declaration, 
     const auto& span = declaration.span;
     const auto sequence_type = symbol(factory).type;
     const auto element = sequence_type.arguments.front();
-    const auto& factory_parameters = symbol(factory).parameters;
+    // Copies, not references into program_.symbols: add() below can reallocate the table.
+    const auto factory_parameters = symbol(factory).parameters;
     for (std::size_t i = 0; i < factory_parameters.size() && i < declaration.parameters.size(); ++i)
         if (frame_owned(program_, symbol(factory_parameters[i]).type))
             throw Diagnostic(declaration.parameters[i].type.span,
@@ -370,8 +371,9 @@ std::vector<IrNode> Lowering::generator_factory(const Declaration& declaration, 
     // The body, with the parameters as its outermost locals.
     Context inner{resume, resume, context.receiver, 0, {{}}, &environment};
     for (std::size_t i = 0; i < factory_parameters.size(); ++i) {
-        const auto& name = symbol(factory_parameters[i]).name;
-        const auto local = add(SymbolKind::Local, name, symbol(factory_parameters[i]).span, resume);
+        const auto name = symbol(factory_parameters[i]).name;
+        const auto parameter_span = symbol(factory_parameters[i]).span;
+        const auto local = add(SymbolKind::Local, name, parameter_span, resume);
         symbol(local).type = symbol(factory_parameters[i]).type;
         inner.scopes.back().emplace(name, local);
         state.parameters.push_back(local);
@@ -549,7 +551,8 @@ IrNode Lowering::lower_yield(const Statement& stmt, Context& context) {
     if (found == generator_states_.end())
         throw Diagnostic(stmt.keyword, "'yield' is only a statement in the body of an 'iterator'").with_code("E0222");
     auto& state = found->second;
-    const auto& element = symbol(state.buffer).type;
+    // A copy: lowering the value can add symbols and move the table.
+    const auto element = symbol(state.buffer).type;
     auto value = this->value(stmt.expressions.front(), context, &element);
     auto block = node(IrOp::Block, stmt.span);
     auto store = node(IrOp::Store, stmt.span);

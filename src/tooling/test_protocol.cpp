@@ -10,6 +10,8 @@
 #include <utility>
 
 #ifdef _WIN32
+#include "platform/windows.hpp"
+
 #include <fcntl.h>
 #include <io.h>
 #else
@@ -35,7 +37,13 @@ int descriptor(std::FILE* stream) {
 }
 int replace(int from, int to) {
 #ifdef _WIN32
-    return _dup2(from, to);
+    if (_dup2(from, to) != 0) return -1;
+    // The process's standard handles follow descriptors 1 and 2, so that
+    // what native code and the console write through GetStdHandle is
+    // redirected too. (The C runtime of a DLL does not set them itself.)
+    if (to == 1 || to == 2)
+        ::SetStdHandle(to == 1 ? STD_OUTPUT_HANDLE : STD_ERROR_HANDLE, reinterpret_cast<HANDLE>(_get_osfhandle(to)));
+    return 0;
 #else
     return dup2(from, to) < 0 ? -1 : 0;
 #endif
@@ -54,6 +62,95 @@ std::FILE* open_descriptor(int value) {
     return fdopen(value, "wb");
 #endif
 }
+
+#ifdef _WIN32
+// Owns the second handle on a capture file, through which its output is read
+// while the program writes it.
+class CaptureReader {
+public:
+    CaptureReader() = default;
+    CaptureReader(CaptureReader&& other) noexcept : handle_(std::exchange(other.handle_, INVALID_HANDLE_VALUE)) {}
+    CaptureReader& operator=(CaptureReader&& other) noexcept {
+        if (this != &other) {
+            close();
+            handle_ = std::exchange(other.handle_, INVALID_HANDLE_VALUE);
+        }
+        return *this;
+    }
+    CaptureReader(const CaptureReader&) = delete;
+    CaptureReader& operator=(const CaptureReader&) = delete;
+    ~CaptureReader() { close(); }
+    HANDLE get() const { return handle_; }
+    void reset(HANDLE handle) {
+        close();
+        handle_ = handle;
+    }
+
+private:
+    void close() {
+        if (handle_ != INVALID_HANDLE_VALUE) ::CloseHandle(handle_);
+        handle_ = INVALID_HANDLE_VALUE;
+    }
+    HANDLE handle_ = INVALID_HANDLE_VALUE;
+};
+
+// A capture file in the temporary directory that the system deletes when its
+// last handle closes, also when the process ends. With `reader`, a second
+// handle is opened on it: it has its own file position, so reading the output
+// as it arrives never moves the position the program's writes use.
+std::FILE* capture_file(CaptureReader* reader) {
+    std::array<wchar_t, MAX_PATH + 1> directory{};
+    std::array<wchar_t, MAX_PATH> name{};
+    const DWORD length = ::GetTempPathW(static_cast<DWORD>(directory.size()), directory.data());
+    if (length == 0 || length >= directory.size() || !::GetTempFileNameW(directory.data(), L"nrt", 0, name.data()))
+        return nullptr;
+    constexpr DWORD share = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+    const HANDLE file = ::CreateFileW(name.data(), GENERIC_READ | GENERIC_WRITE | DELETE, share, nullptr, OPEN_EXISTING,
+                                      FILE_FLAG_DELETE_ON_CLOSE, nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        ::DeleteFileW(name.data());
+        return nullptr;
+    }
+    if (reader) {
+        reader->reset(::CreateFileW(name.data(), GENERIC_READ, share, nullptr, OPEN_EXISTING, 0, nullptr));
+        if (reader->get() == INVALID_HANDLE_VALUE) {
+            ::CloseHandle(file);
+            return nullptr;
+        }
+    }
+    const int value = _open_osfhandle(reinterpret_cast<std::intptr_t>(file), _O_RDWR | _O_BINARY);
+    if (value < 0) {
+        ::CloseHandle(file);
+        if (reader) reader->reset(INVALID_HANDLE_VALUE);
+        return nullptr;
+    }
+    std::FILE* stream = _fdopen(value, "w+b");
+    if (!stream) {
+        _close(value);
+        if (reader) reader->reset(INVALID_HANDLE_VALUE);
+    }
+    return stream;
+}
+
+using CaptureSource = HANDLE;
+
+// Reads at `offset` through the second handle.
+long long read_capture(CaptureSource file, char* buffer, std::size_t size, long long offset) {
+    OVERLAPPED position{};
+    position.Offset = static_cast<DWORD>(static_cast<unsigned long long>(offset));
+    position.OffsetHigh = static_cast<DWORD>(static_cast<unsigned long long>(offset) >> 32);
+    DWORD count = 0;
+    if (::ReadFile(file, buffer, static_cast<DWORD>(size), &count, &position)) return count;
+    return ::GetLastError() == ERROR_HANDLE_EOF ? 0 : -1;
+}
+#else
+using CaptureSource = int;
+
+// pread never changes the offset used by the program's stdout/stderr writes.
+long long read_capture(CaptureSource file, char* buffer, std::size_t size, long long offset) {
+    return ::pread(file, buffer, size, static_cast<off_t>(offset));
+}
+#endif
 
 std::string qualified_name(const IrProgram& program, SymbolId id) {
     auto name = program.symbols[id].name;
@@ -170,6 +267,10 @@ struct TestOutputCapture::Live {
     std::atomic<bool> stopped{false};
     std::thread worker;
     std::exception_ptr failure;
+#ifdef _WIN32
+    // The second handles on the stdout and stderr capture files.
+    std::array<CaptureReader, 2> readers;
+#endif
 };
 
 namespace {
@@ -194,8 +295,14 @@ TestOutputCapture::TestOutputCapture(Emitter live) {
     std::cerr.flush();
     std::fflush(stdout);
     std::fflush(stderr);
+#ifdef _WIN32
+    std::array<CaptureReader, 2> readers;
+    output_ = capture_file(live ? &readers[0] : nullptr);
+    error_ = capture_file(live ? &readers[1] : nullptr);
+#else
     output_ = std::tmpfile();
     error_ = std::tmpfile();
+#endif
     saved_output_ = duplicate(descriptor(stdout));
     saved_error_ = duplicate(descriptor(stderr));
     if (!output_ || !error_ || saved_output_ < 0 || saved_error_ < 0 ||
@@ -209,26 +316,31 @@ TestOutputCapture::TestOutputCapture(Emitter live) {
     if (live) {
         live_ = std::make_unique<Live>();
         live_->emit = std::move(live);
-#ifndef _WIN32
+#ifdef _WIN32
+        live_->readers = std::move(readers);
+#endif
         try {
             live_->worker = std::thread([this] {
                 struct Stream {
-                    int file;
+                    CaptureSource file;
                     const char* name;
-                    off_t offset = 0;
+                    long long offset = 0;
                     std::string pending;
                 };
+#ifdef _WIN32
+                std::array<Stream, 2> streams{{{live_->readers[0].get(), "stdout", 0, {}},
+                                              {live_->readers[1].get(), "stderr", 0, {}}}};
+#else
                 std::array<Stream, 2> streams{{{descriptor(output_), "stdout", 0, {}},
                                               {descriptor(error_), "stderr", 0, {}}}};
+#endif
                 std::array<char, 16384> chunk{};
                 try {
                     for (;;) {
                         const bool stopping = live_->stopped.load(std::memory_order_acquire);
                         for (auto& stream : streams) {
-                            // pread never changes the offset used by the
-                            // program's stdout/stderr writes.
                             for (unsigned round = 0; stopping || round < 16; ++round) {
-                                const auto size = ::pread(stream.file, chunk.data(), chunk.size(), stream.offset);
+                                const auto size = read_capture(stream.file, chunk.data(), chunk.size(), stream.offset);
                                 if (size < 0) throw std::runtime_error("cannot read captured test output");
                                 if (size == 0) break;
                                 stream.offset += size;
@@ -248,7 +360,6 @@ TestOutputCapture::TestOutputCapture(Emitter live) {
             std::fclose(error_);
             throw;
         }
-#endif
     }
 }
 void TestOutputCapture::restore() noexcept {
@@ -281,13 +392,11 @@ void TestOutputCapture::finish(const Emitter& emit) {
     std::cout.flush();
     std::cerr.flush();
     restore();
-#ifndef _WIN32
     if (live_) {
         stop_live();
         if (live_->failure) std::rethrow_exception(live_->failure);
         return;
     }
-#endif
     const auto& output = live_ ? live_->emit : emit;
     std::array<char, 16384> chunk{};
     for (const auto& [stream, name] : {std::pair{output_, "stdout"}, std::pair{error_, "stderr"}}) {
