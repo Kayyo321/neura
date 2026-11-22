@@ -536,7 +536,7 @@ def install(build: Path, cmake: str) -> None:
               "neura runs the compiler of its own installation, not the one first on PATH")
         out = run([on_path("neura", both), "build", paths["HELLO"], "-o", "x.nvr"], work, None, both)
         if WINDOWS:
-            found = out[0] == 1 and out[1] == b"" and out[2].startswith(b"neura: error: expected check, docs,")
+            found = out[0] == 1 and out[1] == b"" and out[2].startswith(b"neura: error: expected check, prove, docs,")
         else:
             found = out == (0, b"the other installation\n", b"")
         check(found, "the shell finds the other installation's neura by PATH")

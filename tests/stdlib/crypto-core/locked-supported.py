@@ -36,7 +36,8 @@ def linux_precondition(requested):
 def windows_precondition(requested):
     kernel = ctypes.WinDLL('kernel32', use_last_error=True)
     psapi = kernel
-    wer = ctypes.WinDLL('wer', use_last_error=True)
+    # kernel32 exports the WerRegisterExcludedMemoryBlock pair; wer.dll does not.
+    wer = kernel
     kernel.GetCurrentProcess.restype = ctypes.c_void_p
     kernel.VirtualAlloc.restype = ctypes.c_void_p
     kernel.VirtualAlloc.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_ulong, ctypes.c_ulong]
