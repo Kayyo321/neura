@@ -891,9 +891,16 @@ NEURA_TEST(concurrency, overlapping_loopback_sockets_are_all_closed) {
         host.wait_for(writes);
         host.wait_for(reads);
         std::multiset<std::string> received;
+        // Accepts may finish in any order, so servers[i] need not be the
+        // peer of clients[i]: the message a server received names its peer.
+        std::vector<std::size_t> peer(connections, connections);
         for (std::size_t i = 0; i < connections; ++i) {
             check_equal(host.value_of(writes[i]).bits, std::uint64_t{8 + std::to_string(i).size()}, "the count written");
-            received.insert(host.value_of(reads[i]).bytes);
+            const auto& bytes = host.value_of(reads[i]).bytes;
+            received.insert(bytes);
+            for (std::size_t client = 0; client < connections; ++client) {
+                if (bytes == "message " + std::to_string(client)) peer[client] = i;
+            }
         }
         check(received == sent, "each message arrives once");
 
@@ -909,7 +916,7 @@ NEURA_TEST(concurrency, overlapping_loopback_sockets_are_all_closed) {
             check(host.call("neura.net.close", {clients[i]}).success, "close a socket with a pending read");
             // The pending read still holds the socket: its peer sees no end.
             const auto open =
-                host.call("neura.net.read", {servers[i], Loopback::number(64), Loopback::number(10'000'000)});
+                host.call("neura.net.read", {servers[peer[i]], Loopback::number(64), Loopback::number(10'000'000)});
             check(!open.success && open.value.bits == host_error::timed_out,
                   "the socket stays open while a pending read holds it");
             host.pending.cancel(idle[i]);
@@ -924,7 +931,7 @@ NEURA_TEST(concurrency, overlapping_loopback_sockets_are_all_closed) {
         // the closed sockets: their peers read the end of the stream.
         for (std::size_t i = half; i < connections; ++i) {
             const auto end =
-                host.call("neura.net.read", {servers[i], Loopback::number(64), Loopback::number(5'000'000'000)});
+                host.call("neura.net.read", {servers[peer[i]], Loopback::number(64), Loopback::number(5'000'000'000)});
             check(end.success && end.value.bytes.empty(), "the peer of a closed socket reads the end of the stream");
         }
 
