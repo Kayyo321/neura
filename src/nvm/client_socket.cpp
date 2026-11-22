@@ -2,6 +2,7 @@
 #include "platform/socket.hpp"
 #include <algorithm>
 #include <condition_variable>
+#include <memory>
 #include <mutex>
 #include <thread>
 #ifdef _WIN32
@@ -10,8 +11,8 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <sys/socket.h>
-#include <unistd.h>
 #endif
 
 namespace neura::nvm::provider::client_socket {
@@ -56,6 +57,160 @@ bool prepare_socket(NativeSocket descriptor) {
     return true;
 #endif
 }
+
+struct NumericAddress {
+    addrinfo info{};
+    sockaddr_storage storage{};
+};
+
+bool numeric_address(NumericAddress& address, const char* host, std::int32_t port) {
+    auto* v4 = reinterpret_cast<sockaddr_in*>(&address.storage);
+    auto* v6 = reinterpret_cast<sockaddr_in6*>(&address.storage);
+    if (::inet_pton(AF_INET, host, &v4->sin_addr) == 1) {
+        v4->sin_family = AF_INET;
+        v4->sin_port = htons(static_cast<std::uint16_t>(port));
+        address.info.ai_family = AF_INET;
+        address.info.ai_addrlen = sizeof(sockaddr_in);
+    } else if (::inet_pton(AF_INET6, host, &v6->sin6_addr) == 1) {
+        v6->sin6_family = AF_INET6;
+        v6->sin6_port = htons(static_cast<std::uint16_t>(port));
+        address.info.ai_family = AF_INET6;
+        address.info.ai_addrlen = sizeof(sockaddr_in6);
+    } else {
+        return false;
+    }
+    address.info.ai_socktype = SOCK_STREAM;
+    address.info.ai_addr = reinterpret_cast<sockaddr*>(&address.storage);
+    return true;
+}
+
+#ifndef NEURA_NUMERIC_ADDRESSES_ONLY
+struct Resolution {
+    std::mutex mutex;
+    std::condition_variable ready;
+    bool done = false;
+    int error = 0;
+    addrinfo* addresses = nullptr;
+    ~Resolution() {
+        if (addresses) ::freeaddrinfo(addresses);
+    }
+};
+
+struct ResolverPool {
+    std::mutex mutex;
+    std::condition_variable available;
+    unsigned active = 0;
+
+    void release() {
+        {
+            std::lock_guard lock(mutex);
+            --active;
+        }
+        available.notify_one();
+    }
+};
+
+constinit std::atomic<ResolverPool*> current_pool{nullptr};
+#ifndef _WIN32
+static_assert(decltype(current_pool)::is_always_lock_free);
+void reset_resolver_in_child() {
+    // Parent-owned synchronization state belongs to vanished threads.
+    // A child allocates a fresh pool on its first named lookup.
+    current_pool.store(nullptr, std::memory_order_relaxed);
+}
+const int resolver_atfork_status = ::pthread_atfork(nullptr, nullptr, reset_resolver_in_child);
+#endif
+
+ResolverPool* resolver_pool() {
+#ifndef _WIN32
+    if (resolver_atfork_status != 0) return nullptr;
+#endif
+    auto* pool = current_pool.load();
+    if (pool) return pool;
+    auto replacement = std::make_unique<ResolverPool>();
+    if (current_pool.compare_exchange_strong(pool, replacement.get())) return replacement.release();
+    return pool;
+}
+
+std::shared_ptr<Resolution> resolve(const std::string& host, std::int32_t port, Clock::time_point deadline,
+                                    std::uint32_t& error, const std::atomic<bool>* cancelled) {
+    constexpr unsigned max_jobs = 4;
+    auto* pool = resolver_pool();
+    if (!pool) {
+        error = host_error::other;
+        return {};
+    }
+    // Allocate before claiming a slot, and keep the result alive independently
+    // from the caller when the platform resolver cannot be interrupted.
+    auto resolution = std::make_shared<Resolution>();
+    const auto dns_deadline = std::min(deadline, Clock::now() + std::chrono::seconds(30));
+    // A saturated pool queues callers under their own deadline. Numeric
+    // addresses and localhost bypass the pool entirely.
+    std::unique_lock slot_lock(pool->mutex);
+    for (;;) {
+        if (cancelled && cancelled->load()) {
+            error = host_error::cancelled;
+            return {};
+        }
+        if (Clock::now() >= dns_deadline) {
+            error = host_error::timed_out;
+            return {};
+        }
+        if (pool->active < max_jobs) {
+            ++pool->active;
+            break;
+        }
+        pool->available.wait_until(slot_lock, std::min(dns_deadline, Clock::now() + std::chrono::milliseconds(50)));
+    }
+    slot_lock.unlock();
+    try {
+        std::thread([resolution, pool, host, service = std::to_string(port)] {
+            addrinfo hints{};
+            hints.ai_family = AF_UNSPEC;
+            hints.ai_socktype = SOCK_STREAM;
+            addrinfo* found = nullptr;
+            const auto result = ::getaddrinfo(host.c_str(), service.c_str(), &hints, &found);
+            {
+                std::lock_guard lock(resolution->mutex);
+                resolution->addresses = found;
+                resolution->error = result;
+                resolution->done = true;
+            }
+            pool->release();
+            resolution->ready.notify_one();
+        }).detach();
+    } catch (...) {
+        pool->release();
+        error = host_error::other;
+        return {};
+    }
+    std::unique_lock lock(resolution->mutex);
+    while (!resolution->done) {
+        if (cancelled && cancelled->load()) {
+            error = host_error::cancelled;
+            return {};
+        }
+        if (Clock::now() >= dns_deadline) {
+            error = host_error::timed_out;
+            return {};
+        }
+        resolution->ready.wait_until(lock, std::min(dns_deadline, Clock::now() + std::chrono::milliseconds(50)));
+    }
+    if (cancelled && cancelled->load()) {
+        error = host_error::cancelled;
+        return {};
+    }
+    if (Clock::now() >= dns_deadline) {
+        error = host_error::timed_out;
+        return {};
+    }
+    if (resolution->error != 0) {
+        error = host_error::not_found;
+        return {};
+    }
+    return resolution;
+}
+#endif
 }
 
 NativeSocket connect(const std::string& host, std::int32_t port, Clock::time_point deadline, std::uint32_t& error,
@@ -72,141 +227,42 @@ NativeSocket connect(const std::string& host, std::int32_t port, Clock::time_poi
         error = host_error::timed_out;
         return invalid_native_socket;
     }
+    NumericAddress ip, local_v6;
+    const addrinfo* found = nullptr;
+#ifndef NEURA_NUMERIC_ADDRESSES_ONLY
+    std::shared_ptr<Resolution> resolution;
+    std::unique_ptr<addrinfo, decltype(&::freeaddrinfo)> numeric(nullptr, ::freeaddrinfo);
+#endif
+    if (host == "localhost") {
+        numeric_address(ip, "127.0.0.1", port);
+        numeric_address(local_v6, "::1", port);
+        ip.info.ai_next = &local_v6.info;
+        found = &ip.info;
+    } else if (numeric_address(ip, host.c_str(), port)) {
+        found = &ip.info;
+    } else {
 #ifdef NEURA_NUMERIC_ADDRESSES_ONLY
-    // Match the fully static launcher's existing numeric/localhost contract.
-    // This branch must not reference getaddrinfo or its libc NSS plugins.
-    struct NumericAddress {
-        addrinfo info{};
-        sockaddr_storage storage{};
-    };
-    std::vector<std::unique_ptr<NumericAddress>> addresses;
-    const std::vector<std::string> candidates =
-        host == "localhost" ? std::vector<std::string>{"127.0.0.1", "::1"} : std::vector<std::string>{host};
-    addrinfo* first = nullptr;
-    addrinfo** tail = &first;
-    for (const auto& candidate : candidates) {
-        auto node = std::make_unique<NumericAddress>();
-        auto* v4 = reinterpret_cast<sockaddr_in*>(&node->storage);
-        auto* v6 = reinterpret_cast<sockaddr_in6*>(&node->storage);
-        if (::inet_pton(AF_INET, candidate.c_str(), &v4->sin_addr) == 1) {
-            v4->sin_family = AF_INET;
-            v4->sin_port = htons(static_cast<std::uint16_t>(port));
-            node->info.ai_family = AF_INET;
-            node->info.ai_addrlen = sizeof(sockaddr_in);
-        } else if (::inet_pton(AF_INET6, candidate.c_str(), &v6->sin6_addr) == 1) {
-            v6->sin6_family = AF_INET6;
-            v6->sin6_port = htons(static_cast<std::uint16_t>(port));
-            node->info.ai_family = AF_INET6;
-            node->info.ai_addrlen = sizeof(sockaddr_in6);
+        // The fully static launcher must avoid libc NSS dependencies.
+        error = host_error::unsupported;
+        return invalid_native_socket;
+#else
+        // Native numeric syntax also includes addresses with a scope ID on
+        // supported platforms. AI_NUMERICHOST keeps this parse out of DNS.
+        addrinfo hints{};
+        hints.ai_family = AF_UNSPEC;
+        hints.ai_socktype = SOCK_STREAM;
+        hints.ai_flags = AI_NUMERICHOST;
+        addrinfo* address = nullptr;
+        if (::getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &address) == 0) {
+            numeric.reset(address);
+            found = numeric.get();
         } else {
-            error = host_error::unsupported;
-            return invalid_native_socket;
+            resolution = resolve(host, port, deadline, error, cancelled);
+            if (!resolution) return invalid_native_socket;
+            found = resolution->addresses;
         }
-        node->info.ai_socktype = SOCK_STREAM;
-        node->info.ai_addr = reinterpret_cast<sockaddr*>(&node->storage);
-        *tail = &node->info;
-        tail = &node->info.ai_next;
-        addresses.push_back(std::move(node));
-    }
-    const auto* found = first;
-#else
-    struct Resolution {
-        std::mutex mutex;
-        std::condition_variable ready;
-        bool done = false;
-        int error = 0;
-        addrinfo* addresses = nullptr;
-        ~Resolution() {
-            if (addresses) ::freeaddrinfo(addresses);
-        }
-    };
-    // Heap storage avoids inherited locked mutexes after fork. A stuck system
-    // resolver retains one worker, and later calls fail promptly instead of
-    // accumulating threads. A child gets a fresh slot on its first call.
-    struct ResolverSlot {
-#ifdef _WIN32
-        const std::uint64_t owner = GetCurrentProcessId();
-#else
-        const std::uint64_t owner = static_cast<std::uint64_t>(::getpid());
 #endif
-        std::atomic<bool> busy{false};
-        std::mutex mutex;
-        std::condition_variable available;
-    };
-    static std::atomic<ResolverSlot*> current{new ResolverSlot};
-    auto* slot = current.load();
-#ifndef _WIN32
-    if (slot->owner != static_cast<std::uint64_t>(::getpid())) {
-        auto replacement = std::make_unique<ResolverSlot>();
-        if (current.compare_exchange_strong(slot, replacement.get())) slot = replacement.release();
-        // The inherited slot belongs to a vanished parent worker. Do not
-        // destroy any parent-owned synchronization state in the child.
     }
-#endif
-    // Allocate before claiming the process-wide slot: an allocation failure
-    // must not leave every later resolver caller waiting on a vanished job.
-    auto resolution = std::make_shared<Resolution>();
-    const auto dns_deadline = std::min(deadline, Clock::now() + std::chrono::seconds(30));
-    // Queue ordinary callers behind the one shared resolver job. Admission is
-    // bounded by the calling provider (fetch has sixteen workers), and each
-    // waiter keeps its own original deadline and cancellation state.
-    std::unique_lock slot_lock(slot->mutex);
-    for (;;) {
-        if (cancelled && cancelled->load()) {
-            error = host_error::cancelled;
-            return invalid_native_socket;
-        }
-        if (Clock::now() >= dns_deadline) {
-            error = host_error::timed_out;
-            return invalid_native_socket;
-        }
-        bool idle = false;
-        if (slot->busy.compare_exchange_strong(idle, true)) break;
-        slot->available.wait_until(slot_lock, std::min(dns_deadline, Clock::now() + std::chrono::milliseconds(50)));
-    }
-    slot_lock.unlock();
-    auto* acquired = slot;
-    try {
-        std::thread([resolution, acquired, host, service = std::to_string(port)] {
-            addrinfo hints{};
-            hints.ai_family = AF_UNSPEC;
-            hints.ai_socktype = SOCK_STREAM;
-            addrinfo* found = nullptr;
-            const auto result = ::getaddrinfo(host.c_str(), service.c_str(), &hints, &found);
-            {
-                std::lock_guard lock(resolution->mutex);
-                resolution->addresses = found;
-                resolution->error = result;
-                resolution->done = true;
-            }
-            acquired->busy.store(false);
-            acquired->available.notify_all();
-            resolution->ready.notify_one();
-        }).detach();
-    } catch (...) {
-        acquired->busy.store(false);
-        acquired->available.notify_all();
-        error = host_error::other;
-        return invalid_native_socket;
-    }
-    std::unique_lock lock(resolution->mutex);
-    while (!resolution->done) {
-        if (cancelled && cancelled->load()) {
-            error = host_error::cancelled;
-            return invalid_native_socket;
-        }
-        if (Clock::now() >= dns_deadline) {
-            error = host_error::timed_out;
-            return invalid_native_socket;
-        }
-        resolution->ready.wait_until(lock, std::min(dns_deadline, Clock::now() + std::chrono::milliseconds(50)));
-    }
-    if (resolution->error != 0) {
-        error = host_error::not_found;
-        return invalid_native_socket;
-    }
-    const auto* found = resolution->addresses;
-#endif
     error = host_error::connection_refused;
     for (const auto* entry = found; entry; entry = entry->ai_next) {
         if (cancelled && cancelled->load()) {
