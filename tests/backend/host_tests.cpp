@@ -1780,7 +1780,10 @@ NEURA_TEST(host, dtls13_addressed_engine_roundtrip_and_deadline) {
     // Both sides verified the other's self-signed certificate (mutual DTLS).
     std::string expected_der;
     {
-        std::unique_ptr<FILE, decltype(&std::fclose)> file(std::fopen(material.certificate.c_str(), "r"), std::fclose);
+        // A lambda, not &std::fclose: GCC warns that fclose's attributes are
+        // dropped when its type is a template argument.
+        const auto close_file = [](FILE* opened) { std::fclose(opened); };
+        std::unique_ptr<FILE, decltype(close_file)> file(std::fopen(material.certificate.c_str(), "r"), close_file);
         check(file != nullptr, "open loopback certificate");
         std::unique_ptr<X509, decltype(&X509_free)> parsed(PEM_read_X509(file.get(), nullptr, nullptr, nullptr),
                                                           X509_free);
