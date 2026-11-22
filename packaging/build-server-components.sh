@@ -13,9 +13,12 @@
 #   --jobs N         parallel compile jobs (default 2)
 #
 # Every archive is checked against the lock's SHA-256 before it is unpacked,
-# and every licence text against the lock's license_sha256. The release
-# workflow, the Tier 1 job and a local release build run this one script, so
-# their libraries are built the same way. It writes:
+# and every licence text against the lock's license_sha256. OpenSSL and
+# nghttp2 also require their detached release signatures. A missing signature
+# is downloaded alongside the archive, and a cached signature is verified
+# on every build. The release workflow, the Tier 1 job and a local release
+# build run this one script, so their libraries are built the same way.
+# It writes:
 #
 #   PREFIX/openssl      include/, lib/libssl.a, lib/libcrypto.a, bin/openssl
 #   PREFIX/nghttp2      include/, lib/libnghttp2.a
@@ -37,8 +40,8 @@
 # build machine's: OpenSSL looks for trust anchors and openssl.cnf under
 # /etc/ssl (SSL_CERT_FILE, SSL_CERT_DIR and OPENSSL_CONF override it), and
 # libpq for pg_service.conf under /usr/local/pgsql/etc (PGSYSCONFDIR).
-# It needs sh, curl, a tar that reads gzip, xz and bzip2, perl, make and a
-# C compiler ($CC, or cc).
+# It needs sh, curl, GnuPG, a tar that reads gzip, xz and bzip2, perl, make
+# and a C compiler ($CC, or cc).
 set -eu
 
 die() {
@@ -63,6 +66,7 @@ printf '%s\n' "$jobs" | grep -Eq '^[1-9][0-9]*$' || die "--jobs needs a positive
 here=$(cd "$(dirname "$0")" && pwd -P)
 lock=$here/server-components.lock.toml
 [ -f "$lock" ] || die "$lock is missing"
+command -v gpg >/dev/null 2>&1 || die "GnuPG (gpg) is required to verify release signatures"
 mkdir -p "$1"
 prefix=$(cd "$1" && pwd -P)
 [ -n "$downloads" ] || downloads=$prefix/downloads
@@ -89,24 +93,91 @@ lock_value() {
     printf '%s\n' "$value"
 }
 
-# fetch SECTION: the verified source archive of SECTION, downloaded if needed.
-fetch() {
+download() {
+    printf '%s: downloading %s\n' "$1" "$2" >&2
+    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 -o "$3" "$2" || die "cannot download $2"
+}
+
+# Publish only verified inputs, and make them visible to other builds at once.
+cache_file() (
+    tmp=$(mktemp "$2.XXXXXXXX")
+    trap 'rm -f "$tmp"' 0
+    cp "$1" "$tmp"
+    mv -f "$tmp" "$2"
+)
+
+# verify_signature SECTION SIGNATURE ARCHIVE: trust only the pinned vendor key
+# and signing subkey. Use a separate keyring for each verification.
+verify_signature() (
+    primary=$(lock_value "$1" release_key)
+    signer=$(lock_value "$1" signing_subkey)
+    key=$here/server-component-keys/$1.asc
+    [ -f "$key" ] || die "$1: release key $key is missing"
+    keyring=$(mktemp -d "${TMPDIR:-/tmp}/neura-signatures.XXXXXXXX")
+    trap 'rm -rf "$keyring"' 0
+
+    gpg --no-options --homedir "$keyring" --batch --no-autostart --quiet --import "$key" ||
+        die "$1: cannot import release key $key"
+    if ! status=$(gpg --no-options --homedir "$keyring" --batch --no-autostart \
+        --no-auto-key-retrieve --trust-model always --status-fd 1 --verify "$2" "$3"); then
+        die "$1: signature verification failed for $(basename "$3")"
+    fi
+    if ! printf '%s\n' "$status" | awk -v primary="$primary" -v signer="$signer" '
+        $1 == "[GNUPG:]" && $2 == "VALIDSIG" {
+            valid++
+            if ($3 == signer && $12 == primary) pinned++
+        }
+        END { exit !(valid == 1 && pinned == 1) }
+    '; then
+        die "$1: signature for $(basename "$3") must match primary $primary and signing subkey $signer"
+    fi
+    printf '%s: %s signature is verified (primary %s, signing subkey %s)\n' \
+        "$1" "$(basename "$3")" "$primary" "$signer" >&2
+)
+
+# fetch SECTION: stage and verify a private copy to unpack from. Other builds
+# can refresh the download cache without changing the inputs we verified.
+fetch() (
     url=$(lock_value "$1" source)
     expected=$(lock_value "$1" sha256)
-    file=$downloads/$(basename "$url")
-    if [ -f "$file" ] && [ "$(sha256 "$file")" = "$expected" ]; then
-        printf '%s: %s is verified (SHA-256 %s)\n' "$1" "$(basename "$file")" "$expected" >&2
-    else
-        rm -f "$file"
-        printf '%s: downloading %s\n' "$1" "$url" >&2
-        curl --proto '=https' --tlsv1.2 -fsSL --retry 3 -o "$file.part" "$url" || die "cannot download $url"
-        actual=$(sha256 "$file.part")
-        [ "$actual" = "$expected" ] || die "$url has SHA-256 $actual; the lock pins $expected"
-        mv "$file.part" "$file"
-        printf '%s: %s is verified (SHA-256 %s)\n' "$1" "$(basename "$file")" "$expected" >&2
+    name=$(basename "$url")
+    archive=$work/$name
+    cached_archive=$downloads/$name
+    actual=
+    if [ -f "$cached_archive" ]; then
+        cp "$cached_archive" "$archive"
+        actual=$(sha256 "$archive")
     fi
-    printf '%s\n' "$file"
-}
+    fetched_archive=no
+    if [ "$actual" != "$expected" ]; then
+        download "$1" "$url" "$archive"
+        actual=$(sha256 "$archive")
+        [ "$actual" = "$expected" ] || die "$url has SHA-256 $actual; the lock pins $expected"
+        fetched_archive=yes
+    fi
+    printf '%s: %s is verified (SHA-256 %s)\n' "$1" "$name" "$expected" >&2
+
+    case $1 in
+    openssl|nghttp2)
+        signature_url=$(lock_value "$1" signature)
+        name=$(basename "$signature_url")
+        signature=$work/$name
+        cached_signature=$downloads/$name
+        if [ -f "$cached_signature" ]; then
+            cp "$cached_signature" "$signature"
+            verify_signature "$1" "$signature" "$archive"
+        else
+            download "$1" "$signature_url" "$signature"
+            verify_signature "$1" "$signature" "$archive"
+            cache_file "$signature" "$cached_signature"
+        fi
+        ;;
+    esac
+    if [ "$fetched_archive" = yes ]; then
+        cache_file "$archive" "$cached_archive"
+    fi
+    printf '%s\n' "$archive"
+)
 
 # licence SECTION DESTINATION: copy the licence the lock names out of the
 # unpacked source, after checking its digest.
@@ -137,7 +208,8 @@ fi
 
 work=$prefix/work
 rm -rf "$work" "$prefix/openssl" "$prefix/nghttp2" "$prefix/postgresql" "$prefix/licenses" "$prefix/components.txt"
-mkdir -p "$work" "$prefix/licenses"
+mkdir -m 700 "$work"
+mkdir -p "$prefix/licenses"
 
 openssl_version=$(lock_value openssl version)
 nghttp2_version=$(lock_value nghttp2 version)
