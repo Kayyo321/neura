@@ -1600,23 +1600,18 @@ bool connected_stream(const StandardServices::Tables::Socket* socket) {
     return socket && !socket->pipe && !socket->listener && !socket->datagram;
 }
 
-HostCompletion read_datagram(NativeSocket socket, std::size_t max, std::int64_t timeout) {
-    const int ready = wait_readable(socket, timeout);
-    if (ready == 0) return fail(host_error::timed_out);
-    if (ready < 0) return socket_failure();
+std::optional<HostCompletion> nonblocking_failure();
+
+std::optional<HostCompletion> read_datagram(NativeSocket socket, std::size_t max) {
     std::string bytes(max, '\0');
     sockaddr_storage from{};
     AddressLength length = sizeof from;
-    decltype(::recvfrom(socket, bytes.data(), 0, 0, nullptr, nullptr)) got;
-    do {
-        length = sizeof from;
-        got = ::recvfrom(socket, bytes.data(), static_cast<int>(bytes.size()), 0,
-                         reinterpret_cast<sockaddr*>(&from), &length);
-    } while (got < 0 && platform::last_socket_error().interrupted());
+    auto got = ::recvfrom(socket, bytes.data(), static_cast<int>(bytes.size()), nonblocking_flags,
+                          reinterpret_cast<sockaddr*>(&from), &length);
 #ifdef _WIN32
     if (got < 0 && ::WSAGetLastError() == WSAEMSGSIZE) got = static_cast<int>(bytes.size());
 #endif
-    if (got < 0) return socket_failure();
+    if (got < 0) return nonblocking_failure();
     bytes.resize(static_cast<std::size_t>(got));
     char address[NI_MAXHOST] = {};
     if (::getnameinfo(reinterpret_cast<sockaddr*>(&from), length, address, sizeof address,
@@ -2166,15 +2161,38 @@ void add_socket_services(const Adder& add, const OverlapAdder& overlap, Standard
         } while (sent < 0 && platform::last_socket_error().interrupted());
         return sent < 0 ? socket_failure() : HostCompletion::ok(int32_value(static_cast<std::int32_t>(sent)));
     });
-    add(signature("neura.net.raw.receive_from", {int64(), int32(), int64()}, address_result()),
-        [=](const HostRequest& request) {
-            if (!granted->net || !granted->raw) return denied();
-            const auto* socket = find(request.arguments.at(0), true);
-            const auto max = as_int32(request.arguments.at(1));
-            const auto timeout = as_int64(request.arguments.at(2));
-            if (!socket || max < 1 || timeout < 0) return fail(host_error::invalid_input);
-            return read_datagram(socket->descriptor, std::min<std::size_t>(max, max_read_bytes), timeout);
-        });
+    const FunctionService::Begin begin_raw_read = [=](const HostRequest& request)
+        -> std::variant<HostCompletion, PendingOperation> {
+        if (!granted->net || !granted->raw) return denied();
+        const auto id = as_int64(request.arguments.at(0));
+        const auto* socket = find(request.arguments.at(0), true);
+        const auto max = as_int32(request.arguments.at(1));
+        const auto timeout = as_int64(request.arguments.at(2));
+        if (!socket || max < 1 || timeout < 0) return fail(host_error::invalid_input);
+        const auto held = hold_socket(socket->descriptor);
+        if (!held) return socket_failure();
+        const auto attempt = [=](bool cancelled) -> std::optional<HostCompletion> {
+            if (!table->sockets.contains(id)) return fail(host_error::invalid_input);
+            if (cancelled) return cancelled_answer();
+            NonblockingAttempt nonblocking(held->descriptor);
+            if (!nonblocking.ready) return socket_failure();
+            return read_datagram(held->descriptor, std::min<std::size_t>(max, max_read_bytes));
+        };
+        if (auto done = attempt(false)) return *done;
+        PendingOperation operation;
+        operation.wait_source = PosixWait{{static_cast<std::intptr_t>(held->descriptor), PosixWait::Events::Read}};
+        operation.attempt = attempt;
+        if (timeout > 0) {
+            operation.deadline = deadline_after(request.now, timeout);
+            operation.expire = [] { return fail(host_error::timed_out); };
+        }
+        return operation;
+    };
+    overlap(signature("neura.net.raw.receive_from", {int64(), int32(), int64()}, address_result()),
+            [=](const HostRequest& request) {
+                const auto started_at = socket_time_nanos();
+                return finish_socket_operation(begin_raw_read(request), started_at);
+            }, begin_raw_read);
 
     const FunctionService::Begin begin_relay = [=](const HostRequest& request)
         -> std::variant<HostCompletion, PendingOperation> {

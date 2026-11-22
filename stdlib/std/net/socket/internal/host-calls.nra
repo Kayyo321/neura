@@ -143,7 +143,7 @@ export let HostCalls = module (
     export let raw_send_to = func(socket: int64, host: string, bytes: uint8[list]) -> CountOutcome host("neura.net.raw.send_to", 1);
 
     /// @brief Receives one raw datagram with its sender. Host service: neura.net.raw.receive_from.
-    export let raw_receive_from = func(socket: int64, max: int, timeout_nanos: int64) -> DatagramOutcome host("neura.net.raw.receive_from", 1);
+    export let raw_receive_from = func(socket: int64, max: int, timeout_nanos: int64) -> DatagramOutcome host("neura.net.raw.receive_from", 2);
 
     /// @brief Moves bytes between two streams. Host service: neura.net.splice version 2.
     export let splice = func(source: int64, target: int64, count: int64) -> LongOutcome host("neura.net.splice", 2);

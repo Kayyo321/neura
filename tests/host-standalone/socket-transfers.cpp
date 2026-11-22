@@ -256,9 +256,46 @@ void zero_copy_deadline_after_a_prefix() {
     std::cout << "PASS: zero-copy continuation token and absolute synchronous backpressure timeout\n";
 }
 
+void raw_read_leaves_the_scheduler_available() {
+    Fixture f;
+    f.capabilities.raw = true;
+    const int receiver = ::socket(AF_INET, SOCK_DGRAM, 0);
+    const int sender = ::socket(AF_INET, SOCK_DGRAM, 0);
+    assert(receiver >= 0 && sender >= 0);
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    assert(::bind(receiver, reinterpret_cast<sockaddr*>(&address), sizeof address) == 0);
+    socklen_t size = sizeof address;
+    assert(::getsockname(receiver, reinterpret_cast<sockaddr*>(&address), &size) == 0);
+    // Inject a loopback datagram descriptor under a raw ID so this readiness
+    // test can run without process privileges.
+    f.table.sockets[1] = {receiver, false, true, false, true};
+    {
+        auto pending = f.start("neura.net.raw.receive_from", {int64_value(1), int32_value(4), int64_value(0)});
+        auto& op = std::get<PendingOperation>(pending);
+        assert(op.deadline == PendingOperation::no_deadline && !op.attempt(false));
+        const auto cancelled = op.attempt(true);
+        assert(cancelled && !cancelled->success && cancelled->value.bits == host_error::cancelled);
+    }
+    auto pending = f.start("neura.net.raw.receive_from", {int64_value(1), int32_value(4), int64_value(1000000000)});
+    auto& op = std::get<PendingOperation>(pending);
+    assert(op.deadline == 1000000000 && op.expire().value.bits == host_error::timed_out);
+    assert(::sendto(sender, "probe", 5, 0, reinterpret_cast<sockaddr*>(&address), size) == 5);
+    pollfd ready{receiver, POLLIN, 0};
+    assert(::poll(&ready, 1, 1000) > 0);
+    const auto done = op.attempt(false);
+    assert(done && done->success && done->value.elements[0].bytes == "prob");
+    assert(done->value.elements[1].bytes == "127.0.0.1" && done->value.elements[2].bits == 0);
+    ::close(receiver);
+    ::close(sender);
+    std::cout << "PASS: raw receive readiness, cancellation, deadline and truncation\n";
+}
+
 int main() {
     quiet_source_and_backpressure();
     zero_copy_backpressure();
     zero_copy_deadline_after_a_prefix();
     segmented_counts();
+    raw_read_leaves_the_scheduler_available();
 }
