@@ -1900,8 +1900,8 @@ NEURA_TEST(host, dtls13_server_validates_the_address_before_its_handshake_flight
     // for this address: not for a replay of the flight (as a spoofing sender
     // would send), not over a retransmission interval, and it accepts no
     // connection. OpenSSL 4.1's listener is not strictly stateless here: it
-    // retransmits the HelloRetryRequest and drops a replayed first flight
-    // from the same address (docs/runtime/NVM.md, DTLS services).
+    // retransmits the HelloRetryRequest and briefly ignores further first
+    // flights from the same address (docs/runtime/NVM.md, DTLS services).
     std::vector<std::string> unvalidated;
     for (const auto& packet : first_flight) {
         const auto answer = packets(step(server, s.value, packet, 12345));
@@ -1944,6 +1944,56 @@ NEURA_TEST(host, dtls13_server_validates_the_address_before_its_handshake_flight
     check(client_done && server_done, "the handshake completes after the cookie round trip");
     expect_ok(client.call("neura.net.dtls.engine.release", {c.value}), "DTLS client release");
     expect_ok(server.call("neura.net.dtls.engine.release", {s.value}), "DTLS server release");
+}
+
+// A first flight that claims the peer's address (a spoofing sender that never
+// sees the cookie) is not ignored state-free by OpenSSL 4.1's listener: the
+// real peer's own first flight from that address goes unanswered for a while.
+// This bounds that stall: one of the peer's retransmissions gets a cookie.
+NEURA_TEST(host, dtls13_unvalidated_flight_only_delays_the_peer) {
+    const LoopbackTlsKeys material;
+    Host spoofer(everything()), client(everything()), server(everything());
+    auto opening = [&](bool accepting) {
+        return std::vector<HostValue>{boolean(accepting), text("localhost"), tls_names({}),
+            text(accepting ? "" : material.certificate), text(material.certificate), text(material.key),
+            text("127.0.0.1"), i32(accepting ? 54321 : 12345), text("127.0.0.1"), i32(accepting ? 12345 : 54321),
+            i64(20'000'000'000)};
+    };
+    auto step = [&](Host& host, const HostValue& id, const std::string& inbound, int sender) {
+        const auto result = host.call("neura.net.dtls.engine.exchange", {id, i32(0), bytes(inbound),
+            text("127.0.0.1"), i32(sender), bytes(""), i64(20'000'000'000)});
+        expect_ok(result, "DTLS handshake step");
+        std::vector<std::string> out;
+        for (const auto& packet : result.value.elements.at(1).elements) out.push_back(packet.bytes);
+        return out;
+    };
+    const auto forged = spoofer.call("neura.net.dtls.engine.open", opening(false));
+    const auto c = client.call("neura.net.dtls.engine.open", opening(false));
+    const auto s = server.call("neura.net.dtls.engine.open", opening(true));
+    expect_ok(forged, "spoofing client open"); expect_ok(c, "client open"); expect_ok(s, "server open");
+    for (const auto& packet : step(spoofer, forged.value, "", 54321)) step(server, s.value, packet, 12345);
+    bool answered = false;
+    auto flight = step(client, c.value, "", 54321);
+    const auto started = std::chrono::steady_clock::now();
+    for (int round = 0; round < 6 && !answered; ++round) {
+        for (const auto& packet : flight) {
+            for (const auto& answer : step(server, s.value, packet, 12345)) {
+                answered = answered || dtls_hello_retry_with_cookie(answer);
+            }
+        }
+        if (answered) break;
+        // Let the client's retransmission timer (1 s, doubling) expire.
+        do {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            flight = step(client, c.value, "", 54321);
+        } while (flight.empty() && std::chrono::steady_clock::now() - started < std::chrono::seconds(15));
+    }
+    check(answered, "a retransmitted first flight from the peer gets a HelloRetryRequest");
+    check(std::chrono::steady_clock::now() - started < std::chrono::seconds(10), "the stall is bounded");
+    for (auto* host : {&spoofer, &client}) {
+        host->call("neura.net.dtls.engine.release", {host == &spoofer ? forged.value : c.value});
+    }
+    server.call("neura.net.dtls.engine.release", {s.value});
 }
 
 // TLS client and server streams (src/nvm/tls_provider.cpp) against each
