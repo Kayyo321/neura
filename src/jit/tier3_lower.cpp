@@ -189,6 +189,7 @@ public:
         out_.function.allocatable_xmm = allocatable_xmm;
         out_.function.vreg_count = static_cast<std::uint32_t>(out_.function.classes.size());
         assign_homes();
+        defer_entry_state_loads();
         return std::move(out_);
     }
 
@@ -1734,6 +1735,87 @@ private:
     }
 
     // ---- spill homes ----------------------------------------------------------
+
+    // A recovery-only entry value with its original frame slot as a home
+    // need not stay live from the entry to every check. The home proof below
+    // already excludes writes and overlapping call results while it is live.
+    // Give each state use its own load instead. In a loop the allocator leaves
+    // these state-only values in memory, and an EntryLoad into its own frame
+    // slot emits nothing. Keep the IR value named by the state unchanged.
+    void defer_entry_state_loads() {
+        auto& fn = out_.function;
+        const auto nv = fn.vreg_count;
+        std::vector<std::uint8_t> eligible(nv, 0), used(nv, 0), state_used(nv, 0);
+        std::vector<mir::Inst> loads(nv);
+        for (const auto& block : fn.blocks) {
+            for (const auto& inst : block.insts) {
+                const auto& step = out_.steps[inst.opcode];
+                if (step.kind != Kind::EntryLoad || inst.defs.size() != 1) continue;
+                const auto v = inst.defs[0].vreg;
+                if (v.cls != mir::RegClass::Gpr || fn.spill_home[v.id] != static_cast<std::int32_t>(step.index)) continue;
+                eligible[v.id] = 1;
+                loads[v.id] = inst;
+            }
+        }
+        for (const auto& block : fn.blocks) {
+            for (const auto& phi : block.phis) {
+                for (const auto v : phi.inputs) eligible[v.id] = 0;
+            }
+            for (const auto& inst : block.insts) {
+                const bool write_back = out_.steps[inst.opcode].kind == Kind::WriteBack;
+                for (const auto& u : inst.uses) {
+                    if (write_back) state_used[u.vreg.id] = 1;
+                    else eligible[u.vreg.id] = 0;
+                }
+                for (const auto& u : inst.state_uses) state_used[u.vreg.id] = 1;
+            }
+        }
+        for (std::uint32_t v = 0; v < nv; ++v) eligible[v] &= state_used[v];
+        // A home proves that spilling this value is a valid frame write,
+        // not that another value cannot temporarily use the same slot. A
+        // deferred load additionally needs the original bits to remain there.
+        std::vector<std::uint32_t> home_value(f_.slot_count, t3::none);
+        std::vector<std::uint8_t> shared_home(f_.slot_count, 0);
+        for (std::uint32_t v = 0; v < nv; ++v) {
+            const auto home = fn.spill_home[v];
+            if (home < 0) continue;
+            auto& value = home_value[home];
+            if (value != t3::none && value != value_of_[v]) shared_home[home] = 1;
+            value = value_of_[v];
+        }
+        for (std::uint32_t v = 0; v < nv; ++v) {
+            if (eligible[v] && shared_home[fn.spill_home[v]]) eligible[v] = 0;
+        }
+        if (std::none_of(eligible.begin(), eligible.end(), [](auto x) { return x != 0; })) return;
+        for (auto& block : fn.blocks) {
+            std::vector<mir::Inst> insts;
+            for (auto& inst : block.insts) {
+                if (out_.steps[inst.opcode].kind == Kind::EntryLoad && eligible[inst.defs[0].vreg.id]) continue;
+                const auto materialize = [&](mir::Operand& u) {
+                    const auto v = u.vreg.id;
+                    if (v >= nv || !eligible[v]) return;
+                    auto load = loads[v];
+                    if (used[v]) {
+                        u.vreg.id = fresh(value_of_[v]);
+                        fn.spill_home[u.vreg.id] = fn.spill_home[v];
+                    }
+                    used[v] = 1;
+                    load.defs[0].vreg = u.vreg;
+                    insts.push_back(std::move(load));
+                };
+                for (auto& u : inst.state_uses) materialize(u);
+                if (out_.steps[inst.opcode].kind == Kind::WriteBack) {
+                    for (auto& u : inst.uses) materialize(u);
+                }
+                insts.push_back(std::move(inst));
+            }
+            block.insts = std::move(insts);
+        }
+        fn.vreg_count = static_cast<std::uint32_t>(fn.classes.size());
+        // Preserve the original homes and their long-lifetime proof: choosing
+        // new homes after shortening the lifetimes could reuse a source slot.
+        out_.canon_vreg.resize(fn.vreg_count, 0);
+    }
 
     // A virtual register gets the frame slot r of the physical frame as its
     // stack location (its spill home, design 8.3) only when every spill of

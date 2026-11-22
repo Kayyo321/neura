@@ -13,6 +13,7 @@
 #include "backend/fixtures.hpp"
 
 #include "jit/jit.hpp"
+#include "jit/regalloc.hpp"
 #include "jit/tier3_lower.hpp"
 #include "jit/tier3_native.hpp"
 #include "lift/evaluate.hpp"
@@ -1005,6 +1006,73 @@ NEURA_TEST(jit, tier_3_budget_deoptimizes_only_when_the_counter_passes_the_room)
             check(fake.deopt_state == 0 && fake.deopt_reason == static_cast<std::uint32_t>(t3::Reason::Budget) &&
                       fake.left_at == t3::none,
                   "C + P = 5 beyond a room of " + std::to_string(room) + " deoptimizes for the budget");
+        }
+    }
+}
+
+NEURA_TEST(jit, tier_3_recovery_only_entry_loads_stay_in_the_frame_until_a_loop_deoptimizes) {
+    if (!native_runs()) return;
+    for (const bool data_use : {false, true}) {
+        Builder b(1);
+        const auto cold = b.value(0, t3::Op::EntryLoad, 64, 0);
+        const auto entry_count = b.value(0, t3::Op::EntryCounter, 64, 0);
+        t3::Inst jump;
+        jump.op = t3::Op::Jump;
+        b.add(0, jump);
+        b.f.blocks[1].preds.push_back(1);
+        b.f.blocks[1].succs.push_back(1);
+        t3::Inst phi;
+        phi.op = t3::Op::Phi;
+        phi.type = {t3::Type::Int, 64};
+        phi.extra = static_cast<std::uint32_t>(b.f.extras.size());
+        phi.count = 2;
+        b.f.extras.insert(b.f.extras.end(), {entry_count, t3::none});
+        const auto count = b.add(1, phi);
+        if (data_use) {
+            t3::Inst add;
+            add.op = t3::Op::Lift;
+            add.type = {t3::Type::Int, 64};
+            add.lifted.op = Opcode::AddWrapping;
+            add.lifted.width = 64;
+            add.operands[0] = cold;
+            add.operands[1] = cold;
+            b.add(1, add);
+        }
+        t3::Inst budget;
+        budget.op = t3::Op::Budget;
+        budget.operands[0] = count;
+        budget.imm = 1;
+        budget.flags = t3::Checked;
+        budget.state = b.state(count, 3);
+        b.f.states[budget.state].slots[0] = {t3::StateSlot::Kind::Value, cold};
+        b.add(1, budget);
+        const auto next = b.value(1, t3::Op::CounterAdd, 64, 1, count);
+        b.f.extras[phi.extra + 1] = next;
+        b.add(1, jump);
+        const auto lowered = jit::native::lower(b.f, {0});
+        const auto entry_loads = std::count_if(lowered.function.blocks[0].insts.begin(),
+                                              lowered.function.blocks[0].insts.end(), [&](const auto& inst) {
+            return lowered.steps[inst.opcode].kind == jit::native::Kind::EntryLoad;
+        });
+        check_equal(entry_loads, data_use ? 1L : 0L, "only an actual data use keeps the load at entry");
+        const auto allocation = jit::mir::allocate(lowered.function);
+        if (!data_use) {
+            for (std::size_t block = 0; block < lowered.function.blocks.size(); ++block) {
+                for (std::size_t index = 0; index < lowered.function.blocks[block].insts.size(); ++index) {
+                    const auto& inst = lowered.function.blocks[block].insts[index];
+                    if (lowered.steps[inst.opcode].kind != jit::native::Kind::Budget) continue;
+                    const auto location = allocation.blocks[block].insts[index].state_uses.at(0);
+                    check(location.kind == jit::mir::LocKind::FrameSlot && location.index == 0,
+                          "the hot loop's recovery value stays in its original frame home");
+                }
+            }
+        }
+        const auto compiled = compile(std::move(b.f));
+        check(compiled.program != nullptr, "the recovery loop compiles: " + compiled.failure);
+        for (const auto value : {std::uint64_t{0}, std::uint64_t{42}, ~std::uint64_t{0}}) {
+            const auto fake = run(*compiled.program, {value}, 4000);
+            check_equal(fake.deopt_counter, std::uint64_t{4000}, "the hot loop deoptimizes at the exact step limit");
+            check_equal(fake.deopt_values.at(cold), value, "deoptimization recovers the original cold word");
         }
     }
 }
