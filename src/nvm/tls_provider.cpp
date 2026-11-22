@@ -728,6 +728,7 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
         ERR_clear_error();
         std::uint32_t failure = 0;
         int status = 0;
+        bool retry_output = false;
         std::string plaintext;
         // Drive the listener before its accepted connection. Both timer sets matter.
         if (stream.listener && !SSL_handle_events(stream.listener)) failure = host_error::connection_reset;
@@ -770,8 +771,18 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
                 status = 1;
                 if (result <= 0 && !(operation == 3 && result == 0)) {
                     const auto reason = SSL_get_error(ssl, result);
-                    if (reason == SSL_ERROR_WANT_READ || reason == SSL_ERROR_WANT_WRITE) status = 0;
-                    else if (reason == SSL_ERROR_ZERO_RETURN && operation == 1) status = 2;
+                    // #33277 can retain a permanent receive error while reporting
+                    // WANT_READ. Never clear and retry a nonempty error queue.
+                    // #33278 misreports listener BIO backpressure as SYSCALL;
+                    // require both the SSL and BIO write-retry flags, with no
+                    // stacked error, before treating that case as retryable.
+                    const bool write_retry = reason == SSL_ERROR_WANT_WRITE ||
+                        (reason == SSL_ERROR_SYSCALL && SSL_want_write(ssl) &&
+                         BIO_should_write(SSL_get_wbio(ssl)));
+                    if (ERR_peek_error() == 0 && (reason == SSL_ERROR_WANT_READ || write_retry)) {
+                        status = 0;
+                        retry_output = write_retry;
+                    } else if (reason == SSL_ERROR_ZERO_RETURN && operation == 1) status = 2;
                     else if (SSL_get_verify_result(ssl) != X509_V_OK ||
                              ERR_GET_REASON(ERR_peek_last_error()) == SSL_R_PEER_DID_NOT_RETURN_A_CERTIFICATE)
                         failure = host_error::permission_denied;
@@ -790,7 +801,9 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
             total += size;
             outgoing.push_back(bytes_value(std::move(packet)));
         }
-        const auto wait = datagram_wait(stream);
+        // Draining output freed BIO capacity: resume a parked write before
+        // waiting for network input. Zero is an immediate retry, never infinity.
+        const auto wait = retry_output ? 0 : datagram_wait(stream);
         if (failure) stream.terminal_error = failure;
         else if (status != 0) {
             stream.pending_operation = -1;

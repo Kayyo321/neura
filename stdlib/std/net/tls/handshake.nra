@@ -299,6 +299,14 @@ export let Handshake = module (
                         if (status != WantsInput) {
                             return Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.Some(received));
                         }
+                        if (wait_nanos == 0) {
+                            // The host drained BIO backpressure; retry without
+                            // re-enqueueing the packet or waiting for a peer.
+                            inbound = new;
+                            sender_host = "";
+                            sender_port = 0;
+                            continue;
+                        }
                         wire.set_read_timeout(duration.of_nanos(wait_nanos));
                     },
                 }
