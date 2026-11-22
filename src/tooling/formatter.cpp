@@ -980,13 +980,16 @@ std::string render(std::string_view source, const std::vector<Token>& tokens, co
                 if (blank_before.contains(item.offset)) out.line(2);
                 else out.line(item.lines_before > 1 ? 2 : 1);
                 comment_continues = inside;
-                // A comment above an `or` alternative is indented with it.
                 std::size_t following = i + 1;
                 while (following < items.size() && items[following].comment) ++following;
+                // Comments among standalone tags share the declaration's depth.
+                if (following < items.size() && hints.before.contains(items[following].offset))
+                    comment_continues = false;
+                // A comment above an `or` alternative is indented with it.
                 const bool before_alternative = inside && following < items.size() && items[following].text == "or" &&
                                                 items[following].kind == TokenKind::Keyword;
                 if (before_alternative && out.at_line_start()) out.text(text, statement_indent + 1, false);
-                else emit(text, inside, false);
+                else emit(text, comment_continues, false);
             }
             out.line();
             previous = &item;
@@ -1032,7 +1035,7 @@ std::string render(std::string_view source, const std::vector<Token>& tokens, co
                    (!joins || ((text == "}" || text == ")") && !delimiters.empty() && delimiters.back().multiline))) {
             // A blank line before a block's closing delimiter is kept.
             out.line(2);
-        } else if (previous && previous->comment && inside) {
+        } else if (previous && previous->comment && inside && !structural) {
             continuation = true;
         }
         // Whether the next item starts a new source line after this opening
