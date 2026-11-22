@@ -22,6 +22,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <variant>
 
 #ifdef NEURA_NVM_TLS
 #ifdef _WIN32

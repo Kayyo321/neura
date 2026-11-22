@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <charconv>
 #include <initializer_list>
+#include <system_error>
 #include <utility>
 
 namespace neura::project {
