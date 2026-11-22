@@ -948,33 +948,29 @@ private:
         return kNever;
     }
 
-    // Handle the part of a vreg that starts inside a loop when it is read in that
+    // False when the part of a vreg that starts inside a loop is read in that
     // loop by no instruction (frame states do not count) and needs no
     // register there: a value that only a deoptimization or code after the
-    // loop reads. For a loop-header phi, first try a register that is free
-    // for the whole interval. That can avoid a back-edge store. The
-    // ordinary scan can still evict it for a later register use.
-    bool allocate_frame_only_loop_interval(std::uint32_t id) {
+    // loop reads. It then stays in memory (and returns to a register before
+    // a later register use), so that the loop's registers go to values the
+    // loop computes with.
+    bool used_in_loop(std::uint32_t id) {
         const Interval& it = intervals_[id];
         const Pos start = it.start();
         const Pos loop_end = innermost_loop_end(start);
-        if (loop_end == kNever || it.vreg == kNone) return false;
-        if (next_data_use(it, start) < loop_end) return false;
+        if (loop_end == kNever || it.vreg == kNone) return true;
+        if (next_data_use(it, start) < loop_end) return true;
         const Pos first = next_reg_use(it, start);
-        if (first < loop_end) return false;
-        const auto header = def_block_[it.vreg];
-        if (def_inst_[it.vreg] < 0 && start == start_[header] &&
-            std::ranges::any_of(loops_, [header](const Loop& loop) { return loop.header == header; }) &&
-            try_free(id, true)) return true;
+        if (first < loop_end) return true;
         if (first == kNever) {
             intervals_[id].spilled = true;
-            return true;
+            return false;
         }
-        if (gap_at_or_before(first) <= start) return false;
+        if (gap_at_or_before(first) <= start) return true;
         const auto child = split(id, split_position(start, first));
         intervals_[id].spilled = true;
         push(child, start);
-        return true;
+        return false;
     }
 
     void scan(RegClass cls) {
@@ -997,7 +993,8 @@ private:
             const auto [pos, id] = unhandled_.top();
             unhandled_.pop();
             advance(pos);
-            if (!allocate_frame_only_loop_interval(id) && !try_free(id)) allocate_blocked(id);
+            if (!used_in_loop(id)) continue;
+            if (!try_free(id)) allocate_blocked(id);
             if (intervals_[id].reg >= 0) active_.push_back(id);
         }
     }
@@ -1049,7 +1046,7 @@ private:
     // interval does not cover that position.
     static Pos next_start(const Interval& it) { return it.ranges[it.cursor].from; }
 
-    bool try_free(std::uint32_t id, bool whole_interval = false) {
+    bool try_free(std::uint32_t id) {
         const Pos start = intervals_[id].start();
         const Pos end = intervals_[id].end();
         std::array<Pos, 16> free{};
@@ -1079,7 +1076,6 @@ private:
             intervals_[id].reg = reg;
             return true;
         }
-        if (whole_interval) return false;
         for (const auto r : regs_) {
             if (reg < 0 || free[r] > free[static_cast<std::size_t>(reg)] ||
                 (free[r] == free[static_cast<std::size_t>(reg)] && r == hint)) {

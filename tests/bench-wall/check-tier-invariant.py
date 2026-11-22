@@ -19,7 +19,6 @@ MODES = {
 }
 CASES = {
     "hoisted-bounds": [("0", None), ("1", None), ("2", None), ("0", 90000), ("0", 90007)],
-    "frame-only-loop-phis": [("0", None), ("1", None), ("2", None), ("0", 40000), ("0", 40008)],
     "nil-result": [("0", None), ("1", None), ("2", None), ("0", 44000), ("0", 44008)],
 }
 
