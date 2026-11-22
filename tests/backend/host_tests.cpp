@@ -8,6 +8,7 @@
 #include "fixtures.hpp"
 #include "nvm/app_services.hpp"
 #include "nvm/dtls_internal.hpp"
+#include "nvm/tls_internal.hpp"
 #include "nvm/generation_internal.hpp"
 #include "nvm/secret_services.hpp"
 #include "nvm/providers.hpp"
@@ -1827,6 +1828,118 @@ NEURA_TEST(host, dtls13_addressed_engine_roundtrip_and_deadline) {
     expect_ok(client.call("neura.net.dtls.engine.release", {quiet.value}), "release expired engine");
 }
 
+// A read whose deadline passed while a peer datagram was on its way still
+// processes it once. When that datagram is a KeyUpdate, the answer the read
+// produces (the reply KeyUpdate and ACK) is returned with TimedOut instead of
+// being drained and dropped, and the peer's KeyUpdate then completes.
+NEURA_TEST(host, dtls13_expired_read_returns_the_answers_it_produced) {
+    const LoopbackTlsKeys material;
+    Host client(everything()), server(everything());
+    auto opening = [&](bool accepting, std::int32_t local, std::int32_t peer) {
+        return std::vector<HostValue>{boolean(accepting), text("localhost"), tls_names({}),
+            text(material.certificate), text(material.certificate),
+            text(material.key), text("127.0.0.1"), i32(local), text("127.0.0.1"), i32(peer),
+            i64(5'000'000'000)};
+    };
+    const auto c = client.call("neura.net.dtls.engine.open", opening(false, 12345, 54321));
+    const auto s = server.call("neura.net.dtls.engine.open", opening(true, 54321, 12345));
+    expect_ok(c, "DTLS client open"); expect_ok(s, "DTLS server open");
+    auto exchange = [&](Host& host, HostValue id, int operation, const std::string& inbound, int sender,
+                        std::int64_t timeout = 5'000'000'000, const std::string& message = "") {
+        return host.call("neura.net.dtls.engine.exchange", {id, i32(operation), bytes(inbound),
+            text("127.0.0.1"), i32(sender), bytes(message), i64(timeout)});
+    };
+    auto step = [&](Host& host, HostValue id, int operation, const std::string& inbound, int sender) {
+        const auto result = exchange(host, id, operation, inbound, sender);
+        expect_ok(result, "DTLS engine step");
+        check_equal(result.value.elements.at(4).bits, std::uint64_t(0), "DTLS protocol error");
+        return result.value;
+    };
+    auto packets = [](const HostValue& result) {
+        std::vector<std::string> out;
+        for (const auto& packet : result.elements.at(1).elements) out.push_back(packet.bytes);
+        return out;
+    };
+    std::vector<std::string> to_server, to_client;
+    bool client_done = false, server_done = false;
+    for (int turn = 0; turn < 100 && !(client_done && server_done); ++turn) {
+        if (!client_done) {
+            const auto incoming = to_client.empty() ? "" : to_client.front();
+            if (!to_client.empty()) to_client.erase(to_client.begin());
+            const auto result = step(client, c.value, 0, incoming, 54321);
+            for (auto& packet : packets(result)) to_server.push_back(std::move(packet));
+            client_done = result.elements.at(0).bits == 1;
+        }
+        if (!server_done) {
+            const auto incoming = to_server.empty() ? "" : to_server.front();
+            if (!to_server.empty()) to_server.erase(to_server.begin());
+            const auto result = step(server, s.value, 0, incoming, 12345);
+            for (auto& packet : packets(result)) to_client.push_back(std::move(packet));
+            server_done = result.elements.at(0).bits == 1;
+        }
+    }
+    check(client_done && server_done, "DTLS 1.3 handshake");
+    // Let the tail of the handshake (the server's ACK of the client Finished) reach the client.
+    for (const auto& packet : to_client) step(client, c.value, 1, packet, 54321);
+    to_client.clear();
+    to_server.clear();
+
+    // The client requests a KeyUpdate; its record waits on the wire.
+    const auto update = step(client, c.value, 4, "", 54321);
+    check_equal(update.elements.at(0).bits, std::uint64_t(0), "the KeyUpdate waits for its ACK");
+    const auto requests = packets(update);
+    check(!requests.empty(), "the KeyUpdate is sent");
+
+    // The server's read expires before the record arrives.
+    const auto waiting = exchange(server, s.value, 1, "", 0, 30'000'000);
+    if (waiting.success) check_equal(waiting.value.elements.at(0).bits, std::uint64_t(0), "the read waits");
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    if (!waiting.success) {
+        // The 30 ms deadline passed before the first call returned.
+        expect_error(waiting, host_error::timed_out, "the first read call expired");
+        check(false, "the read was started before its deadline");
+    }
+    std::vector<std::string> answers;
+    for (const auto& packet : requests) {
+        const auto late = exchange(server, s.value, 1, packet, 12345);
+        expect_ok(late, "an expired read given a late datagram answers with its packets");
+        check_equal(late.value.elements.at(0).bits, std::uint64_t(0), "the late datagram completes no message");
+        check_equal(late.value.elements.at(4).bits, std::uint64_t(host_error::timed_out), "the read reports TimedOut");
+        for (auto& answer : packets(late.value)) answers.push_back(std::move(answer));
+        // Later datagrams of the same flight go to a read started afresh.
+        const auto again = exchange(server, s.value, 1, "", 0, 30'000'000);
+        if (again.success) check_equal(again.value.elements.at(0).bits, std::uint64_t(0), "the read waits again");
+        std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    }
+    check(!answers.empty(), "the late KeyUpdate produced the server's answer");
+
+    // Those answers complete the client's KeyUpdate: nothing was lost.
+    bool updated = false;
+    for (const auto& answer : answers) {
+        const auto result = step(client, c.value, 4, answer, 54321);
+        for (auto& packet : packets(result)) to_server.push_back(std::move(packet));
+        updated = updated || result.elements.at(0).bits == 1;
+    }
+    check(updated, "the client's KeyUpdate completes with the answers of the expired read");
+
+    // The association stays usable after the expired read.
+    const auto sent = exchange(client, c.value, 2, "", 54321, 5'000'000'000, "message");
+    expect_ok(sent, "DTLS write after the KeyUpdate");
+    for (auto& packet : packets(sent.value)) to_server.push_back(std::move(packet));
+    bool received = false;
+    for (const auto& packet : to_server) {
+        const auto result = step(server, s.value, 1, packet, 12345);
+        if (result.elements.at(0).bits == 1) {
+            check_equal(result.elements.at(2).bytes, std::string("message"), "DTLS plaintext after the expired read");
+            received = true;
+            break;
+        }
+    }
+    check(received, "the association stays usable after the expired read");
+    expect_ok(client.call("neura.net.dtls.engine.release", {c.value}), "DTLS client release");
+    expect_ok(server.call("neura.net.dtls.engine.release", {s.value}), "DTLS server release");
+}
+
 // A DTLS 1.3 HelloRetryRequest: a plaintext handshake record (type 22) whose
 // ServerHello (type 2) carries the RFC 8446 section 4.1.3 random, with a
 // cookie extension (44). Offsets follow the 13-byte DTLSPlaintext header and
@@ -2529,8 +2642,32 @@ NEURA_TEST(host, tls_v2_requires_exact_versions_and_mutual_identity) {
         tls_names({}), text(material.certificate)}), host_error::capability_denied, "explicit CA requires fs");
 }
 
+// The handshake deadline of a connection accepted with timeout zero.
+NEURA_TEST(host, tls_accept_handshake_deadline_is_bounded_for_timeout_zero) {
+    using nvm::tls_internal::accepted_handshake_deadline;
+    using Point = std::chrono::steady_clock::time_point;
+    const auto now = std::chrono::steady_clock::now();
+    const auto accept_deadline = now + std::chrono::seconds(5);
+    const auto bound = nvm::tls_internal::default_transfer_timeout;
+    check(accepted_handshake_deadline(0, Point::max(), now, bound) == now + std::chrono::seconds(30),
+          "timeout zero bounds the handshake by 30 seconds from the accept");
+    check(accepted_handshake_deadline(5'000'000'000, accept_deadline, now, bound) == accept_deadline,
+          "a positive timeout keeps the accept deadline for the handshake");
+    const auto late = Point::max() - std::chrono::seconds(1);
+    check(accepted_handshake_deadline(0, Point::max(), late, bound) == Point::max(),
+          "the bound saturates at the end of the clock");
+    check(nvm::tls_internal::accept_handshake_bound() == bound, "the provider uses the 30-second default");
+}
+
+// A silent TCP peer of an accept with timeout zero is cut off by the bound,
+// shortened here to 200 ms; an unbounded handshake would leave the peer's
+// read to time out at 1.5 seconds instead of seeing the close.
 NEURA_TEST(host, tls_accept_default_bounds_a_stalled_handshake) {
     const LoopbackTlsKeys material;
+    struct Bound {
+        Bound() { nvm::tls_internal::set_accept_handshake_bound_for_testing(200'000'000); }
+        ~Bound() { nvm::tls_internal::set_accept_handshake_bound_for_testing(0); }
+    } bound;
     Host server(everything());
     Host silent(everything());
     const auto listener = server.call("neura.net.listen", {text("127.0.0.1"), i32(0)});
@@ -2540,18 +2677,20 @@ NEURA_TEST(host, tls_accept_default_bounds_a_stalled_handshake) {
     const auto peer = silent.call("neura.net.connect", {text("127.0.0.1"), port.value, i64(1'000'000'000)});
     expect_ok(peer, "TCP peer connects without speaking TLS");
     HostCompletion accepted;
+    const auto started = std::chrono::steady_clock::now();
     std::jthread worker([&] {
         accepted = server.call("neura.net.tls.accept", {listener.value, text(material.certificate), text(material.key),
             tls_names({}), i64(0)});
     });
     // Close at this outer bound even on a regression so the accept can finish.
-    const auto ended = silent.call("neura.net.read", {peer.value, i32(1), i64(35'000'000'000)});
+    const auto ended = silent.call("neura.net.read", {peer.value, i32(1), i64(1'500'000'000)});
     const auto closed = silent.call("neura.net.close", {peer.value});
     worker.join();
     expect_ok(closed, "close silent peer");
-    expect_ok(ended, "default TLS handshake deadline closed the socket");
-    check(ended.value.bytes.empty(), "silent peer gets EOF after timeout");
+    expect_ok(ended, "the handshake bound closed the socket");
+    check(ended.value.bytes.empty(), "silent peer gets EOF after the bound");
     expect_error(accepted, host_error::timed_out, "TLS accept reports TimedOut");
+    check(std::chrono::steady_clock::now() - started < std::chrono::milliseconds(1500), "the bound ends the wait early");
 }
 
 #endif

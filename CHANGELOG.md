@@ -49,16 +49,22 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ### Fixed
 
-- `neura.process.generation` no longer fails on an unknown VMClock version or an unexpected read error; it falls back to the PID and vmgenid detectors and retries a transient VMClock open failure.
+- `neura.process.generation` no longer fails on an unknown VMClock version or an unexpected read error; it falls back to the PID and vmgenid detectors and retries a transient VMClock open failure or a read shorter than the VMClock header, giving VMClock up only after three short reads in a row.
 - A TLS write that times out or fails ends the stream with that error for every later operation instead of letting a next write fail with `ConnectionReset` or mix records.
 - `TlsStream.shutdown(Write)` uses the write timeout, `neura.net.tls.shutdown_write` treats zero as the 30-second default, and a TLS accept with timeout zero bounds the handshake after the TCP accept by 30 seconds, so a silent peer no longer holds the caller without limit.
 - A DTLS 1.3 transport survives a receive that times out or fails on the socket: the association stays usable instead of failing every later operation, and a later send no longer returns `InvalidInput`.
 - A DTLS write that OpenSSL keeps asking to retry waits on the socket with backoff instead of spinning.
 - `H2.connect`, `send_frame` and `close` no longer hold the scheduler while TLS waits on a stalled peer; they run as cancellable overlapped operations through new `neura.net.tls.*_overlapped` host services.
-- TLS credential files load without `/proc` when no path prefixes are configured. Paths are checked against the prefixes and for a regular file before they are opened, so a FIFO or device outside the grant is never opened, and Windows refuses UNC and device paths, including link targets, before opening. FreeBSD and NetBSD check prefixes through `F_KINFO` and `F_GETPATH` instead of returning `Unsupported`.
+- TLS credential files load without `/proc` when no path prefixes are configured. Paths are checked against the prefixes and for a regular file before they are opened, so a FIFO or device the given path names is not opened, and Windows refuses UNC and device paths, including link targets, before opening. FreeBSD and NetBSD check prefixes through `F_KINFO` and `F_GETPATH` instead of returning `Unsupported`.
 - Native fetch accepts a chunked response of any number of chunks: each chunk-size line and the trailer section have their own 16 KiB bound, instead of one budget for all chunk metadata.
 - Native fetch keys redirect-loop detection on the method as well as the URL, so a `POST` that a 303 sends to its own URL as a `GET` is not a loop.
 - Native HTTP/2 fetch writes each turn's frames in one write, so flow-control updates do not wait for delayed acknowledgements.
+- A desktop target with `http_client` and no `connect` list on it or its `ui` target now gets an empty origin list, so its native child reaches no origin, instead of an unrestricted grant. `neura run` and `neura dev` scope a server bundle's grant by its `http_client_origins` requirement, and refuse an `--allow-http-client` of either form after `--` for a scoped bundle instead of letting it lift or extend the manifest's list.
+- On Linux, a TLS credential file under path prefixes is opened through an `O_PATH` handle resolved with `openat2(RESOLVE_NO_SYMLINKS)` and checked before it is reopened for reading, so a directory swapped for a link between the path check and the open can no longer make the provider open a FIFO, device or file outside the prefixes. Other POSIX systems check the resolved name instead of the given path; their remaining race and the limit of path checks for hard links are documented.
+- On Linux, `neura.net.send_file` to a peer that has closed or reset the connection returns `ConnectionReset` instead of ending `neura run` or a native executable with SIGPIPE: `sendfile(2)` now runs with SIGPIPE blocked on the calling thread, as TLS writes do. An offset past a 32-bit `off_t` returns `InvalidInput` instead of wrapping.
+- Native fetch under an origin list reads an IP literal with a final dot (`http://1.2.3.4.:80`) as that address: it matched the listed numeric origin but was then treated as a name whose global answers were all allowed, instead of allowing exactly the listed address.
+- A DTLS read whose deadline passed while a peer datagram was on its way returns the packets that datagram produced, such as an ACK or the reply to a KeyUpdate, with `TimedOut`, instead of draining and dropping them, so the peer's KeyUpdate still completes.
+- Native fetch bounds the total framing of a chunked response to 64 KiB or eight times the body received so far, whichever is larger, and returns `TooLarge` past it, so one-byte chunks with 16 KiB extensions can no longer cost thousands of times the body in parsing.
 
 ### Known limitations
 

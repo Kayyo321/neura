@@ -8,6 +8,7 @@
 #include "provider_internal.hpp"
 #include "client_socket.hpp"
 #include "platform/socket.hpp"
+#include "tls_internal.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -21,6 +22,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <variant>
 
 #ifdef NEURA_NVM_TLS
 #ifdef _WIN32
@@ -30,17 +32,30 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
-#if !defined(SO_NOSIGPIPE)
-#include <pthread.h>
-#include <signal.h>
-#endif
+#include <unistd.h>
 #endif
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 #include <openssl/x509v3.h>
 #include "dtls_internal.hpp"
+#include "sigpipe_guard.hpp"
 #include "tls_material.hpp"
 #endif
+
+namespace neura::nvm::tls_internal {
+namespace {
+std::atomic<std::int64_t> handshake_bound{0};
+} // namespace
+
+std::int64_t accept_handshake_bound() {
+    const auto bound = handshake_bound.load(std::memory_order_relaxed);
+    return bound > 0 ? bound : default_transfer_timeout;
+}
+
+void set_accept_handshake_bound_for_testing(std::int64_t nanos) {
+    handshake_bound.store(nanos, std::memory_order_relaxed);
+}
+} // namespace neura::nvm::tls_internal
 
 namespace neura::nvm::provider {
 
@@ -126,44 +141,10 @@ HostSignature engine_release() {
 
 #ifdef NEURA_NVM_TLS
 
-namespace {
+// OpenSSL's socket BIO can raise SIGPIPE on a closed socket: TLS writes run
+// under SocketWrites (sigpipe_guard.hpp).
 
-// OpenSSL's socket BIO can raise SIGPIPE on a closed socket. Suppress it only
-// on the host-calling thread, preserving a signal that was already pending.
-class SocketWrites {
-public:
-#if !defined(_WIN32) && !defined(SO_NOSIGPIPE)
-    SocketWrites() {
-        sigemptyset(&blocked_);
-        sigaddset(&blocked_, SIGPIPE);
-        changed_ = pthread_sigmask(SIG_BLOCK, &blocked_, &saved_) == 0;
-        sigset_t pending;
-        pending_ = sigpending(&pending) != 0 || sigismember(&pending, SIGPIPE) == 1;
-    }
-
-    ~SocketWrites() {
-        if (!changed_) return;
-        if (!pending_) {
-            timespec zero{};
-            while (sigtimedwait(&blocked_, nullptr, &zero) < 0 && errno == EINTR) {}
-        }
-        pthread_sigmask(SIG_SETMASK, &saved_, nullptr);
-    }
-
-private:
-    sigset_t blocked_{};
-    sigset_t saved_{};
-    bool changed_ = false;
-    bool pending_ = false;
-#else
-    SocketWrites() = default;
-    ~SocketWrites() = default;
-#endif
-};
-
-} // namespace
-
-constexpr std::int64_t default_transfer_timeout = 30'000'000'000LL;
+constexpr std::int64_t default_transfer_timeout = tls_internal::default_transfer_timeout;
 
 struct TlsIo;
 
@@ -525,14 +506,32 @@ struct TlsConnectTicket {
 
 } // namespace
 
+std::uint64_t current_process() {
+#ifdef _WIN32
+    return ::GetCurrentProcessId();
+#else
+    return static_cast<std::uint64_t>(::getpid());
+#endif
+}
+
 struct TlsConnectJobs {
     struct Job {
         std::shared_ptr<TlsConnectState> state;
         std::jthread worker;
     };
     std::vector<Job> entries;
+    const std::uint64_t owner = current_process();
+
+    // A fork child inherits the entries but not their threads: joining one
+    // would wait for a parent thread that never ends here. The child leaves
+    // them alone, as the fetch workers do.
+    bool inherited() const { return owner != current_process(); }
 
     ~TlsConnectJobs() {
+        if (inherited()) {
+            [[maybe_unused]] const auto* left = new std::vector<Job>(std::move(entries));
+            return;
+        }
         for (auto& job : entries) job.state->cancel();
         // Job destruction joins the workers before OpenSSL or the provider's
         // capability and path configuration can be torn down.
@@ -638,7 +637,8 @@ void add_tls_services(const Adder& add, const OverlapAdder& cancellable, Standar
             if (state->tls.size() >= max_open_ids) return fail(host_error::other);
             const auto deadline = deadline_of(timeout);
             try {
-                if (!state->tls_connect_jobs) state->tls_connect_jobs = std::make_shared<TlsConnectJobs>();
+                if (!state->tls_connect_jobs || state->tls_connect_jobs->inherited())
+                    state->tls_connect_jobs = std::make_shared<TlsConnectJobs>();
                 auto& jobs = state->tls_connect_jobs->entries;
                 std::erase_if(jobs, [](const auto& job) { return job.state->finished.load(); });
                 if (jobs.size() >= 16) return fail(host_error::busy);
@@ -715,7 +715,8 @@ void add_tls_services(const Adder& add, const OverlapAdder& cancellable, Standar
         if (!attach_socket(*stream)) return fail(host_error::other);
         // Zero waits for a client without limit, but a connected peer that
         // stalls the handshake is still bounded by the transfer default.
-        const auto handshake_deadline = timeout == 0 ? deadline_of(default_transfer_timeout) : deadline;
+        const auto handshake_deadline = tls_internal::accepted_handshake_deadline(
+            timeout, deadline, Clock::now(), tls_internal::accept_handshake_bound());
         std::uint32_t error = 0;
         if (drive(stream->ssl, stream->descriptor, handshake_deadline, error,
                   [&] { return SSL_accept(stream->ssl); }) <= 0) {
@@ -962,8 +963,13 @@ void add_tls_services(const Adder& add, const OverlapAdder& cancellable, Standar
             stream.key_update_started = false;
         } else if (expired) {
             // The late datagram completed no message (an ACK, a retransmission).
+            // Its answer, such as an ACK or the reply to a KeyUpdate, is
+            // already drained from the BIO: return it with the timeout in the
+            // failure field, which the caller sends before reporting. The
+            // read leaves the association usable, so this is not terminal.
             stream.pending_operation = -1;
-            return fail(host_error::timed_out);
+            return HostCompletion::ok(tuple_value({int32_value(0), tuple_value(std::move(outgoing)), bytes_value({}),
+                                                   int64_value(wait), scalar(host_error::timed_out)}));
         }
         return HostCompletion::ok(tuple_value({int32_value(status), tuple_value(std::move(outgoing)),
                                                bytes_value(std::move(plaintext)), int64_value(wait), scalar(failure)}));

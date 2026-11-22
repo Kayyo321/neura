@@ -1,6 +1,7 @@
 #include "http_fetch_provider.hpp"
 #include "client_socket.hpp"
 #include "platform/socket.hpp"
+#include "sigpipe_guard.hpp"
 
 #include <algorithm>
 #include <array>
@@ -19,6 +20,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <variant>
 #include <vector>
 
 #ifdef _WIN32
@@ -45,11 +47,18 @@ namespace {
 using Clock = std::chrono::steady_clock;
 constexpr std::size_t body_limit = 8 * 1024 * 1024;
 constexpr std::size_t head_limit = 16384;
+// Chunked framing (size lines, extensions and each chunk's CRLF) may total
+// 64 KiB or eight times the body bytes received so far, whichever is larger.
+// A one-byte chunk needs five framing bytes, so only extensions reach it:
+// they cannot make each body byte cost a 16 KiB line of parsing.
+constexpr std::size_t chunk_framing_floor = 64 * 1024;
+constexpr std::size_t chunk_framing_factor = 8;
 constexpr std::uint32_t too_large = 16, busy = 17, unknown = 18;
-// Fetch codes after the shared table in providers.hpp, whose 19 to 22 are
-// the SQL provider's (docs/runtime/NVM.md, "HTTP client services").
-constexpr std::uint32_t redirect_downgrade = 23, redirect_body = 24;
-[[maybe_unused]] constexpr std::uint32_t not_processed = 25;
+// Codes 23 to 25 are the fetch services' own, in the shared table of
+// providers.hpp after the SQL provider's 19 to 22.
+using host_error::not_processed;
+using host_error::redirect_body;
+using host_error::redirect_downgrade;
 constexpr std::int64_t default_timeout = 30000000000LL;
 struct Failure {
     std::uint32_t code;
@@ -245,15 +254,21 @@ struct Address {
     }
 };
 
+// The host without the trailing dot of an absolute name. `1.2.3.4.` is the
+// address 1.2.3.4 both in its origin and in the origin filter, so a listed
+// numeric origin still allows exactly that address.
+std::string bare_host(const std::string& host) {
+    return host.size() > 1 && host.back() == '.' ? host.substr(0, host.size() - 1) : host;
+}
+
 std::string Url::origin() const {
-    auto name = lower(host);
-    const Address address(host.c_str());
+    const auto bare = bare_host(host);
+    auto name = lower(bare);
+    const Address address(bare.c_str());
     if (address.family != AF_UNSPEC) {
         char numeric[INET6_ADDRSTRLEN];
         if (::inet_ntop(address.family, address.bytes.data(), numeric, sizeof numeric)) name = numeric;
         if (address.family == AF_INET6) name = "[" + name + "]";
-    } else if (name.ends_with('.') && name.size() > 1) {
-        name.pop_back();
     }
     return std::string(secure ? "https://" : "http://") + name + ":" + std::to_string(port);
 }
@@ -384,14 +399,14 @@ client_socket::AddressFilter origin_filter(const Url& url, const Origins& origin
     // allows exactly its address. A listed name allows its global addresses,
     // and another address only when a numeric origin with the same scheme
     // and port lists it. Each connect attempt checks its own candidate.
-    const auto literal = Address(url.host.c_str()).unmapped();
+    const auto literal = Address(bare_host(url.host).c_str()).unmapped();
     return [&url, &origins, literal](std::string_view numeric) {
         const auto candidate = Address(std::string(numeric).c_str()).unmapped();
         if (candidate.family == AF_UNSPEC) return false;
         if (literal.family != AF_UNSPEC) return candidate == literal;
         if (global_address(candidate)) return true;
         return std::ranges::any_of(*origins, [&](const auto& allowed) {
-            const auto listed = Address(allowed.host.c_str()).unmapped();
+            const auto listed = Address(bare_host(allowed.host).c_str()).unmapped();
             return allowed.secure == url.secure && allowed.port == url.port && listed.family != AF_UNSPEC &&
                    candidate == listed;
         });
@@ -450,34 +465,8 @@ struct Response {
     std::string body;
 };
 
-// TLS BIO writes may raise SIGPIPE. This mask is local to the fetch worker,
-// and consumes only a signal newly produced by that worker's socket writes.
-class SocketWrites {
-#if !defined(_WIN32) && !defined(SO_NOSIGPIPE)
-    sigset_t blocked_{}, saved_{};
-    bool changed_ = false, pending_ = false;
-
-  public:
-    SocketWrites() {
-        sigemptyset(&blocked_);
-        sigaddset(&blocked_, SIGPIPE);
-        changed_ = pthread_sigmask(SIG_BLOCK, &blocked_, &saved_) == 0;
-        sigset_t pending;
-        pending_ = sigpending(&pending) != 0 || sigismember(&pending, SIGPIPE) == 1;
-    }
-    ~SocketWrites() {
-        if (!changed_) return;
-        if (!pending_) {
-            timespec zero{};
-            while (sigtimedwait(&blocked_, nullptr, &zero) < 0 && errno == EINTR) {}
-        }
-        pthread_sigmask(SIG_SETMASK, &saved_, nullptr);
-    }
-#else
-  public:
-    SocketWrites() = default;
-#endif
-};
+// TLS BIO writes may raise SIGPIPE: the fetch worker writes under
+// SocketWrites (sigpipe_guard.hpp), a mask local to that thread.
 class Connection {
     NativeSocket socket_ = invalid_native_socket;
     Clock::time_point deadline_;
@@ -768,9 +757,15 @@ Response http1(Connection& connection, const Url& url, const Request& request) {
     }
     if (request.method == "HEAD" || response.status == 204 || response.status == 304) return response;
     if (chunked) {
+        std::size_t framing = 0;
+        const auto framing_limit = [&] {
+            return std::max(chunk_framing_floor, chunk_framing_factor * response.body.size());
+        };
         for (;;) {
             std::size_t line_budget = head_limit;
             const auto line = input.line(line_budget);
+            framing += head_limit - line_budget;
+            if (framing > framing_limit()) reject(too_large);
             const auto semi = line.find(';');
             auto digits = std::string_view(line).substr(0, semi);
             if (semi != std::string::npos)
@@ -782,6 +777,7 @@ Response http1(Connection& connection, const Url& url, const Request& request) {
             std::string ending;
             input.take(2, ending);
             if (ending != "\r\n") reject(unknown);
+            framing += 2;
         }
         std::size_t trailer_budget = head_limit;
         for (std::size_t fields = 0;; ++fields) {

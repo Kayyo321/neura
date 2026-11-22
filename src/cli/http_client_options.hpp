@@ -49,6 +49,13 @@ inline bool parse_http_client_option(std::string_view argument, nvm::Capabilitie
     return true;
 }
 
+// An option that would widen a scoped grant: --allow-http-client in either
+// form. A bundle whose grant is scoped refuses it among the operator's
+// arguments; --deny-http-client only narrows and stays allowed.
+inline bool widens_http_client(std::string_view argument) {
+    return argument == "--allow-http-client" || argument.starts_with("--allow-http-client=");
+}
+
 inline std::string http_client_option(const std::vector<std::string>* origins) {
     std::string option = "--allow-http-client";
     if (origins) {

@@ -39,6 +39,10 @@ extern "C" int __wrap_getaddrinfo(const char* host, const char* port, const addr
     if (name == "link-local.test") numeric = "fe80::1";
     if (name == "unspecified.test") numeric = "::";
     if (name == "private.test") numeric = "10.8.0.1";
+    // Numeric hosts written as absolute names: a resolver that does not read
+    // them as addresses may answer anything, here a public address.
+    if (name == "127.0.0.2.") numeric = "93.184.216.34";
+    if (name == "127.0.0.1.") numeric = "127.0.0.1";
     // The first answer is public, every later one private.
     if (name == "changing.test") numeric = changing_answers++ == 0 ? "93.184.216.34" : "10.8.0.1";
     assert(numeric);
@@ -124,6 +128,30 @@ int main() {
             }
         });
     };
+    // As `serve`, for a response the client may stop reading part way.
+    const auto serve_partly = [&](std::string response) {
+        return std::jthread([listener, response = std::move(response)] {
+            pollfd readable{listener, POLLIN, 0};
+            assert(::poll(&readable, 1, 2500) == 1);
+            const auto stream = ::accept(listener, nullptr, nullptr);
+            assert(stream >= 0);
+            char block[1024];
+            std::string head;
+            while (head.find("\r\n\r\n") == std::string::npos && head.size() < 4096) {
+                readable = {stream, POLLIN, 0};
+                assert(::poll(&readable, 1, 2500) == 1);
+                const auto count = ::recv(stream, block, sizeof block, 0);
+                assert(count > 0);
+                head.append(block, count);
+            }
+            for (std::size_t sent = 0; sent < response.size();) {
+                const auto count = ::send(stream, response.data() + sent, response.size() - sent, MSG_NOSIGNAL);
+                if (count <= 0) break;
+                sent += static_cast<std::size_t>(count);
+            }
+            ::close(stream);
+        });
+    };
     const std::string ok = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok";
     const auto permit = [&](const std::string& host, std::optional<std::vector<std::string>> origins) {
         const auto previous_connects = connects.load();
@@ -152,6 +180,17 @@ int main() {
     // A numeric origin allows exactly its address.
     permit("127.0.0.1", std::vector{origin("127.0.0.1")});
     deny("127.0.0.1", {origin("127.0.0.2")});
+    // A numeric host with the trailing dot of an absolute name is that
+    // address: its listed numeric origin allows exactly that address, never
+    // the global answers of a lookup of the dotted name.
+    {
+        const auto previous_connects = connects.load();
+        const auto done = fetch(origin("127.0.0.2."), std::vector{origin("127.0.0.2")});
+        assert(done.success && done.value.elements[0].bits == 0);
+        assert(done.value.elements[3].bytes == origin("127.0.0.2") && connects == previous_connects);
+    }
+    permit("127.0.0.1.", std::vector{origin("127.0.0.1")});
+    permit("127.0.0.1", std::vector{origin("127.0.0.1.")});
     // `localhost` is a name: its loopback addresses need numeric origins.
     deny("localhost", {origin("localhost")});
     // No list keeps the unscoped grant; an empty list allows nothing.
@@ -191,6 +230,37 @@ int main() {
         assert(done.success && done.value.elements[0].bits == 0);
         assert(done.value.elements[3].bytes == origin("changing.test"));
         assert(connects == previous_connects + 1);
+    }
+    // Chunked framing is bounded by the body it frames (docs/runtime/NVM.md,
+    // "HTTP client services"): ordinary chunking of any count is accepted,
+    // one-byte chunks with 16 KiB extensions are refused as too large.
+    {
+        const auto chunked = [&](const std::string& chunks) {
+            const auto server = serve_partly("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n" +
+                                             chunks + "0\r\n\r\n");
+            return fetch(origin("127.0.0.1"), std::nullopt);
+        };
+        std::string chunks, expected;
+        for (int chunk = 0; chunk < 3000; ++chunk) {
+            chunks += "a\r\n0123456789\r\n";
+            expected += "0123456789";
+        }
+        auto done = chunked(chunks);
+        assert(done.success && done.value.elements[0].bits == 200 && done.value.elements[2].bytes == expected);
+        // One-byte chunks: five framing bytes each, past the 64 KiB floor.
+        chunks.clear();
+        expected.clear();
+        for (int chunk = 0; chunk < 20000; ++chunk) {
+            chunks += "1\r\nb\r\n";
+            expected += 'b';
+        }
+        done = chunked(chunks);
+        assert(done.success && done.value.elements[0].bits == 200 && done.value.elements[2].bytes == expected);
+        // One-byte chunks with maximal extensions.
+        chunks.clear();
+        for (int chunk = 0; chunk < 40; ++chunk) chunks += "1;x=" + std::string(16000, 'e') + "\r\nb\r\n";
+        done = chunked(chunks);
+        assert(!done.success && done.value.bits == 16);
     }
     // A list that does not parse allows nothing.
     {

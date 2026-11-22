@@ -10,6 +10,7 @@
 #include "provider_internal.hpp"
 
 #include "platform/socket.hpp"
+#include "sigpipe_guard.hpp"
 
 #include <algorithm>
 #include <array>
@@ -21,6 +22,7 @@
 #include <cstring>
 #include <limits>
 #include <optional>
+#include <variant>
 
 #ifdef _WIN32
 #include "platform/text.hpp"
@@ -1619,10 +1621,20 @@ struct FileTransfer {
             if (kernel_copy && used == buffer.size()) {
                 NonblockingDescription description(target.descriptor);
                 if (!description.ready) return finish(socket_failure());
+                if constexpr (sizeof(off_t) < sizeof(std::int64_t)) {
+                    if (offset + sent > static_cast<std::int64_t>(std::numeric_limits<off_t>::max()))
+                        return finish(host_error::invalid_input);
+                }
                 auto position = static_cast<off_t>(offset + sent);
                 const auto want = static_cast<std::size_t>(
                     std::min<std::int64_t>(count - sent, attempt_budget - (sent - started)));
-                const auto moved = ::sendfile(target.descriptor, file, &position, want);
+                // sendfile has no MSG_NOSIGNAL: a peer that has gone would
+                // raise SIGPIPE, which ends `neura run` and native executables.
+                ssize_t moved = 0;
+                {
+                    [[maybe_unused]] SocketWrites protection;
+                    moved = ::sendfile(target.descriptor, file, &position, want);
+                }
                 if (moved > 0) {
                     sent += moved;
                     continue;

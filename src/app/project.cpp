@@ -20,6 +20,7 @@
 #include <regex>
 #include <set>
 #include <sstream>
+#include <variant>
 
 #ifndef _WIN32
 #include <spawn.h>
@@ -883,11 +884,13 @@ BuildResult build_desktop(Project& project, const std::string& name, const Targe
     // file, which CreateProcess starts only by its .exe name (W31).
     const auto suffix = tool::executable_file("");
     const auto& web_settings = std::get<WebSettings>(project.manifest.targets.at(desktop.ui.value).settings);
+    // The native child's http_client grant is always scoped: to the desktop
+    // target's connect list, else its ui target's, else to no origin at all,
+    // as anything outside the lists is unreachable (Projects030.md).
     const auto& configured_origins = desktop.origins.connect ? desktop.origins.connect : web_settings.origins.connect;
     const auto http_origins = configured_origins ? http_origin_texts(*configured_origins) : std::vector<std::string>{};
-    const auto compiled = compile(project, target, options, scratch, true, "app-child" + suffix,
-                                  configured_origins ? &http_origins : nullptr);
-    if (configured_origins && std::ranges::find(bundle.capabilities, Capability::HttpClient) != bundle.capabilities.end()) {
+    const auto compiled = compile(project, target, options, scratch, true, "app-child" + suffix, &http_origins);
+    if (std::ranges::find(bundle.capabilities, Capability::HttpClient) != bundle.capabilities.end()) {
         bundle.requirements.emplace("http_client_origins", 1);
         bundle.origins["connect"] = http_origins;
     }
