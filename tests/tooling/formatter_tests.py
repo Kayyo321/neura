@@ -176,6 +176,18 @@ let read = func(.Note("parameter") item: Cell) -> int32 {
         hash_source = self.formatted(source, "--tag-style=hash")
         self.assertEqual(execute("--check", source=hash_source.encode()).returncode, 0)
 
+    def test_comments_among_standalone_tags_keep_the_declaration_indent(self):
+        for sigil in ("#", "."):
+            with self.subTest(sigil=sigil):
+                source = f"""let Values = module (
+    {sigil}[Since("0.3.1"), Stable]
+    /// A reading in milliseconds.
+    {sigil}Unit("ms")
+    export let period = 1;
+);
+"""
+                self.assertEqual(self.formatted(source), source)
+
     def test_tag_conversions_only_replace_sigil_bytes(self):
         # Preserve a BOM, mixed line endings, unformatted layout, no final
         # newline, and the sigils inside comments, strings and member access.
