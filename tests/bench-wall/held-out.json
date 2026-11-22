@@ -1,0 +1,123 @@
+{
+  "fixture_revision": "aadb21a24fcd1b3369bbd31e7fb2fe7e253c36fc",
+  "programs": [
+    {
+      "name": "csv",
+      "mode": "test",
+      "source": "tests/stdlib/csv/csv-tests.nra",
+      "purpose": "Quoted fields, record parsing and seeded round trips.",
+      "options": [],
+      "arguments": [],
+      "sha256": {
+        "tests/stdlib/csv/csv-tests.nra": "47a661a3072ce7af632a54ff059af59d7a203dbbfc1777a66b78e9ebe51f13b8"
+      }
+    },
+    {
+      "name": "big-integer",
+      "mode": "test",
+      "source": "tests/stdlib/big-integer/big-integer-tests.nra",
+      "purpose": "Arbitrary precision arithmetic and decimal text.",
+      "options": [],
+      "arguments": [],
+      "sha256": {
+        "tests/stdlib/big-integer/big-integer-tests.nra": "ac29c11d30faae3bbef311c0621669d0f65c4d300539f7e67de064e6913c0273"
+      }
+    },
+    {
+      "name": "base64",
+      "mode": "test",
+      "source": "tests/stdlib/base64/base64-tests.nra",
+      "purpose": "Standard and URL alphabets, encoding and rejection.",
+      "options": [],
+      "arguments": [],
+      "sha256": {
+        "tests/stdlib/base64/base64-tests.nra": "78f602d4c400e5cc55efcab60c679448b6c9abac724e5d089cba1e5e83e0398b"
+      }
+    },
+    {
+      "name": "sha256",
+      "mode": "test",
+      "source": "tests/stdlib/sha256/sha256-tests.nra",
+      "purpose": "Known-answer digests, padding and incremental hashing.",
+      "options": [],
+      "arguments": [],
+      "sha256": {
+        "tests/stdlib/sha256/sha256-tests.nra": "b84432788ac80fdbd6ffc57420b01f3cf2cf324219d2419b8fab3dae423abfe1"
+      }
+    },
+    {
+      "name": "ml-kem",
+      "mode": "test",
+      "source": "tests/stdlib/crypto-pqc/ml-kem-tests.nra",
+      "purpose": "Post-quantum key operations against frozen ACVP vectors.",
+      "options": [
+        "-I",
+        "tests/stdlib/crypto-pqc/support"
+      ],
+      "arguments": [],
+      "sha256": {
+        "tests/stdlib/crypto-pqc/ml-kem-tests.nra": "04e7132da6fe5e9d5dbfbccae3b3b92bef2e40ef82e078e27b5dda53c0060e38",
+        "tests/stdlib/crypto-pqc/support/ml-kem-vectors.nra": "ae74075d2b1488a0b29e088d8ba52a41caab3d63dc9baf470e63add03ae98590"
+      }
+    },
+    {
+      "name": "json",
+      "mode": "test",
+      "source": "tests/stdlib/json/json-tests.nra",
+      "purpose": "Parsing, encoding, traversal and malformed input.",
+      "options": [],
+      "arguments": [],
+      "sha256": {
+        "tests/stdlib/json/json-tests.nra": "d52a353fff152845dce4fdfe1223d2931c027788a6fd1c3a94344c89da18709b"
+      }
+    },
+    {
+      "name": "string-builder",
+      "mode": "test",
+      "source": "tests/stdlib/string-builder/string-builder-tests.nra",
+      "purpose": "UTF-8 appends, snapshots, boundary checks and resizing.",
+      "options": [],
+      "arguments": [],
+      "sha256": {
+        "tests/stdlib/string-builder/string-builder-tests.nra": "45690979dde9f0c4532e7e4386130a59b48297bcfb0480f86a3bbd7c882d0290"
+      }
+    },
+    {
+      "name": "portfolio",
+      "mode": "run",
+      "source": "examples/apps/portfolio.nra",
+      "purpose": "A model-host portfolio app with routing, user events and form validation.",
+      "options": [],
+      "arguments": [],
+      "sha256": {
+        "examples/apps/portfolio.nra": "445daea883f5d3b9209778f1e58f669ecfacac68fd114fae6e44d0c588e5915c"
+      }
+    },
+    {
+      "name": "fan-out",
+      "mode": "run",
+      "source": "tests/concurrency/programs/fan-out.nra",
+      "purpose": "Nested task scopes, fan-out, cancellation and scope exit.",
+      "options": [
+        "--virtual-time"
+      ],
+      "arguments": [],
+      "sha256": {
+        "tests/concurrency/programs/fan-out.nra": "a3126a6796a92aeeb43fa596e56fc54a3ddaeca7740b761fe4b45eddeff8b50f"
+      }
+    },
+    {
+      "name": "worker-group",
+      "mode": "run",
+      "source": "tests/concurrency/programs/worker-group.nra",
+      "purpose": "A scheduler-backed worker group with channels and queued work.",
+      "options": [
+        "--virtual-time"
+      ],
+      "arguments": [],
+      "sha256": {
+        "tests/concurrency/programs/worker-group.nra": "74f86739792097e42a672b98007f94340a80fd509fca103b59310f1e6303fb8b"
+      }
+    }
+  ]
+}
