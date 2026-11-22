@@ -1113,7 +1113,11 @@ private:
     }
 
     void roots() {
-        const auto is_ref = [](const Inst& in) { return in.type.type == Type::Ref && in.op != Op::RunConst; };
+        // The literal nil handle does not denote a heap entry. Folding a
+        // reference phi to nil may turn a frame-state slot into a constant.
+        const auto is_ref = [](const Inst& in) {
+            return in.type.type == Type::Ref && in.op != Op::RunConst && (in.op != Op::Const || in.imm != 0);
+        };
         bool any = false;
         for (std::uint32_t id = 0; id < f_.insts.size(); ++id) {
             if (block_of_[id] != none && is_ref(f_.insts[id])) any = true;
