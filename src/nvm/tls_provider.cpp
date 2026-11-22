@@ -502,8 +502,12 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
             return fail(socket_error(platform::last_socket_error().code));
         }
         if (!attach_socket(*stream)) return fail(host_error::other);
+        // Zero waits for a client without limit, but a connected peer that
+        // stalls the handshake is still bounded by the transfer default.
+        const auto handshake_deadline = timeout == 0 ? deadline_of(default_transfer_timeout) : deadline;
         std::uint32_t error = 0;
-        if (drive(stream->ssl, stream->descriptor, deadline, error, [&] { return SSL_accept(stream->ssl); }) <= 0) {
+        if (drive(stream->ssl, stream->descriptor, handshake_deadline, error,
+                  [&] { return SSL_accept(stream->ssl); }) <= 0) {
             if (SSL_get_verify_result(stream->ssl) != X509_V_OK ||
                 ERR_GET_REASON(ERR_peek_last_error()) == SSL_R_PEER_DID_NOT_RETURN_A_CERTIFICATE) {
                 return fail(host_error::permission_denied);
@@ -907,7 +911,9 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
         if (stream->terminal_error) return fail(stream->terminal_error);
         if (stream->write_closed) return HostCompletion::ok();
         std::uint32_t error = 0;
-        const auto deadline = std::min(stream->deadline, deadline_of(timeout));
+        // Zero selects the 30-second transfer default, never an unlimited wait.
+        const auto deadline = std::min(stream->deadline,
+                                       deadline_of(timeout == 0 ? default_transfer_timeout : timeout));
         const auto notified = drive(stream->ssl, stream->descriptor, deadline, error, [&] {
             const auto result = SSL_shutdown(stream->ssl);
             // 0 means our close_notify was sent and the peer's is still outstanding.

@@ -43,6 +43,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 - `neura.process.generation` no longer fails on an unknown VMClock version or an unexpected read error; it falls back to the PID and vmgenid detectors and retries a transient VMClock open failure.
 - A TLS write that times out or fails ends the stream with that error for every later operation instead of letting a next write fail with `ConnectionReset` or mix records.
+- `TlsStream.shutdown(Write)` uses the write timeout, `neura.net.tls.shutdown_write` treats zero as the 30-second default, and a TLS accept with timeout zero bounds the handshake after the TCP accept by 30 seconds, so a silent peer no longer holds the caller without limit.
 - TLS credential files load without `/proc` when no path prefixes are configured. Paths are checked against the prefixes and for a regular file before they are opened, so a FIFO or device outside the grant is never opened, and Windows refuses UNC and device paths, including link targets, before opening. FreeBSD and NetBSD check prefixes through `F_KINFO` and `F_GETPATH` instead of returning `Unsupported`.
 
 ### Known limitations

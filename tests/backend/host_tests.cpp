@@ -2165,12 +2165,18 @@ NEURA_TEST(host, tls_public_endpoints_verify_live_svid) {
         }
     });
     const auto address = "127.0.0.1:" + std::to_string(as_i32(port.value));
-    const auto client_run = nvm::run(image, nvm::bind(image, nra_client.registry),
+    const auto client_run = nvm::record(image, nvm::bind(image, nra_client.registry),
         std::vector<std::string>{"client", address, certificate, client_key, material.certificate});
     serving.join();
-    check(client_run.completed && client_run.status == 0, "public client completed: " + describe_trap(client_run, image));
+    check(client_run.outcome.completed && client_run.outcome.status == 0,
+          "public client completed: " + client_run.outcome.message);
     expect_ok(accepted, "public client authenticated");
     check_equal(nra_client.output.contents(), std::string("pong\n"), "public connector round trip");
+    const auto shutdown = std::ranges::find_if(client_run.entries, [](const auto& entry) {
+        return entry.import == "neura.net.tls.shutdown_write";
+    });
+    check(shutdown != client_run.entries.end(), "public shutdown issued the host call");
+    check_equal(as_i64(shutdown->arguments.at(1)), std::int64_t{3'000'000'000}, "shutdown uses the write timeout");
     native_server.call("neura.net.tls.close", {accepted.value.elements.at(0)});
     native_server.call("neura.net.close", {listener.value});
 
@@ -2271,7 +2277,7 @@ NEURA_TEST(host, tls_v2_requires_exact_versions_and_mutual_identity) {
         check_equal(local.value.elements.at(0).bytes, std::string("127.0.0.1"), "numeric loopback address");
         expect_error(client.call("neura.net.tls.kernel_offload", {socket}), host_error::unsupported,
                      "kernel offload without handshake opt-in");
-        expect_ok(client.call("neura.net.tls.shutdown_write", {socket, i64(wait)}), "send close_notify");
+        expect_ok(client.call("neura.net.tls.shutdown_write", {socket, i64(0)}), "send close_notify with default budget");
         const auto ended = server.call("neura.net.tls.read", {peer, i32(64), i64(wait)});
         expect_ok(ended, "orderly TLS shutdown");
         check(ended.value.bytes.empty(), "close_notify is an orderly end");
@@ -2308,6 +2314,31 @@ NEURA_TEST(host, tls_v2_requires_exact_versions_and_mutual_identity) {
     Host restricted(only_net);
     expect_error(restricted.call("neura.net.tls.connect", {text("127.0.0.1"), port.value, i64(wait), text(""),
         tls_names({}), text(material.certificate)}), host_error::capability_denied, "explicit CA requires fs");
+}
+
+NEURA_TEST(host, tls_accept_default_bounds_a_stalled_handshake) {
+    const LoopbackTlsKeys material;
+    Host server(everything());
+    Host silent(everything());
+    const auto listener = server.call("neura.net.listen", {text("127.0.0.1"), i32(0)});
+    expect_ok(listener, "listen");
+    const auto port = server.call("neura.net.local_port", {listener.value});
+    expect_ok(port, "port");
+    const auto peer = silent.call("neura.net.connect", {text("127.0.0.1"), port.value, i64(1'000'000'000)});
+    expect_ok(peer, "TCP peer connects without speaking TLS");
+    HostCompletion accepted;
+    std::jthread worker([&] {
+        accepted = server.call("neura.net.tls.accept", {listener.value, text(material.certificate), text(material.key),
+            tls_names({}), i64(0)});
+    });
+    // Close at this outer bound even on a regression so the accept can finish.
+    const auto ended = silent.call("neura.net.read", {peer.value, i32(1), i64(35'000'000'000)});
+    const auto closed = silent.call("neura.net.close", {peer.value});
+    worker.join();
+    expect_ok(closed, "close silent peer");
+    expect_ok(ended, "default TLS handshake deadline closed the socket");
+    check(ended.value.bytes.empty(), "silent peer gets EOF after timeout");
+    expect_error(accepted, host_error::timed_out, "TLS accept reports TimedOut");
 }
 
 #endif
