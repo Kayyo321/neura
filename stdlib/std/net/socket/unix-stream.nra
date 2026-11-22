@@ -80,7 +80,7 @@ export let UnixStream = module (
         export let peer_address = func -> Optional<UnixAddr> => peer;
 
         /// @brief The listener's address for an accepted socket; otherwise it asks the host, which traps in
-        /// Neura 0.3.0 (no local-address service).
+        /// For accepted streams the host reports the bound address.
         .NoDiscard
         export let local_address = func -> Result<UnixAddr> {
             return Result<UnixAddr>.Err(bytes.closed("socket", label)) unless open_now;
@@ -94,7 +94,7 @@ export let UnixStream = module (
             };
         };
 
-        /// @brief Ends reading, writing or both. Traps in Neura 0.3.0: the runtime has no shutdown service.
+        /// @brief Ends reading, writing or both on the connected Unix stream.
         .NoDiscard
         export let shutdown = func(how: Shutdown) -> Result<Unit> {
             return Result<Unit>.Err(bytes.closed("socket", label)) unless open_now;

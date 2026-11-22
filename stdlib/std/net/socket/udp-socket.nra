@@ -80,6 +80,7 @@ export let UdpSocket = module (
         /// @brief Enables or disables UDP receive coalescing. On hosts without this socket option it returns
         /// Unsupported. When enabled, use `receive_coalesced` to retain datagram boundaries.
         .NoDiscard
+        .Since("0.3.1")
         export let set_receive_coalescing = func(enabled: bool) -> Result<Unit> {
             return Result<Unit>.Err(bytes.closed("socket", bound.to_string())) unless open_now;
             return match (host.set_option(id, 14, enabled ? 1 : 0)) {

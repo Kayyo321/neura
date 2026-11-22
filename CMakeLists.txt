@@ -1189,6 +1189,13 @@ endif()
 
 include(CTest)
 
+if(BUILD_TESTING AND NEURA_ENABLE_SERVER_TLS)
+    find_program(NEURA_SERVER_TEST_OPENSSL NAMES openssl)
+    if(NOT NEURA_SERVER_TEST_OPENSSL OR NOT EXISTS "${NEURA_SERVER_TEST_OPENSSL}")
+        message(FATAL_ERROR "TLS tests generate loopback certificates with the openssl CLI. Set NEURA_SERVER_TEST_OPENSSL to its path or configure with BUILD_TESTING=OFF.")
+    endif()
+endif()
+
 if(NEURA_SDK)
 # The libclang C API headers and a loader that opens the system libclang at
 # run time, for C header imports. Building Neura never links libclang.
@@ -1517,7 +1524,6 @@ if(BUILD_TESTING AND NEURA_SDK)
     if(TARGET neura_http_listener_foreground)
         set(NEURA_SERVER_LISTENER_TEST_OPTIONS)
         if(NEURA_ENABLE_SERVER_TLS)
-            find_program(NEURA_SERVER_TEST_OPENSSL NAMES openssl REQUIRED)
             list(APPEND NEURA_SERVER_LISTENER_TEST_OPTIONS --openssl "${NEURA_SERVER_TEST_OPENSSL}")
         endif()
         add_test(NAME server-http-listeners COMMAND "${Python3_EXECUTABLE}"
@@ -1531,7 +1537,6 @@ if(BUILD_TESTING AND NEURA_SDK)
         # record and replay, the drain, and 1,000 requests of load.
         set(NEURA_SERVER_HOST_TEST_OPTIONS)
         if(NEURA_ENABLE_SERVER_TLS)
-            find_program(NEURA_SERVER_TEST_OPENSSL NAMES openssl REQUIRED)
             list(APPEND NEURA_SERVER_HOST_TEST_OPTIONS --tls --openssl "${NEURA_SERVER_TEST_OPENSSL}")
         endif()
         find_program(NEURA_SERVER_TEST_CURL NAMES curl)
@@ -1982,6 +1987,12 @@ if(BUILD_TESTING AND NEURA_SDK)
         set_tests_properties(stdlib-net-socket-${feature} PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 120)
     endforeach()
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NEURA_ENABLE_SERVER_TLS)
+        add_executable(neura_tls_resolver_deadline_tests tests/backend/tls_resolver_deadline_tests.cpp)
+        target_link_libraries(neura_tls_resolver_deadline_tests PRIVATE neura_nvm neura_openssl)
+        target_link_options(neura_tls_resolver_deadline_tests PRIVATE -Wl,--wrap=getaddrinfo)
+        neura_target_defaults(neura_tls_resolver_deadline_tests)
+        add_test(NAME tls-resolver-deadline COMMAND neura_tls_resolver_deadline_tests)
+        set_tests_properties(tls-resolver-deadline PROPERTIES TIMEOUT 10)
         add_test(NAME stdlib-net-tls-ktls COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/net-tls/ktls.py" "$<TARGET_FILE:neura_backend_tests>"
             "${CMAKE_CURRENT_SOURCE_DIR}" "${NEURA_SERVER_TEST_OPENSSL}")
@@ -2134,7 +2145,6 @@ if(BUILD_TESTING AND NEURA_SDK)
     )
     set_tests_properties(stdlib-install PROPERTIES FIXTURES_SETUP stdlib)
     if(NEURA_ENABLE_SERVER_TLS)
-        find_program(NEURA_SERVER_TEST_OPENSSL NAMES openssl REQUIRED)
         add_test(NAME stdlib-net-tls-loopback COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/net-tls/loopback.py"
             --neura "$<TARGET_FILE:neura>" --openssl "${NEURA_SERVER_TEST_OPENSSL}")

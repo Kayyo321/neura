@@ -131,8 +131,7 @@ export let HostCalls = module (
     /// @brief A Multipath TCP listener. Host service: neura.net.mptcp.listen.
     export let mptcp_listen = func(host: string, port: int) -> IdOutcome host("neura.net.mptcp.listen", 1);
 
-    /// @brief A raw IP socket (SOCK_RAW) for family 4 or 6 and an IP protocol number. Needed service:
-    /// neura.net.raw.open.
+    /// @brief A raw IP socket (SOCK_RAW) for family 4 or 6 and an IP protocol number. Requires net and raw.
     export let raw_open = func(family: int, protocol: int) -> IdOutcome host("neura.net.raw.open", 1);
 
     /// @brief The numeric local address of a raw socket. Host service: neura.net.raw.local_address.
@@ -147,19 +146,17 @@ export let HostCalls = module (
     /// @brief Moves bytes between two streams. Host service: neura.net.splice version 2.
     export let splice = func(source: int64, target: int64, count: int64) -> LongOutcome host("neura.net.splice", 2);
 
-    /// @brief Sends with MSG_ZEROCOPY. Host service: neura.net.send_zerocopy.
+    /// @brief Sends a prefix without blocking the task scheduler. The provider uses a copy-avoidance hint when available.
     export let send_zerocopy = func(socket: int64, bytes: uint8[list]) -> CountOutcome host("neura.net.send_zerocopy", 1);
 
-    /// @brief Sends a buffer as datagrams of segment_size bytes with UDP_SEGMENT. Needed service:
-    /// neura.net.udp.send_segmented.
+    /// @brief Sends a buffer as datagrams of segment_size bytes, using segmentation offload when available.
     export let udp_send_segmented = func(socket: int64, host: string, port: int, bytes: uint8[list],
         segment_size: int) -> CountOutcome host("neura.net.udp.send_segmented", 1);
 
     /// @brief Receives coalesced datagrams and their segment size. Host service: neura.net.udp.receive_segments.
     export let udp_receive_coalesced = func(socket: int64, max: int, timeout_nanos: int64) -> CoalescedOutcome host("neura.net.udp.receive_segments", 1);
 
-    /// @brief Asks the driver to wait with backend 1 io_uring, 2 epoll, 3 kqueue or 4 poll. Needed service:
-    /// neura.runtime.event_loop.
+    /// @brief Probes backend 1 io_uring, 2 epoll, 3 kqueue or 4 poll. A successful request selects it for the execution.
     export let select_event_loop = func(backend: int) -> DoneOutcome host("neura.runtime.event_loop", 1);
 
     /// @brief A verified TLS client with an exact version range, optional client certificate and kTLS request.
@@ -180,8 +177,7 @@ export let HostCalls = module (
     export let listen_with_options = func(host: string, port: int, options: int[list],
         values: int64[list]) -> IdOutcome host("neura.net.listen", 3);
 
-    /// @brief A UDP socket whose options are set before bind(2), as SO_REUSEADDR and SO_REUSEPORT need. Needed service:
-    /// neura.net.udp.bind version 2.
+    /// @brief Binds a UDP socket after applying its reuse options. Host service: neura.net.udp.bind version 2.
     export let udp_bind_with_options = func(host: string, port: int, options: int[list],
         values: int64[list]) -> IdOutcome host("neura.net.udp.bind", 2);
 );
