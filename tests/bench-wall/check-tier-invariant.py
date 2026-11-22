@@ -18,6 +18,7 @@ MODES = {
     "Tier 3 native": ({"NEURA_TIER3": "native", "NEURA_TIER3_VERIFY": "1"}, ["--tier=2", "--jit=on"]),
 }
 CASES = {
+    "frame-only-loop-phis": [("0", None), ("1", None), ("2", None), ("0", 40000), ("0", 40008)],
     "nil-result": [("0", None), ("1", None), ("2", None), ("0", 44000), ("0", 44008)],
 }
 

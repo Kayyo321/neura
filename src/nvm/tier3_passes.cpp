@@ -1095,6 +1095,55 @@ bool passes_enabled() {
     return enabled;
 }
 
+namespace {
+
+// A frame-state-only header phi can share another phi's location when
+// both produce the same value on each incoming edge. Include the entry
+// edges in the proof: equality only after the first back edge is insufficient.
+void merge_loop_state_phis(Function& f, detail::Counts& counts) {
+    const detail::Cfg cfg(f);
+    const auto loops = detail::find_loops(f, cfg);
+    if (loops.empty()) return;
+    std::vector<bool> ordinary_use(f.insts.size(), false);
+    for (const auto& block : f.blocks) {
+        for (const auto id : block.insts) {
+            const auto& in = f.insts[id];
+            detail::for_each_operand(f, in, [&](std::uint32_t operand) {
+                if (operand != id) ordinary_use[operand] = true;
+            });
+        }
+    }
+    detail::Replacements repl(f.insts.size());
+    for (const auto& loop : loops) {
+        auto& insts = f.blocks[loop.header].insts;
+        const auto end = std::find_if(insts.begin(), insts.end(),
+                                      [&](std::uint32_t id) { return f.insts[id].op != Op::Phi; });
+        // Prefer a phi read by the loop over one only its frame state reads.
+        std::map<std::vector<std::uint64_t>, std::uint32_t> equal;
+        for (auto it = insts.begin(); it != end; ++it) {
+            const auto id = *it;
+            const auto& phi = f.insts[id];
+            std::vector<std::uint64_t> key{static_cast<std::uint64_t>(phi.type.type), phi.type.width};
+            detail::for_each_operand(f, phi, [&](std::uint32_t operand) {
+                key.push_back(operand == id ? none : repl.find(operand));
+            });
+            const auto [other, added] = equal.try_emplace(std::move(key), id);
+            if (added || (ordinary_use[id] && ordinary_use[other->second])) continue;
+            if (ordinary_use[id]) {
+                repl.set(other->second, id);
+                other->second = id;
+            } else {
+                repl.set(id, other->second);
+            }
+            ++counts["copy.loop_state_phi"];
+        }
+        insts.erase(std::remove_if(insts.begin(), end, [&](std::uint32_t id) { return repl.find(id) != id; }), end);
+    }
+    repl.apply(f);
+}
+
+} // namespace
+
 void optimize(const nvr::Image& image, Function& f, bool verify_each) {
     using namespace detail;
     Counts counts;
@@ -1119,6 +1168,7 @@ void optimize(const nvr::Image& image, Function& f, bool verify_each) {
     run("fold and propagate", [&] { simplify(f, counts); });
     run("loop-invariant code motion", [&] { hoist_invariants(f, counts); });
     run("value numbering", [&] { number_values(f, counts); });
+    run("frame-state loop phis", [&] { merge_loop_state_phis(f, counts); });
     run("dead code removal", [&] { remove_dead(f, counts); });
     run("checkpoint lengths", [&] { compute_budgets(f); });
     f.pass_counts = std::move(counts);
