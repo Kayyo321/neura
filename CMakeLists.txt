@@ -1437,6 +1437,9 @@ if(BUILD_TESTING AND NEURA_SDK)
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/frontend.cmake"
     )
 
+    add_test(NAME parser-if-initializers COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressions/if_initializers.py" "$<TARGET_FILE:neura>")
+
     # Scoped tasks (docs/lang/Concurrency.md): conformance of the forms and
     # their checks, then compiled programs through every build route.
     add_test(NAME concurrency-frontend COMMAND ${CMAKE_COMMAND}
@@ -1482,6 +1485,9 @@ if(BUILD_TESTING AND NEURA_SDK)
         "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/concurrency-parallel-tests"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/concurrency/parallel.cmake"
     )
+
+    add_test(NAME parser-dot-tags COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/tags/dot_tags.py" "$<TARGET_FILE:neura>")
 
     add_test(NAME source-docs COMMAND "${CMAKE_COMMAND}"
         "-DNEURA=$<TARGET_FILE:neura>"
@@ -1621,6 +1627,12 @@ if(BUILD_TESTING AND NEURA_SDK)
         "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/nir-link-tests"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/nir-link.cmake"
     )
+
+    add_test(NAME typed-numeric-literals COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressions/typed-numeric-literals.py" "$<TARGET_FILE:neura>")
+
+    add_test(NAME nil-conditions COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressions/nil_conditions.py" "$<TARGET_FILE:neura>")
 
     # Grouped parameters and the constructor shorthand build the image of
     # their written-out form (docs/design/Parameters030.md).

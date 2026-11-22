@@ -28,6 +28,31 @@ constexpr std::size_t none = static_cast<std::size_t>(-1);
 bool contains(const Span &span, std::size_t offset) {
     return offset >= span.offset && offset <= span.offset + span.length;
 }
+Span initializer_scope(const Statement &statement, const Span &enclosing) {
+    if (statement.kind != Statement::Kind::If || statement.initializer.empty())
+        return enclosing;
+    // The names are visible from the condition through the end of the
+    // else chain. The initializer still reads the enclosing bindings.
+    const auto &init = statement.initializer.front().span;
+    const auto start = init.offset + init.length;
+    auto scope = statement.span;
+    scope.length -= start - scope.offset;
+    scope.offset = start;
+    return scope;
+}
+Span initialized_branch_scope(const Statement &statement, const std::vector<Statement> &branch,
+                              const std::vector<Token> &tokens, const Span &enclosing) {
+    if (statement.kind != Statement::Kind::If || statement.initializer.empty() || branch.empty())
+        return enclosing;
+    auto scope = branch.front().span;
+    auto end = branch.back().span.offset + branch.back().span.length;
+    const auto after = std::lower_bound(tokens.begin(), tokens.end(), end,
+        [](const Token &token, std::size_t offset) { return token.span.offset < offset; });
+    if (after != tokens.end() && after->text == "}")
+        end = std::min(after->span.offset, statement.span.offset + statement.span.length);
+    scope.length = end - scope.offset;
+    return scope;
+}
 unsigned modifier(std::string_view name) {
     const auto found = std::find(semantic_modifiers.begin(), semantic_modifiers.end(), name);
     return found == semantic_modifiers.end() ? 0u : 1u << static_cast<unsigned>(found - semantic_modifiers.begin());
@@ -596,7 +621,9 @@ void AnalysisSession::parse_document(EditorDocument &document) {
     }
     document.syntax_diagnostics.clear();
     document.tokens = lex_recovering(document.source, document.path, document.syntax_diagnostics);
-    document.syntax = parse_recovering(document.tokens, document.syntax_diagnostics);
+    document.tag_sigils.clear();
+    document.syntax = parse_recovering(document.tokens, document.syntax_diagnostics, &document.tag_sigils);
+    std::sort(document.tag_sigils.begin(), document.tag_sigils.end());
 }
 EditorDocument &AnalysisSession::open(std::string uri, std::string source, std::int64_t version) {
     const auto path = uri_path(uri);
@@ -808,9 +835,16 @@ void AnalysisSession::index_syntax(EditorDocument &doc) {
                 s.constant_bindings ? modifier("readonly") : 0);
         for (const auto &e : s.expressions)
             expression(e, parent, next_scope);
-        for (const auto *body : {&s.body, &s.alternative, &s.initializer, &s.step})
-            for (const auto &child : *body)
-                statement(child, parent, next_scope);
+        const auto init_scope = initializer_scope(s, next_scope);
+        for (const auto &child : s.initializer)
+            statement(child, parent, init_scope);
+        for (const auto *branch : {&s.body, &s.alternative}) {
+            const auto branch_scope = initialized_branch_scope(s, *branch, doc.tokens, next_scope);
+            for (const auto &child : *branch)
+                statement(child, parent, branch_scope);
+        }
+        for (const auto &child : s.step)
+            statement(child, parent, next_scope);
         for (const auto &arm : s.arms) {
             for (const auto &token : arm.bindings)
                 add(token.text, token.span, token.span, arm.span, parent, 13, 7, modifier("readonly"));
@@ -1761,7 +1795,11 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
             return Json{{"isIncomplete", false}, {"items", items}};
         }
     }
-    if (before != std::string::npos && doc.source[before] == '#') {
+    const auto tag_open = before != std::string::npos && before > 0 && doc.source[before] == '['
+                              ? doc.source.find_last_not_of(" \t\r\n", before - 1) : before;
+    if (tag_open != std::string::npos &&
+        (doc.source[tag_open] == '#' ||
+         std::binary_search(doc.tag_sigils.begin(), doc.tag_sigils.end(), tag_open))) {
         for (const auto &tag : tag_registry()) {
             if (tag.status == TagStatus::Reserved) continue;
             add(std::string(tag.name), 14, tag_signature(tag) + " — " + std::string(tag_status_name(tag.status)),
@@ -1894,8 +1932,11 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
                     for (const auto &condition : statement.expressions) narrowings(condition, statement.span);
                 if (statement.declaration) declaration(*statement.declaration, scope);
                 const auto nested = statement.kind == Statement::Kind::Block ? statement.span : scope;
-                statements(statement.body, nested);
-                statements(statement.alternative, nested);
+                if (statement.kind == Statement::Kind::If)
+                    statements(statement.initializer, initializer_scope(statement, nested));
+                statements(statement.body, initialized_branch_scope(statement, statement.body, context.tokens, nested));
+                statements(statement.alternative,
+                           initialized_branch_scope(statement, statement.alternative, context.tokens, nested));
             }
         };
         statements(context.syntax.statements, Span{context.path, 1, 1, 0, context.source.size()});
@@ -2338,8 +2379,12 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
                 return expression_type(value.operands.front(), context, depth + 1);
             TypeSyntax type;
             switch (value.kind) {
-            case Expr::Kind::Integer: type.name = value.character ? "byte" : "int32"; break;
-            case Expr::Kind::Float: type.name = "float64"; break;
+            case Expr::Kind::Integer:
+                type.name = value.literal_type.empty() ? (value.character ? "byte" : "int32") : value.literal_type;
+                break;
+            case Expr::Kind::Float:
+                type.name = value.literal_type.empty() ? "float64" : value.literal_type;
+                break;
             case Expr::Kind::String: type.name = "string"; break;
             case Expr::Kind::Boolean: type.name = "bool"; break;
             case Expr::Kind::Collection: {

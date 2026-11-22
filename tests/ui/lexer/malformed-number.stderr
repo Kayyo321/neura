@@ -1,8 +1,8 @@
-error[E0105]: unexpected character after numeric literal
+error[E0105]: unknown numeric suffix 'px'
  --> $DIR/malformed-number.nra:2:15
   |
 2 | let width = 10px;
-  |               ^ a number cannot continue with a letter
+  |               ^^ not a supported literal type suffix
   |
   = help: separate the number from a following name with a space or an operator
 

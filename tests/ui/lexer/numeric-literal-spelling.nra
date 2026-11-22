@@ -1,0 +1,2 @@
+let width = 10'u32;
+let scale = 1e3u32;

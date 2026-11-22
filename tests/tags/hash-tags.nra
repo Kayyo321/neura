@@ -1,0 +1,50 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Status = enum (
+    /// A reading is available.
+    #Likely Ready,
+    #[Unlikely, SerialName("waiting")] Waiting,
+);
+
+/// A reading in milliseconds.
+#Stable
+let Reading = record (
+    #[Unit("ms"), SerialName("elapsed"),] elapsed: int,
+);
+
+#[Since("0.3.1"), Stable]
+/// Reads the elapsed time with calibration.
+#Example("Metrics.read(10)")
+let Metrics = module (
+    /// Returns the calibrated elapsed time.
+    #NoDiscard
+    export let read = func(#[Unit("ms"), Note("Input")] elapsed: int) -> int {
+        #Note("The sampled reading")
+        last reading = new Reading(elapsed);
+
+        let calibration: class (
+            #Unit("ms")
+            export let offset: int = 5;
+        ) = new;
+        return reading.elapsed + calibration.offset;
+    };
+
+    /// Reserved for internal use.
+    #Hidden
+    export let internal_count = 3;
+);
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let elapsed = Metrics
+            .read(10);
+        if (#Note("Selected measurement") let printed = elapsed; true) {
+            console.print_line(printed.to_string());
+        }
+        if (Status.Ready != Status.Waiting) {
+            return program.ExitCode.Ok;
+        }
+        return program.ExitCode.Failure;
+    };
+);

@@ -238,6 +238,9 @@ private:
             } else if (remaining().starts_with("$\"")) {
                 closes.push_back('"');
                 ++offset_;
+            } else if (const auto end = skip_neura_word(source_, offset_); end != offset_) {
+                offset_ = end;
+                continue;
             } else if (c == '"' || c == '\'') {
                 ++offset_;
                 while (!done() && !line_end(peek()) && peek() != c) {
@@ -382,6 +385,23 @@ std::optional<std::size_t> close(std::string_view source, std::size_t body, Toke
 
 std::optional<std::size_t> close_neura(std::string_view source, std::size_t open, char close) {
     return BodyScanner(source, open).embedded_neura(close);
+}
+
+std::size_t skip_neura_word(std::string_view source, std::size_t offset) {
+    if (offset >= source.size() || !name_char(source[offset])) return offset;
+    const bool number = source[offset] >= '0' && source[offset] <= '9';
+    while (++offset < source.size()) {
+        const auto c = source[offset];
+        if (name_char(c) || (number && c == '\'')) continue;
+        // Let the lexer diagnose a misplaced separator beside a fraction
+        // point or exponent sign. A brace after it still ends the hole.
+        if (number && offset + 1 < source.size() && source[offset + 1] == '\'') {
+            const auto previous = source[offset - 1];
+            if (c == '.' || ((c == '+' || c == '-') && (previous == 'e' || previous == 'E'))) continue;
+        }
+        break;
+    }
+    return offset;
 }
 
 bool html_void_element(std::string_view name) {

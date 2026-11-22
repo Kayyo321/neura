@@ -1,0 +1,14 @@
+error[E0106]: misplaced digit separator
+ --> $DIR/numeric-literal-spelling.nra:1:15
+  |
+1 | let width = 10'u32;
+  |               ^ a digit separator must be between two digits of one digit group
+
+error[E0107]: integer suffix on a floating-point literal
+ --> $DIR/numeric-literal-spelling.nra:2:16
+  |
+2 | let scale = 1e3u32;
+  |                ^^^ an integer suffix requires a number without a fraction or exponent
+
+Some errors have detailed explanations: E0106, E0107.
+For more information about an error, try `neura explain E0106`.

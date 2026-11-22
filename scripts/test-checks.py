@@ -375,6 +375,37 @@ def markdown() -> None:
         print(f"{'PASS' if passed else f'FAIL'} markdown: {name}" + ("" if passed else f": got {output!r}"))
 
 
+def source_syntax() -> None:
+    """Source views and API notes support either tag sigil."""
+    import site_docs
+
+    source = """#Note("hash")
+/// A documented declaration.
+.[Final, Since("0.3.1")]
+let Choice = enum (.Likely Ready, #Unlikely Waiting);
+let read = func(.Note("parameter") item: Choice) -> Choice => item;
+let selected = Choice
+    .Ready;
+"""
+    highlighted = site_docs.highlight("neura", source)
+    sigils = re.findall(r'<span class="k">([#.][^<]*)</span>', highlighted)
+    same("site: dot and hash tags versus continued member access", repr(sigils),
+         repr(["#Note", ".[Final", ".Likely", "#Unlikely", ".Note"]))
+
+    api = load_script("update-stdlib-wiki-api")
+    mixed = ['    .Hidden;', '    .Since("0.3.1")', '    /// A public function.',
+             '    .[Pure, Note("a dot . and hash #")]#NoDiscard',
+             '    export let read = func(.Note("parameter")#[Unit("ms")] item: int) -> int => item;']
+    hashed = ['    .Hidden;', '    #Since("0.3.1")', '    /// A public function.',
+              '    #[Pure, Note("a dot . and hash #")]#NoDiscard',
+              '    export let read = func(#Note("parameter")#[Unit("ms")] item: int) -> int => item;']
+    same("wiki API: mixed stack, tag arguments and continued member access", repr(api.tags_above(mixed, 4)),
+         repr(['Since("0.3.1")', 'Pure', 'Note("a dot . and hash #")', 'NoDiscard']))
+    same("wiki API: existing tag notes and comments", repr(api.comment_notes(mixed, 4) + api.tag_notes(api.tags_above(mixed, 4))),
+         repr(api.comment_notes(hashed, 4) + api.tag_notes(api.tags_above(hashed, 4))))
+    same("wiki API: parameter tags in signatures use hash", api.declaration(mixed, 4), api.declaration(hashed, 4))
+
+
 def redirects() -> None:
     """The preview's redirects stay on the preview and keep the request out of the header line."""
     global failures
@@ -403,6 +434,20 @@ def redirects() -> None:
         response = Response()
         handler.redirect(response, location)
         same(f"site: preview redirect: {name}", response.headers.get("Location", ""), wanted)
+
+
+def numeric_source_syntax() -> None:
+    """Source views highlight the complete spelling of each numeric literal."""
+    import site_docs
+
+    source = """let count = 1'200s32;
+let tiny = 1.0'25e-1'0bf16;
+let letter = 'a';
+"""
+    highlighted = site_docs.highlight("neura", source)
+    numbers = re.findall(r'<span class="n">([^<]*)</span>', highlighted)
+    same("site: numeric separators, exponent and suffix", repr(numbers),
+         repr(["1'200s32", "1.0'25e-1'0bf16"]))
 
 
 def wiki(label: str, change, problem: str | None) -> None:
@@ -783,7 +828,9 @@ def main() -> int:
               "has the path of a page the build generates")
     documents_build()
     markdown()
+    source_syntax()
     redirects()
+    numeric_source_syntax()
     site_build()
 
     print(f"{failures} unexpected results.")

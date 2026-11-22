@@ -1,0 +1,5 @@
+let render = func() {
+    if (let view = html() from "./view.html"; true) {
+        let _ = view();
+    }
+};

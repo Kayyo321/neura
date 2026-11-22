@@ -17,6 +17,8 @@ Errors about characters, literals, and comments.
 | [E0103](E0103.md) | unterminated string literal |
 | [E0104](E0104.md) | invalid escape or character in a string literal |
 | [E0105](E0105.md) | malformed numeric literal |
+| [E0106](E0106.md) | misplaced digit separator |
+| [E0107](E0107.md) | integer suffix on a floating-point literal |
 
 ## E02xx: Parser
 
@@ -89,6 +91,7 @@ Errors about declarations, scopes, and name resolution.
 | [E0268](E0268.md) | invalid Unicode escape |
 | [E0269](E0269.md) | Unicode escape that is not a scalar value |
 | [E0270](E0270.md) | string literal escapes that are not valid UTF-8 |
+| [E0271](E0271.md) | dot tag without a name or group |
 | [E0301](E0301.md) | duplicate local binding |
 | [E0302](E0302.md) | duplicate declaration |
 | [E0303](E0303.md) | duplicate parameter or field name |

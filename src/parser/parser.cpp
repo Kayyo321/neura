@@ -14,8 +14,9 @@ namespace {
 
 class Parser {
 public:
-    explicit Parser(const std::vector<Token>& tokens, bool template_neura = false)
-        : tokens_(tokens), template_neura_(template_neura) {}
+    explicit Parser(const std::vector<Token>& tokens, bool template_neura = false,
+                    std::vector<std::size_t>* tag_sigils = nullptr)
+        : tokens_(tokens), template_neura_(template_neura), tag_sigils_(tag_sigils) {}
 
     Expr template_expression() {
         auto value = expression();
@@ -65,6 +66,7 @@ public:
 private:
     const std::vector<Token>& tokens_;
     bool template_neura_;
+    std::vector<std::size_t>* tag_sigils_;
     std::size_t cursor_{};
     // Syntax errors found so far (Tooling.md, Diagnostics): the parser
     // records an error, skips to the end of the statement or member that
@@ -390,11 +392,11 @@ private:
     // a conditional expression.
     // A class member declaration starts at `offset`: the same words that
     // begin a declaration anywhere, including a contextual `last` binding,
-    // or the '#' of its tags, which no expression starts with.
+    // or the sigil of its tags, which no expression starts with.
     // A '|' there begins a class hook clause, which an anonymous class cannot
     // have (E0216), and no expression begins with '|' either.
     bool at_class_member(std::size_t offset) const {
-        return at_declaration(offset) || next_is(offset, "#") || next_is(offset, "|");
+        return at_declaration(offset) || at_tag_sigil(offset) || next_is(offset, "|");
     }
 
     bool next_keyword(std::size_t offset, std::string_view text) const {
@@ -721,10 +723,13 @@ private:
             advance();
             expect(",");
             const auto& version = current();
+            const auto digits = numeric_literal_text(version);
             std::uint32_t number = 0;
-            const auto end = version.text.data() + version.text.size();
-            const auto [next, error] = std::from_chars(version.text.data(), end, number);
-            if (version.kind != TokenKind::Integer || error != std::errc{} || next != end || number == 0) {
+            const auto end = digits.data() + digits.size();
+            const auto [next, error] = std::from_chars(digits.data(), end, number);
+            if (version.kind != TokenKind::Integer || is_character_literal(version) ||
+                (version.numeric_suffix && version.numeric_suffix->type != "uint32") ||
+                error != std::errc{} || next != end || number == 0) {
                 if (kernel)
                     throw Diagnostic(version.span, "kernel ABI version must be a positive uint32").with_code("E0783");
                 throw Diagnostic(version.span, "host service version must be a positive uint32").with_code("E0213");
@@ -757,25 +762,32 @@ private:
                tokens_[cursor_ + offset + 1].kind == TokenKind::Identifier;
     }
 
-    // Tags (docs/lang/Tags.md):
-    //   tags := ( '#' tag | '#' '[' tag (',' tag)* [','] ']' )+
+    bool at_tag_sigil(std::size_t offset = 0) const {
+        return next_is(offset, "#") || next_is(offset, ".");
+    }
+
+    // Tag attachment (docs/lang/Tags.md, docs/lang/Neura0.3.1.md):
+    //   tags := ( sigil tag | sigil '[' tag (',' tag)* [','] ']' )+
+    //   sigil := '#' | '.'
     //   tag  := Name [ '(' [ arg (',' arg)* [','] ] ')' ]
     //   arg  := [ident ':'] literal
     // where a literal is a string, a number, true or false, a qualified
-    // name, or a bracketed list of those. Empty when no '#' is next.
+    // name, or a bracketed list of those. Empty when no sigil is next.
     std::vector<TagSyntax> tag_list() {
         std::vector<TagSyntax> result;
-        while (at("#")) {
-            const auto hash = cursor_;
-            advance();
+        while (at_tag_sigil()) {
+            const auto start = cursor_;
+            const auto& sigil = advance();
+            if (tag_sigils_) tag_sigils_->push_back(sigil.span.offset);
             if (match("[")) {
                 do {
-                    if (at("]")) break;
                     result.push_back(tag(cursor_));
-                } while (match(","));
+                } while (match(",") && !at("]"));
                 expect("]");
             } else {
-                result.push_back(tag(hash));
+                if (sigil.text == "." && current().kind != TokenKind::Identifier)
+                    throw Diagnostic(sigil.span, "expected a tag name or '[' after '.'").with_code("E0271");
+                result.push_back(tag(start));
             }
         }
         return result;
@@ -817,11 +829,14 @@ private:
             result.kind = TagArgumentSyntax::Kind::String;
             result.text = decode_string_literal(advance().text);
         } else if (token.kind == TokenKind::Integer || token.kind == TokenKind::Float) {
+            if (token.numeric_suffix)
+                throw Diagnostic(token.span, "a tag number takes no type suffix").with_code("E0910")
+                    .label("write this tag argument without a suffix");
             result.kind = token.kind == TokenKind::Integer ? TagArgumentSyntax::Kind::Integer
                                                            : TagArgumentSyntax::Kind::Float;
-            const bool character = is_character_literal(token);
-            result.text = advance().text;
-            if (character) result.text = std::to_string(decode_character_literal(result.text));
+            result.text = is_character_literal(token) ? std::to_string(decode_character_literal(token.text))
+                                                      : numeric_literal_text(token);
+            advance();
             if (negative) result.text = "-" + result.text;
         } else if (!negative && (at("true") || at("false"))) {
             result.kind = TagArgumentSyntax::Kind::Boolean;
@@ -861,8 +876,9 @@ private:
     // A declaration with the tags written before it. The documentation
     // comment may come before the tags, among them, or between them and the
     // declaration; the one closest to the declaration documents it.
-    Declaration tagged_declaration(std::optional<Declaration::Kind> owner = std::nullopt) {
-        if (!at("#")) return declaration(owner);
+    Declaration tagged_declaration(std::optional<Declaration::Kind> owner = std::nullopt,
+                                   bool let_initializer = false) {
+        if (!at_tag_sigil()) return declaration(owner);
         const auto first = cursor_;
         auto tags = tag_list();
         const auto documentation = tag_documentation(first);
@@ -884,6 +900,7 @@ private:
             if (!destructure) error.note("tags apply to declarations only, not to statements or expressions");
             throw error;
         }
+        if (let_initializer && !at("let")) expected("'let' in an 'if' initializer");
         auto result = declaration(owner);
         if (result.name == "_") {
             throw Diagnostic(tags_span, "tags cannot apply to '_'").with_code("E0909")
@@ -1372,7 +1389,7 @@ private:
     bool at_hook_clause() const {
         if (at("|")) return true;
         if (at("export")) return next_is(1, "|");
-        if (!at("#")) return false;
+        if (!at_tag_sigil()) return false;
         auto i = cursor_;
         const auto skip = [&](std::string_view open, std::string_view close) {
             std::size_t depth = 0;
@@ -1385,7 +1402,7 @@ private:
                 }
             }
         };
-        while (i < tokens_.size() && tokens_[i].kind == TokenKind::Symbol && tokens_[i].text == "#") {
+        while (at_tag_sigil(i - cursor_)) {
             ++i;
             if (i < tokens_.size() && tokens_[i].kind == TokenKind::Symbol && tokens_[i].text == "[") {
                 skip("[", "]");
@@ -1427,7 +1444,7 @@ private:
     }
 
     HookClause hook_clause() {
-        if (at("#")) {
+        if (at_tag_sigil()) {
             const auto first = cursor_;
             tag_list();
             record(malformed_hook(span_from(first), "a class hook clause takes no tags")
@@ -1622,8 +1639,16 @@ private:
 
     // The condition of an `if`, where narrowings may stand
     // (docs/design/Expressions030.md, Narrowing).
-    Expr if_condition(Statement& statement) {
+    Expr if_condition(Statement& result_statement) {
         expect("(");
+        if (at("let") || at_tag_sigil()) {
+            struct RestoreDepth {
+                unsigned& depth;
+                ~RestoreDepth() { --depth; }
+            } restore{block_depth_};
+            ++block_depth_;
+            result_statement.initializer.push_back(statement(true));
+        }
         const auto saved_root = std::exchange(narrowing_root_, cursor_);
         const auto saved_next = std::exchange(narrowing_next_, true);
         std::optional<Expr> result;
@@ -1636,7 +1661,7 @@ private:
         }
         narrowing_root_ = saved_root;
         narrowing_next_ = saved_next;
-        check_narrowings(*result, statement);
+        check_narrowings(*result, result_statement);
         try {
             expect(")");
         } catch (const Diagnostic&) {
@@ -1716,7 +1741,7 @@ private:
         statement.constant_bindings = !allowed.empty();
     }
 
-    Statement statement() {
+    Statement statement(bool let_initializer = false) {
         const auto start = cursor_;
         Statement result{};
         if (at_startup_block()) {
@@ -1724,9 +1749,9 @@ private:
             if (block_depth_ > 0) record(misplaced_startup_block(result.keyword));
             return result;
         }
-        if (at("#")) {
+        if (at_tag_sigil()) {
             result.kind = Statement::Kind::Binding;
-            result.declaration = std::make_unique<Declaration>(tagged_declaration());
+            result.declaration = std::make_unique<Declaration>(tagged_declaration(std::nullopt, let_initializer));
             result.span = result.declaration->span;
             return result;
         }
@@ -2871,7 +2896,7 @@ private:
             ++contents.column;
             ++contents.offset;
             contents.length = body.text.size();
-            source = parse_template(body.text, std::move(contents));
+            source = parse_template(body.text, std::move(contents), tag_sigils_);
         } else {
             throw malformed_factory(word, "expected a body or 'from' after the parameter list");
         }
@@ -3025,8 +3050,12 @@ private:
             result.character = true;
             return result;
         }
-        if (token.kind == TokenKind::Integer) return token_expression(Expr::Kind::Integer);
-        if (token.kind == TokenKind::Float) return token_expression(Expr::Kind::Float);
+        if (token.kind == TokenKind::Integer || token.kind == TokenKind::Float) {
+            auto result = token_expression(token.kind == TokenKind::Integer ? Expr::Kind::Integer : Expr::Kind::Float);
+            result.text = numeric_literal_text(token);
+            if (token.numeric_suffix) result.literal_type = token.numeric_suffix->type;
+            return result;
+        }
         if (token.kind == TokenKind::String && token.parts) return interpolated_string();
         if (token.kind == TokenKind::String) return token_expression(Expr::Kind::String);
         throw Diagnostic(token.span, "expected an expression").with_code("E0204")
@@ -3183,8 +3212,8 @@ private:
             }
             return escaped;
         };
-        const auto hole_expression = [](const InterpolationPart& part) {
-            Parser nested(part.tokens);
+        const auto hole_expression = [&](const InterpolationPart& part) {
+            Parser nested(part.tokens, false, tag_sigils_);
             auto value = nested.expression();
             if (!nested.at_end())
                 throw Diagnostic(nested.current().span, "expected the end of the hole").with_code("E0202")
@@ -3245,25 +3274,26 @@ private:
 
 } // namespace
 
-ParsedFile parse(const std::vector<Token>& tokens) {
+ParsedFile parse(const std::vector<Token>& tokens, std::vector<std::size_t>* tag_sigils) {
     if (tokens.empty() || tokens.back().kind != TokenKind::End) {
         throw std::invalid_argument("parser requires an end-of-file token");
     }
-    return Parser(tokens).file();
+    return Parser(tokens, false, tag_sigils).file();
 }
 
-ParsedFile parse_recovering(const std::vector<Token>& tokens, std::vector<Diagnostic>& diagnostics) {
+ParsedFile parse_recovering(const std::vector<Token>& tokens, std::vector<Diagnostic>& diagnostics,
+                            std::vector<std::size_t>* tag_sigils) {
     if (tokens.empty() || tokens.back().kind != TokenKind::End)
         throw std::invalid_argument("parser requires an end-of-file token");
-    return Parser(tokens).file(&diagnostics);
+    return Parser(tokens, false, tag_sigils).file(&diagnostics);
 }
 
-Expr parse_template_expression(const std::vector<Token>& tokens) {
-    return Parser(tokens, true).template_expression();
+Expr parse_template_expression(const std::vector<Token>& tokens, std::vector<std::size_t>* tag_sigils) {
+    return Parser(tokens, true, tag_sigils).template_expression();
 }
 
-TemplateForHead parse_template_for_head(const std::vector<Token>& tokens) {
-    return Parser(tokens, true).template_for_head();
+TemplateForHead parse_template_for_head(const std::vector<Token>& tokens, std::vector<std::size_t>* tag_sigils) {
+    return Parser(tokens, true, tag_sigils).template_for_head();
 }
 
 } // namespace neura

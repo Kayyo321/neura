@@ -524,27 +524,9 @@ void Lowering::check_parameter_names(SymbolId method, SymbolId base) {
 namespace {
 
 bool contextual_argument(const Expr& input) {
-    if (input.kind == ExprKind::Integer || input.kind == ExprKind::Float || input.kind == ExprKind::Nil) return true;
-    if (input.kind == ExprKind::Unary && input.text == "-" &&
-        (input.operands.front().kind == ExprKind::Integer || input.operands.front().kind == ExprKind::Float))
-        return true;
+    if (contextual_number(input) || input.kind == ExprKind::Nil) return true;
     if (input.kind == ExprKind::Collection && input.operands.empty()) return true;
     return input.kind == ExprKind::New && !input.type;
-}
-
-bool numeric_argument(const Expr& input) {
-    return input.kind == ExprKind::Integer || input.kind == ExprKind::Float ||
-           (input.kind == ExprKind::Unary && input.text == "-" &&
-            (input.operands.front().kind == ExprKind::Integer || input.operands.front().kind == ExprKind::Float));
-}
-
-// A character literal, whose default type is `byte`.
-bool character_argument(const Expr& input) {
-    return input.kind == ExprKind::Integer && input.character;
-}
-
-bool float_argument(const Expr& input) {
-    return input.kind == ExprKind::Float || (input.kind == ExprKind::Unary && input.operands.front().kind == ExprKind::Float);
 }
 
 } // namespace
@@ -642,10 +624,10 @@ Substitution Lowering::infer_type_arguments(SymbolId target, const Expr& expr, s
         }
         if (untyped_lambda_expr(input)) continue;
         if (contextual_argument(input)) {
-            if (numeric_argument(input) && declared.kind == TypeKind::TypeParameter)
-                literals.emplace_back(first + i, float_argument(input)   ? float64_type
-                                                 : character_argument(input) ? uint8_type
-                                                                             : int32_type);
+            if (const auto* literal = numeric_literal(input); literal && declared.kind == TypeKind::TypeParameter)
+                literals.emplace_back(first + i, literal->kind == ExprKind::Float ? float64_type
+                                                 : input.character               ? uint8_type
+                                                                                 : int32_type);
             continue;
         }
         if (input.kind == ExprKind::Lambda && input.lambda) {
