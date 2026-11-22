@@ -34,6 +34,9 @@ let NativeFetch = module:program.Entry (
                         return "Io:" .. kind.to_string();
                     },
                     errors.Error.Custom(detail) => {
+                        if (fetch.failure_of(problem) == fetch.FetchFailure.RedirectDenied) {
+                            return "Custom:" .. detail.code() .. ":" .. detail.message();
+                        }
                         return "Custom:" .. detail.code();
                     },
                     _ => {
@@ -92,8 +95,20 @@ let NativeFetch = module:program.Entry (
             body.append(110);
             body.append(103);
         }
+        last fields: [string, string][list] = new;
+        if (mode == "redirect-headers") {
+            fields.append(["Accept", "text/plain"]);
+            fields.append(["Accept-Language", "en"]);
+            fields.append(["Authorization", "Bearer loopback-test"]);
+            fields.append(["Cookie", "test=1"]);
+            fields.append(["X-Api-Key", "loopback-test"]);
+            fields.append(["Content-Type", "application/octet-stream"]);
+        }
         if (api == "fetch") {
             let request = fetch.request(method, url).with_timeout(limit).with_body(body);
+            for (let field in fields) {
+                request = request.with_header(field[0], field[1]);
+            }
             if (mode == "invalid-header") {
                 request = request.with_header("X-Test", "bad\r\nvalue");
             }
@@ -112,6 +127,9 @@ let NativeFetch = module:program.Entry (
         last request = new http.ClientRequest(method, url);
         request.set_deadline(limit);
         request.set_body(body);
+        for (let field in fields) {
+            request.headers.add(field[0], field[1]);
+        }
         if (mode == "duplicate-request-length") {
             request.headers.add("Content-Length", "0");
             request.headers.add("Content-Length", "0");

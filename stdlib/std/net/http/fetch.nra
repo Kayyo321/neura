@@ -12,14 +12,16 @@ let.promote _ = import:Std.Time.Duration;
 ///
 /// Native fetch requires `http_client`, an absolute HTTP(S) URL, and an available TLS provider for HTTPS.
 /// It verifies the peer and its name against the runner's configured trust store, applies a single deadline
-/// across redirects, and uses no ambient cookie jar or authentication state.
+/// across redirects, and uses no ambient cookie jar or authentication state. A redirect to another origin keeps
+/// only the caller's Accept, Accept-Language and Content-Language fields. A redirect from HTTPS to HTTP, and a
+/// redirect to another origin that would resend the request body, fail with `http.RedirectDenied`.
 ///
 /// A response with any status, 404 and 500 included, is `Ok`: the status is the server's answer. `Err` means
 /// there is no answer. Its I/O kind is InvalidInput for a malformed request, TimedOut when the timeout passed,
 /// Unsupported for a scheme other than http and https, CapabilityDenied when the host does not grant the
-/// `http_client` group or the origin, and Cancelled when the calling task's scope was cancelled. Three
-/// failures have no I/O kind and are custom errors with the codes `http.TooLarge`, `http.Busy` and
-/// `http.OutcomeUnknown`; `failure_of` classifies every error. OutcomeUnknown is a network failure or a refusal
+/// `http_client` group or the origin, and Cancelled when the calling task's scope was cancelled. The custom
+/// error codes are `http.TooLarge`, `http.Busy`, `http.OutcomeUnknown` and `http.RedirectDenied`;
+/// `failure_of` classifies every error. OutcomeUnknown is a network failure or a refusal
 /// the browser does not explain (CORS among them): the server may or may not have acted on the request.
 ///
 /// `send` overlaps in a program with tasks: the calling task waits and the others run. Without tasks the
@@ -30,10 +32,11 @@ export let Fetch = module (
     .Since("0.3.0")
     export let Credentials = enum (Omit, SameOrigin, Include);
 
-    /// @brief Why a fetch produced no response.
+    /// @brief Why a fetch produced no response. RedirectDenied is new in 0.3.1.
     .Since("0.3.0")
     export let FetchFailure = enum (
-        InvalidInput, TimedOut, Unsupported, CapabilityDenied, Cancelled, TooLarge, Busy, OutcomeUnknown, Other
+        InvalidInput, TimedOut, Unsupported, CapabilityDenied, Cancelled, TooLarge, Busy, OutcomeUnknown, Other,
+        RedirectDenied
     );
 
     /// @brief The host's answer: status, headers as alternating names and values, and body, or a host error
@@ -219,11 +222,14 @@ export let Fetch = module (
         if (code == "http.Busy") {
             return FetchFailure.Busy;
         }
+        if (code == "http.RedirectDenied") {
+            return FetchFailure.RedirectDenied;
+        }
         return if (code == "http.OutcomeUnknown") -> FetchFailure.OutcomeUnknown
             else -> FetchFailure.Other;
     };
 
-    /// @brief The error of a host code: codes 1 to 15 are I/O errors, 16 to 18 the custom errors above.
+    /// @brief The error of a host code: codes 1 to 15 are I/O errors, 16 to 18, 23 and 24 are fetch-specific.
     .Pure
     let error_of = func(code: uint32, what: string) -> Error {
         if (code == 16) {
@@ -232,8 +238,16 @@ export let Fetch = module (
         if (code == 17) {
             return custom("http.Busy", what .. ": too many fetches are in flight");
         }
-        return if (code == 18) -> custom("http.OutcomeUnknown", what .. ": no response; the server may have acted")
-            else -> host_error.io(code, "fetch failed", what);
+        if (code == 18) {
+            return custom("http.OutcomeUnknown", what .. ": no response; the server may have acted");
+        }
+        if (code == 23) {
+            return custom("http.RedirectDenied", what .. ": a redirect from HTTPS to HTTP was refused");
+        }
+        if (code == 24) {
+            return custom("http.RedirectDenied", what .. ": a redirect to another origin would resend the body");
+        }
+        return host_error.io(code, "fetch failed", what);
     };
 
     .Pure

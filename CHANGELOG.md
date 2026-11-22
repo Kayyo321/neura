@@ -38,6 +38,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - `EventLoop.select` returns `Ok(Poll)` on Windows. Successful event-loop installs apply to the native driver and debugger. Replays use the recorded result.
 - Raw IP sockets require the explicit `raw` capability and network access. SPIFFE SVID verification requires a nonempty trust domain.
 - Unqualified device and enclave evidence APIs and FN-DSA return typed `Unsupported` results. FN-DSA signing and verification now return `Result`.
+- Native fetch never follows a redirect from HTTPS to HTTP, or one that would resend the request body to another origin; both fail with `http.RedirectDenied` (codes 23 and 24). A redirect to another origin keeps only the caller's `Accept`, `Accept-Language` and `Content-Language` fields.
 
 ### Fixed
 

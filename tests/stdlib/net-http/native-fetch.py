@@ -67,9 +67,11 @@ def redirect(status, target):
 
 class Peer:
     """A finite server. The stop event also releases intentionally quiet peers."""
-    def __init__(self, case, context=None):
+    def __init__(self, case, context=None, *, target=None):
         self.case = case
         self.context = context
+        self.target = target
+        self.paths = []
         self.stop = threading.Event()
         self.errors = queue.Queue()
         self.listener = socket.socket()
@@ -143,6 +145,8 @@ class Peer:
 
     def respond(self, connection):
         head = receive_head(connection)
+        method, path, _ = head.split(b"\r\n", 1)[0].split(b" ")
+        self.paths.append(path)
         if self.case == "closed":
             return
         if self.case == "timeout":
@@ -178,6 +182,39 @@ class Peer:
                 connection.sendall(fixed())
             else:
                 raise AssertionError(f"303 fixture received unexpected method, path, or body: {head!r} {body!r}")
+        elif self.case in {"redirect-307", "redirect-308"}:
+            body = receive_body(connection, head)
+            if method != b"POST" or body != b"ping":
+                raise AssertionError(f"307/308 fixture received unexpected method or body: {method!r} {body!r}")
+            if path == b"/fixed":
+                status = b"307 Temporary Redirect" if self.case == "redirect-307" else b"308 Permanent Redirect"
+                connection.sendall(redirect(status, self.target or b"/landed"))
+            elif path == b"/landed" and self.target is None:
+                connection.sendall(fixed(body))
+            else:
+                raise AssertionError(f"307/308 fixture received unexpected path: {path!r}")
+        elif self.case in {"redirect-ten-hops", "redirect-eleven-hops"}:
+            hop = int(path[1:])
+            if hop == (10 if self.case == "redirect-ten-hops" else 11):
+                connection.sendall(fixed())
+            else:
+                connection.sendall(redirect(b"302 Found", f"/{hop + 1}".encode()))
+        elif self.case in {"redirect-headers", "redirected-headers"}:
+            fields = dict(line.lower().split(b": ", 1) for line in head.split(b"\r\n")[1:] if line)
+            if fields.get(b"accept") != b"text/plain" or fields.get(b"accept-language") != b"en":
+                raise AssertionError(f"safe request headers missing: {fields!r}")
+            supplied = {b"authorization", b"cookie", b"x-api-key", b"content-type"}
+            if self.case == "redirect-headers":
+                if not supplied <= fields.keys():
+                    raise AssertionError(f"initial request headers missing: {fields!r}")
+                connection.sendall(redirect(b"302 Found", self.target))
+            else:
+                allowed = {b"accept", b"accept-language", b"host", b"connection", b"content-length"}
+                if fields.keys() != allowed:
+                    raise AssertionError(f"caller headers crossed the origin: {fields!r}")
+                connection.sendall(fixed())
+        elif self.case == "redirect-downgrade":
+            connection.sendall(redirect(b"302 Found", self.target))
         elif self.case == "redirect-loop":
             connection.sendall(b"HTTP/1.1 302 Found\r\nLocation: /loop\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
         elif self.case == "truncated":
@@ -373,6 +410,50 @@ def expect(actual, expected, name):
     print(f"PASS {name}", flush=True)
 
 
+def expect_no_connection(listener, reason):
+    try:
+        unexpected, _ = listener.accept()
+    except BlockingIOError:
+        return
+    unexpected.close()
+    raise AssertionError(f"{reason}: unexpectedly opened a TCP connection")
+
+
+def redirect_cases(invoke, api, cert, key):
+    for case, expected in (("redirect-ten-hops", "Ok:200:hello"),
+                           ("redirect-eleven-hops", "Custom:http.OutcomeUnknown")):
+        with Peer(case) as peer:
+            expect(invoke(api, f"http://127.0.0.1:{peer.port}/0"), expected, f"{api}-{case}")
+        if peer.paths != [f"/{hop}".encode() for hop in range(11)]:
+            raise AssertionError(f"{case}: unexpected redirect path sequence: {peer.paths!r}")
+    with Peer("redirect-307") as peer:
+        expect(invoke(api, f"http://127.0.0.1:{peer.port}/fixed", "post"), "Ok:200:ping", f"{api}-307-same-origin")
+    with Peer("redirected-headers") as destination:
+        target = f"http://127.0.0.1:{destination.port}/landed".encode()
+        with Peer("redirect-headers", target=target) as peer:
+            expect(invoke(api, f"http://127.0.0.1:{peer.port}/fixed", "redirect-headers"), "Ok:200:hello",
+                   f"{api}-redirect-strips-unsafe-fields")
+    with socket.socket() as unused:
+        unused.bind(("127.0.0.1", 0))
+        unused.listen(1)
+        unused.setblocking(False)
+        target = f"http://127.0.0.1:{unused.getsockname()[1]}/landed".encode()
+        for status in (307, 308):
+            with Peer(f"redirect-{status}", target=target) as peer:
+                url = f"http://127.0.0.1:{peer.port}/fixed"
+                expect(invoke(api, url, "post"),
+                       f"Custom:http.RedirectDenied:POST {url}: a redirect to another origin would resend the body",
+                       f"{api}-{status}-cross-origin-body-refused")
+                expect_no_connection(unused, f"HTTP {status} redirect across origins")
+        if cert is not None:
+            with Peer("redirect-downgrade", server_context(cert, key), target=target) as peer:
+                url = f"https://localhost:{peer.port}/fixed"
+                expect(invoke(api, url),
+                       f"Custom:http.RedirectDenied:GET {url}: a redirect from HTTPS to HTTP was refused",
+                       f"{api}-https-to-http-refused")
+                expect_no_connection(unused, "HTTPS-to-HTTP redirect")
+
+
 def native_cases(args, root, cert, key, other_cert, other_key):
     image = root / "native-fetch.nvr"
     command([args.neura, "build", HERE / "loopback/native-fetch.nra", "-o", image])
@@ -407,6 +488,7 @@ def native_cases(args, root, cert, key, other_cert, other_key):
                 path = "/start" if case == "redirect" else "/loop" if case == "redirect-loop" else "/fixed"
                 url = f"http://127.0.0.1:{peer.port}{path}"
                 expect(invoke(api, url, mode), expected, f"{api}-{case}")
+        redirect_cases(invoke, api, cert, key)
         # Bound but deliberately not listening, so refusal has no port-reuse race.
         with socket.socket() as reserved:
             reserved.bind(("127.0.0.1", 0))
@@ -420,13 +502,7 @@ def native_cases(args, root, cert, key, other_cert, other_key):
             url = f"http://127.0.0.1:{unused.getsockname()[1]}/"
             for shape in ("duplicate-request-length", "request-length-and-transfer"):
                 expect(invoke(api, url, shape), "Io:InvalidInput", f"{api}-{shape}")
-            try:
-                unexpected, _ = unused.accept()
-            except BlockingIOError:
-                pass
-            else:
-                unexpected.close()
-                raise AssertionError("rejected outgoing framing opened a TCP connection")
+            expect_no_connection(unused, "rejected outgoing framing")
         trace = root / f"{api}.trace"
         with Peer("fixed") as peer:
             url = f"http://127.0.0.1:{peer.port}/fixed"

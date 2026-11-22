@@ -40,6 +40,9 @@ using Clock = std::chrono::steady_clock;
 constexpr std::size_t body_limit = 8 * 1024 * 1024;
 constexpr std::size_t head_limit = 16384;
 constexpr std::uint32_t too_large = 16, busy = 17, unknown = 18;
+// Fetch codes after the shared table in providers.hpp, whose 19 to 22 are
+// the SQL provider's (docs/runtime/NVM.md, "HTTP client services").
+constexpr std::uint32_t redirect_downgrade = 23, redirect_body = 24;
 constexpr std::int64_t default_timeout = 30000000000LL;
 struct Failure {
     std::uint32_t code;
@@ -847,15 +850,23 @@ HostCompletion exchange(Request request, Clock::time_point deadline, const std::
         }
         if (location && (response.status == 301 || response.status == 302 || response.status == 303 ||
                          response.status == 307 || response.status == 308)) {
+            // Redirect policy (docs/runtime/NVM.md, "HTTP client services"):
+            // never HTTPS to HTTP; across origins keep only the safe fields
+            // and never resend a body (307, 308, or 301 and 302 other than
+            // POST would). The next hop is checked against the origin list.
             const auto next = redirected(url, *location);
-            if (parse_url(next).origin() != url.origin()) {
+            const auto next_url = parse_url(next);
+            const bool to_get = (response.status == 303 && request.method != "HEAD") ||
+                                ((response.status == 301 || response.status == 302) && request.method == "POST");
+            if (url.secure && !next_url.secure) reject(redirect_downgrade);
+            if (next_url.origin() != url.origin()) {
+                if (!to_get && !request.body.empty()) reject(redirect_body);
                 std::erase_if(request.headers, [](const auto& field) {
-                    return field.first == "authorization" || field.first == "proxy-authorization" ||
-                           field.first == "cookie";
+                    return field.first != "accept" && field.first != "accept-language" &&
+                           field.first != "content-language";
                 });
             }
-            if ((response.status == 303 && request.method != "HEAD") ||
-                ((response.status == 301 || response.status == 302) && request.method == "POST")) {
+            if (to_get) {
                 request.method = "GET";
                 request.body.clear();
                 std::erase_if(request.headers, [](const auto& field) {
