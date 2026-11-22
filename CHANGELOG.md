@@ -39,6 +39,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - Raw IP sockets require the explicit `raw` capability and network access. SPIFFE SVID verification requires a nonempty trust domain.
 - Unqualified device and enclave evidence APIs and FN-DSA return typed `Unsupported` results. FN-DSA signing and verification now return `Result`.
 - Native fetch never follows a redirect from HTTPS to HTTP, or one that would resend the request body to another origin; both fail with `http.RedirectDenied` (codes 23 and 24). A redirect to another origin keeps only the caller's `Accept`, `Accept-Language` and `Content-Language` fields.
+- Native fetch reports an HTTP/2 request the peer states it did not process (GOAWAY with last stream 0, or `REFUSED_STREAM`, before a response) as `http.NotProcessed` (code 25), rejects caller `Keep-Alive` and `HTTP2-Settings` fields on both protocols, ignores repeated `Location` fields on a response that is not a redirect, and cancels and joins its workers at process exit before OpenSSL's cleanup.
 
 ### Fixed
 

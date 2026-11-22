@@ -217,6 +217,10 @@ class Peer:
             connection.sendall(redirect(b"302 Found", self.target))
         elif self.case == "redirect-loop":
             connection.sendall(b"HTTP/1.1 302 Found\r\nLocation: /loop\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+        elif self.case in {"duplicate-location", "redirect-duplicate-location"}:
+            status = b"200 OK" if self.case == "duplicate-location" else b"302 Found"
+            connection.sendall(b"HTTP/1.1 " + status + b"\r\nLocation: /one\r\nLocation: /two\r\n"
+                               b"Content-Length: 5\r\n\r\nhello")
         elif self.case == "truncated":
             connection.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\nabc")
         elif self.case == "bad-chunk":
@@ -477,6 +481,8 @@ def native_cases(args, root, cert, key, other_cert, other_key):
              ("oversized-header", "Custom:http.TooLarge", "get"),
              ("oversized-body", "Custom:http.TooLarge", "get"),
              ("duplicate-length", "Custom:http.OutcomeUnknown", "get"),
+             ("duplicate-location", "Ok:200:hello", "get"),
+             ("redirect-duplicate-location", "Custom:http.OutcomeUnknown", "get"),
              ("length-and-transfer", "Custom:http.OutcomeUnknown", "get"),
              ("redirect-loop", "Custom:http.OutcomeUnknown", "get"),
              ("timeout", "Io:TimedOut", "short"), ("absolute-deadline", "Io:TimedOut", "deadline"),
@@ -503,6 +509,12 @@ def native_cases(args, root, cert, key, other_cert, other_key):
             for shape in ("duplicate-request-length", "request-length-and-transfer"):
                 expect(invoke(api, url, shape), "Io:InvalidInput", f"{api}-{shape}")
             expect_no_connection(unused, "rejected outgoing framing")
+            schemes = ("http", "https") if cert is not None else ("http",)
+            for scheme in schemes:
+                url = f"{scheme}://localhost:{unused.getsockname()[1]}/"
+                for field in ("Keep-Alive", "Connection", "Upgrade", "Proxy-Connection", "TE", "HTTP2-Settings"):
+                    expect(invoke(api, url, f"header:{field}"), "Io:InvalidInput", f"{api}-{scheme}-reject-{field}")
+                expect_no_connection(unused, f"rejected {scheme} connection-specific fields")
         trace = root / f"{api}.trace"
         with Peer("fixed") as peer:
             url = f"http://127.0.0.1:{peer.port}/fixed"
@@ -537,6 +549,14 @@ def native_cases(args, root, cert, key, other_cert, other_key):
         expect(invoke("fetch", f"http://127.0.0.1:{reserved.getsockname()[1]}/", "invalid-header"),
                "Io:InvalidInput", "fetch-invalid-request-header")
     task_cases(invoke)
+    if cert is not None:
+        # Exit while a fetch waits in a TLS handshake: prompt, clean status 0.
+        with Peer("handshake-timeout", server_context(cert, key)) as peer:
+            started = time.monotonic()
+            expect(invoke("fetch", f"https://localhost:{peer.port}/fixed", "exit-pending"), "Exiting",
+                   "fetch-exit-joins-pending-worker")
+            if time.monotonic() - started > 2.5:
+                raise AssertionError("exit waited for the pending fetch's own deadline")
     if args.http2:
         h2_case(args, root, cert, key, invoke)
         h2_peer_cases(cert, key, invoke)
@@ -612,6 +632,9 @@ class H2Peer(Peer):
         if self.case == "h2-reset":
             connection.sendall(head + h2_frame(3, stream=1, payload=(8).to_bytes(4, "big")))  # CANCEL
             return
+        if self.case == "h2-refused-stream":
+            connection.sendall(h2_frame(3, stream=1, payload=(7).to_bytes(4, "big")))  # REFUSED_STREAM
+            return
         if self.case == "h2-goaway-mid-body":
             data = h2_frame(0, stream=1, payload=b"partial body")
             goaway = h2_frame(7, payload=(1).to_bytes(4, "big") + bytes(4))
@@ -641,7 +664,9 @@ class H2Peer(Peer):
                 for stream in credit:
                     credit[stream] -= size
             return
-        raise AssertionError(f"unknown HTTP/2 fixture case: {self.case}")
+        early_head = h2_frame(1, 4, 1, b"\x08\x03103")  # HEADERS, :status=103
+        goaway = h2_frame(7, payload=bytes(8))  # GOAWAY, last-stream-id=0, NO_ERROR
+        connection.sendall((early_head if self.case == "h2-goaway-after-early-head" else b"") + goaway)
 
 
 def hpack_expansion():
@@ -655,7 +680,10 @@ def hpack_expansion():
 
 def h2_peer_cases(cert, key, invoke):
     packed = hpack_expansion()
-    cases = (("h2-goaway-mid-body", "Custom:http.OutcomeUnknown"),
+    cases = (("h2-goaway-unprocessed", "Custom:http.NotProcessed:NotProcessed"),
+             ("h2-refused-stream", "Custom:http.NotProcessed:NotProcessed"),
+             ("h2-goaway-after-early-head", "Custom:http.OutcomeUnknown"),
+             ("h2-goaway-mid-body", "Custom:http.OutcomeUnknown"),
              ("h2-reset", "Custom:http.OutcomeUnknown"),
              ("h2-oversized-head", "Custom:http.TooLarge"),
              ("h2-decoded-head-limit", "Custom:http.TooLarge"),

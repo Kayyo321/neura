@@ -6,6 +6,8 @@ let http = import:Std.Net.Http;
 let lists = import:Std.Collections.Lists;
 let program = import:Std.Program;
 let result = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let system_clock = import:Std.Time.SystemClock;
 
 // The Python fixture supplies only loopback URLs. Both public clients must
 // preserve the host's typed errors and finish within the request deadline.
@@ -14,6 +16,10 @@ let NativeFetch = module:program.Entry (
         if (args[2] == "overlap") {
             console.print_line(overlap(args[1]));
             return program.ExitCode.Ok;
+        }
+        if (args[2] == "exit-pending") {
+            exit_pending(args[1]);
+            return program.ExitCode.Failure;
         }
         if (args[2] == "cancel-scope") {
             console.print_line(cancel_scope(args[1]));
@@ -37,6 +43,9 @@ let NativeFetch = module:program.Entry (
                         if (fetch.failure_of(problem) == fetch.FetchFailure.RedirectDenied) {
                             return "Custom:" .. detail.code() .. ":" .. detail.message();
                         }
+                        if (fetch.failure_of(problem) == fetch.FetchFailure.NotProcessed) {
+                            return "Custom:" .. detail.code() .. ":NotProcessed";
+                        }
                         return "Custom:" .. detail.code();
                     },
                     _ => {
@@ -57,6 +66,24 @@ let NativeFetch = module:program.Entry (
             reply = first.join() .. "|" .. second.join();
         }
         return "Overlap:" .. reply;
+    };
+
+    // Ends the process while a task's fetch is parked at a stalled peer. The
+    // host cancels and joins the worker before the TLS library's teardown.
+    let exit_pending = func(url: string) {
+        scope {
+            last pending = spawn fetch_one(url);
+            match (system_clock.create().sleep(duration.of_millis(300))) {
+                result.Result.Ok(_) => {
+                    console.print_line("Exiting");
+                },
+                result.Result.Err(_) => {
+                    console.print_line("sleep failed");
+                },
+            }
+            program.Process.exit(0);
+            console.print_line("Joined:" .. pending.join());
+        }
     };
 
     let cancel_scope = func(base: string) -> string {
@@ -96,6 +123,9 @@ let NativeFetch = module:program.Entry (
             body.append(103);
         }
         last fields: [string, string][list] = new;
+        if (strings.starts_with(mode, "header:")) {
+            fields.append([strings.slice_from(mode, 7), "test"]);
+        }
         if (mode == "redirect-headers") {
             fields.append(["Accept", "text/plain"]);
             fields.append(["Accept-Language", "en"]);

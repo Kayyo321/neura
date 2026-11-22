@@ -8,6 +8,7 @@
 #include <charconv>
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <mutex>
@@ -43,6 +44,7 @@ constexpr std::uint32_t too_large = 16, busy = 17, unknown = 18;
 // Fetch codes after the shared table in providers.hpp, whose 19 to 22 are
 // the SQL provider's (docs/runtime/NVM.md, "HTTP client services").
 constexpr std::uint32_t redirect_downgrade = 23, redirect_body = 24;
+[[maybe_unused]] constexpr std::uint32_t not_processed = 25;
 constexpr std::int64_t default_timeout = 30000000000LL;
 struct Failure {
     std::uint32_t code;
@@ -299,7 +301,7 @@ Request parse_request(const HostRequest& host) {
         if (!token(name) || !field_value(value) || trim(value).size() != value.size() || name == "host" ||
             name == "content-length" || name == "transfer-encoding" || name == "connection" || name == "expect" ||
             name == "upgrade" || name == "proxy-connection" || name == "proxy-authorization" || name == "te" ||
-            name == "trailer")
+            name == "trailer" || name == "keep-alive" || name == "http2-settings")
             reject(host_error::invalid_input);
         total += name.size() + value.size() + 4;
         if (total > head_limit) reject(too_large);
@@ -660,7 +662,7 @@ class H2 {
     std::size_t offset_ = 0, header_bytes_ = 0;
     Headers block_;
     std::uint32_t block_status_ = 0, failure_ = 0;
-    bool final_head_ = false, closed_ = false;
+    bool response_seen_ = false, final_head_ = false, closed_ = false;
     Response response_;
     static H2& of(void* user) { return *static_cast<H2*>(user); }
     template <class F> int callback(F function) {
@@ -698,9 +700,12 @@ class H2 {
     static int frame(nghttp2_session*, const nghttp2_frame* frame, void* user) {
         auto& self = of(user);
         return self.callback([&] {
-            if (frame->hd.type == NGHTTP2_GOAWAY &&
-                (frame->goaway.error_code != NGHTTP2_NO_ERROR || frame->goaway.last_stream_id < 1))
-                reject(unknown);
+            // RFC 9113, 6.8: a GOAWAY whose last stream ID is below 1 states
+            // that the peer did not process stream 1, whatever its error code.
+            if (frame->hd.type == NGHTTP2_GOAWAY) {
+                if (frame->goaway.last_stream_id < 1) reject(self.response_seen_ ? unknown : not_processed);
+                if (frame->goaway.error_code != NGHTTP2_NO_ERROR) reject(unknown);
+            }
             if (frame->hd.type != NGHTTP2_HEADERS || frame->hd.stream_id != 1) return;
             if (self.final_head_) {
                 for (const auto& [name, value] : self.block_) {
@@ -709,6 +714,7 @@ class H2 {
                 }
             } else {
                 if (!self.block_status_) reject(unknown);
+                self.response_seen_ = true;
                 std::optional<std::uint64_t> length;
                 bool chunked = false;
                 validate_response_fields(self.block_, length, chunked,
@@ -743,7 +749,9 @@ class H2 {
         auto& self = of(user);
         if (stream == 1) {
             self.closed_ = true;
-            if (error) self.failure_ = unknown;
+            // REFUSED_STREAM before any response is "not processed" (RFC 9113, 8.7).
+            if (error && !self.failure_)
+                self.failure_ = error == NGHTTP2_REFUSED_STREAM && !self.response_seen_ ? not_processed : unknown;
         }
         return 0;
     }
@@ -845,15 +853,17 @@ HostCompletion exchange(Request request, Clock::time_point deadline, const std::
         else
 #endif
             response = http1(connection, url, request);
-        std::optional<std::string> location;
-        for (const auto& [name, value] : response.headers) {
-            if (name == "location") {
-                if (location) reject(unknown);
-                location = value;
+        std::optional<std::string_view> location;
+        if (response.status == 301 || response.status == 302 || response.status == 303 || response.status == 307 ||
+            response.status == 308) {
+            for (const auto& [name, value] : response.headers) {
+                if (name == "location") {
+                    if (location) reject(unknown);
+                    location = value;
+                }
             }
         }
-        if (location && (response.status == 301 || response.status == 302 || response.status == 303 ||
-                         response.status == 307 || response.status == 308)) {
+        if (location) {
             // Redirect policy (docs/runtime/NVM.md, "HTTP client services"):
             // never HTTPS to HTTP; across origins keep only the safe fields
             // and never resend a body (307, 308, or 301 and 302 other than
@@ -893,30 +903,63 @@ struct FetchState {
     std::mutex mutex;
     std::condition_variable ready;
     std::atomic<bool> cancelled{false};
+    std::atomic<bool> finished{false};
     std::shared_ptr<ExternalSignal> signal = std::make_shared<ExternalSignal>();
     std::optional<HostCompletion> answer;
     Clock::time_point deadline;
 };
-// A capped worker pool by ownership: each detached worker retains its slot
-// until it exits. A cancelled request cannot accumulate unbounded workers.
-struct WorkerSlots {
+std::uint64_t process_id() {
 #ifdef _WIN32
-    const std::uint64_t owner = GetCurrentProcessId();
+    return ::GetCurrentProcessId();
 #else
-    const std::uint64_t owner = static_cast<std::uint64_t>(::getpid());
+    return static_cast<std::uint64_t>(::getpid());
 #endif
-    std::atomic<unsigned int> active{0};
+}
+struct FetchWorkers {
+    struct Worker {
+        std::shared_ptr<FetchState> state;
+        std::thread thread;
+    };
+    const std::uint64_t owner = process_id();
+    std::mutex mutex;
+    std::array<Worker, 16> slots;
 };
-WorkerSlots* worker_slots() {
-    static std::atomic<WorkerSlots*> slots{new WorkerSlots};
-    auto* result = slots.load();
-#ifndef _WIN32
-    if (result->owner != static_cast<std::uint64_t>(::getpid())) {
-        auto replacement = std::make_unique<WorkerSlots>();
-        if (slots.compare_exchange_strong(result, replacement.get())) result = replacement.release();
+std::atomic<FetchWorkers*> workers{nullptr};
+std::atomic<bool> stopping_workers{false};
+
+void stop_fetch_workers() {
+    stopping_workers.store(true);
+    auto* pool = workers.load();
+    if (!pool || pool->owner != process_id()) return;
+    std::lock_guard lock(pool->mutex);
+    for (auto& slot : pool->slots)
+        if (slot.state) slot.state->cancelled.store(true);
+    for (auto& slot : pool->slots) {
+        if (!slot.thread.joinable()) continue;
+        slot.thread.join();
+        slot.state.reset();
     }
+}
+
+FetchWorkers& fetch_workers() {
+    // At process exit, cancel and join every live fetch before the TLS
+    // library's own exit handler runs. Handlers run in reverse order of
+    // registration, so initialize the TLS library (which registers its
+    // cleanup) before registering this one. A fork child inherits both.
+    static const bool registered = [] {
+#ifdef NEURA_NVM_TLS
+        if (OPENSSL_init_ssl(0, nullptr) != 1) return false;
 #endif
-    return result;
+        return std::atexit(stop_fetch_workers) == 0;
+    }();
+    if (!registered) reject(host_error::other);
+    auto* pool = workers.load();
+    // A fork child must leave its parent's mutex and threads alone.
+    if (!pool || pool->owner != process_id()) {
+        auto replacement = std::make_unique<FetchWorkers>();
+        if (workers.compare_exchange_strong(pool, replacement.get())) pool = replacement.release();
+    }
+    return *pool;
 }
 std::shared_ptr<FetchState> start_fetch(const HostRequest& host, bool allowed) {
     if (!allowed) reject(host_error::capability_denied);
@@ -926,13 +969,20 @@ std::shared_ptr<FetchState> start_fetch(const HostRequest& host, bool allowed) {
     const auto duration = std::chrono::duration_cast<Clock::duration>(
         std::chrono::nanoseconds(request.timeout ? request.timeout : default_timeout));
     state->deadline = duration < Clock::time_point::max() - started ? started + duration : Clock::time_point::max();
-    auto* slots = worker_slots();
-    auto active = slots->active.load();
-    do {
-        if (active >= 16) reject(busy);
-    } while (!slots->active.compare_exchange_weak(active, active + 1));
+    auto& pool = fetch_workers();
+    std::lock_guard lock(pool.mutex);
+    if (stopping_workers.load()) reject(host_error::cancelled);
+    FetchWorkers::Worker* available = nullptr;
+    for (auto& slot : pool.slots) {
+        if (slot.state && slot.state->finished.load()) {
+            slot.thread.join();
+            slot.state.reset();
+        }
+        if (!available && !slot.state) available = &slot;
+    }
+    if (!available) reject(busy);
     try {
-        std::thread([state, slots, request = std::move(request)]() mutable {
+        available->thread = std::thread([state, request = std::move(request)]() mutable {
             HostCompletion answer;
             try {
                 answer = exchange(std::move(request), state->deadline, state->cancelled);
@@ -945,12 +995,12 @@ std::shared_ptr<FetchState> start_fetch(const HostRequest& host, bool allowed) {
                 std::lock_guard lock(state->mutex);
                 state->answer = std::move(answer);
             }
-            slots->active.fetch_sub(1);
+            state->finished.store(true);
             state->ready.notify_one();
             state->signal->signal();
-        }).detach();
+        });
+        available->state = state;
     } catch (...) {
-        slots->active.fetch_sub(1);
         reject(host_error::other);
     }
     return state;
