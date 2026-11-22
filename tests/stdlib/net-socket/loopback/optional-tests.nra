@@ -96,14 +96,59 @@ let OptionalSocketFeatures = module (
         test.assert_ok<unit.Unit>(sender.close());
     };
 
+    // The Internet checksum (RFC 1071) of `data` from byte `start`: 0 over a message with a valid checksum.
+    let checksum = func(data: uint8[list], start: int) -> int {
+        let sum = 0;
+        for (let i = start; i < data.length; i = i + 2) {
+            last low = i + 1 < data.length ? data[i + 1] as int : 0;
+            sum = sum + (data[i] as int) * 256 + low;
+        }
+        while (sum > 65535) {
+            sum = (sum & 65535) + (sum >> 16);
+        }
+        return 65535 - sum;
+    };
+
+    // Whether `data` (an IPv4 datagram as raw sockets deliver it, header included) holds an ICMP echo reply
+    // to `request`: type 0, code 0, a valid checksum, and the request's identifier, sequence and payload.
+    let is_echo_reply = func(data: uint8[list], request: uint8[list]) -> bool {
+        if (data.length < 20 || ((data[0] >> 4) as int) != 4) {
+            return false;
+        }
+        last start = ((data[0] & 15) as int) * 4;
+        if (data.length - start != request.length || data[start] != 0 || data[start + 1] != 0
+            || checksum(data, start) != 0) {
+            return false;
+        }
+        for (let i = 4; i < request.length; i++) {
+            if (data[start + i] != request[i]) {
+                return false;
+            }
+        }
+        return true;
+    };
+
     export let test_raw_loopback = func {
         last socket = test.assert_ok<raw.RawSocket>(raw.open(net_address.AddressFamily.Ipv4, 1));
         last loop = test.assert_ok<ip.IpAddr>(ip.parse("127.0.0.1"));
-        last echo: uint8[list] = new([8, 0, 247, 254, 0, 1, 0, 0]);
+        // Echo request: type 8, code 0, identifier 0x4E52, sequence 7, payload "neura".
+        last echo: uint8[list] = new([8, 0, 0, 0, 78, 82, 0, 7, 110, 101, 117, 114, 97]);
+        last sum = checksum(echo, 0);
+        echo[2] = (sum >> 8) as uint8;
+        echo[3] = (sum & 255) as uint8;
+        test.assert_equal<int>(0, checksum(echo, 0));
         socket.set_read_timeout(duration.of_seconds(2));
-        test.assert_equal<int>(8, test.assert_ok<int>(socket.send_to(echo, loop)));
-        last received = test.assert_ok<datagrams.Datagram<ip.IpAddr>>(socket.receive_from(64));
-        test.assert(received.data.length >= 8);
+        test.assert_equal<int>(echo.length, test.assert_ok<int>(socket.send_to(echo, loop)));
+        // The socket also sees its own request on loopback, and possibly other ICMP traffic.
+        let replied = false;
+        for (let attempt = 0; attempt < 16 && !replied; attempt++) {
+            last received = test.assert_ok<datagrams.Datagram<ip.IpAddr>>(socket.receive_from(512));
+            if (is_echo_reply(received.data, echo)) {
+                test.assert_equal<ip.IpAddr>(loop, test.assert_some<ip.IpAddr>(received.sender));
+                replied = true;
+            }
+        }
+        test.assert(replied);
         test.assert_ok<ip.IpAddr>(socket.local_address());
         test.assert_ok<unit.Unit>(socket.close());
         test.assert(kind_of(test.assert_err<datagrams.Datagram<ip.IpAddr>>(socket.receive_from(64)))
