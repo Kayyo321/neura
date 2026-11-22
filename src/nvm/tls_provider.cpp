@@ -925,8 +925,13 @@ void add_tls_services(const Adder& add, const OverlapAdder& cancellable, Standar
             stream.key_update_started = false;
         } else if (expired) {
             // The late datagram completed no message (an ACK, a retransmission).
+            // Its answer, such as an ACK or the reply to a KeyUpdate, is
+            // already drained from the BIO: return it with the timeout in the
+            // failure field, which the caller sends before reporting. The
+            // read leaves the association usable, so this is not terminal.
             stream.pending_operation = -1;
-            return fail(host_error::timed_out);
+            return HostCompletion::ok(tuple_value({int32_value(0), tuple_value(std::move(outgoing)), bytes_value({}),
+                                                   int64_value(wait), scalar(host_error::timed_out)}));
         }
         return HostCompletion::ok(tuple_value({int32_value(status), tuple_value(std::move(outgoing)),
                                                bytes_value(std::move(plaintext)), int64_value(wait), scalar(failure)}));
