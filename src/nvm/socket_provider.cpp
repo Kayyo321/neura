@@ -62,6 +62,7 @@
 #include <sys/syscall.h>
 #include <signal.h>
 #include <sys/mman.h>
+#include <sys/sendfile.h>
 #endif
 #if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) || defined(__DragonFly__)
 #include <sys/event.h>
@@ -1537,11 +1538,31 @@ std::optional<std::size_t> read_file_at(NativeFile file, std::int64_t offset, ch
 #endif
 }
 
-// One neura.net.send_file request: a bounded copy from a file to a connected
-// stream. Each scheduler attempt reads at most 64 KiB at a time and sends
-// without blocking; bytes read but not yet accepted stay in `buffer`, so
-// `sent` is exactly the prefix the socket accepted. A deadline, a
-// cancellation or a failure after progress completes with that prefix.
+#ifdef __linux__
+// sendfile(2) has no MSG_DONTWAIT: switch the socket's open file description
+// to O_NONBLOCK for one scheduler attempt and restore it, as Winsock sockets
+// are switched in NonblockingAttempt. Nothing else uses the descriptor then.
+struct NonblockingDescription {
+    explicit NonblockingDescription(int descriptor) : descriptor(descriptor), flags(::fcntl(descriptor, F_GETFL)) {
+        ready = flags >= 0 && ((flags & O_NONBLOCK) != 0 || ::fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) == 0);
+    }
+    ~NonblockingDescription() {
+        if (ready && (flags & O_NONBLOCK) == 0) ::fcntl(descriptor, F_SETFL, flags);
+    }
+    int descriptor;
+    int flags;
+    bool ready = false;
+};
+#endif
+
+// One neura.net.send_file request: a transfer from a file to a connected
+// stream without blocking the scheduler. Linux moves the bytes in the kernel
+// with sendfile(2) on the socket made nonblocking for the attempt. Elsewhere,
+// and for a file sendfile refuses (EINVAL, ENOSYS), each attempt reads at
+// most 64 KiB at the offset and sends without blocking; bytes read but not
+// accepted stay in `buffer`. Either way `sent` is exactly the prefix the
+// socket accepted. A deadline, a cancellation or a failure after progress
+// completes with that prefix.
 struct FileTransfer {
     static constexpr std::size_t chunk = 64 * 1024;
     // Yield to other tasks after this much in one attempt; the socket stays
@@ -1557,6 +1578,9 @@ struct FileTransfer {
     std::int64_t sent = 0;
     std::string buffer{};
     std::size_t used = 0;
+#ifdef __linux__
+    bool kernel_copy = true;
+#endif
 
     HostCompletion finish(std::uint32_t error) const {
         return sent > 0 ? HostCompletion::ok(int64_value(sent)) : fail(error);
@@ -1577,6 +1601,26 @@ struct FileTransfer {
         if (!nonblocking.ready) return finish(socket_failure());
         const auto started = sent;
         while (sent < count) {
+            if (sent - started >= attempt_budget) return std::nullopt;
+#ifdef __linux__
+            if (kernel_copy && used == buffer.size()) {
+                NonblockingDescription description(target.descriptor);
+                if (!description.ready) return finish(socket_failure());
+                auto position = static_cast<off_t>(offset + sent);
+                const auto want = static_cast<std::size_t>(
+                    std::min<std::int64_t>(count - sent, attempt_budget - (sent - started)));
+                const auto moved = ::sendfile(target.descriptor, file, &position, want);
+                if (moved > 0) {
+                    sent += moved;
+                    continue;
+                }
+                if (moved == 0) break; // The end of the file.
+                if (errno == EINTR) continue;
+                if (errno == EAGAIN || errno == EWOULDBLOCK) return std::nullopt;
+                if (errno != EINVAL && errno != ENOSYS) return finish(host_error::from_errno(errno));
+                kernel_copy = false; // This file needs the buffered copy.
+            }
+#endif
             if (used == buffer.size()) {
                 buffer.resize(static_cast<std::size_t>(std::min<std::int64_t>(count - sent, chunk)));
                 std::uint32_t error = 0;
@@ -1586,7 +1630,6 @@ struct FileTransfer {
                 used = 0;
                 if (*got == 0) break; // The end of the file.
             }
-            if (sent - started >= attempt_budget) return std::nullopt;
             const auto written = ::send(target.descriptor, buffer.data() + used, static_cast<int>(buffer.size() - used),
                                         stream_send_flags | nonblocking_flags);
             if (written < 0) {
@@ -2140,9 +2183,9 @@ void add_socket_services(const Adder& add, const OverlapAdder& overlap, Standard
             }, begin_raw_read);
 
     // Sends up to `count` bytes of an open file from `offset` to a connected
-    // stream through a bounded buffer; needs both the net and the fs groups.
-    // It stops at the end of the file, leaves the file position unchanged,
-    // and parks on socket readiness for at most 30 seconds in all.
+    // stream (FileTransfer); needs both the net and the fs groups. It stops at
+    // the end of the file, leaves the file position unchanged, and parks on
+    // socket readiness for at most 30 seconds in all.
     const FunctionService::Begin begin_file_transfer = [=](const HostRequest& request)
         -> std::variant<HostCompletion, PendingOperation> {
         if (!granted->net || !granted->fs) return denied();

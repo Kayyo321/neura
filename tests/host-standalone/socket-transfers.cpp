@@ -6,6 +6,9 @@
 #include <sys/socket.h>
 #include <poll.h>
 #include <fcntl.h>
+#ifdef __linux__
+#include <sys/sendfile.h>
+#endif
 #include <unistd.h>
 #ifdef NDEBUG
 #undef NDEBUG
@@ -289,7 +292,7 @@ void raw_read_leaves_the_scheduler_available() {
 }
 
 // A Unix-domain stream with a small send buffer gives deterministic
-// backpressure for the bounded file copy.
+// backpressure. On Linux the bytes move by sendfile(2).
 void file_transfer_is_bounded() {
     Fixture f;
     FILE* file = ::tmpfile();
@@ -442,6 +445,31 @@ void file_transfer_resumes_under_the_scheduler() {
     std::cout << "PASS: file transfer resumes after its attempt budget under poll and epoll\n";
 }
 
+// Linux refuses sendfile(2) from some files (EINVAL); /proc/self/cmdline is
+// one that pread still reads. The transfer then copies through its buffer.
+void file_transfer_falls_back_to_a_copy() {
+    Fixture f;
+    const int fd = ::open("/proc/self/cmdline", O_RDONLY | O_CLOEXEC);
+    assert(fd >= 0);
+    std::string expected(4096, '\0');
+    const auto length = ::pread(fd, expected.data(), expected.size(), 0);
+    assert(length > 1);
+    expected.resize(static_cast<std::size_t>(length));
+    int stream[2] = {-1, -1};
+    assert(::socketpair(AF_UNIX, SOCK_STREAM, 0, stream) == 0);
+    off_t position = 0;
+    assert(::sendfile(stream[0], fd, &position, 16) < 0 && errno == EINVAL);
+    f.table.files[1] = {fd, true, false};
+    f.table.sockets[1] = {stream[0]};
+    auto sent = f.invoke_file(HostRequest{0, 0, {int64_value(1), int64_value(1), int64_value(0), int64_value(4096)}});
+    assert(sent.success && sent.value.bits == expected.size());
+    assert(read_exact(stream[1], expected.size()) == expected);
+    ::close(stream[0]);
+    ::close(stream[1]);
+    ::close(fd);
+    std::cout << "PASS: file transfer copies through its buffer when sendfile refuses the file\n";
+}
+
 int main() {
     quiet_source_and_backpressure();
     zero_copy_backpressure();
@@ -450,4 +478,7 @@ int main() {
     raw_read_leaves_the_scheduler_available();
     file_transfer_is_bounded();
     file_transfer_resumes_under_the_scheduler();
+#ifdef __linux__
+    file_transfer_falls_back_to_a_copy();
+#endif
 }

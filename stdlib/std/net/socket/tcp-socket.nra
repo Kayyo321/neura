@@ -143,8 +143,8 @@ export let TcpSocket = module (
             return support.apply(id, options, label);
         };
 
-        /// @brief Sends up to `count` bytes of the file at `path`, from byte `offset`, through a bounded buffer
-        /// and returns the count the socket accepted. The count is short at the end of the file, or when the
+        /// @brief Sends up to `count` bytes of the file at `path`, from byte `offset` (`sendfile(2)` on Linux, a
+        /// bounded copy elsewhere), and returns the count the socket accepted. The count is short at the end of the file, or when the
         /// transfer stops after partial progress: it parks only the calling task and waits at most 30 seconds
         /// in all. A timeout, cancellation or failure before any byte is sent returns an error. Opening the file
         /// needs the fs capability. A negative offset or count traps with "invalid argument".
