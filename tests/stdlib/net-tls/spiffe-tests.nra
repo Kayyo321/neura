@@ -94,6 +94,19 @@ let SpiffeTests = module (
         _ => "",
     };
 
+    let assert_empty_trust_domain = func(failure: error.Error) {
+        match (failure) {
+            error.Error.Parse { kind, offset, message } => {
+                test.assert(kind == error.ParseErrorKind.Empty);
+                test.assert_equal<int>(0, offset);
+                test.assert_equal_string("the trust domain is empty", message);
+            },
+            _ => {
+                test.fail("expected the empty trust domain parse error");
+            },
+        }
+    };
+
     export let test_x509_svid_trust_and_uri = func {
         last clock = fixed.of(instant.of_epoch_seconds(1735689600, 0));
         last id = test.assert_ok<spiffe.SpiffeId>(spiffe.verify_x509_svid(vectors.Leaf, vectors.Root, "example.test", clock));
@@ -125,7 +138,8 @@ let SpiffeTests = module (
         last server_only = test.assert_err<spiffe.SpiffeId>(spiffe.verify_x509_svid(vectors.ServerOnly, vectors.WrongRoot,
             "example.test", clock));
         test.assert_equal_string("spiffe.certificate", code(server_only));
-        test.assert_err<spiffe.SpiffeId>(spiffe.verify_x509_svid(vectors.Leaf, vectors.Root, "", clock));
+        assert_empty_trust_domain(test.assert_err<spiffe.SpiffeId>(
+            spiffe.verify_x509_svid(vectors.Leaf, vectors.Root, "", clock)));
     };
 
     export let test_jwt_svid_requires_an_asymmetric_algorithm_and_domain = func {
@@ -137,8 +151,8 @@ let SpiffeTests = module (
                 "test-audience", "example.test", clock));
             test.assert_equal_string("spiffe.token", code(rejected));
         }
-        test.assert_err<spiffe.SpiffeId>(spiffe.verify_jwt_svid(vectors.Jwt, vectors.Jwks,
-            "test-audience", "", clock));
+        assert_empty_trust_domain(test.assert_err<spiffe.SpiffeId>(
+            spiffe.verify_jwt_svid(vectors.Jwt, vectors.Jwks, "test-audience", "", clock)));
     };
 
     export let test_jwt_svid_key_and_claims = func {
@@ -156,6 +170,21 @@ let SpiffeTests = module (
         clock.set(instant.of_epoch_seconds(1800000000, 0));
         last expired = test.assert_err<spiffe.SpiffeId>(spiffe.verify_jwt_svid(vectors.Jwt, vectors.Jwks, "test-audience", "example.test", clock));
         test.assert_equal_string("jwt.expired", code(expired));
+    };
+
+    export let test_jwt_svid_rejects_tampering_and_trust_domain_mismatch = func {
+        last clock = fixed.of(instant.of_epoch_seconds(1735689600, 0));
+        last token = vectors.Jwt;
+        last signature_start = strings.last_index_of(token, ".") + 1;
+        // Change only the first base64url digit of the signature.
+        last digit = token.byte_at(signature_start) == 65 ? "B" : "A";
+        last tampered = token.slice(0, signature_start) .. digit .. token.slice(signature_start + 1, token.byte_length);
+        last invalid_signature = test.assert_err<spiffe.SpiffeId>(
+            spiffe.verify_jwt_svid(tampered, vectors.Jwks, "test-audience", "example.test", clock));
+        test.assert_equal_string("jws.signature", code(invalid_signature));
+        last mismatch = test.assert_err<spiffe.SpiffeId>(
+            spiffe.verify_jwt_svid(token, vectors.Jwks, "test-audience", "other.test", clock));
+        test.assert_equal_string("spiffe.identity", code(mismatch));
     };
 
     export let test_jwt_svid_ml_dsa = func {
