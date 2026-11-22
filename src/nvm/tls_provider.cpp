@@ -164,7 +164,8 @@ struct TlsStream {
     std::int64_t write_timeout = default_transfer_timeout;
     ~TlsStream() {
         if (ssl) {
-            if (SSL_is_init_finished(ssl) && descriptor != invalid_native_socket) {
+            // A failed write can leave a partial record; never append close_notify to it.
+            if (!terminal_error && SSL_is_init_finished(ssl) && descriptor != invalid_native_socket) {
                 [[maybe_unused]] SocketWrites protection;
                 SSL_shutdown(ssl);
             }
@@ -851,6 +852,7 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
         if (!granted->net) return denied();
         const auto* stream = find(request.arguments.at(0));
         if (!stream) return fail(host_error::invalid_input);
+        if (stream->terminal_error) return fail(stream->terminal_error);
         if (!SSL_is_init_finished(stream->ssl) ||
             !(SSL_get_verify_mode(stream->ssl) & SSL_VERIFY_PEER) ||
             SSL_get_verify_result(stream->ssl) != X509_V_OK) return fail(host_error::permission_denied);
@@ -876,6 +878,7 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
         if (!granted->net) return denied();
         const auto* stream = find(request.arguments.at(0));
         if (!stream || stream->descriptor == invalid_native_socket) return fail(host_error::invalid_input);
+        if (stream->terminal_error) return fail(stream->terminal_error);
         sockaddr_storage address{};
 #ifdef _WIN32
         int length = sizeof address;
@@ -901,6 +904,7 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
         auto* stream = find(request.arguments.at(0));
         const auto timeout = as_int64(request.arguments.at(1));
         if (!stream || stream->descriptor == invalid_native_socket || timeout < 0) return fail(host_error::invalid_input);
+        if (stream->terminal_error) return fail(stream->terminal_error);
         if (stream->write_closed) return HostCompletion::ok();
         std::uint32_t error = 0;
         const auto deadline = std::min(stream->deadline, deadline_of(timeout));
@@ -909,7 +913,11 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
             // 0 means our close_notify was sent and the peer's is still outstanding.
             return result == 0 ? 1 : result;
         });
-        if (notified <= 0) return fail(error ? error : host_error::connection_reset);
+        if (notified <= 0) {
+            // A close_notify record may be partly sent; the stream cannot continue.
+            stream->terminal_error = error ? error : host_error::connection_reset;
+            return fail(stream->terminal_error);
+        }
         stream->write_closed = true;
         return HostCompletion::ok();
     });
@@ -918,6 +926,7 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
         if (!granted->net) return denied();
         const auto* stream = find(request.arguments.at(0));
         if (!stream || stream->descriptor == invalid_native_socket) return fail(host_error::invalid_input);
+        if (stream->terminal_error) return fail(stream->terminal_error);
         return BIO_get_ktls_send(SSL_get_wbio(stream->ssl)) && BIO_get_ktls_recv(SSL_get_rbio(stream->ssl))
             ? HostCompletion::ok() : fail(host_error::unsupported);
     });
@@ -928,6 +937,7 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
         const auto max = as_int32(request.arguments.at(1));
         const auto timeout = as_int64(request.arguments.at(2));
         if (!stream || stream->descriptor == invalid_native_socket || max < 1 || timeout < 0) return fail(host_error::invalid_input);
+        if (stream->terminal_error) return fail(stream->terminal_error);
         std::string bytes(std::min<std::size_t>(static_cast<std::size_t>(max), max_read_bytes), '\0');
         std::uint32_t error = 0;
         const auto deadline = std::min(stream->deadline, deadline_of(timeout == 0 ? default_transfer_timeout : timeout));
@@ -950,13 +960,19 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
             : stream ? stream->write_timeout : 0;
         if (timeout <= 0) return fail(host_error::invalid_input);
         if (!stream || stream->descriptor == invalid_native_socket) return fail(host_error::invalid_input);
+        if (stream->terminal_error) return fail(stream->terminal_error);
         if (stream->write_closed) return fail(host_error::connection_reset);
         if (bytes.empty()) return HostCompletion::ok(int32_value(0));
         const auto size = static_cast<int>(std::min<std::size_t>(bytes.size(), INT32_MAX));
         std::uint32_t error = 0;
         const int sent = drive(stream->ssl, stream->descriptor, std::min(stream->deadline, deadline_of(timeout)), error,
                                [&] { return SSL_write(stream->ssl, bytes.data(), size); });
-        if (sent <= 0) return fail(error ? error : host_error::connection_reset);
+        if (sent <= 0) {
+            // OpenSSL may be partway through a record and requires the same
+            // buffer on retry, which ends with this call: the stream is done.
+            stream->terminal_error = error ? error : host_error::connection_reset;
+            return fail(stream->terminal_error);
+        }
         return HostCompletion::ok(int32_value(sent));
     };
     add(signature("neura.net.tls.write", {int64(), byte_list()}, int32()), write);

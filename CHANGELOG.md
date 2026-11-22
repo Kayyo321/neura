@@ -42,6 +42,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 ### Fixed
 
 - `neura.process.generation` no longer fails on an unknown VMClock version or an unexpected read error; it falls back to the PID and vmgenid detectors and retries a transient VMClock open failure.
+- A TLS write that times out or fails ends the stream with that error for every later operation instead of letting a next write fail with `ConnectionReset` or mix records.
 - TLS credential files load without `/proc` when no path prefixes are configured. Paths are checked against the prefixes and for a regular file before they are opened, so a FIFO or device outside the grant is never opened, and Windows refuses UNC and device paths, including link targets, before opening. FreeBSD and NetBSD check prefixes through `F_KINFO` and `F_GETPATH` instead of returning `Unsupported`.
 
 ### Known limitations

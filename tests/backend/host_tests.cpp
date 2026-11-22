@@ -2079,8 +2079,8 @@ NEURA_TEST(ktls, both_directions_transfer_over_kernel_records) {
 }
 #endif
 
-// Neither side reads records after the handshake. Every direct write must
-// return TimedOut, including streams created by both service versions.
+// Neither side reads records after the handshake. A backpressured write must
+// time out and make the stream unusable, including streams from both versions.
 NEURA_TEST(host, tls_write_deadlines_cover_connect_and_accept_versions) {
     const LoopbackTlsKeys material;
     constexpr auto budget = 150'000'000LL;
@@ -2107,14 +2107,28 @@ NEURA_TEST(host, tls_write_deadlines_cover_connect_and_accept_versions) {
             expect_ok(accepted, "accept for blocked TLS write");
             auto& writer = write_server ? server : client;
             const auto id = (write_server ? accepted : connected).value.elements.at(0);
+            expect_error(writer.call("neura.net.tls.write", {id, bytes("x"), i64(0)}, 2),
+                         host_error::invalid_input, "write v2 refuses unlimited timeout");
             const auto started = std::chrono::steady_clock::now();
             expect_error(writer.call("neura.net.tls.write", {id, bytes(std::string(16 * 1024 * 1024, 'x'))}),
                          host_error::timed_out, "non-reading TLS peer bounds legacy write");
             check(std::chrono::steady_clock::now() - started < std::chrono::seconds(2), "write deadline elapsed bound");
-            expect_error(writer.call("neura.net.tls.write", {id, bytes("x"), i64(0)}, 2),
-                         host_error::invalid_input, "write v2 refuses unlimited timeout");
-            client.call("neura.net.tls.close", {connected.value.elements.at(0)});
-            server.call("neura.net.tls.close", {accepted.value.elements.at(0)});
+            expect_error(writer.call("neura.net.tls.write", {id, bytes("different buffer"), i64(budget)}, 2),
+                         host_error::timed_out, "next write reuses the original error");
+            expect_error(writer.call("neura.net.tls.write", {id, bytes("")}),
+                         host_error::timed_out, "empty write reuses the original error");
+            expect_error(writer.call("neura.net.tls.read", {id, i32(64), i64(budget)}),
+                         host_error::timed_out, "read reuses the original error");
+            expect_error(writer.call("neura.net.tls.shutdown_write", {id, i64(budget)}),
+                         host_error::timed_out, "write shutdown reuses the original error");
+            for (const auto* service : {"neura.net.tls.local_address", "neura.net.tls.peer_chain",
+                                        "neura.net.tls.kernel_offload"}) {
+                expect_error(writer.call(service, {id}), host_error::timed_out, service);
+            }
+            expect_ok(client.call("neura.net.tls.close", {connected.value.elements.at(0)}), "close client");
+            expect_ok(server.call("neura.net.tls.close", {accepted.value.elements.at(0)}), "close server");
+            expect_error(writer.call("neura.net.tls.write", {id, bytes("x")}),
+                         host_error::invalid_input, "close released the terminal stream");
         }
     }
 }
