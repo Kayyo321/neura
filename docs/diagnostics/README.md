@@ -242,7 +242,7 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0546](E0546.md) | hooked class reference at a bodyless function |
 | [E0550](E0550.md) | event emitted under a monitor guard |
 | [E0560](E0560.md) | parameter names differ from the overridden method |
-| [E0561](E0561.md) | defaults differ from the overridden method |
+| [E0561](E0561.md) | incompatible default in an override or implementation |
 | [E0570](E0570.md) | invalid record declaration |
 | [E0571](E0571.md) | record field of a type a record cannot hold |
 | [E0572](E0572.md) | copy construction of a value that is not a record |

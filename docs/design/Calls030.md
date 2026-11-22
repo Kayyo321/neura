@@ -70,7 +70,7 @@ A positional call is unchanged by this table: its arguments are written in param
 | A default is checked once, at the declaration, against the parameter's type with the rules of a literal initializer. | implemented, proposed |
 | These parameters take no default: a variadic parameter and every parameter of a function that has one; a primitive reference parameter (`&T`); a parameter whose type mentions a type parameter, except for a class or interface reference whose default is the literal `nil` (0.3.1); a parameter of a lambda, of a function type, of an enum payload, or of a declaration without a body (a host, kernel, scheduler or callback binding). | implemented, proposed |
 | The default is inserted by the compiler in the caller. A caller built against an earlier default keeps it until it is rebuilt. | implemented, proposed |
-| The defaults of an override equal those of the method it overrides, parameter by parameter: the same parameters have one, with the same value. The same holds between an interface method and its implementations. A call therefore means the same whatever the static type of its receiver. | implemented, proposed |
+| The defaults of an override equal those of the method it overrides, parameter by parameter. The same holds between an interface method and its implementations. Starting in 0.3.1, an override or implementation may omit a literal `nil` default and inherit it. Other defaults must be repeated with the same value. A call therefore passes the same default through either static type. | implemented, proposed in 0.3.0, amended in 0.3.1 |
 
 ### Overloads
 
@@ -265,7 +265,7 @@ The calls milestone and the matching milestone share one allocation. This note u
 | `E0488` | invalid extension function | the first parameter | The first parameter is variadic, or its type is a bare type parameter without a bound, `void`, or a function type. |
 | `E0489` | reserved | | |
 | `E0560` | parameter names differ from the overridden method | the parameter | Labels the base parameter. Fix: rename to the base name. |
-| `E0561` | defaults differ from the overridden method | the parameter | Labels the base parameter. Fix: copy the base default. |
+| `E0561` | incompatible default in an override or implementation | the parameter | Labels the base parameter. Repeat the base default or omit it if it is a literal `nil` in 0.3.1. |
 | `E0562` to `E0564` | reserved | | |
 
 Existing codes keep their cases: a required parameter without a value is `E0407`, with the parameter named; type arguments that cannot be inferred are `E0419`, with the unsolved type parameter and the annotation to write; an untyped lambda without an expected type is `E0214`; a default of the wrong type is `E0403`; ambiguity is `E0409`; an unknown member is `E0305`; an unresolved or inaccessible `nameof` path is `E0304` or `E0305`; a declaration named `nameof` is `E0311`.
@@ -308,7 +308,7 @@ Named arguments and defaults:
 30. A lambda `func(a: int = 1) => a` and a function type `func(int = 1) -> int`: reject, `E0226`, and a syntax error in the type.
 31. Alternatives `f(a: int)` and `f(a: int, b: int = 1)` called as `f(1)`: reject, `E0409`; `f(1, 2)` and `f(1, b: 2)`: accept.
 32. Alternatives `f(a: int, b: string)` and `f(b: string, c: bool)` called as `f(b: "x", a: 1)`: accept the first; only it has `a`.
-33. An override that renames a parameter: reject, `E0560`. One that changes or drops a default: reject, `E0561`.
+33. An override that renames a parameter: reject, `E0560`. An added or changed default, or omission of a default other than literal `nil`: reject, `E0561`. An override or implementation that omits a base literal `nil` default: accept starting in 0.3.1, including a call that omits that argument through either static type.
 34. A method called through a base reference with a default: accept; the value is the shared default.
 35. A named call with a trap in the second written argument: accept; the third is not evaluated and the first was admitted.
 36. A named argument that needs an object cast: accept; the cast runs at that argument's place in the written order.
@@ -428,7 +428,7 @@ For the migration guide of the release:
 | --- | --- |
 | A call of a variadic function takes no labels, and such a function takes no defaults. | Which arguments are the variadic tail must not depend on labels. |
 | A default is a literal, `nil` or a variant without payload; named constants are not accepted yet. | It keeps a default free of initialization order and lets `.nir` carry it as one attribute value. |
-| An override and an implementation repeat the base's defaults exactly. | A call then has one meaning whatever the receiver's static type, with caller-side insertion. |
+| In 0.3.0, an override and an implementation repeat the base's defaults exactly. In 0.3.1, an omitted literal `nil` default is inherited. | The caller inserts the same default through either static type. |
 | Type parameters are solved by equal types only; no common base is computed. | Two sources that disagree are an ambiguity the author resolves by writing the type. |
 | `new` and enum constructors are not inferred. | The milestone infers calls; a target type already serves both forms. |
 | An untyped lambda's body is not used to choose an overload. | Choosing by body would lower the lambda once per alternative and make errors depend on the alternatives. |
