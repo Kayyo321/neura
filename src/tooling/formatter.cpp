@@ -474,8 +474,8 @@ private:
             if (accessor.expression) expression(*accessor.expression);
             for (const auto& body : accessor.body) statement(body);
         }
-        // Standalone declaration tags stay on their own lines. Parameter
-        // and enum-variant tags are deliberately left inline.
+        // Standalone declaration tags stay on their own lines. Tags in
+        // parameter lists, enum variants, records and if headers stay inline.
         if (!inline_tags) {
             const auto start = first_offset(value);
             for (auto sigil = hints_.tag_sigils.lower_bound(start);
@@ -498,7 +498,7 @@ private:
         for (const auto& element : value.elements) pattern(element);
     }
 
-    void statement(const Statement& value) {
+    void statement(const Statement& value, bool inline_tags = false) {
         if (value.kind == Statement::Kind::Yield && !value.expressions.empty())
             hints_.keyword_operands.insert(value.expressions.front().span.offset);
         if (value.kind == Statement::Kind::Defer && !value.expressions.empty())
@@ -525,12 +525,12 @@ private:
             if (close) hints_.do_closes.insert(close->span.offset);
         }
         if (value.kind == Statement::Kind::If && value.keyword.length != 0) hints_.guards.insert(value.keyword.offset);
-        if (value.declaration) declaration(*value.declaration);
+        if (value.declaration) declaration(*value.declaration, inline_tags);
         if (value.binding_type) type(*value.binding_type);
         for (const auto& item : value.expressions) expression(item);
         for (const auto& item : value.body) statement(item);
         for (const auto& item : value.alternative) statement(item);
-        for (const auto& item : value.initializer) statement(item);
+        for (const auto& item : value.initializer) statement(item, value.kind == Statement::Kind::If);
         for (const auto& item : value.step) statement(item);
         for (const auto& arm : value.arms) {
             if (arm.named) {

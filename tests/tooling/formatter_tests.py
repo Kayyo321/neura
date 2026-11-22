@@ -278,6 +278,15 @@ let t=['\t','\\','\'','\x41','\xff'];let n='a'..'z';let y=t[0]+'B';let s=$"{'}'}
         self.assertIn('if (let ready = true; ready) {', formatted)
         self.assertIn('} else if (let other = false; other) {', formatted)
 
+    def test_if_initializer_tags_stay_inline(self):
+        for sigil in ("#", "."):
+            with self.subTest(sigil=sigil):
+                source = (f'let run=func{{if({sigil}Note("m") let p=1;p>0){{return;}}'
+                          f'else if({sigil}[Note("n"), Unit("ms")] let q=2;q>0){{return;}}}};')
+                formatted = self.formatted(source, "--tag-style=keep")
+                self.assertIn(f'    if ({sigil}Note("m") let p = 1; p > 0) {{\n', formatted)
+                self.assertIn(f'    }} else if ({sigil}[Note("n"), Unit("ms")] let q = 2; q > 0) {{\n', formatted)
+
     def test_for_header_and_overload_groups(self):
         source = '''let Example=module(export let run=func(){for(let i=0;i<10;i++){if(i==3){continue;}else{let last=i;last++;}}}or func(value:int){do{value--;}while(value>0);};);'''
         formatted = self.formatted(source)
