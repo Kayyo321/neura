@@ -117,7 +117,8 @@ export let Sockets = module (
     export let write = func(socket: int64, bytes: uint8[list]) -> CountOutcome host("neura.net.write", 2);
     /// @brief Releases any socket ID.
     export let close = func(socket: int64) -> DoneOutcome host("neura.net.close", 1);
-    /// @brief Sends `count` bytes of an open file from `offset` to a connected stream; the count sent. Overlapping and cancellable.
+    /// @brief Sends `count` bytes of an open file from `offset` to a connected stream; the count sent.
+    /// Overlapping and cancellable.
     export let send_file = func(socket: int64, file: int64, offset: int64, count: int64) -> LongOutcome
         host("neura.net.send_file", 2);
 );

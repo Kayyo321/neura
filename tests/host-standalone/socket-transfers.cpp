@@ -394,6 +394,54 @@ void file_transfer_is_bounded() {
     std::cout << "PASS: bounded file transfer: deadline, cancellation and expiry prefixes, readiness, EOF, position\n";
 }
 
+// The scheduler path: a transfer that yields after its 1 MiB attempt budget
+// while the socket is still writable must be attempted again at once by
+// every readiness backend, and a second request completes meanwhile.
+void file_transfer_resumes_under_the_scheduler() {
+    FILE* file = ::tmpfile();
+    assert(file != nullptr);
+    const int fd = ::fileno(file);
+    std::string content(5 * 1024 * 1024 + 3, '\0');
+    for (std::size_t index = 0; index < content.size(); ++index) content[index] = static_cast<char>('A' + index % 23);
+    assert(::write(fd, content.data(), content.size()) == static_cast<ssize_t>(content.size()));
+    for (const auto backend : {IoBackend::Poll, IoBackend::Epoll}) {
+        Fixture f;
+        f.table.files[1] = {fd, true, false};
+        int stream[2] = {-1, -1};
+        assert(::socketpair(AF_UNIX, SOCK_STREAM, 0, stream) == 0);
+        // A large buffer and a fast reader keep the socket writable, so
+        // only the attempt budget makes the transfer yield.
+        int large = 8 * 1024 * 1024;
+        ::setsockopt(stream[0], SOL_SOCKET, SO_SNDBUF, &large, sizeof large);
+        f.table.sockets[1] = {stream[0]};
+        std::string received;
+        std::thread reader([&] { received = read_exact(stream[1], content.size()); });
+        SteadyTaskClock clock;
+        PendingRequests pending(clock, backend);
+        HostRequest request{1, 0, {int64_value(1), int64_value(1), int64_value(0),
+                                   int64_value(static_cast<std::int64_t>(content.size()))}};
+        request.now = clock.now();
+        pending.add(1, f.begin.at("neura.net.send_file")(request), true);
+        pending.add(2, HostCompletion::ok(int64_value(42)), false);
+        std::optional<HostCompletion> transferred;
+        bool other = false;
+        const auto limit = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (!transferred && std::chrono::steady_clock::now() < limit) {
+            for (auto& done : pending.wait(clock.now() + 100'000'000)) {
+                if (done.sequence == 2) other = true;
+                else transferred = done.completion;
+            }
+        }
+        reader.join();
+        assert(other && transferred && transferred->success && transferred->value.bits == content.size());
+        assert(received == content);
+        ::close(stream[0]);
+        ::close(stream[1]);
+    }
+    ::fclose(file);
+    std::cout << "PASS: file transfer resumes after its attempt budget under poll and epoll\n";
+}
+
 int main() {
     quiet_source_and_backpressure();
     zero_copy_backpressure();
@@ -401,4 +449,5 @@ int main() {
     segmented_counts();
     raw_read_leaves_the_scheduler_available();
     file_transfer_is_bounded();
+    file_transfer_resumes_under_the_scheduler();
 }
