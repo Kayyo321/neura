@@ -61,6 +61,10 @@ def fixed(body=b"hello", status=b"200 OK"):
     return b"HTTP/1.1 " + status + b"\r\nContent-Length: " + str(len(body)).encode() + b"\r\nConnection: close\r\n\r\n" + body
 
 
+def redirect(status, target):
+    return b"HTTP/1.1 " + status + b"\r\nLocation: " + target + b"\r\nContent-Length: 0\r\n\r\n"
+
+
 class Peer:
     """A finite server. The stop event also releases intentionally quiet peers."""
     def __init__(self, case, context=None):
@@ -164,6 +168,14 @@ class Peer:
                                chunk * 3000 + b"0\r\nX-End: yes\r\n\r\n")
         elif self.case == "redirect" and head.startswith(b"GET /start "):
             connection.sendall(b"HTTP/1.1 302 Found\r\nLocation: /fixed\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+        elif self.case == "redirect-303-same-url":
+            body = receive_body(connection, head)
+            if head.startswith(b"POST /fixed ") and body == b"ping":
+                connection.sendall(redirect(b"303 See Other", b"/fixed"))
+            elif head.startswith(b"GET /fixed ") and not body:
+                connection.sendall(fixed())
+            else:
+                raise AssertionError(f"303 fixture received unexpected method, path, or body: {head!r} {body!r}")
         elif self.case == "redirect-loop":
             connection.sendall(b"HTTP/1.1 302 Found\r\nLocation: /loop\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
         elif self.case == "truncated":
@@ -376,6 +388,7 @@ def native_cases(args, root, cert, key, other_cert, other_key):
     cases = [("fixed", "Ok:200:hello", "get"), ("chunked", "Ok:200:hello", "get"),
              ("many-chunks", "Ok:200:300000:120:120", "body-size"),
              ("redirect", "Ok:200:hello", "get"), ("not-found", "Ok:404:missing", "get"),
+             ("redirect-303-same-url", "Ok:200:hello", "post"),
              ("echo", "Ok:200:ping", "post"), ("closed", "Custom:http.OutcomeUnknown", "get"),
              ("truncated", "Custom:http.OutcomeUnknown", "get"), ("bad-chunk", "Custom:http.OutcomeUnknown", "get"),
              ("oversized-header", "Custom:http.TooLarge", "get"),

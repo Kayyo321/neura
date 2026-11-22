@@ -42,6 +42,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 ### Fixed
 
 - Native fetch accepts a chunked response of any number of chunks: each chunk-size line and the trailer section have their own 16 KiB bound, instead of one budget for all chunk metadata.
+- Native fetch keys redirect-loop detection on the method as well as the URL, so a `POST` that a 303 sends to its own URL as a `GET` is not a loop.
 
 ### Known limitations
 

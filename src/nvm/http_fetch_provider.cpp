@@ -826,10 +826,10 @@ class H2 {
 
 HostCompletion exchange(Request request, Clock::time_point deadline, const std::atomic<bool>& cancelled) {
     [[maybe_unused]] SocketWrites protection;
-    std::set<std::string> visited;
+    std::set<std::pair<std::string, std::string>> visited;
     for (int redirects = 0;; ++redirects) {
         const auto url = parse_url(request.url);
-        if (redirects > 10 || !visited.insert(url.origin() + url.target).second) reject(unknown);
+        if (redirects > 10 || !visited.emplace(request.method, url.origin() + url.target).second) reject(unknown);
         Connection connection(url, deadline, cancelled);
         Response response;
 #ifdef NEURA_NVM_HTTP2
