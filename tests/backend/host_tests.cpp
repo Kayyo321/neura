@@ -1958,6 +1958,83 @@ NEURA_TEST(host, tls_write_deadlines_cover_connect_and_accept_versions) {
     }
 }
 
+NEURA_TEST(host, tls_public_endpoints_verify_live_svid) {
+    const LoopbackTlsKeys material;
+    const auto client_key = material.dir / "client-key.pem";
+    const auto request = material.dir / "client.csr";
+    const auto certificate = material.dir / "client.pem";
+    const auto extensions = material.dir / "client.ext";
+    write_text_file(extensions, "basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\n"
+        "extendedKeyUsage=clientAuth,serverAuth\nsubjectAltName=URI:spiffe://example.test/service\n");
+    const auto make_request = "openssl req -newkey rsa:2048 -nodes -keyout '" + client_key + "' -out '" + request +
+        "' -subj /CN=loopback-svid >/dev/null 2>&1";
+    const auto sign = "openssl x509 -req -in '" + request + "' -CA '" + material.certificate + "' -CAkey '" +
+        material.key + "' -CAcreateserial -days 2 -extfile '" + extensions + "' -out '" + certificate +
+        "' >/dev/null 2>&1";
+    check(std::system(make_request.c_str()) == 0 && std::system(sign.c_str()) == 0, "generate live client SVID");
+    const auto image = build_with_library(environment,
+        environment.source_dir / "tests/stdlib/net-tls/loopback/direct-endpoints.nra");
+    Host native_server(everything());
+    Host nra_client(everything());
+    auto listener = native_server.call("neura.net.listen", {text("127.0.0.1"), i32(0)});
+    expect_ok(listener, "public client listener");
+    auto port = native_server.call("neura.net.local_port", {listener.value});
+    HostCompletion accepted;
+    std::jthread serving([&] {
+        accepted = native_server.call("neura.net.tls.accept", {listener.value, text(material.certificate),
+            text(material.key), tls_names({}), i64(3'000'000'000), i32(13), i32(13), text(material.certificate), boolean(false)}, 2);
+        if (accepted.success) {
+            const auto peer = accepted.value.elements.at(0);
+            const auto got = native_server.call("neura.net.tls.read", {peer, i32(4), i64(2'000'000'000)});
+            if (got.success && got.value.bytes == "ping") native_server.call("neura.net.tls.write", {peer, bytes("pong")});
+        }
+    });
+    const auto address = "127.0.0.1:" + std::to_string(as_i32(port.value));
+    const auto client_run = nvm::run(image, nvm::bind(image, nra_client.registry),
+        std::vector<std::string>{"client", address, certificate, client_key, material.certificate});
+    serving.join();
+    check(client_run.completed && client_run.status == 0, "public client completed: " + describe_trap(client_run, image));
+    expect_ok(accepted, "public client authenticated");
+    check_equal(nra_client.output.contents(), std::string("pong\n"), "public connector round trip");
+    native_server.call("neura.net.tls.close", {accepted.value.elements.at(0)});
+    native_server.call("neura.net.close", {listener.value});
+
+    // Reserve a free port, then let the public acceptor bind it. Retry only
+    // ConnectionRefused while that separate VM starts, under one outer bound.
+    Host native_client(everything());
+    Host nra_server(everything());
+    listener = native_client.call("neura.net.listen", {text("127.0.0.1"), i32(0)});
+    port = native_client.call("neura.net.local_port", {listener.value});
+    native_client.call("neura.net.close", {listener.value});
+    nvm::RunResult server_run;
+    const auto bound = "127.0.0.1:" + std::to_string(as_i32(port.value));
+    std::jthread accepting([&] {
+        server_run = nvm::run(image, nvm::bind(image, nra_server.registry),
+            std::vector<std::string>{"server", bound, material.certificate, material.key, material.certificate});
+    });
+    HostCompletion connected;
+    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    do {
+        connected = native_client.call("neura.net.tls.connect", {text("127.0.0.1"), port.value, i64(2'000'000'000),
+            text("localhost"), tls_names({}), text(material.certificate), i32(13), i32(13),
+            text(certificate), text(client_key), boolean(false)}, 2);
+        if (connected.success || connected.value.bits != host_error::connection_refused) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    } while (std::chrono::steady_clock::now() < until);
+    HostCompletion got;
+    if (connected.success) {
+        const auto peer = connected.value.elements.at(0);
+        expect_ok(native_client.call("neura.net.tls.write", {peer, bytes("ping")}), "public acceptor write");
+        got = native_client.call("neura.net.tls.read", {peer, i32(4), i64(2'000'000'000)});
+    }
+    accepting.join();
+    expect_ok(connected, "connect to public acceptor");
+    check(server_run.completed && server_run.status == 0, "public server completed: " + describe_trap(server_run, image));
+    expect_ok(got, "public acceptor reply");
+    check_equal(got.value.bytes, std::string("pong"), "public acceptor round trip");
+    check_equal(nra_server.output.contents(), std::string("spiffe://example.test/service\n"), "live mTLS SVID verified");
+}
+
 NEURA_TEST(host, tls_material_checks_the_opened_file_target) {
     const LoopbackTlsKeys material;
     TemporaryDirectory allowed("tls-allowed");
@@ -2003,6 +2080,17 @@ NEURA_TEST(host, tls_v2_requires_exact_versions_and_mutual_identity) {
         check_equal(accepted.value.elements.at(1).bytes, std::string("h2"), "server negotiated ALPN");
         const auto socket = connected.value.elements.at(0);
         const auto peer = accepted.value.elements.at(0);
+        for (auto* host : {&client, &server}) {
+            const auto chain = host->call("neura.net.tls.peer_chain", {host == &client ? socket : peer});
+            expect_ok(chain, "verified peer DER chain");
+            check(!chain.value.elements.empty(), "peer chain includes leaf");
+            const auto& der = chain.value.elements.front().bytes;
+            const auto* cursor = reinterpret_cast<const unsigned char*>(der.data());
+            auto* parsed = d2i_X509(nullptr, &cursor, static_cast<long>(der.size()));
+            check(parsed && cursor == reinterpret_cast<const unsigned char*>(der.data()) + der.size(),
+                  "peer certificate is one complete DER X509 certificate");
+            X509_free(parsed);
+        }
         const auto local = client.call("neura.net.tls.local_address", {socket});
         expect_ok(local, "TLS socket local address");
         check_equal(local.value.elements.at(0).bytes, std::string("127.0.0.1"), "numeric loopback address");

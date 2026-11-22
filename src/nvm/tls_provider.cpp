@@ -68,6 +68,10 @@ HostSignature shutdown_write() {
     return signature("neura.net.tls.shutdown_write", {int64(), int64()}, void_type());
 }
 
+HostSignature peer_chain() {
+    return signature("neura.net.tls.peer_chain", {int64()}, HostType(Kind::List, std::vector<HostType>{byte_list()}));
+}
+
 HostSignature engine_open() {
     return signature("neura.net.tls.engine.open", {boolean(), text(), text_list(), text(), text(), text()}, int64());
 }
@@ -650,6 +654,31 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
         return HostCompletion::ok();
     });
 
+    add(peer_chain(), [=](const HostRequest& request) {
+        if (!granted->net) return denied();
+        const auto* stream = find(request.arguments.at(0));
+        if (!stream) return fail(host_error::invalid_input);
+        if (!SSL_is_init_finished(stream->ssl) ||
+            !(SSL_get_verify_mode(stream->ssl) & SSL_VERIFY_PEER) ||
+            SSL_get_verify_result(stream->ssl) != X509_V_OK) return fail(host_error::permission_denied);
+        const auto* chain = SSL_get0_verified_chain(stream->ssl);
+        if (!chain || sk_X509_num(chain) == 0) return fail(host_error::permission_denied);
+        std::vector<HostValue> result;
+        std::size_t total = 0;
+        for (int i = 0; i < sk_X509_num(chain); ++i) {
+            const auto* cert = sk_X509_value(chain, i);
+            const auto size = i2d_X509(cert, nullptr);
+            if (size <= 0 || static_cast<std::size_t>(size) > 16 * 1024 * 1024 - total)
+                return fail(host_error::other);
+            std::string der(static_cast<std::size_t>(size), '\0');
+            auto* cursor = reinterpret_cast<unsigned char*>(der.data());
+            if (i2d_X509(cert, &cursor) != size) return fail(host_error::other);
+            total += der.size();
+            result.push_back(bytes_value(std::move(der)));
+        }
+        return HostCompletion::ok(tuple_value(std::move(result)));
+    });
+
     add(local_address(), [=](const HostRequest& request) {
         if (!granted->net) return denied();
         const auto* stream = find(request.arguments.at(0));
@@ -771,6 +800,7 @@ void add_tls_services(const Adder& add, StandardServices::Tables&, const Capabil
     add(signature("neura.net.tls.accept", {int64(), text(), text(), text_list(), int64()}, stream_result()),
         unsupported);
     add(local_address(), unsupported);
+    add(peer_chain(), unsupported);
     add(shutdown_write(), unsupported);
     add(engine_open(), unsupported);
     add(engine_exchange(), unsupported);

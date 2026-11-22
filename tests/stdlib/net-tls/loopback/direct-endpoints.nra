@@ -1,0 +1,90 @@
+let pem = import:Std.Crypto.Pki.Pem;
+let config = import:Std.Net.Tls.TlsConfig;
+let console = import:Std.Io.Console;
+let duration = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let fs = import:Std.Fs.Fs;
+let path = import:Std.Fs.Path;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let socket_addr = import:Std.Net.Core.SocketAddr;
+let spiffe = import:Std.Net.Tls.Spiffe;
+let stream_socket = import:Std.Net.Socket.StreamSocket;
+let strings = import:Std.Text.Strings;
+let tls_acceptor = import:Std.Net.Tls.TlsAcceptor;
+let tls_connector = import:Std.Net.Tls.TlsConnector;
+let tls_stream = import:Std.Net.Tls.TlsStream;
+
+// Executed by host.tls_public_endpoints_verify_live_svid. Both endpoints use
+// the public wrappers with TLS 1.3 only and required client authentication.
+export let DirectEndpoints = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(result.expect<string>(exercise(args), "direct TLS endpoint"));
+        return program.ExitCode.Ok;
+    };
+
+    let exercise = func(args: string[]) -> result.Result<string> {
+        last builder = config.builder();
+        builder.set_certificate(args[2], args[3]);
+        builder.set_versions(config.TlsVersion.Tls13, config.TlsVersion.Tls13);
+        builder.set_handshake_timeout(duration.of_seconds(3));
+        last address = socket_addr.parse(args[1])?;
+        last stream: tls_stream.TlsStream;
+        if (args[0] == "server") {
+            builder.set_client_ca_file(args[4]);
+            last listener = tls_acceptor.bind(address, builder.build_server()?)?;
+            last accepted = listener.accept();
+            let _ = listener.close();
+            stream = accepted?;
+        } else {
+            builder.set_ca_file(args[4]);
+            builder.set_server_name("localhost");
+            stream = new tls_connector.TlsConnector(address, builder.build_client()?).connect()?;
+        }
+        stream.set_read_timeout(duration.of_seconds(2));
+        stream.set_write_timeout(duration.of_seconds(2));
+        last outcome = inspect(stream, args[0] == "server", args[4]);
+        let _ = stream.close();
+        return outcome;
+    };
+
+    let inspect = func(stream: tls_stream.TlsStream, server: bool, ca_path: string) -> result.Result<string> {
+        // Rejecting Read must leave the stream usable.
+        match (stream.shutdown(stream_socket.Shutdown.Read)) {
+            result.Result.Err(errors.Error.Io { kind, message, path }) => {
+                if (kind != errors.IoErrorKind.Unsupported) {
+                    return result.Result<string>.Err(errors.custom("test.tls.shutdown", "expected Unsupported"));
+                }
+            },
+            _ => {
+                return result.Result<string>.Err(errors.custom("test.tls.shutdown", "read shutdown must fail"));
+            },
+        }
+        last chain = stream.peer_certificate_chain()?;
+        if (chain.length == 0) {
+            return result.Result<string>.Err(errors.custom("test.tls.chain", "expected verified peer chain"));
+        }
+        if (server) {
+            let chain_pem = "";
+            for (let der in chain) {
+                chain_pem ..= pem.encode("CERTIFICATE", der);
+            }
+            last bundle = fs.read_text(path.of(ca_path))?;
+            last identity = spiffe.verify_x509_svid(chain_pem, bundle, "example.test")?;
+            match (spiffe.verify_x509_svid(chain_pem, bundle, "other.test")) {
+                result.Result.Err(_) => {},
+                result.Result.Ok(_) => {
+                    return result.Result<string>.Err(errors.custom("test.tls.domain", "wrong trust domain accepted"));
+                },
+            }
+            last ping = strings.from_bytes(stream.read(4)?)?;
+            if (ping != "ping") {
+                return result.Result<string>.Err(errors.custom("test.tls.payload", "expected ping"));
+            }
+            stream.write(strings.to_bytes("pong"))?;
+            return result.Result<string>.Ok(identity.to_string());
+        }
+        stream.write(strings.to_bytes("ping"))?;
+        return strings.from_bytes(stream.read(4)?);
+    };
+);

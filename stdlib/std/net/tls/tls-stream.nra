@@ -27,6 +27,8 @@ export let TlsStream = module (
 
     let tls_write_bounded = func(stream: int64, data: uint8[list], timeout: int64) -> host.CountOutcome
         host("neura.net.tls.write", 2);
+    let ChainOutcome = enum (Ok(uint8[list][list]), Error(uint32));
+    let tls_peer_chain = func(stream: int64) -> ChainOutcome host("neura.net.tls.peer_chain", 1);
 
     /// @brief One TLS stream.
     .[Final, NoDiscard(reason: "a stream must be closed"), NotThreadSafe]
@@ -122,6 +124,18 @@ export let TlsStream = module (
                 trap_with_message("invalid argument: TLS write timeout must be positive");
             }
             write_timeout_nanos = nanos;
+        };
+
+        /// @brief The verified peer chain as DER certificates, leaf first, including the trust anchor.
+        /// A server stream without client certificate verification returns PermissionDenied.
+        .[Since("0.3.1"), NoDiscard]
+        export let peer_certificate_chain = func -> Result<uint8[list][list]> {
+            return Result<uint8[list][list]>.Err(bytes.closed("stream", label)) unless open_now;
+            return match (tls_peer_chain(id)) {
+                ChainOutcome.Ok(chain) => Result<uint8[list][list]>.Ok(chain),
+                ChainOutcome.Error(code) => Result<uint8[list][list]>.Err(
+                    host_error.io(code, "verified peer certificate chain unavailable", label)),
+            };
         };
 
         /// @brief The dialed peer, or `None` for an accepted stream (not reported by the host).
