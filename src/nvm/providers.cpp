@@ -1424,7 +1424,7 @@ void StandardServices::add(HostSignature signature, FunctionService::Handler han
 
 void StandardServices::add_overlapping(HostSignature signature, FunctionService::Handler handler,
                                        FunctionService::Begin begin) {
-    if (signature.version == 2) {
+    if (signature.version >= 2) {
         services_.push_back(std::make_unique<FunctionService>(std::move(signature), std::move(handler),
                                                                std::move(begin), true));
         return;

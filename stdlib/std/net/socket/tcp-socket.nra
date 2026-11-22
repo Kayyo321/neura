@@ -171,8 +171,8 @@ export let TcpSocket = module (
         };
 
         /// @brief Moves up to `count` bytes from this socket to `target` and returns the count moved.
-        /// Linux uses `splice(2)` and an internal pipe. Other hosts use a bounded temporary buffer.
-        /// A destination failure can discard bytes already moved into the internal pipe on Linux.
+        /// The relay uses a bounded temporary buffer and consumes only the prefix accepted by the target.
+        /// It waits at most 30 seconds for a quiet source or backpressured destination.
         .NoDiscard
         export let splice_to = func(target: TcpSocket, count: int64) -> Result<int64> {
             if (count < 0) {
@@ -186,16 +186,34 @@ export let TcpSocket = module (
             };
         };
 
-        /// @brief Sends bytes with the platform's copy-avoidance mechanism when available.
-        /// The host copies the Neura value at the boundary. A short send returns an error.
+        /// @brief Sends all bytes with the platform's copy-avoidance mechanism when available.
+        /// The host copies the Neura value at the boundary. Partial sends share one 30-second deadline.
+        /// On failure the typed I/O error includes the number of bytes already accepted.
         .NoDiscard
         export let send_zerocopy = func(data: uint8[list]) -> Result<Unit> {
             return Result<Unit>.Err(bytes.closed("socket", label)) unless open_now;
-            return match (host.send_zerocopy(id, data)) {
-                host.CountOutcome.Ok(count) => count == data.length ? bytes.ok()
-                    : Result<Unit>.Err(bytes.no_progress("zero-copy send was short", label)),
-                host.CountOutcome.Error(code) => Result<Unit>.Err(host_error.io(code, "zero-copy send failed", label)),
-            };
+            let written = 0;
+            let deadline: int64 = 0;
+            while (written < data.length) {
+                // A short write must not repeatedly copy a large list across the host boundary.
+                last limit = data.length - written > 65536 ? written + 65536 : data.length;
+                last part = written == 0 && limit == data.length ? data : bytes.copy_range(data, written, limit);
+                match (host.send_zerocopy(id, part, deadline)) {
+                    host.TransferOutcome.Ok(sent) => {
+                        if (sent[0] <= 0 || sent[0] > part.length) {
+                            return Result<Unit>.Err(bytes.no_progress(
+                                "zero-copy send failed after " .. written.to_string() .. " bytes", label));
+                        }
+                        written = written + sent[0];
+                        deadline = sent[1];
+                    },
+                    host.TransferOutcome.Error(code) => {
+                        return Result<Unit>.Err(host_error.io(code,
+                            "zero-copy send failed after " .. written.to_string() .. " bytes", label));
+                    },
+                }
+            }
+            return bytes.ok();
         };
 
         /// @brief Releases the connection, as `TcpStream.close`. Closing again returns Ok.

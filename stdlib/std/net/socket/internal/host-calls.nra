@@ -15,6 +15,8 @@ export let HostCalls = module (
     export let BytesOutcome = enum (Ok(uint8[list]), Error(uint32));
     /// @brief A 64-bit count or option value, or an unsigned host error code.
     export let LongOutcome = enum (Ok(int64), Error(uint32));
+    /// @brief The accepted prefix length and the deadline token, or an unsigned host error code.
+    export let TransferOutcome = enum (Ok([int, int64]), Error(uint32));
     /// @brief Success without a value, or an unsigned host error code.
     export let DoneOutcome = enum (Ok, Error(uint32));
     /// @brief A datagram, its sender's numeric address (or Unix path, `@` for abstract) and port, or an
@@ -146,8 +148,10 @@ export let HostCalls = module (
     /// @brief Moves bytes between two streams. Host service: neura.net.splice version 2.
     export let splice = func(source: int64, target: int64, count: int64) -> LongOutcome host("neura.net.splice", 2);
 
-    /// @brief Sends a prefix without blocking the task scheduler. The provider uses a copy-avoidance hint when available.
-    export let send_zerocopy = func(socket: int64, bytes: uint8[list]) -> CountOutcome host("neura.net.send_zerocopy", 1);
+    /// @brief Sends a prefix without blocking the task scheduler, using a copy-avoidance hint when available.
+    /// Pass 0 for the first prefix and the returned deadline for each later prefix in the same transfer.
+    export let send_zerocopy = func(socket: int64, bytes: uint8[list], deadline: int64) -> TransferOutcome
+        host("neura.net.send_zerocopy", 3);
 
     /// @brief Sends a buffer as datagrams of segment_size bytes, using segmentation offload when available.
     export let udp_send_segmented = func(socket: int64, host: string, port: int, bytes: uint8[list],

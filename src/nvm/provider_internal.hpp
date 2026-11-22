@@ -165,7 +165,7 @@ std::uint32_t windows_path_error(std::string_view path);
 #endif
 
 using Adder = std::function<void(HostSignature, FunctionService::Handler)>;
-// Adds version 1 and cancellable version 2, or an existing version 2 alone.
+// Adds version 1 and cancellable version 2, or a later version alone.
 using OverlapAdder = std::function<void(HostSignature, FunctionService::Handler, FunctionService::Begin)>;
 
 // The task clock reading `nanos` after `now`, without overflow.

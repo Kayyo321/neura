@@ -52,11 +52,19 @@ struct Fixture {
     StandardServices::Tables table;
     Capabilities capabilities;
     std::map<std::string, FunctionService::Begin> begin;
+    FunctionService::Begin begin_transfer;
+    FunctionService::Handler invoke_transfer;
     Fixture() {
         capabilities.net = true;
         const Adder add = [](HostSignature, FunctionService::Handler) {};
-        const OverlapAdder overlap = [&](HostSignature signature, FunctionService::Handler, FunctionService::Begin fn) {
-            begin[signature.name] = std::move(fn);
+        const OverlapAdder overlap = [&](HostSignature signature, FunctionService::Handler invoke,
+                                         FunctionService::Begin fn) {
+            if (signature.name == "neura.net.send_zerocopy" && signature.version == 3) {
+                begin_transfer = std::move(fn);
+                invoke_transfer = std::move(invoke);
+            } else {
+                begin[signature.name] = std::move(fn);
+            }
         };
         add_socket_services(add, overlap, table, capabilities);
     }
@@ -211,8 +219,46 @@ void segmented_counts() {
     std::cout << "PASS: segmented UDP lengths and payload/count accounting\n";
 }
 
+void zero_copy_deadline_after_a_prefix() {
+    Fixture f;
+    TcpPair stream;
+    f.table.sockets[1] = {stream.socket};
+    const auto seed = f.begin_transfer(HostRequest{0, 0, {int64_value(1), bytes_value("prefix"), int64_value(0)}});
+    const auto& prefix = std::get<HostCompletion>(seed);
+    assert(prefix.success && prefix.value.elements[0].bits == 6);
+    assert(read_exact(stream.peer, 6) == "prefix");
+
+    const auto filler = fill(stream.socket);
+    const auto before = std::chrono::steady_clock::now();
+    const auto expiry = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        (before + std::chrono::milliseconds(100)).time_since_epoch()).count();
+    const auto expired = f.invoke_transfer(HostRequest{1, 0, {
+        int64_value(1), bytes_value("unsent"), int64_value(expiry),
+    }});
+    const auto waited = std::chrono::steady_clock::now() - before;
+    assert(!expired.success && expired.value.bits == host_error::timed_out);
+    assert(waited >= std::chrono::milliseconds(90) && waited < std::chrono::seconds(2));
+    assert(read_exact(stream.peer, filler) == std::string(filler, 'f'));
+    const auto past = f.begin_transfer(HostRequest{2, 0, {
+        int64_value(1), bytes_value("must still be unsent"), int64_value(expiry),
+    }});
+    const auto& refused = std::get<HostCompletion>(past);
+    assert(!refused.success && refused.value.bits == host_error::timed_out);
+    char byte;
+    assert(::recv(stream.peer, &byte, 1, MSG_DONTWAIT) < 0 && errno == EAGAIN);
+
+    const auto continued = f.invoke_transfer(HostRequest{3, 0, {
+        int64_value(1), bytes_value("suffix"), prefix.value.elements[1],
+    }});
+    assert(continued.success && continued.value.elements[0].bits == 6);
+    assert(continued.value.elements[1].bits == prefix.value.elements[1].bits);
+    assert(read_exact(stream.peer, 6) == "suffix");
+    std::cout << "PASS: zero-copy continuation token and absolute synchronous backpressure timeout\n";
+}
+
 int main() {
     quiet_source_and_backpressure();
     zero_copy_backpressure();
+    zero_copy_deadline_after_a_prefix();
     segmented_counts();
 }

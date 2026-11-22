@@ -68,7 +68,8 @@ export let UdpSocket = module (
         };
 
         /// @brief Sends `data` to `target` as datagrams of `segment_size` bytes using kernel segmentation
-        /// when available. Returns the count sent. A segment size below 1 or above `Offload.MaxUdpPayload` traps.
+        /// when available. Returns the count accepted, which may cover only a prefix of complete datagrams.
+        /// A segment size below 1 or above `Offload.MaxUdpPayload` traps.
         .NoDiscard
         export let send_segmented = func(data: uint8[list], segment_size: int, target: SocketAddr) -> Result<int> {
             offload.segment_count(data.length, segment_size);

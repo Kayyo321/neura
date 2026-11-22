@@ -103,6 +103,12 @@ HostCompletion select_event_loop(std::int32_t code) {
 }
 
 using SocketClock = std::chrono::steady_clock;
+constexpr std::int64_t transfer_timeout = 30'000'000'000;
+
+std::int64_t socket_time_nanos() {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(SocketClock::now().time_since_epoch()).count();
+}
+
 SocketClock::time_point socket_deadline(std::int64_t timeout_nanos) {
     const auto now = SocketClock::now();
     const auto timeout = std::chrono::duration_cast<SocketClock::duration>(std::chrono::nanoseconds(timeout_nanos));
@@ -1564,17 +1570,29 @@ struct NonblockingAttempt {
 
 // Adapt a nonblocking attempt for programs without tasks. Task images use
 // begin() directly, so waiting here never blocks their scheduler.
-HostCompletion finish_socket_operation(std::variant<HostCompletion, PendingOperation> started) {
+HostCompletion finish_socket_operation(std::variant<HostCompletion, PendingOperation> started,
+                                       std::int64_t started_at) {
     if (auto* done = std::get_if<HostCompletion>(&started)) return std::move(*done);
     auto& operation = std::get<PendingOperation>(started);
     for (;;) {
         const auto interest = std::get<PosixWait>(operation.wait_source).current();
         const short events = interest.events == PosixWait::Events::Read ? platform::poll_in : platform::poll_out;
         platform::PollItem item{static_cast<NativeSocket>(interest.descriptor), events, 0};
-        if (platform::poll(std::span(&item, 1), -1) < 0 && !platform::last_socket_error().interrupted()) {
+        int timeout = -1;
+        if (operation.deadline != PendingOperation::no_deadline) {
+            const auto remaining = operation.deadline - (socket_time_nanos() - started_at);
+            if (remaining <= 0) return operation.expire();
+            timeout = static_cast<int>(std::min<std::int64_t>(1 + (remaining - 1) / 1'000'000, INT_MAX));
+        }
+        const auto ready = platform::poll(std::span(&item, 1), timeout);
+        if (ready < 0 && !platform::last_socket_error().interrupted()) {
             return socket_failure();
         }
-        if (auto done = operation.attempt(false)) return std::move(*done);
+        if (ready > 0) {
+            if (operation.deadline != PendingOperation::no_deadline &&
+                socket_time_nanos() - started_at >= operation.deadline) return operation.expire();
+            if (auto done = operation.attempt(false)) return std::move(*done);
+        }
     }
 }
 
@@ -2199,10 +2217,15 @@ void add_socket_services(const Adder& add, const OverlapAdder& overlap, Standard
         PendingOperation operation;
         operation.wait_source = PosixWait{{}, [interest] { return *interest; }};
         operation.attempt = attempt;
+        operation.deadline = deadline_after(request.now, transfer_timeout);
+        operation.expire = [] { return fail(host_error::timed_out); };
         return operation;
     };
     overlap({"neura.net.splice", 2, {int64(), int64(), int64()}, int64(), uint32()},
-            [=](const HostRequest& request) { return finish_socket_operation(begin_relay(request)); }, begin_relay);
+            [=](const HostRequest& request) {
+                const auto started_at = socket_time_nanos();
+                return finish_socket_operation(begin_relay(request), started_at);
+            }, begin_relay);
 
     const FunctionService::Begin begin_zerocopy = [=](const HostRequest& request)
         -> std::variant<HostCompletion, PendingOperation> {
@@ -2210,25 +2233,45 @@ void add_socket_services(const Adder& add, const OverlapAdder& overlap, Standard
         const auto id = as_int64(request.arguments.at(0));
         const auto* socket = find(request.arguments.at(0));
         if (!connected_stream(socket)) return fail(host_error::invalid_input);
+        const auto& bytes = request.arguments.at(1).bytes;
+        const bool continuation = request.arguments.size() == 3;
+        if (bytes.size() > INT32_MAX) return fail(host_error::invalid_input);
+        const auto now = socket_time_nanos();
+        auto expires_at = continuation ? as_int64(request.arguments.at(2)) : 0;
+        if (expires_at == 0) expires_at = now + transfer_timeout;
+        if (expires_at > now + transfer_timeout) return fail(host_error::invalid_input);
+        if (expires_at <= now) return fail(host_error::timed_out);
         const auto held = hold_socket(socket->descriptor);
         if (!held) return socket_failure();
-        if (request.arguments.at(1).bytes.size() > INT32_MAX) return fail(host_error::invalid_input);
-        const auto data = std::make_shared<const std::string>(request.arguments.at(1).bytes);
+        const auto data = std::make_shared<const std::string>(bytes);
         const auto attempt = [=](bool cancelled) -> std::optional<HostCompletion> {
             if (!table->sockets.contains(id)) return fail(host_error::invalid_input);
             if (cancelled) return cancelled_answer();
+            if (socket_time_nanos() >= expires_at) return fail(host_error::timed_out);
             NonblockingAttempt nonblocking(held->descriptor);
             if (!nonblocking.ready) return socket_failure();
-            return send_zerocopy(held->descriptor, *data);
+            auto result = send_zerocopy(held->descriptor, *data);
+            if (continuation && result && result->success) {
+                return HostCompletion::ok(tuple_value({std::move(result->value), int64_value(expires_at)}));
+            }
+            return result;
         };
         if (auto done = attempt(false)) return *done;
         PendingOperation operation;
         operation.wait_source = PosixWait{{static_cast<std::intptr_t>(held->descriptor), PosixWait::Events::Write}};
         operation.attempt = attempt;
+        operation.deadline = deadline_after(request.now, expires_at - now);
+        operation.expire = [] { return fail(host_error::timed_out); };
         return operation;
     };
+    const auto invoke_zerocopy = [=](const HostRequest& request) {
+        const auto started_at = socket_time_nanos();
+        return finish_socket_operation(begin_zerocopy(request), started_at);
+    };
     overlap(signature("neura.net.send_zerocopy", {int64(), byte_list()}, int32()),
-            [=](const HostRequest& request) { return finish_socket_operation(begin_zerocopy(request)); }, begin_zerocopy);
+            invoke_zerocopy, begin_zerocopy);
+    overlap({"neura.net.send_zerocopy", 3, {int64(), byte_list(), int64()},
+             tuple({int32(), int64()}), uint32()}, invoke_zerocopy, begin_zerocopy);
 
     const FunctionService::Begin begin_segments = [=](const HostRequest& request)
         -> std::variant<HostCompletion, PendingOperation> {
@@ -2259,10 +2302,15 @@ void add_socket_services(const Adder& add, const OverlapAdder& overlap, Standard
         PendingOperation operation;
         operation.wait_source = PosixWait{{static_cast<std::intptr_t>(held->descriptor), PosixWait::Events::Write}};
         operation.attempt = attempt;
+        operation.deadline = deadline_after(request.now, transfer_timeout);
+        operation.expire = [] { return fail(host_error::timed_out); };
         return operation;
     };
     overlap(signature("neura.net.udp.send_segmented", {int64(), text(), int32(), byte_list(), int32()}, int32()),
-            [=](const HostRequest& request) { return finish_socket_operation(begin_segments(request)); }, begin_segments);
+            [=](const HostRequest& request) {
+                const auto started_at = socket_time_nanos();
+                return finish_socket_operation(begin_segments(request), started_at);
+            }, begin_segments);
     add(signature("neura.runtime.event_loop", {int32()}, void_type()), [=](const HostRequest& request) {
         if (!granted->net) return denied();
         return select_event_loop(as_int32(request.arguments.at(0)));

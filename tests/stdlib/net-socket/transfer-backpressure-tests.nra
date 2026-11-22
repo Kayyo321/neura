@@ -1,0 +1,52 @@
+// test-options: --allow-net
+// host-dependent-counts: TCP can deliver the same stream in different prefix sizes.
+let duration = import:Std.Time.Duration;
+let options = import:Std.Net.Socket.SocketOptions;
+let socket_addr = import:Std.Net.Core.SocketAddr;
+let tcp = import:Std.Net.Socket.TcpSocket;
+let server = import:Std.Net.Socket.TcpServer;
+let test = import:Std.Test;
+let unit = import:Std.Core.Unit;
+
+let TransferBackpressure = module (
+    let listen = func -> server.TcpServer {
+        last address = test.assert_ok<socket_addr.SocketAddr>(socket_addr.parse("127.0.0.1:0"));
+        return test.assert_ok<server.TcpServer>(server.bind(address));
+    };
+
+    let write_under_backpressure = func(port: int, count: int) {
+        last target = test.assert_ok<socket_addr.SocketAddr>(socket_addr.parse("127.0.0.1:" .. port.to_string()));
+        last builder = options.builder();
+        builder.set_send_buffer(4096);
+        last settings = test.assert_ok<options.SocketOptions>(builder.build(options.SocketKind.TcpStream));
+        last client = test.assert_ok<tcp.TcpSocket>(tcp.connect_with(target, duration.of_seconds(2), settings));
+        last data: uint8[list] = new;
+        for (let i = 0; i < count; i++) {
+            data.append((i % 251) as uint8);
+        }
+        test.assert_ok<unit.Unit>(client.send_zerocopy(data));
+        test.assert_ok<unit.Unit>(client.close());
+    };
+
+    export let test_copy_avoidance_continues_after_a_partial_send = func {
+        last listener = listen();
+        last count = 192000;
+        scope {
+            spawn write_under_backpressure(listener.local_port(), count);
+            last peer = test.assert_ok<tcp.TcpSocket>(listener.accept());
+            peer.set_read_timeout(duration.of_seconds(5));
+            let received = 0;
+            while (received < count) {
+                last part = test.assert_ok<uint8[list]>(peer.read(count - received));
+                test.assert(part.length > 0);
+                for (let byte in part) {
+                    test.assert_equal<uint8>((received % 251) as uint8, byte);
+                    received++;
+                }
+            }
+            test.assert_equal<int>(0, test.assert_ok<uint8[list]>(peer.read(1)).length);
+            test.assert_ok<unit.Unit>(peer.close());
+        }
+        test.assert_ok<unit.Unit>(listener.close());
+    };
+);
