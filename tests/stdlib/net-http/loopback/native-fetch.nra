@@ -78,7 +78,8 @@ let NativeFetch = module:program.Entry (
     };
 
     let send = func(api: string, url: string, mode: string) -> result.Result<string> {
-        last limit = mode == "short" || mode == "post-blocked" ? duration.of_millis(200) : duration.of_seconds(3);
+        last limit = mode == "deadline" ? duration.of_millis(400)
+            : mode == "short" || mode == "post-blocked" ? duration.of_millis(200) : duration.of_seconds(3);
         last method = mode == "post-blocked" || mode == "post" ? "POST" : "GET";
         let body: uint8[list] = new;
         if (mode == "post-blocked") {

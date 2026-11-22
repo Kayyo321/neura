@@ -149,10 +149,12 @@ class Peer:
             self.stop.wait(timeout=2)
             return
         if self.case == "absolute-deadline":
-            time.sleep(0.12)
-            connection.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n")
-            if not self.stop.wait(timeout=0.18):
-                connection.sendall(b"hello")
+            # Each pause is shorter than the 400 ms request budget. A
+            # timeout renewed by each read would allow the entire response.
+            for piece in (b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n", b"he", b"l", b"lo"):
+                if self.stop.wait(timeout=0.13):
+                    break
+                connection.sendall(piece)
             return
         if self.case == "echo":
             body = receive_body(connection, head)
@@ -396,7 +398,8 @@ def native_cases(args, root, cert, key, other_cert, other_key):
              ("duplicate-length", "Custom:http.OutcomeUnknown", "get"),
              ("length-and-transfer", "Custom:http.OutcomeUnknown", "get"),
              ("redirect-loop", "Custom:http.OutcomeUnknown", "get"),
-             ("timeout", "Io:TimedOut", "short"), ("absolute-deadline", "Io:TimedOut", "short"),
+             ("timeout", "Io:TimedOut", "short"), ("absolute-deadline", "Io:TimedOut", "deadline"),
+             ("absolute-deadline", "Ok:200:hello", "get"),
              ("non-reading", "Io:TimedOut", "post-blocked")]
     for api in ("fetch", "client"):
         for case, expected, mode in cases:
