@@ -1906,6 +1906,44 @@ NEURA_TEST(ktls, both_directions_transfer_over_kernel_records) {
 }
 #endif
 
+NEURA_TEST(host, tls_write_deadlines_cover_connect_and_accept_versions) {
+    const LoopbackTlsKeys material;
+    constexpr auto budget = 150'000'000LL;
+    for (const auto version : {1u, 2u}) {
+        for (const bool write_server : {false, true}) {
+            Host server(everything());
+            Host client(everything());
+            const auto listener = server.call("neura.net.listen", {text("127.0.0.1"), i32(0)});
+            expect_ok(listener, "listen for blocked TLS writes");
+            const auto port = server.call("neura.net.local_port", {listener.value});
+            auto accept_args = std::vector<HostValue>{listener.value, text(material.certificate), text(material.key),
+                                                       tls_names({}), i64(budget)};
+            auto connect_args = std::vector<HostValue>{text("127.0.0.1"), port.value, i64(budget), text("localhost"),
+                                                        tls_names({}), text(material.certificate)};
+            if (version == 2) {
+                accept_args.insert(accept_args.end(), {i32(13), i32(13), text(""), boolean(false)});
+                connect_args.insert(connect_args.end(), {i32(13), i32(13), text(""), text(""), boolean(false)});
+            }
+            HostCompletion accepted;
+            std::jthread worker([&] { accepted = server.call("neura.net.tls.accept", accept_args, version); });
+            const auto connected = client.call("neura.net.tls.connect", connect_args, version);
+            worker.join();
+            expect_ok(connected, "connect for blocked TLS write");
+            expect_ok(accepted, "accept for blocked TLS write");
+            auto& writer = write_server ? server : client;
+            const auto id = (write_server ? accepted : connected).value.elements.at(0);
+            const auto started = std::chrono::steady_clock::now();
+            expect_error(writer.call("neura.net.tls.write", {id, bytes(std::string(16 * 1024 * 1024, 'x'))}),
+                         host_error::timed_out, "non-reading TLS peer bounds legacy write");
+            check(std::chrono::steady_clock::now() - started < std::chrono::seconds(2), "write deadline elapsed bound");
+            expect_error(writer.call("neura.net.tls.write", {id, bytes("x"), i64(0)}, 2),
+                         host_error::invalid_input, "write v2 refuses unlimited timeout");
+            client.call("neura.net.tls.close", {connected.value.elements.at(0)});
+            server.call("neura.net.tls.close", {accepted.value.elements.at(0)});
+        }
+    }
+}
+
 NEURA_TEST(host, tls_v2_requires_exact_versions_and_mutual_identity) {
     const LoopbackTlsKeys material;
     constexpr auto wait = 2'000'000'000LL;

@@ -25,6 +25,9 @@ export let TlsStream = module (
     let tls_local_address = func(stream: int64) -> host.AddressOutcome host("neura.net.tls.local_address", 1);
     let tls_shutdown_write = func(stream: int64, timeout: int64) -> host.DoneOutcome host("neura.net.tls.shutdown_write", 1);
 
+    let tls_write_bounded = func(stream: int64, data: uint8[list], timeout: int64) -> host.CountOutcome
+        host("neura.net.tls.write", 2);
+
     /// @brief One TLS stream.
     .[Final, NoDiscard(reason: "a stream must be closed"), NotThreadSafe]
     export let TlsStream = class implements StreamSocket<SocketAddr> (
@@ -38,6 +41,8 @@ export let TlsStream = module (
         export last alpn: string;
         /// @brief The read timeout in nanoseconds; zero waits without limit.
         let timeout_nanos: int64 = 0;
+        /// @brief Writes have a finite default budget of thirty seconds.
+        let write_timeout_nanos: int64 = 30000000000;
         /// @brief Tracks whether the stream may still use the host ID.
         let open_now: bool = true;
         let read_closed: bool = false;
@@ -71,7 +76,7 @@ export let TlsStream = module (
             return Result<Unit>.Err(bytes.closed("stream", label)) unless open_now && not write_closed;
             let remaining = data;
             while (remaining.length > 0) {
-                match (host.tls_write(id, remaining)) {
+                match (tls_write_bounded(id, remaining, write_timeout_nanos)) {
                     host.CountOutcome.Ok(count) => {
                         if (count <= 0) {
                             return Result<Unit>.Err(bytes.no_progress("TLS write failed", label));
@@ -107,6 +112,16 @@ export let TlsStream = module (
         /// @brief Sets the read timeout. A negative timeout traps with "invalid argument: negative timeout".
         export let set_read_timeout = func(timeout: Duration) {
             timeout_nanos = support.timeout_nanos(timeout);
+        };
+
+        /// @brief Sets a positive per-host-write timeout; zero or negative traps.
+        .Since("0.3.1")
+        export let set_write_timeout = func(timeout: Duration) {
+            last nanos = support.timeout_nanos(timeout);
+            if (nanos == 0) {
+                trap_with_message("invalid argument: TLS write timeout must be positive");
+            }
+            write_timeout_nanos = nanos;
         };
 
         /// @brief The dialed peer, or `None` for an accepted stream (not reported by the host).
