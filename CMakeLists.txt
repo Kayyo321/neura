@@ -2157,6 +2157,9 @@ if(BUILD_TESTING AND NEURA_SDK)
         if(area STREQUAL "crypto-pqc")
             set(split_files slh-dsa-sign-fast-tests slh-dsa-sign-sha2-small-tests slh-dsa-sign-shake-small-tests)
         endif()
+        if(area STREQUAL "crypto-core")
+            set(split_files lock-tests generic-lock-tests)
+        endif()
         string(REPLACE ";" "," skipped "${split_files}")
         add_test(NAME stdlib-${area} COMMAND ${CMAKE_COMMAND}
             "-DNEURA=${CMAKE_CURRENT_BINARY_DIR}/stdlib-install/prefix/bin/neura${CMAKE_EXECUTABLE_SUFFIX}"
@@ -2170,7 +2173,12 @@ if(BUILD_TESTING AND NEURA_SDK)
         set_tests_properties(stdlib-${area} PROPERTIES FIXTURES_REQUIRED stdlib)
         foreach(file IN LISTS split_files)
             string(REGEX REPLACE "-tests$" "" part "${file}")
-            add_test(NAME stdlib-${area}-${part} COMMAND ${CMAKE_COMMAND}
+            set(supported_wrapper)
+            if(area STREQUAL "crypto-core")
+                set(supported_wrapper "${Python3_EXECUTABLE}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/crypto-core/locked-supported.py" --)
+            endif()
+            add_test(NAME stdlib-${area}-${part} COMMAND ${supported_wrapper} ${CMAKE_COMMAND}
                 "-DNEURA=${CMAKE_CURRENT_BINARY_DIR}/stdlib-install/prefix/bin/neura${CMAKE_EXECUTABLE_SUFFIX}"
                 "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
                 "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/stdlib-tests/${area}-${part}"
@@ -2180,6 +2188,9 @@ if(BUILD_TESTING AND NEURA_SDK)
                 -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/area.cmake"
             )
             set_tests_properties(stdlib-${area}-${part} PROPERTIES FIXTURES_REQUIRED stdlib)
+            if(area STREQUAL "crypto-core")
+                set_tests_properties(stdlib-${area}-${part} PROPERTIES SKIP_RETURN_CODE 77)
+            endif()
         endforeach()
     endforeach()
 
@@ -2192,6 +2203,10 @@ if(BUILD_TESTING AND NEURA_SDK)
                 "$<TARGET_FILE:neura_backend_tests>" host "${CMAKE_CURRENT_SOURCE_DIR}"
                 entropy_comes_from_the_system_generator)
         endforeach()
+        add_test(NAME backend-secret-memory-supported COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/crypto-core/locked-supported.py" --bytes 1048576 --
+            "$<TARGET_FILE:neura_backend_tests>" secret_memory "${CMAKE_CURRENT_SOURCE_DIR}")
+        set_tests_properties(backend-secret-memory-supported PROPERTIES SKIP_RETURN_CODE 77)
     endif()
 
     # The desktop window host and its Neura native child (docs/design/Desktop030.md). These tests need the

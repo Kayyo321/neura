@@ -1400,7 +1400,7 @@ NEURA_TEST(host, library_drbg_reseeds_after_generation_change) {
 
 // Secret memory (src/nvm/secret_services.cpp): locked, dump-excluded pages
 // addressed by handle, zeroed on release.
-NEURA_TEST(host, secret_memory_is_locked_and_released) {
+NEURA_TEST(secret_memory, secret_memory_is_locked_and_released) {
     nvm::SecretServices secrets(true);
     nvm::HostRegistry registry;
     secrets.register_all(registry);

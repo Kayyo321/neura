@@ -1,0 +1,14 @@
+// test-options: --gpu=off
+let errors = import:Std.Core.Error;
+let.promote _ = import:Std.Crypto.Core.Secret;
+let test = import:Std.Test;
+
+// Codec validation is independent of host locked-memory availability.
+let GenericCodecTests = module (
+    export let test_missing_codec_is_a_typed_failure = func {
+        let wrapped = new Secret<int>(42, new func(_value: int) {});
+        last failure = test.assert_err(wrapped.try_lock());
+        test.assert_equal_string("InvalidInput: generic secret lock requires a codec", errors.message(failure));
+        test.assert_equal_int32(42, wrapped.expose());
+    };
+);

@@ -1,5 +1,4 @@
-// test-options: --gpu=off
-// host-dependent-counts: host-buffer support and resource limits govern which branch can run
+// test-options: --gpu=off --allow-entropy
 let.promote _ = import:Std.Core.Error;
 let.promote _ = import:Std.Core.Result;
 let.promote _ = import:Std.Crypto.Core.SecretBytes;
@@ -14,47 +13,30 @@ let LockTests = module (
     export let test_locked_secret_transport_and_wipe = func {
         last secret = new SecretBytes(new([9, 8, 7]));
         last old_alias = secret.expose();
-        match (secret.try_lock()) {
-            Result.Ok(_) => {
-                test.assert_equal_int32(3, secret.length());
-                test.assert_equal_int32(0, old_alias[0] as int);
-                test.assert_equal_int32(0, old_alias[2] as int);
-                test.assert_ok(secret.try_lock());
-                old_alias[0] = 55;
-                last copy = secret.expose();
-                test.assert_equal_int32(9, copy[0] as int);
-                copy[0] = 101;
-                test.assert_equal_int32(9, secret.expose()[0] as int);
-                last ordinary = new SecretBytes(new([9, 8, 7]));
-                test.assert(secret.ct_equals(ordinary) && ordinary.ct_equals(secret));
-                test.assert(secret.ct_equals(secret));
-                test.assert(!secret.ct_equals(new SecretBytes(new([9, 8]))));
-                secret.wipe();
-                secret.wipe();
-                test.assert(secret.is_wiped());
-                test.assert_equal_int32(3, secret.length());
-                test.assert_equal_string("SecretBytes(<redacted>)", secret.to_string());
-                last key = new SecretKey<Marker>(new([9, 8, 7]));
-                key.lock();
-                test.assert_equal_int32(3, key.key_length());
-                test.assert_equal_int32(9, key.expose()[0] as int);
-                key.wipe();
-                test.assert(key.is_wiped());
-            },
-            Result.Err(error) => {
-                match (error) {
-                    Error.Io { kind, message: _, path: _ } => {
-                        test.assert(kind == IoErrorKind.Unsupported || kind == IoErrorKind.Other);
-                    },
-                    _ => {
-                        test.fail("expected a host lock error");
-                    },
-                }
-                test.assert_equal_int32(9, old_alias[0] as int);
-                test.assert_equal_int32(9, secret.expose()[0] as int);
-                test.assert(!secret.is_wiped());
-                secret.wipe();
-            },
-        }
+        test.assert_ok(secret.try_lock());
+        test.assert_equal_int32(3, secret.length());
+        test.assert_equal_int32(0, old_alias[0] as int);
+        test.assert_equal_int32(0, old_alias[2] as int);
+        test.assert_ok(secret.try_lock());
+        old_alias[0] = 55;
+        last copy = secret.expose();
+        test.assert_equal_int32(9, copy[0] as int);
+        copy[0] = 101;
+        test.assert_equal_int32(9, secret.expose()[0] as int);
+        last ordinary = new SecretBytes(new([9, 8, 7]));
+        test.assert(secret.ct_equals(ordinary) && ordinary.ct_equals(secret));
+        test.assert(secret.ct_equals(secret));
+        test.assert(!secret.ct_equals(new SecretBytes(new([9, 8]))));
+        secret.wipe();
+        secret.wipe();
+        test.assert(secret.is_wiped());
+        test.assert_equal_int32(3, secret.length());
+        test.assert_equal_string("SecretBytes(<redacted>)", secret.to_string());
+        last key = new SecretKey<Marker>(new([9, 8, 7]));
+        key.lock();
+        test.assert_equal_int32(3, key.key_length());
+        test.assert_equal_int32(9, key.expose()[0] as int);
+        key.wipe();
+        test.assert(key.is_wiped());
     };
 );
