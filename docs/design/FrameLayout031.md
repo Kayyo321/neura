@@ -22,11 +22,12 @@ Three possible remedies belong at different boundaries:
 ## Decision
 
 Keep the executable frame layout. In Tier 3 machine lowering, shorten the
-lifetimes of entry loads used only by recovery states or frame write-backs. Materialize a separate
-machine value at each recovery use when the original frame slot is proved
-stable until its recovery uses. The allocator can then leave a value used
-only for recovery inside a loop in its existing frame home. A load whose
-allocated home is its source slot emits no machine instruction.
+lifetimes of entry loads whose original slots remain stable. Defer a load
+when its recovery uses occur in more blocks inside loops than use blocks
+outside loops. Each use block materializes the value once. Ordinary data
+operands of write-backs inside loops keep their entry loads. The allocator
+can leave a deferred value in its existing frame home, and a load assigned
+to its source slot emits no machine instruction.
 
 The proof must exclude ordinary data uses and phi inputs, writes of a different
 value into the slot, call results that overlap it, and other values assigned
