@@ -433,6 +433,12 @@ struct Program {
     mutable std::mutex lazy_mutex;
     mutable std::unique_ptr<std::atomic<const std::uint8_t*>[]> lazy_entries;
     mutable std::vector<std::unique_ptr<jit::Program>> lazy_code;
+
+    // Unsettled Tier 2 callee programs seen by the first inlining pass.
+    // Only the cache's publication path reads or writes this metadata,
+    // under its mutex. The IR and machine code of both versions stay live.
+    std::vector<std::uint32_t> pending_callees;
+    mutable bool rebuild_attempted = false;
 };
 
 // The speculation record of one Dispatch op of a function program: the first

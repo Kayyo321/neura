@@ -4,6 +4,10 @@
 #include "jit/jit.hpp"
 #include "lift/evaluate.hpp"
 
+#ifndef NEURA_WASM_RUNTIME
+#include "tier3.hpp"
+#endif
+
 #include <algorithm>
 #include <cassert>
 #include <functional>
@@ -2060,7 +2064,7 @@ TierCache::RegionResolution TierCache::program(std::uint32_t function, std::uint
     };
     auto formation = tier2::form_program(image_, function, form, options_.checkable);
 
-    const std::lock_guard lock(mutex_);
+    std::unique_lock lock(mutex_);
     auto& found = programs_[function];
     const auto patience = std::uint64_t{options_.region_after} * options_.region_patience;
     if (found.state == RegionEntry::State::Settled) {
@@ -2093,9 +2097,28 @@ TierCache::RegionResolution TierCache::program(std::uint32_t function, std::uint
         return {nullptr, false, found.next_attempt};
     }
     found.state = RegionEntry::State::Settled;
+    const auto settled = [&](RegionResolution result) {
+#ifndef NEURA_WASM_RUNTIME
+        if (native_enabled() && options_.native_inlining) {
+            // Initial settlement is a cold path. Consult the recorded
+            // dependencies here, with no poll on interpreted or native calls.
+            std::vector<const tier2::Region*> callers;
+            for (const auto& code : native_owned_) {
+                const auto& pending = code->pending_callees;
+                if (!code->rebuild_attempted && std::binary_search(pending.begin(), pending.end(), function) &&
+                    std::all_of(pending.begin(), pending.end(), [&](std::uint32_t callee) {
+                        return programs_[callee].state == RegionEntry::State::Settled;
+                    })) callers.push_back(code->ir.region);
+            }
+            lock.unlock();
+            for (const auto* caller : callers) compile_native(*caller, tier3::Variant::Standard);
+        }
+#endif
+        return result;
+    };
     if (!formation.region) {
         ++statistics_.program_rejections[formation.reason];
-        return {nullptr, true, 0};
+        return settled({nullptr, true, 0});
     }
     found.formed_after = settled_before;
     found.refresh_at = !formation.pending ? 0 : options_.defer_proofs ? next_check(arrivals) : arrivals * 4;
@@ -2115,7 +2138,7 @@ TierCache::RegionResolution TierCache::program(std::uint32_t function, std::uint
 #ifndef NEURA_WASM_RUNTIME
     if (std::getenv("NEURA_TIER_DUMP")) std::fputs(tier2::describe(*found.region).c_str(), stderr);
 #endif
-    return {found.region.get(), true, found.refresh_at};
+    return settled({found.region.get(), true, found.refresh_at});
 }
 
 #ifndef NEURA_WASM_RUNTIME

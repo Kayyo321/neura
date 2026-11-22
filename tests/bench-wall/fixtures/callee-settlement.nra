@@ -1,0 +1,31 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+.NoInline
+let step = func(value: int) -> int {
+    return value + 2;
+};
+
+.NoInline
+let accumulate = func(seed: int, count: int, use_step: bool) -> int {
+    let total = seed;
+    for (let index = 0; index < count; index += 1) {
+        if (use_step) {
+            total = step(total);
+        } else {
+            total += 1;
+        }
+    }
+    return total;
+};
+
+let Entry = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(accumulate(0, 300, false).to_string());
+        console.print_line(accumulate(0, 300, true).to_string());
+        if (args.length > 0) {
+            console.print_line(accumulate(2147483646, 1, true).to_string());
+        }
+        return program.ExitCode.Ok;
+    };
+);

@@ -1900,11 +1900,26 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
     if (program.program_id >= native_capacity_) return nullptr;
     auto& slot = native_programs_[program.program_id * tier3::variant_count + static_cast<unsigned>(variant)];
     const tier3::Program* expected = nullptr;
-    // The first thread to ask builds it; the others go on interpreting.
+    const tier3::Program* previous = nullptr;
+    // On the first build, the other runs go on interpreting. On a rebuild,
+    // they keep using the published code until its replacement is ready.
     if (!slot.compare_exchange_strong(expected, native_forming, std::memory_order_acq_rel)) {
-        return native_code(program, variant);
+        previous = native_code(program, variant);
+        if (!previous || variant != tier3::Variant::Standard) return previous;
+        const std::lock_guard lock(mutex_);
+        const auto& pending = previous->pending_callees;
+        if (previous->rebuild_attempted || pending.empty() ||
+            !std::all_of(pending.begin(), pending.end(), [&](std::uint32_t callee) {
+                return programs_[callee].state == RegionEntry::State::Settled;
+            })) return previous;
+        previous->rebuild_attempted = true;
+        if (std::none_of(pending.begin(), pending.end(), [&](std::uint32_t callee) {
+                return programs_[callee].region != nullptr;
+            })) return previous;
     }
     tier3::BuildResult built;
+    std::vector<std::uint32_t> pending;
+    std::uint64_t bytes = 0;
     try {
         built = tier3::build(image_, program, tier3::verify_enabled(), variant);
         if (built.program) built.program->ir.variant = variant;
@@ -1912,15 +1927,27 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
         // variants keep every call and return the reference's.
         if (built.program && variant == tier3::Variant::Standard && options_.native_inlining) {
             tier3::InlineSource source;
-            source.program = [this](std::uint32_t function) -> const tier2::Region* {
+            source.program = [this, previous, &pending](std::uint32_t function) -> const tier2::Region* {
                 const std::lock_guard lock(mutex_);
                 const auto& found = programs_[function];
-                return found.state == RegionEntry::State::Settled ? found.region.get() : nullptr;
+                if (found.state == RegionEntry::State::Settled) return found.region.get();
+                if (!previous) pending.push_back(function);
+                return nullptr;
             };
             source.record = [this](const tier2::Region& region, std::uint32_t table) -> const tier3::DispatchRecord* {
                 return dispatch_record(region, table);
             };
-            tier3::inline_calls(image_, built.program->ir, source, tier3::verify_enabled());
+            tier3::inline_calls(image_, built.program->ir, source, !previous && tier3::verify_enabled());
+            if (previous) {
+                // Late callees can expose an inlining shape the first build
+                // never saw. Publish a replacement only if it verifies,
+                // including the roots of references live at safepoints.
+                const auto failures = tier3::verify(image_, built.program->ir);
+                if (!failures.empty()) {
+                    built.reason = "inlined graph " + failures.front();
+                    built.program.reset();
+                }
+            }
         }
         if (built.program) {
             auto& original = built.program->ir;
@@ -1944,44 +1971,41 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
             }
             tier3::place_canons(image_, original, verify);
         }
+        if (built.program && machine_code_) {
+            auto& native = *built.program;
+            auto* entry = native.function_entry.get();
+            auto generated = jit::native::generate(entry ? entry->ir : native.ir, tier3::verify_enabled());
+            if (entry && !generated.failure.empty()) {
+                native.function_entry.reset();
+                entry = nullptr;
+                generated = jit::native::generate(native.ir, tier3::verify_enabled());
+            }
+            if (generated.failure.empty()) {
+                built.program->machine = jit::Program::load(generated.code.bytes, generated.failure);
+                if (!built.program->machine) generated.failure = "no executable memory: " + generated.failure;
+            }
+            if (!generated.failure.empty()) {
+                built.reason = generated.failure;
+                built.program.reset();
+            } else {
+                native.trampoline = generated.code.trampoline;
+                native.verify = tier3::verify_enabled();
+                if (entry) {
+                    entry->machine = native.machine;
+                    entry->trampoline = native.trampoline;
+                    entry->verify = native.verify;
+                    entry->entry_code = std::move(generated.code.entries);
+                    native.entry_code.assign(native.ir.entries.size(), jit::native::lazy);
+                } else {
+                    native.entry_code = std::move(generated.code.entries);
+                }
+                native.lazy_entries = std::make_unique<std::atomic<const std::uint8_t*>[]>(native.entry_code.size());
+                bytes = generated.code.bytes.size();
+            }
+        }
     } catch (const std::exception& error) {
         built.program.reset();
         built.reason = std::string("internal error: ") + error.what();
-    }
-    // Machine code; a program that cannot have it stays on the program
-    // interpreter.
-    std::uint64_t bytes = 0;
-    if (built.program && machine_code_) {
-        auto& program = *built.program;
-        auto* entry = program.function_entry.get();
-        auto generated = jit::native::generate(entry ? entry->ir : program.ir, tier3::verify_enabled());
-        if (entry && !generated.failure.empty()) {
-            program.function_entry.reset();
-            entry = nullptr;
-            generated = jit::native::generate(program.ir, tier3::verify_enabled());
-        }
-        if (generated.failure.empty()) {
-            built.program->machine = jit::Program::load(generated.code.bytes, generated.failure);
-            if (!built.program->machine) generated.failure = "no executable memory: " + generated.failure;
-        }
-        if (!generated.failure.empty()) {
-            built.reason = generated.failure;
-            built.program.reset();
-        } else {
-            program.trampoline = generated.code.trampoline;
-            program.verify = tier3::verify_enabled();
-            if (entry) {
-                entry->machine = program.machine;
-                entry->trampoline = program.trampoline;
-                entry->verify = program.verify;
-                entry->entry_code = std::move(generated.code.entries);
-                program.entry_code.assign(program.ir.entries.size(), jit::native::lazy);
-            } else {
-                program.entry_code = std::move(generated.code.entries);
-            }
-            program.lazy_entries = std::make_unique<std::atomic<const std::uint8_t*>[]>(program.entry_code.size());
-            bytes = generated.code.bytes.size();
-        }
     }
     const tier3::Program* published = nullptr;
     if (std::getenv("NEURA_TIER_DUMP")) {
@@ -1998,11 +2022,20 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
             }
         }
         std::fputs(("tier 3 program " + std::to_string(program.program_id) + " of function " +
-                    std::to_string(program.function) + ":\n" + text).c_str(), stderr);
+                    std::to_string(program.function) + (previous ? " (callee settlement rebuild):\n" : ":\n") +
+                    text).c_str(), stderr);
     }
+    bool settled_during_build = false;
     {
         const std::lock_guard lock(mutex_);
         if (built.program) {
+            std::sort(pending.begin(), pending.end());
+            pending.erase(std::unique(pending.begin(), pending.end()), pending.end());
+            settled_during_build = !pending.empty() &&
+                std::all_of(pending.begin(), pending.end(), [&](std::uint32_t callee) {
+                    return programs_[callee].state == RegionEntry::State::Settled;
+                });
+            built.program->pending_callees = std::move(pending);
             published = built.program.get();
             auto pass_counts = built.program->ir.pass_counts;
             if (const auto& entry = built.program->function_entry) {
@@ -2024,11 +2057,13 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
             statistics_.native_bytes += bytes;
         } else {
             ++statistics_.native_failed;
-            ++statistics_.native_rejections[built.reason];
+            ++statistics_.native_rejections[previous ? "rebuild: " + built.reason : built.reason];
         }
+        // Settlement observes the wait record and this slot under one lock.
+        slot.store(published ? published : previous ? previous : native_failed, std::memory_order_release);
     }
-    slot.store(published ? published : native_failed, std::memory_order_release);
-    return published;
+    if (settled_during_build) return compile_native(program, variant);
+    return published ? published : previous;
 }
 
 tier3::DispatchRecord* TierCache::dispatch_record(const tier2::Region& program, std::uint32_t table) const {
