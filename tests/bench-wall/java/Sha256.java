@@ -12,6 +12,14 @@ public final class Sha256 {
         0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
     };
 
+    // SHA-256 combines words modulo 2^32 in both arithmetic modes.
+    private @interface Wrapping {}
+
+    @Wrapping
+    private static int addWord(int left, int right) {
+        return left + right;
+    }
+
     private static int rotate(int value, int count) {
         return (value >>> count) | (value << (32 - count));
     }
@@ -28,7 +36,7 @@ public final class Sha256 {
             int w2 = schedule[t - 2];
             int s0 = rotate(w15, 7) ^ rotate(w15, 18) ^ (w15 >>> 3);
             int s1 = rotate(w2, 17) ^ rotate(w2, 19) ^ (w2 >>> 10);
-            schedule[t] = (schedule[t - 16] + s0) + (schedule[t - 7] + s1);
+            schedule[t] = addWord(addWord(schedule[t - 16], s0), addWord(schedule[t - 7], s1));
         }
         int a = state[0];
         int b = state[1];
@@ -41,31 +49,34 @@ public final class Sha256 {
         for (int t = 0; t < 64; t = t + 1) {
             int s1 = rotate(e, 6) ^ rotate(e, 11) ^ rotate(e, 25);
             int choice = (e & f) ^ (~e & g);
-            int t1 = ((h + s1) + (choice + ROUND_CONSTANTS[t])) + schedule[t];
+            int t1 = addWord(addWord(addWord(h, s1), addWord(choice, ROUND_CONSTANTS[t])), schedule[t]);
             int s0 = rotate(a, 2) ^ rotate(a, 13) ^ rotate(a, 22);
             int majority = (a & b) ^ (a & c) ^ (b & c);
-            int t2 = s0 + majority;
+            int t2 = addWord(s0, majority);
             h = g;
             g = f;
             f = e;
-            e = d + t1;
+            e = addWord(d, t1);
             d = c;
             c = b;
             b = a;
-            a = t1 + t2;
+            a = addWord(t1, t2);
         }
-        state[0] = state[0] + a;
-        state[1] = state[1] + b;
-        state[2] = state[2] + c;
-        state[3] = state[3] + d;
-        state[4] = state[4] + e;
-        state[5] = state[5] + f;
-        state[6] = state[6] + g;
-        state[7] = state[7] + h;
+        state[0] = addWord(state[0], a);
+        state[1] = addWord(state[1], b);
+        state[2] = addWord(state[2], c);
+        state[3] = addWord(state[3], d);
+        state[4] = addWord(state[4], e);
+        state[5] = addWord(state[5], f);
+        state[6] = addWord(state[6], g);
+        state[7] = addWord(state[7], h);
     }
 
     public static void main(String[] args) {
-        int n = Integer.parseInt(args[0]);
+        System.out.print(workload(Integer.parseInt(args[0])));
+    }
+
+    public static String workload(int n) {
         // Padding: a one bit, zeros to 56 mod 64 bytes, then the bit length.
         int padded = n + 1;
         while (padded % 64 != 56) {
@@ -90,6 +101,6 @@ public final class Sha256 {
         for (int i = 0; i < 8; i = i + 1) {
             digest.append(String.format("%08x", state[i]));
         }
-        System.out.println("sha256 " + digest);
+        return "sha256 " + digest + System.lineSeparator();
     }
 }

@@ -91,7 +91,10 @@ public final class ParseResults {
     }
 
     public static void main(String[] args) {
-        int n = Integer.parseInt(args[0]);
+        System.out.print(workload(Integer.parseInt(args[0])));
+    }
+
+    public static String workload(int n) {
         ArrayList<String> lines = new ArrayList<>();
         long seed = 12345;
         for (int i = 0; i < RECORDS; i = i + 1) {
@@ -147,6 +150,6 @@ public final class ParseResults {
                 }
             }
         }
-        System.out.println("parse-results " + parsed + " " + missing + " " + invalid + " " + unknown + " " + checksum);
+        return "parse-results " + parsed + " " + missing + " " + invalid + " " + unknown + " " + checksum + System.lineSeparator();
     }
 }

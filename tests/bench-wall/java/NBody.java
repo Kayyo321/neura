@@ -81,14 +81,17 @@ public final class NBody {
     }
 
     public static void main(String[] args) {
-        int n = Integer.parseInt(args[0]);
+        System.out.print(workload(Integer.parseInt(args[0])));
+    }
+
+    public static String workload(int n) {
         NBody planets = new NBody();
         double before = planets.energy();
         for (int i = 0; i < n; i = i + 1) {
             planets.advance(0.01);
         }
         double after = planets.energy();
-        System.out.println("nbody " + Long.toHexString(Double.doubleToRawLongBits(before)) + " "
-                           + Long.toHexString(Double.doubleToRawLongBits(after)));
+        return "nbody " + Long.toHexString(Double.doubleToRawLongBits(before)) + " "
+                           + Long.toHexString(Double.doubleToRawLongBits(after)) + System.lineSeparator();
     }
 }

@@ -66,7 +66,10 @@ public final class Closures {
     }
 
     public static void main(String[] args) {
-        int n = Integer.parseInt(args[0]);
+        System.out.print(workload(Integer.parseInt(args[0])));
+    }
+
+    public static String workload(int n) {
         LongList values = new LongList();
         long seed = 12345;
         for (int i = 0; i < VALUES; i = i + 1) {
@@ -88,6 +91,6 @@ public final class Closures {
             }
             checksum = (checksum * 31 + (long) kept.length() + total + walked) & MASK;
         }
-        System.out.println("closures " + checksum);
+        return "closures " + checksum + System.lineSeparator();
     }
 }

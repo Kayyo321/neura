@@ -1,7 +1,10 @@
 // Same algorithm, input, and output as ../neura/collatz.nra.
 public final class Collatz {
     public static void main(String[] args) {
-        int n = Integer.parseInt(args[0]);
+        System.out.print(workload(Integer.parseInt(args[0])));
+    }
+
+    public static String workload(int n) {
         int bestStart = 0;
         long bestLength = 0;
         long total = 0;
@@ -22,6 +25,6 @@ public final class Collatz {
                 bestStart = start;
             }
         }
-        System.out.println("collatz " + bestStart + " " + bestLength + " " + total);
+        return "collatz " + bestStart + " " + bestLength + " " + total + System.lineSeparator();
     }
 }

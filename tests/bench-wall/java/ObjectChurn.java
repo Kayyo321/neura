@@ -28,7 +28,10 @@ public final class ObjectChurn {
     }
 
     public static void main(String[] args) {
-        int n = Integer.parseInt(args[0]);
+        System.out.print(workload(Integer.parseInt(args[0])));
+    }
+
+    public static String workload(int n) {
         Random random = new Random();
         ArrayList<Particle> survivors = new ArrayList<>();
         long checksum = 0;
@@ -57,6 +60,6 @@ public final class ObjectChurn {
             survivors = next;
             checksum = (checksum * 31 + (long) survivors.size() + total) & MASK;
         }
-        System.out.println("object-churn " + survivors.size() + " " + checksum);
+        return "object-churn " + survivors.size() + " " + checksum + System.lineSeparator();
     }
 }

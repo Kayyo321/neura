@@ -1,36 +1,31 @@
 #!/usr/bin/env python3
-"""Measure the wall-clock time of the programs in tests/bench-wall.
+r"""Compare the fixed workloads in tests/bench-wall.
 
-Each program in tests/bench-wall/neura/ is built once with `neura build` and
-run with `neura run --stats` several times; the result is the median wall
-time of the process, the median of its peak resident memory, the program's
-output, and the `steps` and `peak heap cells` it reports. When `javac` and
-`java` are on PATH, the counterpart in tests/bench-wall/java/ is compiled
-on its own and run the same number of times with the same size, and its
-output must match the Neura program's byte for byte. Without them the run is
-Neura-only and says so. The wall time of the one `neura build` and the one
-`javac` of each program is recorded too.
+The cold track measures prebuilt programs in fresh processes. The warmed
+track runs a fresh fork with fixed warmup and sample counts: Neura shares a
+TierCache, HotSpot uses JMH, and CoreCLR uses BenchmarkDotNet. Host console
+output is outside the warmed timer. All results must agree byte for byte.
+C# uses workstation, nonconcurrent GC. Each JDK also has a Serial GC run.
 
-Every program's first line names three sizes,
-`// sizes: quick <n> full <n> long <n>`. --quick uses the first, which keeps
-each program to a few seconds on the reference evaluator; the default uses
-the second, about ten times the work; --long uses the third, which keeps the
-Java program busy for a few seconds, so that start-up does not dominate it.
-The method is described in docs/Benchmarks.md.
+Each source declares its quick, full (default), and long input sizes. Pick
+idiomatic or checked arithmetic for the managed counterparts. Neura keeps
+its ordinary checked semantics in both comparisons. Build time is separate.
+The .NET project has one shared build time. Each warmed managed tool uses
+its own pinned benchmark harness. Optional user-mode instruction counts
+come from separate cold perf runs. JSON retains individual samples.
 
-    scripts/bench-wall.py --quick
-    scripts/bench-wall.py --neura build/neura --runs 7 --only nbody,sieve
-    scripts/bench-wall.py --long --runs 3
-    scripts/bench-wall.py --size sieve=1000000 --out-dir /tmp/bench
+    python3 scripts/bench-wall.py --quick
+    python3 scripts/bench-wall.py --track warmed --jdk jdk21=JDK21 --dotnet DOTNET
+    python3 scripts/bench-wall.py --long --candidate build/new/neura --no-java --no-dotnet
+    python3 scripts/bench-wall.py --arithmetic checked --out-dir build/bench-checked
 
-Results go to <out-dir>/bench-wall.json and <out-dir>/bench-wall.md. Peak
-resident memory is the `ru_maxrss` of each measured process alone, read with
-os.wait4 when it exits, in KiB in the JSON (`median_peak_rss_kib`) and in MiB
-in the table.
+The runner targets Linux. It keeps all generated files in --out-dir.
 """
 
 import argparse
+import base64
 import datetime
+import hashlib
 import json
 import os
 import platform
@@ -41,6 +36,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -49,6 +45,19 @@ SIZES = re.compile(r"^// sizes: quick (\d+) full (\d+) long (\d+)$", re.MULTILIN
 SIZES_FORMAT = "// sizes: quick <n> full <n> long <n>"
 MODES = ("quick", "full", "long")
 STATS = re.compile(r"^stats: steps (\d+), peak heap cells (\d+)", re.MULTILINE)
+CALLS = re.compile(r"^tier: programs .*?; calls (\d+),", re.MULTILINE)
+INSTRUCTIONS = re.compile(r"^(\d+),[^,]*,instructions:u,", re.MULTILINE)
+MAVEN_CENTRAL = "https://repo.maven.apache.org/maven2"
+JMH_DEPS = (
+    ("org/openjdk/jmh/jmh-core/1.37/jmh-core-1.37.jar",
+     "dc0eaf2bbf0036a70b60798c785d6e03a9daf06b68b8edb0f1ba9eb3421baeb3"),
+    ("org/openjdk/jmh/jmh-generator-annprocess/1.37/jmh-generator-annprocess-1.37.jar",
+     "6a5604b5b804e0daca1145df1077609321687734a8b49387e49f10557c186c77"),
+    ("net/sf/jopt-simple/jopt-simple/5.0.4/jopt-simple-5.0.4.jar",
+     "df26cc58f235f477db07f753ba5a3ab243ebe5789d9f89ecf68dd62ea9a66c28"),
+    ("org/apache/commons/commons-math3/3.6.1/commons-math3-3.6.1.jar",
+     "1e56d7b058d28b65abd256b8458e3885b674c1d588fa43cd7d1cbb9c7ef2b308"),
+)
 
 
 def java_class(name):
@@ -57,22 +66,20 @@ def java_class(name):
     return special.get(name, "".join(part.capitalize() for part in name.split("-")))
 
 
-def timed(command, cwd):
-    """Runs `command` to completion: its wall time, the completed process,
-    and its peak resident memory in KiB. The memory is the child's own
-    ru_maxrss from os.wait4, not a maximum over every child so far."""
+def timed(command, cwd, env=None):
+    """Returns wall seconds, the completed process, child peak RSS in KiB, and CPU seconds."""
     with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
         started = time.perf_counter()
-        child = subprocess.Popen(command, cwd=cwd, stdout=stdout, stderr=stderr)
+        child = subprocess.Popen(command, cwd=cwd, env=env, stdout=stdout, stderr=stderr)
         _, status, usage = os.wait4(child.pid, 0)
         elapsed = time.perf_counter() - started
         child.returncode = os.waitstatus_to_exitcode(status)
         stdout.seek(0)
         stderr.seek(0)
         process = subprocess.CompletedProcess(command, child.returncode, stdout.read(), stderr.read())
-    # Linux reports ru_maxrss in KiB, macOS in bytes.
+    # Linux reports ru_maxrss in KiB. macOS reports bytes.
     rss_kib = usage.ru_maxrss // 1024 if sys.platform == "darwin" else usage.ru_maxrss
-    return elapsed, process, rss_kib
+    return elapsed, process, rss_kib, usage.ru_utime + usage.ru_stime
 
 
 def fail(message):
@@ -82,6 +89,9 @@ def fail(message):
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--neura", default=str(ROOT / "build" / "neura"), help="the neura executable")
+    parser.add_argument("--ref", help="Git reference for the supplied Neura build")
+    parser.add_argument("--candidate", help="a second Neura build, measured alternately with --neura")
+    parser.add_argument("--candidate-ref", help="Git reference for --candidate")
     parser.add_argument("--runs", type=int, default=5, help="runs per program and language (default 5)")
     sizes = parser.add_mutually_exclusive_group()
     sizes.add_argument("--quick", action="store_true", help="use each program's quick size")
@@ -95,17 +105,31 @@ def parse_args():
                         help="--max-heap-cells for neura run (default 2^32; neura's own default is 2^26, which "
                              "some long sizes exceed)")
     parser.add_argument("--no-java", action="store_true", help="skip Java even when it is installed")
+    parser.add_argument("--jdk", action="append", default=[], metavar="LABEL=DIR",
+                        help="add a named JDK installation containing bin/java and bin/javac; repeatable")
+    parser.add_argument("--dotnet", help="path to the dotnet executable (default: look on PATH)")
+    parser.add_argument("--no-dotnet", action="store_true", help="skip .NET even when it is installed")
+    parser.add_argument("--no-perf", action="store_true", help="skip separate perf instruction captures")
+    parser.add_argument("--diagnostics", action="store_true", help="capture separate --tier-stats runs")
+    parser.add_argument("--arithmetic", choices=("idiomatic", "checked"), default="idiomatic",
+                        help="arithmetic comparison to run; reports stay separate")
+    parser.add_argument("--track", choices=("cold", "warmed"), default="cold")
+    parser.add_argument("--warmups", type=int, default=3, help="workload invocations before warmed samples")
     parser.add_argument("--run-option", action="append", default=[], metavar="OPTION",
                         help="pass OPTION to neura run, for example --run-option=--tier=0 (repeatable)")
     parser.add_argument("--compare-tiers", action="store_true",
-                        help="run each program at --tier=0, --tier=1, and --tier=2 (regions interpreted, and "
-                             "compiled with --jit=on where this machine can) instead of comparing with Java, and "
-                             "report the share of steps tiers 1 and 2 ran (docs/runtime/NVM.md, \"Execution tiers\")")
+                        help="compare tiers 0, 1, 2 interpreted, 2 native, and 3 native where available")
     parser.add_argument("--out-dir", default=str(ROOT / "build" / "bench-wall"),
                         help="where images, classes, and results go (default build/bench-wall)")
     args = parser.parse_args()
     if args.runs < 1:
         parser.error("--runs must be positive")
+    if args.warmups < 1:
+        parser.error("--warmups must be positive")
+    if args.compare_tiers and (args.candidate or args.track != "cold"):
+        parser.error("--compare-tiers requires one Neura and the cold track")
+    if args.candidate_ref and not args.candidate:
+        parser.error("--candidate-ref requires --candidate")
     args.mode = "quick" if args.quick else "long" if args.long else "full"
     return args
 
@@ -149,189 +173,388 @@ def find_java(args):
     return (javac, java), first[0] if first else "unknown version"
 
 
-def median_run(command, cwd, runs, label):
-    """Runs `command` `runs` times: the median wall time, every wall time,
-    the output, the stats, and every peak resident memory in KiB."""
-    times = []
-    memory = []
-    output = None
-    stats = None
-    for index in range(runs):
-        elapsed, process, rss_kib = timed(command, cwd)
-        if process.returncode != 0:
-            fail(f"{label} exited {process.returncode}\n{process.stdout.decode(errors='replace')}"
-                 f"{process.stderr.decode(errors='replace')}")
-        if output is None:
-            output = process.stdout
-        elif process.stdout != output:
-            fail(f"{label} printed different output on run {index + 1}")
-        stderr = process.stderr.decode(errors="replace")
-        match = STATS.search(stderr)
-        if match:
-            current = (int(match.group(1)), int(match.group(2)))
-            if stats is not None and current != stats:
-                fail(f"{label} reported different stats on run {index + 1}")
-            stats = current
-        times.append(elapsed)
-        memory.append(rss_kib)
-    return statistics.median(times), times, output, stats, memory
-
-
-def memory_fields(memory):
-    """The JSON fields of the peak resident memory of a set of runs."""
-    return {"median_peak_rss_kib": statistics.median(memory), "peak_rss_kib": memory}
-
-
-def timed_build(command, cwd, label):
+def timed_build(command, cwd, label, env=None):
     """Runs one build command: its wall time in seconds."""
-    elapsed, process, _ = timed(command, cwd)
+    elapsed, process, _, _ = timed(command, cwd, env)
     if process.returncode != 0:
         fail(f"{label} failed\n{process.stdout.decode(errors='replace')}{process.stderr.decode(errors='replace')}")
     return elapsed
 
 
+def checked(command, cwd, label, env=None):
+    process = subprocess.run(command, cwd=cwd, env=env, capture_output=True)
+    if process.returncode:
+        fail(f"{label} exited {process.returncode}\n{process.stderr.decode(errors='replace')}")
+    return process
+
+
+def git_ref(ref):
+    if not ref:
+        return None
+    return checked(["git", "rev-parse", "--verify", f"{ref}^{{commit}}"], ROOT, "Git reference").stdout.decode().strip()
+
+
+def java_variants(args):
+    if args.no_java:
+        return {}
+    variants = {}
+    requested = []
+    for item in args.jdk:
+        label, separator, home = item.partition("=")
+        if not separator or not re.fullmatch(r"[A-Za-z0-9-]+", label) or not home:
+            fail("--jdk expects LABEL=DIR")
+        bin_dir = Path(home).resolve() / "bin"
+        requested.append((label, str(bin_dir / "java"), str(bin_dir / "javac")))
+    if not requested:
+        found, _ = find_java(args)
+        if found:
+            requested.append(("java", found[1], found[0]))
+    for label, java, javac in requested:
+        if label in variants:
+            fail(f"duplicate JDK label {label}")
+        if not (Path(java).is_file() and Path(javac).is_file()):
+            fail(f"{label}: java and javac are required")
+        version = checked([java, "-version"], ROOT, label).stderr.decode().splitlines()[0]
+        variants[label] = (java, javac, version)
+    return variants
+
+
+def find_dotnet(args):
+    if args.no_dotnet:
+        return None
+    tool = args.dotnet or shutil.which("dotnet")
+    if not tool:
+        return None
+    binary = Path(tool).resolve()
+    env = dict(os.environ, PATH=os.pathsep.join([str(binary.parent), os.environ.get("PATH", "")]),
+               DOTNET_ROOT=str(binary.parent), DOTNET_gcServer="0", DOTNET_gcConcurrent="0",
+               DOTNET_CLI_TELEMETRY_OPTOUT="1")
+    version = checked([str(binary), "--version"], ROOT, ".NET version", env).stdout.decode().strip()
+    return str(binary), env, version
+
+
+def find_perf(args, out):
+    if args.no_perf:
+        return None
+    perf = shutil.which("perf")
+    if perf is None:
+        return None
+    probe = subprocess.run([perf, "stat", "-x,", "-e", "instructions:u", "true"], cwd=out,
+                           capture_output=True, env=dict(os.environ, LC_ALL="C"))
+    return perf if probe.returncode == 0 and INSTRUCTIONS.search(probe.stderr.decode()) else None
+
+
+def summary(samples):
+    data = {}
+    for name in ("seconds", "cpu_seconds", "peak_rss_kib", "instructions"):
+        values = [sample[name] for sample in samples if sample.get(name) is not None]
+        if values:
+            data[f"median_{name}"] = statistics.median(values)
+            data[name] = values
+    data["samples"] = samples
+    return data
+
+
+def cold_runs(commands, out, args, perf):
+    samples = {label: [] for label in commands}
+    expected = None
+    for index in range(args.runs):
+        labels = list(commands)
+        if index % 2:
+            labels.reverse()
+        for label in labels:
+            command, env, _, is_neura = commands[label]
+            elapsed, process, rss, cpu = timed(command, out, env)
+            if process.returncode:
+                fail(f"{label} exited {process.returncode}\n{process.stderr.decode(errors='replace')}")
+            if expected is None:
+                expected = process.stdout
+            if process.stdout != expected:
+                fail(f"{label}: output differs\nexpected {expected!r}\nreceived {process.stdout!r}")
+            sample = {"seconds": elapsed, "cpu_seconds": cpu, "peak_rss_kib": rss}
+            if is_neura:
+                stats = STATS.search(process.stderr.decode())
+                if stats is None:
+                    fail(f"{label}: missing execution statistics")
+                sample["steps"], sample["peak_heap_cells"] = (int(value) for value in stats.groups())
+            samples[label].append(sample)
+    # One separately instrumented process per variant. Headline timings are uninstrumented.
+    if perf:
+        for label, (command, env, _, _) in commands.items():
+            capture = checked([perf, "stat", "-x,", "-e", "instructions:u", "--", *command], out, label,
+                              dict(env or os.environ, LC_ALL="C"))
+            if capture.stdout != expected:
+                fail(f"{label}: perf run output differs")
+            match = INSTRUCTIONS.search(capture.stderr.decode())
+            if match is not None:
+                samples[label][0]["instructions"] = int(match[1])
+    rows = {}
+    for label, values in samples.items():
+        command, env, build_seconds, is_neura = commands[label]
+        row = summary(values)
+        row["build_seconds"] = build_seconds
+        if is_neura:
+            for key in ("steps", "peak_heap_cells"):
+                if len({sample[key] for sample in values}) != 1:
+                    fail(f"{label}: {key} differs between runs")
+                row[key] = values[0][key]
+            if args.diagnostics:
+                proc = checked(command[:2] + ["--tier-stats"] + command[2:], out, label, env)
+                text = proc.stderr.decode()
+                match = CALLS.search(text)
+                row["calls"] = int(match[1]) if match else 0
+                row["tier_stats"] = [line for line in text.splitlines() if line.startswith("tier: ")]
+                if proc.stdout != expected:
+                    fail(f"{label}: diagnostic run output differs")
+        rows[label] = row
+    return rows, expected.decode()
+
+
+def machine_details():
+    machine = {"system": platform.system(), "machine": platform.machine(), "kernel": platform.release(),
+               "cpus": os.cpu_count(), "python": platform.python_version()}
+    if hasattr(os, "sched_getaffinity"):
+        machine["affinity"] = sorted(os.sched_getaffinity(0))
+    cpuinfo = Path("/proc/cpuinfo")
+    if cpuinfo.is_file():
+        model = re.search(r"^model name\s*:\s*(.*)$", cpuinfo.read_text(), re.MULTILINE)
+        if model:
+            machine["cpu"] = model[1]
+    governors = sorted({path.read_text().strip()
+                        for path in Path("/sys/devices/system/cpu").glob("cpu*/cpufreq/scaling_governor")})
+    if governors:
+        machine["governors"] = governors
+    return machine
+
+
+def build_warm_neura(neura, out, label):
+    prefix = neura.parent
+    lib = next(iter(sorted((prefix / "lib/neura").glob("libneura-core-*.so"))), None)
+    compiler = shutil.which("clang++")
+    if lib is None or compiler is None:
+        fail("warmed Neura needs the Linux shared core beside the executable and clang++")
+    runner = out / f"warm-{label}"
+    timed_build([compiler, "-std=c++20", "-O2", "-I", str(ROOT / "src"),
+                 str(BENCH / "warm-neura.cpp"), str(lib), f"-Wl,-rpath,{lib.parent}", "-o", str(runner)],
+                out, label)
+    return runner
+
+
+def prepare_managed(args, out, javas, dotnet):
+    java_sources = BENCH / "java"
+    if javas and args.arithmetic == "checked":
+        java_sources = out / "checked-java"
+        java_sources.mkdir(exist_ok=True)
+        java = next(iter(javas.values()))[0]
+        checked([java, str(BENCH / "java/harness/CheckedSources.java"), str(BENCH / "java"), str(java_sources)],
+                out, "generate checked Java")
+    jars = []
+    if javas and args.track == "warmed":
+        deps = out / "jmh-deps"
+        deps.mkdir(exist_ok=True)
+        for relative, sha256 in JMH_DEPS:
+            jar = deps / relative.rsplit("/", 1)[-1]
+            if not jar.is_file():
+                with urllib.request.urlopen(f"{MAVEN_CENTRAL}/{relative}", timeout=30) as response:
+                    data = response.read()
+                if hashlib.sha256(data).hexdigest() != sha256:
+                    fail(f"digest mismatch for {jar.name}")
+                jar.write_bytes(data)
+            elif hashlib.sha256(jar.read_bytes()).hexdigest() != sha256:
+                fail(f"digest mismatch for {jar.name}")
+            jars.append(jar)
+        for label, (_, javac, _) in javas.items():
+            wrapper = out / f"wrapper-{label}"
+            wrapper.mkdir(exist_ok=True)
+            checked([javac, "-cp", str(jars[0]), "-processorpath", os.pathsep.join(map(str, jars[:2])),
+                     "-d", str(wrapper), str(BENCH / "java/harness/Workload.java"),
+                     str(BENCH / "java/harness/ProcessCpuTime.java")], out, f"{label}: compile JMH wrapper")
+    dotnet_build = None
+    if dotnet:
+        binary, env, _ = dotnet
+        env.setdefault("NUGET_PACKAGES", str(out / "nuget-packages"))
+        env.setdefault("DOTNET_CLI_HOME", str(out / "dotnet-home"))
+        # Keep the restore, obj files and package logs out of the source tree.
+        project = out / "csharp"
+        shutil.copytree(BENCH / "csharp", project, dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns("bin", "obj"))
+        config = "Checked" if args.arithmetic == "checked" else "Release"
+        checked([binary, "restore", "--nologo", f"-p:Configuration={config}"], project, ".NET restore", env)
+        dotnet_build = timed_build([binary, "build", "--no-restore", "--nologo", "-c", config],
+                                   project, ".NET build", env)
+    return java_sources, jars, dotnet_build
+
+
+def managed_commands(args, out, javas, dotnet, name, size, prepared):
+    commands = {}
+    klass = java_class(name)
+    java_sources, _, dotnet_build = prepared
+    source = java_sources / f"{klass}.java"
+    for label, (java, javac, _) in javas.items():
+        classes = out / f"classes-{label}"
+        classes.mkdir(exist_ok=True)
+        build = timed_build([javac, "-d", str(classes), str(source)], out, f"{name}: {label} build")
+        for suffix, options in [("", []), ("-serial", ["-XX:+UseSerialGC"])]:
+            commands[label + suffix] = ([java, *options, "-cp", str(classes), klass, str(size)], None, build, False)
+    if dotnet:
+        binary, env, _ = dotnet
+        config = "Checked" if args.arithmetic == "checked" else "Release"
+        dll = out / "csharp/bin" / config / "net10.0/BenchWall.dll"
+        commands["dotnet"] = [binary, str(dll), name, str(size)], env, dotnet_build, False
+    return commands
+
+
+def verify_text_edges(neura, managed, out):
+    image = out / "images/text-split-edge.nvr"
+    checked([str(neura), "build", str(BENCH / "fixtures/text-split-edge.nra"), "-o", str(image)],
+            out, "build text edge cases")
+    expected = "1 0 \n1 6 single\n3 2 ||\n3 7 é|猫|\n".encode()
+    if checked([str(neura), "run", str(image)], out, "Neura text edge cases").stdout != expected:
+        fail("Neura: text edge output differs")
+    for label, (command, env, _, _) in managed.items():
+        if label.endswith("-serial"):
+            continue
+        edge = command[:2] + ["--verify-text-edges"] if label == "dotnet" else command[:-1] + ["--verify-edges"]
+        if checked(edge, out, f"{label}: text edge cases", env).stdout != expected:
+            fail(f"{label}: text edge output differs")
+
+
+def warmed_managed(args, out, javas, dotnet, name, size, expected, prepared):
+    built = managed_commands(args, out, javas, dotnet, name, size, prepared)
+    rows = {}
+    retained = out / "managed-samples" / name
+    retained.mkdir(parents=True, exist_ok=True)
+    for label, (java, _, _) in javas.items():
+        cp = os.pathsep.join(map(str, [out / f"wrapper-{label}", out / f"classes-{label}", *prepared[1]]))
+        for suffix, options in [("", []), ("-serial", ["-jvmArgsAppend=-XX:+UseSerialGC"])]:
+            key = label + suffix
+            with tempfile.TemporaryDirectory(dir=out) as scratch:
+                output = Path(scratch) / "jmh.json"
+                checked([java, "-cp", cp, "org.openjdk.jmh.Main", "benchwall.jmh.Workload.run",
+                         "-p", f"program={java_class(name)}", "-p", f"size={size}",
+                         "-p=checksum=" + base64.b64encode(expected.encode()).decode(),
+                         "-bm", "ss", "-f", "1", "-wi", str(args.warmups), "-i", str(args.runs),
+                         "-bs", "1", "-wbs", "1", "-foe", "true", "-prof", "benchwall.jmh.ProcessCpuTime",
+                         *options, "-rf", "json", "-rff", str(output)], out, key)
+                data = json.loads(output.read_text())[0]
+            wall = data["primaryMetric"]["rawData"][0]
+            cpu = data["secondaryMetrics"]["processCpu"]["rawData"][0]
+            samples = [{"seconds": w / 1000, "cpu_seconds": c / 1000} for w, c in zip(wall, cpu, strict=True)]
+            if len(samples) != args.runs:
+                fail(f"{key}: incomplete JMH samples")
+            rows[key] = {**summary(samples), "build_seconds": built[key][2]}
+            (retained / f"{key}.json").write_text(json.dumps(samples, indent=2) + "\n")
+    if dotnet:
+        (binary, dll, _, _), env, build, _ = built["dotnet"]
+        expected_file = retained / "checksum.txt"
+        expected_file.write_bytes(expected.encode())
+        sample_dir = retained / "dotnet"
+        checked([binary, dll, "--warmed", name, str(size), str(args.runs), str(args.warmups),
+                 str(sample_dir), str(expected_file)], out / "csharp", name, env)
+        data = json.loads((sample_dir / "samples.json").read_text())
+        samples = [{"seconds": w, "cpu_seconds": c}
+                   for w, c in zip(data["wall_seconds"], data["cpu_seconds"], strict=True)]
+        if len(samples) != args.runs:
+            fail(f"{name}: incomplete BenchmarkDotNet samples")
+        rows["dotnet"] = {**summary(samples), "build_seconds": build}
+    return rows
+
+
+def warmed_neura_run(runner, image, size, args, out, label):
+    command = [str(runner), str(image), str(size), str(args.warmups), str(args.runs), str(args.max_steps),
+               str(args.max_heap_cells)]
+    proc = checked(command, out, label)
+    text = proc.stderr.decode()
+    samples = [{"seconds": float(wall), "cpu_seconds": float(cpu)}
+               for wall, cpu in re.findall(r"^sample (\S+) (\S+)$", text, re.MULTILINE)]
+    stats = STATS.search(text)
+    if len(samples) != args.runs or stats is None:
+        fail(f"{label}: incomplete warmed samples")
+    return {**summary(samples), "steps": int(stats[1]), "peak_heap_cells": int(stats[2])}, proc.stdout.decode()
+
+
 def main():
     args = parse_args()
+    os.environ.setdefault("NEURA_GPU", "off")
     neura = Path(args.neura).resolve()
-    if not neura.exists():
-        fail(f"{neura} does not exist; build it first or pass --neura")
+    tools = {"neura": neura}
+    if args.candidate:
+        tools["candidate"] = Path(args.candidate).resolve()
+    for label, tool in tools.items():
+        if not tool.is_file():
+            fail(f"{label} executable does not exist")
+    if args.track == "warmed" and args.run_option:
+        fail("warmed Neura uses the shared-cache runner and does not accept --run-option")
     out = Path(args.out_dir).resolve()
     images = out / "images"
-    classes = out / "classes"
     images.mkdir(parents=True, exist_ok=True)
-    selected = programs(args)
-    java, java_note = (None, "not run: tiers compared") if args.compare_tiers else find_java(args)
-    print(f"neura: {neura}")
-    print(f"java: {java_note}")
-    print(f"mode: {args.mode}, {args.runs} runs, median wall time")
-    if java:
-        classes.mkdir(parents=True, exist_ok=True)
+    javas = {} if args.compare_tiers else java_variants(args)
+    dotnet = None if args.compare_tiers else find_dotnet(args)
+    perf = find_perf(args, out) if args.track == "cold" else None
+    if args.compare_tiers:
+        args.diagnostics = True
+    runtime_versions = {label: checked([str(tool), "--version"], out, label).stdout.decode().strip()
+                        for label, tool in tools.items()}
+    runtime_versions.update({label: version for label, (_, _, version) in javas.items()})
+    if dotnet:
+        runtime_versions["dotnet"] = dotnet[2]
+    report = {
+        "date": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+        "mode": args.mode, "track": args.track, "arithmetic": args.arithmetic, "runs": args.runs,
+        "warmups": args.warmups if args.track == "warmed" else None,
+        "versions": runtime_versions, "git": {"neura": git_ref(args.ref), "candidate": git_ref(args.candidate_ref)},
+        "max_steps": args.max_steps, "max_heap_cells": args.max_heap_cells, "run_options": args.run_option,
+        "gpu": os.environ["NEURA_GPU"], "instructions": bool(perf), "machine": machine_details(), "results": [],
+        "neura_version": runtime_versions["neura"],
+    }
+    prepared = prepare_managed(args, out, javas, dotnet)
+    runners = {label: build_warm_neura(tool, out, label) for label, tool in tools.items()} if args.track == "warmed" else {}
 
-    results = []
     native = None
-    for name, source, size in selected:
-        image = images / f"{name}.nvr"
-        build_seconds = timed_build([str(neura), "build", str(source), "-o", str(image)], out,
-                                    f"{name}: neura build")
-        command = [str(neura), "run", "--stats", "--max-steps", str(args.max_steps), "--max-heap-cells",
-                   str(args.max_heap_cells), *args.run_option, str(image), "--", str(size)]
+    for name, source, size in programs(args):
+        commands = {}
+        warm_rows = {}
+        expected = None
+        for label, tool in tools.items():
+            image = images / f"{label}-{name}.nvr"
+            build_seconds = timed_build([str(tool), "build", str(source), "-o", str(image)], out, f"{name}: {label} build")
+            command = [str(tool), "run", "--stats", "--max-steps", str(args.max_steps), "--max-heap-cells",
+                       str(args.max_heap_cells), *args.run_option, str(image), "--", str(size)]
+            if args.track == "warmed":
+                row, output = warmed_neura_run(runners[label], image, size, args, out, label)
+                row["build_seconds"] = build_seconds
+                if expected is not None and output != expected:
+                    fail(f"{label}: warmed output differs")
+                expected = output
+                warm_rows[label] = row
+            else:
+                commands[label] = command, None, build_seconds, True
         if args.compare_tiers:
             if native is None:
                 native = native_available(neura, out, image)
-                print(f"native code: {'compared (--jit=on)' if native else 'not available here'}", flush=True)
-            entry = compare_tiers(command, out, args.runs, name, size, native)
-            entry["build_seconds"] = build_seconds
-            results.append(entry)
-            continue
-        seconds, times, output, stats, memory = median_run(command, out, args.runs, f"{name} (neura)")
-        entry = {
-            "name": name,
-            "size": size,
-            "neura": {"median_seconds": seconds, "seconds": times,
-                      "steps": stats[0] if stats else None, "peak_heap_cells": stats[1] if stats else None,
-                      **memory_fields(memory), "build_seconds": build_seconds},
-            "output": output.decode(errors="replace"),
-        }
-        line = f"{name:16} size {size:>10}  neura {seconds:8.3f} s {mib(memory_fields(memory)):>7} MiB"
-        if stats:
-            line += f"  steps {stats[0]:>14}"
-        if java:
-            # Each program is compiled on its own, so the time is that program's.
-            java_build = timed_build([java[0], "-d", str(classes), str(BENCH / "java" / f"{java_class(name)}.java")],
-                                     out, f"{name}: javac")
-            java_command = [java[1], "-cp", str(classes), java_class(name), str(size)]
-            java_seconds, java_times, java_output, _, java_memory = median_run(java_command, out, args.runs,
-                                                                               f"{name} (java)")
-            entry["java"] = {"median_seconds": java_seconds, "seconds": java_times, **memory_fields(java_memory),
-                             "build_seconds": java_build}
-            entry["outputs_match"] = java_output == output
-            line += (f"  java {java_seconds:8.3f} s {mib(memory_fields(java_memory)):>7} MiB  "
-                     f"ratio {seconds / java_seconds:8.1f}")
-            if java_output != output:
-                line += "  OUTPUT DIFFERS"
-        print(line, flush=True)
-        results.append(entry)
+            rows, expected = cold_runs(tier_commands(command, build_seconds, native), out, args, perf)
+            metrics = {(row["steps"], row["peak_heap_cells"]) for row in rows.values()}
+            if len(metrics) != 1:
+                fail(f"{name}: tiers disagree on steps or peak heap cells")
+            entry = {"name": name, "size": size, "output": expected, **rows}
+        else:
+            if args.track == "warmed":
+                warm_rows.update(warmed_managed(args, out, javas, dotnet, name, size, expected, prepared))
+                rows = warm_rows
+            else:
+                managed = managed_commands(args, out, javas, dotnet, name, size, prepared)
+                if name == "text-split":
+                    verify_text_edges(neura, managed, out)
+                commands.update(managed)
+                rows, expected = cold_runs(commands, out, args, perf)
+            entry = {"name": name, "size": size, "output": expected, **rows}
+        medians = "  ".join(f"{label} {row['median_seconds']:.6f}s" for label, row in rows.items())
+        print(f"{name:16} {size:>10}  {medians}", flush=True)
+        report["results"].append(entry)
 
-    report = {
-        "date": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
-        "mode": args.mode,
-        "runs": args.runs,
-        "max_steps": args.max_steps,
-        "max_heap_cells": args.max_heap_cells,
-        "neura": str(neura),
-        "neura_version": subprocess.run([str(neura), "--version"], capture_output=True, text=True).stdout.strip(),
-        "java": java_note,
-        "machine": {"system": platform.system(), "machine": platform.machine(), "cpus": os.cpu_count(),
-                    "python": platform.python_version()},
-        "results": results,
-    }
     (out / "bench-wall.json").write_text(json.dumps(report, indent=2) + "\n")
-    (out / "bench-wall.md").write_text(tier_markdown(report) if args.compare_tiers else markdown(report))
-    print(f"wrote {out / 'bench-wall.json'} and {out / 'bench-wall.md'}")
-    if any(entry.get("outputs_match") is False for entry in results):
-        fail("a Java program's output differs from its Neura program's")
+    (out / "bench-wall.md").write_text(markdown(report))
     return 0
-
-
-TIER_STEPS = re.compile(r"tier: steps (\d+): tier 2 ([0-9.]+)% .*?, tier 1 ([0-9.]+)%")
-JIT_LINE = re.compile(r"tier: jit on: (\d+) regions compiled \((\d+) bytes of code\)")
-
-
-def compare_tiers(command, cwd, runs, name, size, native):
-    """Times one program at tiers 0 and 1, at tier 2 with every region on
-    the region interpreter (--jit=off), and, when `native`, at tier 2 with
-    regions compiled to native code (--jit=on; docs/runtime/NVM.md, "Native
-    compilation"). All must print the same output and report the same steps
-    and peak heap cells."""
-    at = command.index("run") + 1
-    configurations = [("tier0", ["--tier=0"]), ("tier1", ["--tier=1"]), ("tier2", ["--tier=2", "--jit=off"])]
-    if native:
-        configurations.append(("jit", ["--tier=2", "--jit=on"]))
-    timed_runs = {}
-    for key, options in configurations:
-        timed_runs[key] = median_run(command[:at] + options + command[at:], cwd, runs, f"{name} ({key})")
-    seconds = {key: timed_runs[key][0] for key in timed_runs}
-    for key in timed_runs:
-        if timed_runs[key][2] != timed_runs["tier0"][2] or timed_runs[key][3] != timed_runs["tier0"][3]:
-            fail(f"{name}: tier 0 and {key} differ in output or stats")
-    shares = {}
-    compiled = None
-    for key, options in configurations[1:]:
-        stats = command[:at] + options + ["--tier-stats"] + command[at:]
-        text = subprocess.run(stats, cwd=cwd, capture_output=True).stderr.decode(errors="replace")
-        match = TIER_STEPS.search(text)
-        shares[key] = (float(match.group(2)), float(match.group(3))) if match else (None, None)
-        if key == "jit":
-            jit = JIT_LINE.search(text)
-            compiled = (int(jit.group(1)), int(jit.group(2))) if jit else None
-    line = (f"{name:16} size {size:>8}  tier 0 {seconds['tier0']:8.3f} s  tier 1 {seconds['tier1']:8.3f} s  "
-            f"tier 2 {seconds['tier2']:8.3f} s")
-    if native:
-        line += f"  jit {seconds['jit']:8.3f} s  jit speedup over tier 2 {seconds['tier2'] / seconds['jit']:5.2f}"
-    line += (f"  speedup {seconds['tier0'] / seconds['tier1']:5.2f} {seconds['tier0'] / seconds['tier2']:5.2f}  "
-             f"tier 1 steps {shares['tier1'][1]}%  tier 2 steps in regions {shares['tier2'][0]}%")
-    print(line, flush=True)
-    stats0 = timed_runs["tier0"][3]
-    entry = {"name": name, "size": size, "steps": stats0[0] if stats0 else None,
-             "tier0": {"median_seconds": seconds["tier0"], "seconds": timed_runs["tier0"][1]},
-             "tier1": {"median_seconds": seconds["tier1"], "seconds": timed_runs["tier1"][1],
-                       "steps_percent": shares["tier1"][1]},
-             "tier2": {"median_seconds": seconds["tier2"], "seconds": timed_runs["tier2"][1],
-                       "region_percent": shares["tier2"][0], "tier1_percent": shares["tier2"][1]},
-             "output": timed_runs["tier0"][2].decode(errors="replace")}
-    if native:
-        entry["jit"] = {"median_seconds": seconds["jit"], "seconds": timed_runs["jit"][1],
-                        "region_percent": shares["jit"][0],
-                        "regions_compiled": compiled[0] if compiled else None,
-                        "code_bytes": compiled[1] if compiled else None}
-    for key in timed_runs:
-        entry[key].update(memory_fields(timed_runs[key][4]))
-    return entry
-
-
-def mib(fields):
-    """The median peak resident memory of `memory_fields` in MiB, as text."""
-    return f"{fields['median_peak_rss_kib'] / 1024:.1f}"
 
 
 def native_available(neura, cwd, image):
@@ -341,76 +564,54 @@ def native_available(neura, cwd, image):
     return b"--jit=on" not in process.stderr
 
 
-def tier_markdown(report):
-    native = any("jit" in entry for entry in report["results"])
-    lines = [
-        f"Tiers 0, 1, and 2, {report['mode']} sizes, median of {report['runs']} runs "
-        f"({report['date']}, {report['machine']['system']} {report['machine']['machine']}, "
-        f"{report['machine']['cpus']} CPUs). Tier 2 runs regions on the region interpreter"
-        + ("; Native runs them as native code (--jit=on)." if native else "."),
-        "",
-        f"- Neura: {report['neura_version'] or report['neura']}",
-        "",
+def tier_commands(command, build_seconds, native):
+    modes = [
+        ("Tier 0", "0", "off", "off"),
+        ("Tier 1", "1", "off", "off"),
+        ("Tier 2 interpreter", "2", "off", "off"),
     ]
     if native:
-        lines += ["| Program | Size | Steps | Tier 0 (s) | Tier 1 (s) | Tier 2 (s) | Native (s) | Speedup 1 | "
-                  "Speedup 2 | Speedup native | Native / tier 2 | Steps in regions |",
-                  "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"]
-    else:
-        lines += ["| Program | Size | Steps | Tier 0 (s) | Tier 1 (s) | Tier 2 (s) | Speedup 1 | Speedup 2 | "
-                  "Steps on tier 1 | Steps in regions |",
-                  "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"]
-    percent = lambda value: "" if value is None else f"{value:.1f}%"
-    for entry in report["results"]:
-        t0 = entry["tier0"]["median_seconds"]
-        t1 = entry["tier1"]["median_seconds"]
-        t2 = entry["tier2"]["median_seconds"]
-        if native and "jit" in entry:
-            tj = entry["jit"]["median_seconds"]
-            lines.append(f"| {entry['name']} | {entry['size']} | {entry['steps']} | {t0:.3f} | {t1:.3f} | {t2:.3f} | "
-                         f"{tj:.3f} | {t0 / t1:.2f} | {t0 / t2:.2f} | {t0 / tj:.2f} | {tj / t2:.2f} | "
-                         f"{percent(entry['tier2']['region_percent'])} |")
-        else:
-            lines.append(f"| {entry['name']} | {entry['size']} | {entry['steps']} | {t0:.3f} | {t1:.3f} | {t2:.3f} | "
-                         f"{t0 / t1:.2f} | {t0 / t2:.2f} | {percent(entry['tier1']['steps_percent'])} | "
-                         f"{percent(entry['tier2']['region_percent'])} |")
-    return "\n".join(lines) + "\n"
+        modes.append(("Tier 2 native", "2", "on", "off"))
+        if sys.platform == "linux" and platform.machine() == "x86_64":
+            modes.append(("Tier 3 native", "2", "on", "native"))
+    return {label: (command[:2] + [f"--tier={tier}", f"--jit={jit}"] + command[2:],
+                    dict(os.environ, NEURA_TIER3=tier3), build_seconds, True)
+            for label, tier, jit, tier3 in modes}
 
 
 def markdown(report):
-    java = any("java" in entry for entry in report["results"])
+    machine = report["machine"]
     lines = [
-        f"Wall-clock benchmarks, {report['mode']} sizes, median of {report['runs']} runs "
-        f"({report['date']}, {report['machine']['system']} {report['machine']['machine']}, "
-        f"{report['machine']['cpus']} CPUs).",
+        f"# {report['track'].capitalize()} benchmarks, {report['arithmetic']} arithmetic",
         "",
-        f"- Neura: {report['neura_version'] or report['neura']}",
-        f"- Java: {report['java']}",
+        f"{report['mode'].capitalize()} inputs, median of {report['runs']} samples "
+        f"({report['date']}, {machine['system']} {machine['kernel']} {machine['machine']}).",
         "",
+        f"- CPU: {machine.get('cpu', '')}, affinity {machine.get('affinity', '')}, "
+        f"governors {', '.join(machine.get('governors', []))}",
+        f"- Limits: {report['max_steps']} steps, {report['max_heap_cells']} heap cells",
     ]
-    if java:
-        lines += ["| Program | Size | Neura (s) | Steps | Java (s) | Neura / Java | Same output | Neura RSS (MiB) | "
-                  "Java RSS (MiB) | Neura build (s) | Java build (s) |",
-                  "| --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: |"]
-    else:
-        lines += ["| Program | Size | Neura (s) | Steps | Peak heap cells | Neura RSS (MiB) | Neura build (s) |",
-                  "| --- | ---: | ---: | ---: | ---: | ---: | ---: |"]
+    if report["warmups"]:
+        lines.append(f"- Neura warmups: {report['warmups']} full workload invocations per process")
+    for label, version in report["versions"].items():
+        ref = report["git"].get(label)
+        lines.append(f"- {label}: {version}" + (f", {ref}" if ref else ""))
+    lines.extend([
+        "",
+        "| Program | Size | Runtime | Wall median (s) | Wall range (s) | CPU median (s) | Calls | Steps | Peak heap cells | Instructions:u | Build (s) |",
+        "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ])
     for entry in report["results"]:
-        neura = entry["neura"]
-        steps = "" if neura["steps"] is None else str(neura["steps"])
-        row = f"| {entry['name']} | {entry['size']} | {neura['median_seconds']:.3f} | {steps} |"
-        if java:
-            if "java" in entry:
-                seconds = entry["java"]["median_seconds"]
-                same = "yes" if entry["outputs_match"] else "no"
-                row += (f" {seconds:.3f} | {neura['median_seconds'] / seconds:.1f} | {same} | {mib(neura)} | "
-                        f"{mib(entry['java'])} | {neura['build_seconds']:.3f} | {entry['java']['build_seconds']:.3f} |")
-            else:
-                row += f" | | | {mib(neura)} | | {neura['build_seconds']:.3f} | |"
-        else:
-            cells = "" if neura["peak_heap_cells"] is None else str(neura["peak_heap_cells"])
-            row += f" {cells} | {mib(neura)} | {neura['build_seconds']:.3f} |"
-        lines.append(row)
+        for label, row in entry.items():
+            if not isinstance(row, dict):
+                continue
+            samples = row["seconds"]
+            cpu = f"{row['median_cpu_seconds']:.6f}" if "median_cpu_seconds" in row else ""
+            build = f"{row['build_seconds']:.6f}" if "build_seconds" in row else ""
+            lines.append(f"| {entry['name']} | {entry['size']} | {label} | {row['median_seconds']:.6f} | "
+                         f"{min(samples):.6f}–{max(samples):.6f} | {cpu} | {row.get('calls', '')} | "
+                         f"{row.get('steps', '')} | {row.get('peak_heap_cells', '')} | "
+                         f"{row.get('median_instructions', '')} | {build} |")
     return "\n".join(lines) + "\n"
 
 

@@ -93,7 +93,10 @@ public final class Dispatch {
     }
 
     public static void main(String[] args) {
-        int n = Integer.parseInt(args[0]);
+        System.out.print(workload(Integer.parseInt(args[0])));
+    }
+
+    public static String workload(int n) {
         ArrayList<Shape> shapes = new ArrayList<>();
         long seed = 12345;
         for (int i = 0; i < SHAPES; i = i + 1) {
@@ -120,6 +123,6 @@ public final class Dispatch {
                 checksum = (checksum * 31 + shape.weight() + shape.mix(checksum & 1023)) & MASK;
             }
         }
-        System.out.println("dispatch " + shapes.size() + " " + checksum);
+        return "dispatch " + shapes.size() + " " + checksum + System.lineSeparator();
     }
 }

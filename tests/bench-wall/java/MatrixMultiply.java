@@ -3,7 +3,10 @@ public final class MatrixMultiply {
     private static final long MASK = 1073741823L;
 
     public static void main(String[] args) {
-        int n = Integer.parseInt(args[0]);
+        System.out.print(workload(Integer.parseInt(args[0])));
+    }
+
+    public static String workload(int n) {
         long[] a = new long[n * n];
         long[] b = new long[n * n];
         long[] c = new long[n * n];
@@ -26,6 +29,6 @@ public final class MatrixMultiply {
         for (int i = 0; i < n * n; i = i + 1) {
             checksum = (checksum * 31 + c[i]) & MASK;
         }
-        System.out.println("matrix-multiply " + checksum);
+        return "matrix-multiply " + checksum + System.lineSeparator();
     }
 }

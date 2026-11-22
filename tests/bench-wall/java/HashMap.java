@@ -5,7 +5,10 @@ public final class HashMap {
     private static final long MASK = 1073741823L;
 
     public static void main(String[] args) {
-        int n = Integer.parseInt(args[0]);
+        System.out.print(workload(Integer.parseInt(args[0])));
+    }
+
+    public static String workload(int n) {
         java.util.LinkedHashMap<Long, Long> map = new java.util.LinkedHashMap<>();
         for (int i = 0; i < n; i = i + 1) {
             map.put((long) i * 7919, (long) i);
@@ -24,6 +27,6 @@ public final class HashMap {
         for (java.util.Map.Entry<Long, Long> entry : map.entrySet()) {
             checksum = (checksum * 31 + entry.getKey() * 3 + entry.getValue()) & MASK;
         }
-        System.out.println("hash-map " + map.size() + " " + total + " " + checksum);
+        return "hash-map " + map.size() + " " + total + " " + checksum + System.lineSeparator();
     }
 }

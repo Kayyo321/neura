@@ -5,7 +5,9 @@
 // substrings, as the Neura library searches and slices, and the limit -1
 // keeps trailing empty pieces, as split does. trim removes the spaces that
 // Strings.trim removes, and String.join joins as Strings.join does.
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.regex.Pattern;
 
 public final class TextSplit {
     private static final int FIELDS = 8;
@@ -13,7 +15,21 @@ public final class TextSplit {
     private static final String[] WORDS = {"alpha", "beta", "gamma", "delta"};
 
     public static void main(String[] args) {
-        int n = Integer.parseInt(args[0]);
+        System.out.print(args[0].equals("--verify-edges") ? verifyEdges() : workload(Integer.parseInt(args[0])));
+    }
+
+    private static String verifyEdges() {
+        StringBuilder output = new StringBuilder();
+        for (String[] input : new String[][]{{"", ","}, {"single", ","}, {",,", ","}, {"é🔹猫🔹", "🔹"}}) {
+            String[] parts = input[0].split(Pattern.quote(input[1]), -1);
+            String joined = String.join("|", parts);
+            output.append(parts.length).append(' ').append(joined.getBytes(StandardCharsets.UTF_8).length)
+                .append(' ').append(joined).append('\n');
+        }
+        return output.toString();
+    }
+
+    public static String workload(int n) {
         long seed = 12345;
         int matches = 0;
         long bytes = 0;
@@ -52,6 +68,6 @@ public final class TextSplit {
                 checksum = (checksum * 31 + (long) joined.charAt(k)) & MASK;
             }
         }
-        System.out.println("text-split " + matches + " " + bytes + " " + checksum);
+        return "text-split " + matches + " " + bytes + " " + checksum + System.lineSeparator();
     }
 }

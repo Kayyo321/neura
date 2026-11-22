@@ -27,7 +27,10 @@ public final class SpectralNorm {
     }
 
     public static void main(String[] args) {
-        int n = Integer.parseInt(args[0]);
+        System.out.print(workload(Integer.parseInt(args[0])));
+    }
+
+    public static String workload(int n) {
         double[] u = new double[n];
         double[] v = new double[n];
         double[] scratch = new double[n];
@@ -45,6 +48,6 @@ public final class SpectralNorm {
             vv = vv + v[i] * v[i];
         }
         double norm = Math.sqrt(vbv / vv);
-        System.out.println("spectral-norm " + Long.toHexString(Double.doubleToRawLongBits(norm)));
+        return "spectral-norm " + Long.toHexString(Double.doubleToRawLongBits(norm)) + System.lineSeparator();
     }
 }

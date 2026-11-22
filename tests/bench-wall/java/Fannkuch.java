@@ -1,7 +1,10 @@
 // Same algorithm, input, and output as ../neura/fannkuch.nra.
 public final class Fannkuch {
     public static void main(String[] args) {
-        int n = Integer.parseInt(args[0]);
+        System.out.print(workload(Integer.parseInt(args[0])));
+    }
+
+    public static String workload(int n) {
         int[] perm = new int[n];
         int[] perm1 = new int[n];
         int[] count = new int[n];
@@ -43,8 +46,7 @@ public final class Fannkuch {
             // Rotate prefixes of perm1 to reach the next permutation.
             while (true) {
                 if (r == n) {
-                    System.out.println("fannkuch " + checksum + " " + maxFlips);
-                    return;
+                    return "fannkuch " + checksum + " " + maxFlips + System.lineSeparator();
                 }
                 int first = perm1[0];
                 for (int i = 0; i < r; i = i + 1) {

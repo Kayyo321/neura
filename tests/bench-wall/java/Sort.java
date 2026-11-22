@@ -101,7 +101,10 @@ public final class Sort {
     }
 
     public static void main(String[] args) {
-        int n = Integer.parseInt(args[0]);
+        System.out.print(workload(Integer.parseInt(args[0])));
+    }
+
+    public static String workload(int n) {
         int[] items = new int[n];
         long seed = 12345;
         for (int i = 0; i < n; i = i + 1) {
@@ -112,11 +115,10 @@ public final class Sort {
         long checksum = 0;
         for (int i = 0; i < items.length; i = i + 1) {
             if (i > 0 && items[i - 1] > items[i]) {
-                System.out.println("not sorted");
-                System.exit(1);
+                throw new IllegalStateException("not sorted");
             }
             checksum = (checksum * 31 + items[i]) & MASK;
         }
-        System.out.println("sort " + checksum);
+        return "sort " + checksum + System.lineSeparator();
     }
 }

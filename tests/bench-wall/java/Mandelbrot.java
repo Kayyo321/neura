@@ -4,7 +4,10 @@ public final class Mandelbrot {
     private static final long MASK = 1073741823L;
 
     public static void main(String[] args) {
-        int n = Integer.parseInt(args[0]);
+        System.out.print(workload(Integer.parseInt(args[0])));
+    }
+
+    public static String workload(int n) {
         double size = n;
         int inside = 0;
         long checksum = 0;
@@ -32,6 +35,6 @@ public final class Mandelbrot {
                 checksum = (checksum * 31 + bit) & MASK;
             }
         }
-        System.out.println("mandelbrot " + inside + " " + checksum);
+        return "mandelbrot " + inside + " " + checksum + System.lineSeparator();
     }
 }

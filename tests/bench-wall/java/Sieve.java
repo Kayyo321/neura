@@ -1,7 +1,10 @@
 // Same algorithm, input, and output as ../neura/sieve.nra.
 public final class Sieve {
     public static void main(String[] args) {
-        int n = Integer.parseInt(args[0]);
+        System.out.print(workload(Integer.parseInt(args[0])));
+    }
+
+    public static String workload(int n) {
         boolean[] composite = new boolean[n + 1];
         int count = 0;
         long sum = 0;
@@ -16,6 +19,6 @@ public final class Sieve {
                 }
             }
         }
-        System.out.println("sieve " + count + " " + sum);
+        return "sieve " + count + " " + sum + System.lineSeparator();
     }
 }

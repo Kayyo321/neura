@@ -1,0 +1,19 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let strings = import:Std.Text.Strings;
+
+export let TextSplitEdge = module:program.Entry (
+    let show = func(value: string, separator: string) {
+        last parts = strings.split(value, separator);
+        last joined = strings.join(parts, "|");
+        console.println("{} {} {}", parts.length, joined.byte_length, joined);
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        show("", ",");
+        show("single", ",");
+        show(",,", ",");
+        show("é🔹猫🔹", "🔹");
+        return program.ExitCode.Ok;
+    };
+);
