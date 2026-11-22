@@ -1,0 +1,162 @@
+let acme = import:Std.Net.Tls.Acme;
+let config = import:Std.Net.Tls.TlsConfig;
+let console = import:Std.Io.Console;
+let duration = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let handshake = import:Std.Net.Tls.Handshake;
+let http = import:Std.Net.Http;
+let optional = import:Std.Core.Optional;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let socket_addr = import:Std.Net.Core.SocketAddr;
+let strings = import:Std.Text.Strings;
+let tcp = import:Std.Net.Socket.TcpSocket;
+let tcp_server = import:Std.Net.Socket.TcpServer;
+let udp = import:Std.Net.Socket.UdpSocket;
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last outcome = dispatch(args);
+        match (outcome) {
+            result.Result.Ok(text) => {
+                console.print_line(text);
+            },
+            result.Result.Err(failure) => {
+                match (failure) {
+                    errors.Error.Io { kind, message, path } => {
+                        console.print_line(kind.to_string());
+                    },
+                    errors.Error.Custom(detail) => {
+                        console.print_line(detail.code());
+                    },
+                    _ => {
+                        console.print_line(errors.message(failure));
+                    },
+                }
+            },
+        }
+        return program.ExitCode.Ok;
+    };
+
+    let dispatch = func(args: string[]) -> result.Result<string> {
+        if (args[0] == "server") {
+            return serve(args[1], args[2], args[3]);
+        }
+        if (args[0] == "https") {
+            return request(args[1], args[2], duration.of_seconds(2));
+        }
+        if (args[0] == "https-deadline") {
+            return request(args[1], args[2], duration.of_millis(400));
+        }
+        if (args[0] == "dtls") {
+            return dtls(args[1]);
+        }
+        return exchange(args[1], args[2], args[3]);
+    };
+
+    let dtls = func(address: string) -> result.Result<string> {
+        last peer = socket_addr.parse(address)?;
+        last local = socket_addr.parse("127.0.0.1:0")?;
+        last wire = udp.bind(local)?;
+        last settings = config.builder().build_client()?;
+        last outcome = handshake.dtls13(settings, wire, peer);
+        let _ = wire.close();
+        match (outcome) {
+            result.Result.Ok(stream) => {
+                let _ = stream.close();
+                return result.Result<string>.Ok("unexpected DTLS connection");
+            },
+            result.Result.Err(failure) => {
+                return result.Result<string>.Err(failure);
+            },
+        }
+    };
+
+    let request = func(address: string, ca: string, timeout: duration.Duration) -> result.Result<string> {
+        last req = new http.ClientRequest("GET", "https://" .. address .. "/directory?name=test");
+        req.set_deadline(timeout);
+        last response = new acme.HttpsTransport(ca).fetch(req)?;
+        return result.Result<string>.Ok(response.status.to_string() .. ":" .. response.body_text());
+    };
+
+    let serve = func(certificate: string, key: string, client_ca: string) -> result.Result<string> {
+        last builder = config.builder();
+        builder.set_certificate(certificate, key);
+        builder.set_client_ca_file(client_ca);
+        builder.set_versions(config.TlsVersion.Tls13, config.TlsVersion.Tls13);
+        builder.set_handshake_timeout(duration.of_seconds(5));
+        last settings = builder.build_server()?;
+        last listener = tcp_server.bind(socket_addr.parse("127.0.0.1:0")?)?;
+        console.print_line(listener.address().to_string());
+        last accepted = listener.accept();
+        let _ = listener.close();
+        last socket = accepted?;
+        socket.set_read_timeout(duration.of_seconds(2));
+        match (handshake.tls13(settings, socket)) {
+            result.Result.Ok(tls) => {
+                last reply = func -> result.Result<string> {
+                    last ping: uint8[list] = new;
+                    while (ping.length < 4) {
+                        match (tls.receive()?) {
+                            optional.Optional.Some(chunk) => {
+                                for (let b in chunk) {
+                                    ping.append(b);
+                                }
+                            },
+                            optional.Optional.None => {
+                                break;
+                            },
+                        }
+                    }
+                    last text = strings.from_bytes(ping)?;
+                    if (text != "ping") {
+                        return result.Result<string>.Err(errors.custom("test.tls.payload", "expected ping"));
+                    }
+                    tls.send(strings.to_bytes("pong"))?;
+                    return result.Result<string>.Ok(text);
+                };
+                last outcome = reply();
+                let _ = tls.close();
+                return outcome;
+            },
+            result.Result.Err(problem) => {
+                let _ = socket.close();
+                return result.Result<string>.Err(problem);
+            },
+        }
+    };
+
+    let exchange = func(address: string, ca: string, name: string) -> result.Result<string> {
+        last builder = config.builder();
+        builder.set_ca_file(ca);
+        builder.set_server_name(name);
+        builder.set_handshake_timeout(duration.of_millis(500));
+        last settings = builder.build_client()?;
+        last socket = tcp.connect(socket_addr.parse(address)?, duration.of_seconds(2))?;
+        socket.set_read_timeout(duration.of_seconds(2));
+        last opened = handshake.tls13(settings, socket);
+        match (opened) {
+            result.Result.Err(problem) => {
+                let _ = socket.close();
+                return result.Result<string>.Err(problem);
+            },
+            result.Result.Ok(tls) => {
+                last response = func -> result.Result<string> {
+                    tls.send(strings.to_bytes("ping"))?;
+                    last data = tls.receive()?;
+                    match (data) {
+                        optional.Optional.Some(bytes) => {
+                            return strings.from_bytes(bytes);
+                        },
+                        optional.Optional.None => {
+                            return result.Result<string>.Ok("end");
+                        },
+                    }
+                };
+                last outcome = response();
+                let _ = tls.close();
+                return outcome;
+            },
+        }
+    };
+);

@@ -1,3 +1,15 @@
+// test-options: --gpu=off --deny-all --max-steps 2000000000
+let vectors = import:SpiffeVectors;
+let algorithm = import:Std.Crypto.Algorithm;
+let base64 = import:Std.Encoding.Base64;
+let ecdsa = import:Std.Crypto.Asymmetric.Ecdsa;
+let http = import:Std.Net.Http;
+let json = import:Std.Encoding.Json;
+let jwk = import:Std.Crypto.Token.Jwk;
+let jws = import:Std.Crypto.Token.Jws;
+let optional = import:Std.Core.Optional;
+let result = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
 let acme = import:Std.Net.Tls.Acme;
 let error = import:Std.Core.Error;
 let test = import:Std.Test;
@@ -14,7 +26,6 @@ let AcmeTests = module (
         test.assert_equal_string(RsaThumbprint, acme.rsa_thumbprint(RsaModulus, "AQAB"));
     };
 
-    // Script: /home/dev/neura-gate/030/std-net/vectors-socket-tls-quic/acme_vec.py.
     // Generated with python3 -I: base64.urlsafe_b64encode(hashlib.sha256(('{"crv":"P-256","kty":"EC","x":"%s",
     // "y":"%s"}' % (x, y)).encode()).digest()).rstrip(b"=") for the x and y below.
     export let test_ec_thumbprint = func {
@@ -31,7 +42,6 @@ let AcmeTests = module (
         test.assert_equal_string("/.well-known/acme-challenge/" + Token, test.assert_ok<string>(acme.http01_path(Token)));
     };
 
-    // Script: /home/dev/neura-gate/030/std-net/vectors-socket-tls-quic/acme_vec.py.
     // Generated with python3 -I: ka = token + "." + thumbprint;
     // base64.urlsafe_b64encode(hashlib.sha256(ka.encode()).digest()).rstrip(b"=") and
     // list(bytes([4, 32]) + hashlib.sha256(ka.encode()).digest()).
@@ -67,5 +77,157 @@ let AcmeTests = module (
             test.assert_equal_string("acme.token", code);
         }
         test.assert_err<string>(acme.http01_path("../etc"));
+    };
+
+    const Origin: string = "https://127.0.0.1:8443";
+    const X: string = "axfR8uEsQkf4vOblY6RA8ncDfYEt6zOg9KE5RdiYwpY";
+    const Y: string = "T-NC4v4af5uO5-tKfA-eFivOM1drMV7Oy7ZAaDe_UfU";
+    const AccountJwk: string = "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"" .. X .. "\",\"y\":\"" .. Y .. "\"}";
+
+    let signing_key = func -> ecdsa.EcPrivateKey {
+        last scalar: uint8[list] = new;
+        for (let i in 0 .. 31) {
+            scalar.append(0);
+        }
+        scalar.append(1);
+        return test.assert_ok<ecdsa.EcPrivateKey>(ecdsa.parse_private_key(ecdsa.Curve.P256, scalar));
+    };
+
+    let signing = func(input: uint8[list]) -> result.Result<uint8[list]> {
+        last signer = new ecdsa.EcdsaSigner(signing_key(), algorithm.Algorithm.Sha256);
+        return result.Result<uint8[list]>.Ok(signer.sign_raw(input));
+    };
+
+    let member = func(object: [string, json.JsonValue][list], name: string) -> string {
+        match (json.member(object, name)) {
+            optional.Optional.Some(value) => {
+                match (value) {
+                    json.JsonValue.Text(text) => {
+                        return text;
+                    },
+                    _ => {},
+                }
+            },
+            optional.Optional.None => {},
+        }
+        test.fail("expected string field " .. name);
+        return "";
+    };
+
+    let fields = func(text: string) -> [string, json.JsonValue][list] {
+        match (test.assert_ok<json.JsonValue>(json.parse(text))) {
+            json.JsonValue.Object(members) => {
+                return members;
+            },
+            _ => {
+                test.fail("expected object");
+            },
+        }
+        return new;
+    };
+
+    let decode_text = func(encoded: string) -> string {
+        return test.assert_ok<string>(strings.from_bytes(test.assert_ok<uint8[list]>(base64.decode_url_unpadded(encoded))));
+    };
+
+    let response = func(status: int, path: string, nonce: string, body: string) -> result.Result<http.Response> {
+        last headers = new http.Headers();
+        if (path != "") {
+            headers.add("Location", Origin .. path);
+        }
+        if (nonce != "") {
+            headers.add("Replay-Nonce", nonce);
+        }
+        return result.Result<http.Response>.Ok(new http.Response(status, headers, strings.to_bytes(body)));
+    };
+
+    let TestAuthority = class implements http.Transport (
+        let calls: int = 0;
+        let nonce: string = "bm9uY2Uw";
+        export let down: bool = false;
+        export let wrong_chain: bool = false;
+
+        export let fetch = func(request: http.ClientRequest) -> result.Result<http.Response> {
+            calls++;
+            if (down) {
+                return result.Result<http.Response>.Err(error.custom("test.timeout", "exchange timed out"));
+            }
+            if (request.method == "GET") {
+                test.assert_equal_string(Origin .. "/directory", request.url);
+                return response(200, "", "", "{\"newNonce\":\"" .. Origin .. "/nonce\",\"newAccount\":\""
+                    .. Origin .. "/account\",\"newOrder\":\"" .. Origin .. "/order\"}");
+            }
+            if (request.method == "HEAD") {
+                test.assert_equal_string(Origin .. "/nonce", request.url);
+                return response(200, "", nonce, "");
+            }
+            test.assert_equal_string("POST", request.method);
+            last envelope = fields(test.assert_ok<string>(strings.from_bytes(request.body())));
+            last protected = member(envelope, "protected");
+            last payload = member(envelope, "payload");
+            last signature = member(envelope, "signature");
+            last header = fields(decode_text(protected));
+            test.assert_equal_string(request.url, member(header, "url"));
+            test.assert_equal_string("ES256", member(header, "alg"));
+            test.assert_equal_string(nonce, member(header, "nonce"));
+            last verifier = test.assert_ok<jwk.EcKey>(jwk.parse_ec(AccountJwk, ecdsa.Curve.P256));
+            last signed_body = test.assert_ok<uint8[list]>(jws.verify<jwk.EcKey>(protected .. "." .. payload .. "." .. signature, verifier));
+            last body = test.assert_ok<string>(strings.from_bytes(signed_body));
+            nonce = base64.encode_url_unpadded(strings.to_bytes(calls.to_string()));
+            if (request.url == (Origin .. "/account")) {
+                if (calls == 3) {
+                    return response(400, "", nonce, "{\"type\":\"urn:ietf:params:acme:error:badNonce\"}");
+                }
+                test.assert(optional.is_some<json.JsonValue>(json.member(header, "jwk")));
+                test.assert(optional.is_none<json.JsonValue>(json.member(header, "kid")));
+                test.assert(body.contains("termsOfServiceAgreed"));
+                return response(201, "/account/1", nonce, "{}");
+            }
+            test.assert_equal_string(Origin .. "/account/1", member(header, "kid"));
+            if (request.url == (Origin .. "/order")) {
+                test.assert(body.contains("example.test"));
+                return response(201, "/order/1", nonce, "{}");
+            }
+            if (request.url == (Origin .. "/challenge/1")) {
+                test.assert_equal_string("{}", body);
+                return response(200, "", nonce, "{\"status\":\"processing\"}");
+            }
+            if (request.url == (Origin .. "/order/1")) {
+                test.assert_equal_string("", body);
+                return response(200, "", nonce, "{\"finalize\":\"" .. Origin .. "/finalize/1\"}");
+            }
+            if (request.url == (Origin .. "/finalize/1")) {
+                test.assert_equal_string(vectors.Csr, member(fields(body), "csr"));
+                return response(200, "", nonce, "{\"status\":\"valid\"}");
+            }
+            test.assert_equal_string(Origin .. "/cert/1", request.url);
+            test.assert_equal_string("", body);
+            return response(200, "", nonce, wrong_chain ? "unexpected text" : vectors.Leaf);
+        };
+    );
+
+    let failure_code = func(problem: error.Error) -> string => match (problem) {
+        error.Error.Custom(detail) => detail.code(),
+        _ => "",
+    };
+
+    export let test_signed_account_order_challenge_finalize_and_download = func {
+        last authority = new TestAuthority();
+        last signer = new acme.AccountSigner("ES256", AccountJwk, signing);
+        last client = new acme.AcmeClient(Origin .. "/directory", acme.ec_thumbprint("P-256", X, Y), authority, signer);
+        test.assert_equal_string(Origin .. "/account/1", test.assert_ok<string>(client.register_account(new, true)));
+        last order = test.assert_ok<string>(client.new_order(new(["example.test"])));
+        test.assert_equal_string(Origin .. "/order/1", order);
+        test.assert_equal_string("{\"status\":\"processing\"}", test.assert_ok<string>(client.respond_to_challenge(Origin .. "/challenge/1")));
+        last csr = test.assert_ok<uint8[list]>(base64.decode_url_unpadded(vectors.Csr));
+        test.assert_equal_string("{\"status\":\"valid\"}", test.assert_ok<string>(client.finalize(order, csr)));
+        test.assert(test.assert_ok<string>(client.download_certificate(Origin .. "/cert/1")).contains("BEGIN CERTIFICATE"));
+        authority.wrong_chain = true;
+        test.assert_equal_string("acme.certificate", failure_code(test.assert_err<string>(client.download_certificate(Origin .. "/cert/1"))));
+        test.assert_equal_string("acme.order", failure_code(test.assert_err<string>(client.new_order(new))));
+        test.assert_equal_string("acme.url", failure_code(test.assert_err<string>(client.respond_to_challenge("http://127.0.0.1/"))));
+        test.assert_equal_string("acme.csr", failure_code(test.assert_err<string>(client.finalize(order, new))));
+        authority.down = true;
+        test.assert_equal_string("test.timeout", failure_code(test.assert_err<string>(client.register_account(new, true))));
     };
 );

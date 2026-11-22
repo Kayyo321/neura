@@ -1,11 +1,26 @@
+let certificates = import:Std.Crypto.Pki.Certificate;
+let csr = import:Std.Crypto.Pki.Csr;
+let addresses = import:Std.Net.Core.SocketAddr;
+let chunked = import:Std.Net.Http.Chunked;
+let headers = import:Std.Net.Http.Headers;
+let host_error = import:Std.Core.Internal.HostError;
+let socket = import:Std.Net.Internal.Socket;
+let tls = import:Std.Net.Socket.Internal.HostCalls;
+let tls_stream = import:Std.Net.Tls.TlsStream;
+let wire = import:Std.Net.Http.Wire;
+let duration = import:Std.Time.Duration;
+let http = import:Std.Net.Http;
+let jose = import:Std.Crypto.Internal.JoseJson;
+let json = import:Std.Encoding.Json;
+let.promote _ = import:Std.Core.Optional;
+let uri = import:Std.Net.Core.Uri;
 let base64 = import:Std.Encoding.Base64;
 let errors = import:Std.Core.Error;
 let.promote _ = import:Std.Core.Result;
 let sha256 = import:Std.Digest.Sha256;
 let strings = import:Std.Text.Strings;
 
-/// @brief ACME (RFC 8555) certificate provisioning: the challenge computations, which are real, and the client
-/// API, whose network flows are stubs.
+/// @brief ACME (RFC 8555) certificate provisioning and challenge computations.
 ///
 /// Real: the key authorization `token || '.' || base64url(Thumbprint(accountKey))` (RFC 8555 section 8.1) with
 /// the JWK thumbprint of RFC 7638 for RSA and EC account keys; the HTTP-01 resource path (section 8.3); the
@@ -16,9 +31,10 @@ let strings = import:Std.Text.Strings;
 /// it MUST NOT contain characters outside the base64url alphabet); otherwise the functions return a Custom
 /// error with the code `acme.token`.
 ///
-/// Stub: `AcmeClient`'s account, order, challenge and certificate flows need an HTTPS client and JWS signing of
-/// every request (RFC 8555 section 6.2), neither of which Neura 0.3.0 provides, so each traps. Step-ca and
-/// Let's Encrypt differ only in the directory URL given to the client.
+/// `AcmeClient` uses a verified, non-redirecting HTTPS transport by default. A caller-supplied transport
+/// must preserve the signed request URL, verify the peer and reject redirects. The account signer holds the public JWK and signs JWS inputs;
+/// private key storage and HTTPS trust are chosen by the caller. Automatic polling and provisioning the
+/// challenge response are the caller's responsibility.
 /// @see [Std.Net.Tls.Acme](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Tls-Acme)
 .Since("0.3.0")
 export let Acme = module (
@@ -79,18 +95,189 @@ export let Acme = module (
         return out;
     };
 
-    /// @brief An ACME client bound to a directory URL and an account key thumbprint. Its flows are stubs.
-    .Final
+    let connect_deadline = func(host: string, port: int, timeout_nanos: int64, server_name: string,
+        alpn: string[list], ca_file: string) -> tls.TlsOutcome host("neura.net.tls.connect_deadline", 1);
+
+    /// @brief A verified, non-redirecting HTTP/1.1 transport for ACME. An empty CA file uses system trust.
+    .[Final, Since("0.3.1")]
+    export let HttpsTransport = class implements http.Transport (
+        last ca: string;
+
+        export let init = func(ca_file: string = "") {
+            ca = ca_file;
+        };
+
+        export let fetch = func(request: http.ClientRequest) -> Result<http.Response> {
+            checked_url(request.url, request.url)?;
+            last parsed = uri.parse(request.url)?;
+            last name = optional_text(parsed.host_name());
+            last port = https_port(parsed.port);
+            if (request.method != "GET" && request.method != "HEAD" && request.method != "POST") {
+                return fail<http.Response>("acme.transport", "ACME uses only GET, HEAD and POST");
+            }
+            last content = request.body();
+            if (content.length > 1048576 || (request.method != "POST" && content.length != 0)) {
+                return fail<http.Response>("acme.transport", "invalid request body or body exceeds 1 MiB");
+            }
+            last outcome = connect_deadline(name, port, request.deadline().to_nanos(), name, new(["http/1.1"]), ca);
+            match (outcome) {
+                tls.TlsOutcome.Error(code) => {
+                    return Result<http.Response>.Err(host_error.io(code, "HTTPS connection failed", name));
+                },
+                tls.TlsOutcome.Ok(opened) => {
+                    let [id, alpn] = opened;
+                    last stream = new tls_stream.TlsStream(new socket.Handle(id, name), Optional<addresses.SocketAddr>.None, alpn);
+                    last response = send_request(stream, request, parsed, content);
+                    let _ = stream.close();
+                    return response;
+                },
+            }
+        };
+    );
+
+    let send_request = func(stream: tls_stream.TlsStream, request: http.ClientRequest, parsed: uri.Uri,
+        content: uint8[list]) -> Result<http.Response> {
+        last fields = new headers.Headers();
+        for (let i in 0 .. request.headers.size()) {
+            last field = request.headers.name_at(i);
+            last lower = strings.to_ascii_lower(field);
+            if (lower == "content-type" || lower == "accept") {
+                fields.add(field, request.headers.value_at(i));
+            }
+        }
+        fields.set("Host", optional_text(parsed.authority()));
+        fields.set("Connection", "close");
+        if (request.method == "POST") {
+            fields.set("Content-Length", content.length.to_string());
+        }
+        let target = parsed.path == "" ? "/" : parsed.path;
+        match (parsed.query) {
+            Optional.Some(query) => {
+                target ..= "?" .. query;
+            },
+            Optional.None => {},
+        }
+        stream.write(wire.write_request_head(new wire.RequestHead(request.method, target, "HTTP/1.1", fields)))?;
+        if (content.length != 0) {
+            stream.write(content)?;
+        }
+        last limits = new wire.Limits(16384, 100, 1048576, 4096, 16384, false, ["GET", "HEAD", "POST"]);
+        last reader = new wire.HeadReader(limits);
+        while (not reader.is_complete()) {
+            reader.feed(read_more(stream)?)?;
+        }
+        last head = reader.response_head()?;
+        if (head.version != "HTTP/1.1" || head.status < 200) {
+            return fail<http.Response>("acme.transport", "expected a final HTTP/1.1 response");
+        }
+        if (head.headers.contains("Transfer-Encoding")) {
+            last encodings = head.headers.list_elements("Transfer-Encoding");
+            if (encodings.length != 1 || not strings.equals_ignore_ascii_case(encodings[0], "chunked")
+                || head.headers.contains("Content-Length")) {
+                return fail<http.Response>("acme.transport", "ambiguous or unsupported HTTP body encoding");
+            }
+        }
+        last body = read_body(stream, wire.response_body_length(head, request.method)?, reader.remainder(), limits)?;
+        return Result<http.Response>.Ok(new http.Response(head.status, head.headers, body));
+    };
+
+    let read_body = func(stream: tls_stream.TlsStream, framing: wire.BodyFraming, first: uint8[list], limits: wire.Limits)
+        -> Result<uint8[list]> {
+        match (framing) {
+            wire.BodyFraming.None => {
+                return Result<uint8[list]>.Ok(new);
+            },
+            wire.BodyFraming.Length(length) => {
+                if (length > limits.max_body_bytes) {
+                    return fail<uint8[list]>("acme.transport", "HTTP body exceeds 1 MiB");
+                }
+                while ((first.length as int64) < length) {
+                    append_body(first, read_more(stream)?, length)?;
+                }
+                if ((first.length as int64) != length) {
+                    return fail<uint8[list]>("acme.transport", "bytes follow the framed HTTP response");
+                }
+                return Result<uint8[list]>.Ok(first);
+            },
+            wire.BodyFraming.Chunked => {
+                last decoder = new chunked.ChunkedDecoder(limits);
+                last output = decoder.feed(first)?;
+                while (not decoder.is_done()) {
+                    append_body(output, decoder.feed(read_more(stream)?)?, limits.max_body_bytes)?;
+                }
+                if (decoder.remainder().length != 0) {
+                    return fail<uint8[list]>("acme.transport", "bytes follow the framed HTTP response");
+                }
+                return Result<uint8[list]>.Ok(output);
+            },
+            wire.BodyFraming.UntilClose => {
+                while (true) {
+                    last read = stream.read(16384)?;
+                    if (read.length == 0) {
+                        return Result<uint8[list]>.Ok(first);
+                    }
+                    append_body(first, read, limits.max_body_bytes)?;
+                }
+            },
+        }
+    };
+
+    let read_more = func(stream: tls_stream.TlsStream) -> Result<uint8[list]> {
+        last chunk = stream.read(16384)?;
+        if (chunk.length == 0) {
+            return fail<uint8[list]>("acme.transport", "peer closed before the framed HTTP response completed");
+        }
+        return Result<uint8[list]>.Ok(chunk);
+    };
+
+    let append_body = func(body: uint8[list], chunk: uint8[list], maximum: int64) -> Result<bool> {
+        if ((body.length as int64) + (chunk.length as int64) > maximum) {
+            return fail<bool>("acme.transport", "HTTP body exceeds its declared length or 1 MiB");
+        }
+        for (let b in chunk) {
+            body.append(b);
+        }
+        return Result<bool>.Ok(true);
+    };
+
+    /// @brief An asymmetric account signing key. `sign` returns raw JOSE signature bytes for its algorithm.
+    .[Final, Since("0.3.1")]
+    export let AccountSigner = class (
+        export last algorithm: string;
+        export last public_jwk: string;
+        export last sign: func(uint8[list]) -> Result<uint8[list]>;
+
+        export let init = func(alg: string, jwk: string, sign_input: func(uint8[list]) -> Result<uint8[list]>) {
+            algorithm = alg;
+            public_jwk = jwk;
+            sign = sign_input;
+        };
+    );
+
+    /// @brief An ACME client bound to one HTTPS directory, verified transport and signing identity.
+    .[Final, NotThreadSafe]
     export let AcmeClient = class (
-        /// @brief The directory URL (for example a step-ca or Let's Encrypt directory).
+        /// @brief The ACME directory URL.
         export last directory_url: string;
         /// @brief The RFC 7638 thumbprint of the account key.
         export last account_thumbprint: string;
+        last transport: http.Transport;
+        last signer: AccountSigner;
+        let account_url: string = "";
+        let nonce_url: string = "";
+        let register_url: string = "";
+        let order_url: string = "";
+        let nonce: string = "";
 
-        /// @brief A client for `directory` with the account key's thumbprint. Nothing is fetched here.
-        export let init = func(directory: string, thumbprint: string) {
+        /// @brief A client for `directory`. A thumbprint-only client can compute challenges. The network
+        /// methods also need an account signer. Set `account` to resume a prior account.
+        export let init = func(directory: string, thumbprint: string, https: http.Transport = nil,
+            signing_key: AccountSigner = nil, account: string = "") {
             directory_url = directory;
             account_thumbprint = thumbprint;
+            transport = https == nil ? new HttpsTransport() : https;
+            signer = signing_key;
+            account_url = account;
         };
 
         /// @brief The key authorization for `token` with this client's account key.
@@ -98,44 +285,293 @@ export let Acme = module (
         export let key_authorization_for = func(token: string) -> Result<string> =>
             key_authorization(token, account_thumbprint);
 
-        /// @brief Registers or finds the account (RFC 8555 section 7.3); the account URL.
-        /// @stub needs an HTTPS client and JWS request signing (RFC 8555 section 6.2)
+        /// @brief Registers or finds the account (RFC 8555 section 7.3) and remembers and returns its URL.
         .NoDiscard
         export let register_account = func(contacts: string[list], terms_agreed: bool) -> Result<string> {
-            trap_with_message("unsupported: Std.Net.Tls.Acme.AcmeClient.register_account is not implemented in Neura 0.3.0 (needs an HTTPS client and JWS request signing (RFC 8555 section 6.2))");
+            ready()?;
+            last payload = json.write(json.JsonValue.Object(new([
+                ["contact", json.JsonValue.Array(json_texts(contacts))],
+                ["termsOfServiceAgreed", json.JsonValue.Boolean(terms_agreed)]
+            ])));
+            last response = post(register_url, payload, true)?;
+            last location = location_of(response)?;
+            checked_url(directory_url, location)?;
+            account_url = location;
+            return Result<string>.Ok(location);
         };
 
-        /// @brief Places an order for DNS identifiers (section 7.4); the order URL.
-        /// @stub needs an HTTPS client and JWS request signing (RFC 8555 section 6.2)
+        /// @brief Places an order for DNS identifiers (section 7.4) and returns the order URL.
         .NoDiscard
         export let new_order = func(domains: string[list]) -> Result<string> {
-            trap_with_message("unsupported: Std.Net.Tls.Acme.AcmeClient.new_order is not implemented in Neura 0.3.0 (needs an HTTPS client and JWS request signing (RFC 8555 section 6.2))");
+            if (domains.length == 0) {
+                return fail<string>("acme.order", "at least one DNS identifier is required");
+            }
+            last identifiers: json.JsonValue[list] = new;
+            for (let domain in domains) {
+                if (domain.byte_length == 0) {
+                    return fail<string>("acme.order", "a DNS identifier must not be empty");
+                }
+                identifiers.append(json.JsonValue.Object(new([
+                    ["type", json.JsonValue.Text("dns")], ["value", json.JsonValue.Text(domain)]
+                ])));
+            }
+            ready()?;
+            last payload = json.write(json.JsonValue.Object(new([["identifiers", json.JsonValue.Array(identifiers)]])));
+            last location = location_of(post(order_url, payload, false)?)?;
+            return checked_url(directory_url, location);
         };
 
-        /// @brief Tells the server a challenge is ready (section 7.5.1).
-        /// @stub needs an HTTPS client and JWS request signing (RFC 8555 section 6.2)
+        /// @brief Fetches an account-owned ACME resource using POST-as-GET. Use this for order state and authorizations.
+        .[NoDiscard, Since("0.3.1")]
+        export let fetch_resource = func(url: string) -> Result<string> => response_text(post(url, "", false)?);
+
+        /// @brief Tells the server a challenge is ready (section 7.5.1) and returns the resource body.
         .NoDiscard
-        export let respond_to_challenge = func(challenge_url: string) -> Result<string> {
-            trap_with_message("unsupported: Std.Net.Tls.Acme.AcmeClient.respond_to_challenge is not implemented in Neura 0.3.0 (needs an HTTPS client and JWS request signing (RFC 8555 section 6.2))");
-        };
+        export let respond_to_challenge = func(challenge_url: string) -> Result<string> =>
+            response_text(post(challenge_url, "{}", false)?);
 
-        /// @brief Finalizes an order with a DER certificate signing request (section 7.4).
-        /// @stub needs an HTTPS client and JWS request signing (RFC 8555 section 6.2)
+        /// @brief Reads the order's finalize URL and submits a DER certificate signing request (section 7.4).
         .NoDiscard
         export let finalize = func(order_url: string, csr_der: uint8[list]) -> Result<string> {
-            trap_with_message("unsupported: Std.Net.Tls.Acme.AcmeClient.finalize is not implemented in Neura 0.3.0 (needs an HTTPS client and JWS request signing (RFC 8555 section 6.2))");
+            if (csr_der.length == 0 || csr_der.length > 1048576) {
+                return fail<string>("acme.csr", "the certificate signing request must be between 1 byte and 1 MiB");
+            }
+            match (csr.parse(csr_der)) {
+                Result.Ok(_) => {},
+                Result.Err(_) => {
+                    return fail<string>("acme.csr", "the certificate signing request must be valid PKCS #10 DER");
+                },
+            }
+            last order = jose.parse_object(fetch_resource(order_url)?, "acme.order")?;
+            last target = jose.required_text(order, "finalize", "acme.order")?;
+            last payload = json.write(json.JsonValue.Object(new([["csr", json.JsonValue.Text(jose.encode(csr_der))]])));
+            return response_text(post(target, payload, false)?);
         };
 
-        /// @brief Downloads the issued PEM certificate chain (section 7.4.2).
-        /// @stub needs an HTTPS client and JWS request signing (RFC 8555 section 6.2)
+        /// @brief Downloads the issued PEM certificate chain using POST-as-GET (section 7.4.2).
         .NoDiscard
         export let download_certificate = func(certificate_url: string) -> Result<string> {
-            trap_with_message("unsupported: Std.Net.Tls.Acme.AcmeClient.download_certificate is not implemented in Neura 0.3.0 (needs an HTTPS client and JWS request signing (RFC 8555 section 6.2))");
+            last content = response_text(post(certificate_url, "", false)?)?;
+            match (certificates.parse_pem(content)) {
+                Result.Ok(chain) => {
+                    if (chain.length > 0) {
+                        return Result<string>.Ok(content);
+                    }
+                },
+                Result.Err(_) => {},
+            }
+            return fail<string>("acme.certificate", "the server did not return a valid PEM certificate chain");
         };
 
         /// @brief Text such as "AcmeClient(https://ca.example/directory)".
         export let.override to_string = func -> string => "AcmeClient(" .. directory_url .. ")";
+
+        let ready = func -> Result<bool> {
+            if (signer == nil) {
+                return fail<bool>("acme.configuration", "an account signer is required");
+            }
+            if (nonce_url.byte_length != 0) {
+                return Result<bool>.Ok(true);
+            }
+            checked_url(directory_url, directory_url)?;
+            last response = checked_response(exchange(new http.ClientRequest("GET", directory_url))?)?;
+            last directory = jose.parse_object(response_text(response)?, "acme.directory")?;
+            last new_nonce = checked_url(directory_url, jose.required_text(directory, "newNonce", "acme.directory")?)?;
+            last new_account = checked_url(directory_url, jose.required_text(directory, "newAccount", "acme.directory")?)?;
+            last new_order = checked_url(directory_url, jose.required_text(directory, "newOrder", "acme.directory")?)?;
+            nonce_url = new_nonce;
+            register_url = new_account;
+            order_url = new_order;
+            return Result<bool>.Ok(true);
+        };
+
+        let exchange = func(request: http.ClientRequest) -> Result<http.Response> {
+            request.set_deadline(duration.of_seconds(30));
+            request.set_credentials(http.CredentialsMode.Omit);
+            return transport.fetch(request);
+        };
+
+        let take_nonce = func -> Result<string> {
+            if (nonce.byte_length == 0) {
+                last response = checked_response(exchange(new http.ClientRequest("HEAD", nonce_url))?)?;
+                nonce = get_header(response, "Replay-Nonce");
+            }
+            last current = nonce;
+            nonce = "";
+            jose.decode(current, "acme.nonce", "the server must supply a base64url nonce")?;
+            if (current.byte_length == 0) {
+                return fail<string>("acme.nonce", "the server must supply a non-empty nonce");
+            }
+            return Result<string>.Ok(current);
+        };
+
+        let post = func(url: string, payload: string, use_jwk: bool) -> Result<http.Response> {
+            ready()?;
+            checked_url(directory_url, url)?;
+            last account_key = public_fields(signer, account_thumbprint)?;
+            if (not use_jwk) {
+                if (account_url.byte_length == 0) {
+                    return fail<http.Response>("acme.account", "register an account or supply a registered account URL");
+                }
+                checked_url(directory_url, account_url)?;
+            }
+            for (let attempt in 0 .. 2) {
+                last protected_fields: [string, json.JsonValue][list] = new([
+                    ["alg", json.JsonValue.Text(signer.algorithm)], ["nonce", json.JsonValue.Text(take_nonce()?)],
+                    ["url", json.JsonValue.Text(url)]
+                ]);
+                if (use_jwk) {
+                    protected_fields.append(["jwk", json.JsonValue.Object(account_key)]);
+                } else {
+                    protected_fields.append(["kid", json.JsonValue.Text(account_url)]);
+                }
+                last encoded_header = jose.encode(strings.to_bytes(json.write(json.JsonValue.Object(protected_fields))));
+                last encoded_body = jose.encode(strings.to_bytes(payload));
+                last signature = (signer.sign)(strings.to_bytes(encoded_header .. "." .. encoded_body))?;
+                if (signature.length == 0) {
+                    return fail<http.Response>("acme.signature", "the account signer returned an empty signature");
+                }
+                last envelope = json.write(json.JsonValue.Object(new([
+                    ["protected", json.JsonValue.Text(encoded_header)], ["payload", json.JsonValue.Text(encoded_body)],
+                    ["signature", json.JsonValue.Text(jose.encode(signature))]
+                ])));
+                last request = new http.ClientRequest("POST", url);
+                request.headers.add("Content-Type", "application/jose+json");
+                request.set_body(strings.to_bytes(envelope));
+                last response = exchange(request)?;
+                nonce = get_header(response, "Replay-Nonce");
+                if (response.status == 400 && response.body().length <= 1048576 && is_bad_nonce(response)) {
+                    if (attempt == 1) {
+                        break;
+                    }
+                    continue;
+                }
+                return checked_response(response);
+            }
+            return fail<http.Response>("acme.nonce", "the server refused the replacement nonce");
+        };
     );
+
+    let checked_url = func(directory: string, url: string) -> Result<string> {
+        last base = uri.parse(directory)?;
+        last target = uri.parse(url)?;
+        last base_host = optional_text(base.host);
+        last target_host = optional_text(target.host);
+        if (optional_text(base.scheme) != "https" || optional_text(target.scheme) != "https" || base_host == ""
+            || not strings.equals_ignore_ascii_case(base_host, target_host) || https_port(base.port) != https_port(target.port)
+            || https_port(target.port) < 1 || https_port(target.port) > 65535 || present(target.userinfo) || present(target.fragment)) {
+            return fail<string>("acme.url", "ACME resources must be HTTPS URLs under the directory's origin without userinfo or fragments");
+        }
+        return Result<string>.Ok(url);
+    };
+
+    let optional_text = func(value: Optional<string>) -> string => match (value) {
+        Optional.Some(text) => text,
+        Optional.None => "",
+    };
+
+    let present = func(value: Optional<string>) -> bool => match (value) {
+        Optional.Some(_) => true,
+        Optional.None => false,
+    };
+
+    let https_port = func(value: Optional<int>) -> int => match (value) {
+        Optional.Some(port) => port,
+        Optional.None => 443,
+    };
+
+    let json_texts = func(items: string[list]) -> json.JsonValue[list] {
+        last values: json.JsonValue[list] = new;
+        for (let item in items) {
+            values.append(json.JsonValue.Text(item));
+        }
+        return values;
+    };
+
+    let public_fields = func(signer: AccountSigner, thumbprint: string) -> Result<[string, json.JsonValue][list]> {
+        last fields = jose.parse_object(signer.public_jwk, "acme.key")?;
+        last kind = jose.required_text(fields, "kty", "acme.key")?;
+        let result_fields: [string, json.JsonValue][list] = new([["kty", json.JsonValue.Text(kind)]]);
+        let actual = "";
+        if (kind == "RSA" && (signer.algorithm == "RS256" || signer.algorithm == "RS384" || signer.algorithm == "RS512")) {
+            last n = key_part(fields, "n")?;
+            last e = key_part(fields, "e")?;
+            result_fields.append(["n", json.JsonValue.Text(n)]);
+            result_fields.append(["e", json.JsonValue.Text(e)]);
+            actual = rsa_thumbprint(n, e);
+        } else if (kind == "EC") {
+            last curve = jose.required_text(fields, "crv", "acme.key")?;
+            if (not ((curve == "P-256" && signer.algorithm == "ES256") || (curve == "P-384" && signer.algorithm == "ES384")
+                || (curve == "P-521" && signer.algorithm == "ES512"))) {
+                return fail<[string, json.JsonValue][list]>("acme.key", "the account algorithm must match the public key curve");
+            }
+            last x = key_part(fields, "x")?;
+            last y = key_part(fields, "y")?;
+            result_fields.append(["crv", json.JsonValue.Text(curve)]);
+            result_fields.append(["x", json.JsonValue.Text(x)]);
+            result_fields.append(["y", json.JsonValue.Text(y)]);
+            actual = ec_thumbprint(curve, x, y);
+        } else {
+            return fail<[string, json.JsonValue][list]>("acme.key", "an RSA or EC account signing key is required");
+        }
+        if (actual != thumbprint) {
+            return fail<[string, json.JsonValue][list]>("acme.key", "the supplied account thumbprint does not match the signer");
+        }
+        return Result<[string, json.JsonValue][list]>.Ok(result_fields);
+    };
+
+    let key_part = func(fields: [string, json.JsonValue][list], name: string) -> Result<string> {
+        last value = jose.required_text(fields, name, "acme.key")?;
+        if (value.byte_length == 0) {
+            return fail<string>("acme.key", "empty public key parameter " .. name);
+        }
+        jose.decode(value, "acme.key", "public key parameters must be base64url")?;
+        return Result<string>.Ok(value);
+    };
+
+    let get_header = func(response: http.Response, name: string) -> string {
+        last values = response.headers.get_all(name);
+        return values.length == 1 ? values[0] : "";
+    };
+
+    let response_text = func(response: http.Response) -> Result<string> => strings.from_bytes(response.body());
+
+    let is_bad_nonce = func(response: http.Response) -> bool {
+        match (jose.parse_object(response.body_text(), "acme.problem")) {
+            Result.Ok(problem) => {
+                match (json.member(problem, "type")) {
+                    Optional.Some(value) => {
+                        match (value) {
+                            json.JsonValue.Text(text) => {
+                                return text == "urn:ietf:params:acme:error:badNonce";
+                            },
+                            _ => {},
+                        }
+                    },
+                    Optional.None => {},
+                }
+            },
+            Result.Err(_) => {},
+        }
+        return false;
+    };
+
+    let checked_response = func(response: http.Response) -> Result<http.Response> {
+        if (response.status < 200 || response.status >= 300 || response.is_streamed() || response.body().length > 1048576) {
+            return fail<http.Response>("acme.response", "unexpected ACME response (HTTP " .. response.status.to_string() .. ")");
+        }
+        return Result<http.Response>.Ok(response);
+    };
+
+    let location_of = func(response: http.Response) -> Result<string> {
+        last location = get_header(response, "Location");
+        if (location.byte_length == 0) {
+            return fail<string>("acme.location", "a single Location response header is required");
+        }
+        return Result<string>.Ok(location);
+    };
+
+    let fail = func<T>(code: string, message: string) -> Result<T> => Result<T>.Err(errors.custom(code, message));
 
     /// @brief base64url without padding of SHA-256 of the UTF-8 text.
     let digest_text = func(text: string) -> string => base64.encode_url_unpadded(sha256.of(strings.to_bytes(text)));

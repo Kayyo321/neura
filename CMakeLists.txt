@@ -2103,6 +2103,12 @@ if(BUILD_TESTING AND NEURA_SDK)
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/install.cmake"
     )
     set_tests_properties(stdlib-install PROPERTIES FIXTURES_SETUP stdlib)
+    if(NEURA_ENABLE_SERVER_TLS)
+        find_program(NEURA_SERVER_TEST_OPENSSL NAMES openssl REQUIRED)
+        add_test(NAME stdlib-net-tls-loopback COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/net-tls/loopback.py"
+            --neura "$<TARGET_FILE:neura>" --openssl "${NEURA_SERVER_TEST_OPENSSL}")
+    endif()
     file(GLOB stdlib_areas LIST_DIRECTORIES true CONFIGURE_DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/*")
     foreach(area_dir IN LISTS stdlib_areas)
