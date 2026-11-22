@@ -1,0 +1,6 @@
+let law = func -> bool => true;
+
+let check = func -> bool {
+    let value = law();
+    return value;
+};

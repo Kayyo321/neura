@@ -2,7 +2,7 @@
 
 > **Status:** design for Neura 0.3.1. Phase 1 of [the rollout](#7-phased-rollout-plan) ships in 0.3.1. Phases 2 to 4 are on the roadmap and are not implemented. The six design questions the proposal left open are settled in [Decisions](#8-decisions).
 > **Syntax fence note:** every syntax illustration uses a `text` fence, so `doc-examples` does not compile this page. The page holds no compiler implementation code. It specifies the surface grammar, the semantics, the scoping and inheritance model, the proof theory, and the contracts of the compiler pipeline.
-> **Registries:** the proposal was written against earlier registries. This page uses the current ones: laws are written in NeuraIR 1.16 (the reader accepts 1.0 through 1.15 today), `SymbolKind::Law` takes ordinal 14, and the diagnostics take `E1401` to `E1420`, because `E1100` already belongs to expressions. Tags in the examples use the dot spelling of [the 0.3.1 specification](../lang/Neura0.3.1.md#dot-tags); prose names a tag as `#Name`, as diagnostics print it.
+> **Registries:** the proposal was written against earlier registries. This page uses the current ones: law records require NeuraIR 1.16, `SymbolKind::Law` takes ordinal 14, and the diagnostics take `E1401` to `E1421`, because `E1100` already belongs to expressions. Tags in the examples use the dot spelling of [the 0.3.1 specification](../lang/Neura0.3.1.md#dot-tags); prose names a tag as `#Name`, as diagnostics print it.
 
 ---
 
@@ -115,8 +115,10 @@ Every item inside `law ( ... )` ends with `;` (consistent with every declaration
 | **Precondition / hypothesis** | `given h: Prop;` or `given h: bool_expr;` (the name is optional, as `given Prop;`, when unused) | Logical implication. Supplies a named proof witness `h` of proposition `Prop` (a boolean expression `cond` desugars to `{ (cond) == true : bool }`). Multiple `given` clauses curry left to right. |
 | **Local abbreviation** | `last name = expr;` or `last name: Type = expr;` | Pure definitional binding (`let` mutation is disallowed inside `law (...)`). Unfolds transparently during normalization; exists solely for readability and avoiding repetition. |
 | **Termination measure** | `measure: expr;` (optional) | Declares a well-founded termination measure (a non-negative integer expression or tuple of measures) when an inductive proof recurses on something other than a direct structural enum subterm. |
-| **Existential quantifier** | `exists y: Type;` (before `claim:`) | Constructive existential (dependent Sigma type). The proof must supply a concrete witness term `witness expr;` and then prove the claim for that witness. |
+| **Existential quantifier** | `exists y: Type;` (before `claim:`) | Constructive existential (dependent Sigma type). The proof supplies a concrete witness with `witness expr;` and then proves the claim for that witness. A plain class existential requires a live instance. Nullable existential syntax (`exists?`) is deferred. |
 | **Claim (goal proposition)** | `claim: Prop;` / `holds: bool_expr;` / `no_trap: expr;` / `traps[(TrapClass)]: expr;` / `outcome: { lhs == rhs : Type };` / `refutes;` | The theorem goal(s) the proof must discharge. Multiple claim clauses in one `law (...)` form a conjunction (a proof discharges them with `split` or named claim blocks). |
+
+Quantifiers and hypotheses nest in source order. A witness can use variables and hypotheses already in scope at its existential. A universal or named hypothesis that follows an existential enters the proof scope through `intro` after the witness.
 
 #### Proposition forms (`Prop`)
 
@@ -673,7 +675,7 @@ Laws respect every stage boundary: **source syntax stays in the Lexer and Parser
   - Right after parsing a declaration's trailing `;`, the parser already peeks for `|` to parse `| get:` / `| set:` accessor clauses on class fields.
   - Extending that exact peek to recognize `| proof:` and `| axiom;` after a `law` declaration keeps the parser simple and gives crisp diagnostics when someone attaches `| proof:` to a non-law or `| get:` to a law.
 - **Disambiguating `law (...)` from calling a function named `law`:**
-  - In `let x = law (...)`, `law` starts a law expression if and only if it is immediately followed by `<` (generic parameters followed by `(`), or by `(` whose first token begins a law item (`for`, `exists`, `given`, `last`, `measure`, `claim`, `holds`, `no_trap`, `traps`, `outcome`, `refutes`, or `)`), or by `.invariant (`. Calling an ordinary user function `let r = law(42);` stays an ordinary call.
+  - In `let x = law (...)`, `law` starts a law expression if and only if it is followed by a generic-parameter list and `(`, or by `(` whose first token begins a law item (`for`, `exists`, `given`, `last`, `measure`, `claim`, `holds`, `no_trap`, `traps`, `outcome`, `refutes`, or `)`), or by `.invariant (`. An ordinary call such as `let r = law(42);` and a comparison such as `law < limit` retain their expression meaning.
 - **Multi-error syntax recovery:**
   - Inside `law (...)` and `| proof: { ... };`, syntax errors recover to the next `;` or matching closing delimiter, respecting `--max-errors` before lowering begins.
 
@@ -841,6 +843,7 @@ Mirroring Bend's `bend PROOF.bend --verdict`:
 | `E1418` | Mutable reference escape (`&T`) of an invariant field | Points to the escaping reference binding or return. |
 | `E1419` | Independent `--verdict` kernel check failed | Internal elaborator-versus-kernel discrepancy diagnostic (never silently passes). |
 | `E1420` | `| axiom;` outside the trusted `Std` library | Mirrors `E0780` (`kernel` outside `Std`). |
+| `E1421` | Law feature belongs to a later phase | Names the unavailable feature, including trusted axioms, and its planned phase when assigned. |
 
 A construct that belongs to a later phase is rejected in 0.3.1 with a diagnostic that names the phase's feature as not supported in this release; it is never accepted unchecked.
 

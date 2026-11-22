@@ -1,0 +1,7 @@
+let law = 3;
+let limit = 4;
+let value = 5;
+
+let ordered = law < limit;
+let between = law < limit && value > (law);
+let compact = law<limit && value>(law);

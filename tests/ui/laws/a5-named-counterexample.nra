@@ -1,0 +1,7 @@
+let Booleans = module (
+    let EitherTrue = law (
+        for (left: bool, right: bool);
+        holds: left || right;
+    );
+        | proof: decide;
+);

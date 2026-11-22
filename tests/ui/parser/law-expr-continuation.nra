@@ -1,0 +1,3 @@
+let law = func -> bool => true;
+
+let answer = law() && true;

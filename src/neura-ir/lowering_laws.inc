@@ -324,7 +324,7 @@ LawTerm Lowering::law_proposition(const PropositionSyntax& syntax, LawEnvironmen
     case Kind::NoTrap:
     case Kind::Traps:
     case Kind::Outcome:
-        unsupported_law(syntax.span, "trap and outcome propositions", 2);
+        throw Diagnostic(syntax.span, "trap and outcome propositions are deferred to Phase 2").with_code("E1421");
     }
     bad_law_type(syntax.span, "unknown law proposition");
 }
@@ -333,8 +333,7 @@ Lowering::LawEnvironment Lowering::law_statement(IrLawRecord& record, const Decl
     using Kind = LawItemSyntax::Kind;
     LawEnvironment env{context(record.owner), record.law_symbol, {}, {}};
     env.context.scopes.emplace_back();
-    std::vector<LawTerm> introductions;
-    std::vector<LawTerm> existentials;
+    std::vector<LawTerm> binders;
     std::vector<LawTerm> claims;
     for (const auto& item : decl.law->items) {
         switch (item.kind) {
@@ -349,29 +348,29 @@ Lowering::LawEnvironment Lowering::law_statement(IrLawRecord& record, const Decl
                 if (parameter.default_value || parameter.variadic)
                     bad_law_type(parameter.span, "a law quantifier cannot be variadic or have a default");
                 const auto index = law_value_binding(env, parameter.name, parameter.span, domain);
-                const auto id = env.context.scopes.back().find(parameter.name);
-                if (id != env.context.scopes.back().end()) symbol(record.law_symbol).parameters.push_back(id->second);
+                const auto id = env.context.scopes.back().at(parameter.name);
+                symbol(record.law_symbol).parameters.push_back(id);
                 const auto kind = item.kind == Kind::Exists ? LawTermKind::Exists
                     : item.nullable ? LawTermKind::NullableForall : LawTermKind::Forall;
-                auto& binders = item.kind == Kind::Exists ? existentials : introductions;
-                binders.push_back({kind, std::move(domain), parameter.span, no_symbol, no_symbol, index});
+                binders.push_back({kind, std::move(domain), parameter.span, id, no_symbol, index});
             }
             break;
         case Kind::Given: {
             auto statement = law_proposition(*item.proposition, env);
             const auto index = item.binding ? env.next++ : law_no_binding;
+            SymbolId id = no_symbol;
             if (item.binding) {
                 const auto& name = item.binding->text;
                 if (env.context.scopes.back().contains(name) ||
                     !env.evidence.emplace(name, std::pair{index, statement}).second)
                     bad_law_type(item.binding->span, "duplicate hypothesis '" + name + "'");
-                const auto id = add(SymbolKind::Parameter, name, item.binding->span, record.law_symbol);
+                id = add(SymbolKind::Parameter, name, item.binding->span, record.law_symbol);
                 symbol(id).constant = true;
                 symbol(id).type = void_type;
                 symbol(record.law_symbol).parameters.push_back(id);
             }
-            introductions.push_back({LawTermKind::Implies, {}, item.span, no_symbol, no_symbol, index,
-                                     {std::move(statement)}});
+            binders.push_back({LawTermKind::Implies, {}, item.span, id, no_symbol, index,
+                               {std::move(statement)}});
             break;
         }
         case Kind::Last: {
@@ -380,7 +379,7 @@ Lowering::LawEnvironment Lowering::law_statement(IrLawRecord& record, const Decl
             const auto& name = item.binding->text;
             law_value_binding(env, name, item.binding->span, value.type);
             env.values[env.context.scopes.back().at(name)] = value;
-            record.abbreviations.push_back({name, std::move(value)});
+            record.abbreviations.push_back({name, std::move(value), static_cast<std::uint32_t>(binders.size())});
             break;
         }
         case Kind::Claim:
@@ -397,22 +396,19 @@ Lowering::LawEnvironment Lowering::law_statement(IrLawRecord& record, const Decl
         case Kind::NoTrap:
         case Kind::Traps:
         case Kind::Outcome:
-            unsupported_law(item.keyword, "trap and outcome claims", 2);
+            throw Diagnostic(item.keyword, "trap and outcome claims are deferred to Phase 2").with_code("E1421");
         }
     }
     if (claims.empty())
         throw Diagnostic(decl.law->close, "a law must declare a claim").with_code("E1403");
     auto body = claims.size() == 1 ? std::move(claims.front())
         : LawTerm{LawTermKind::All, {}, decl.law->keyword, no_symbol, no_symbol, 0, std::move(claims)};
-    const auto quantify = [&](std::vector<LawTerm>& terms) {
-        for (auto it = terms.rbegin(); it != terms.rend(); ++it) {
-            it->terms.push_back(std::move(body));
-            body = std::move(*it);
-        }
-    };
-    quantify(existentials);
-    record.introductions = static_cast<std::uint32_t>(introductions.size());
-    quantify(introductions);
+    const auto first_exists = std::ranges::find(binders, LawTermKind::Exists, &LawTerm::kind);
+    record.introductions = static_cast<std::uint32_t>(first_exists - binders.begin());
+    for (auto binder = binders.rbegin(); binder != binders.rend(); ++binder) {
+        binder->terms.push_back(std::move(body));
+        body = std::move(*binder);
+    }
     record.statement = std::move(body);
     return env;
 }
@@ -433,39 +429,30 @@ Lowering::LawEnvironment Lowering::inherited_law_environment(const IrLawRecord& 
     LawEnvironment env{context(module), law.law_symbol, {}, {}};
     env.context.scopes.emplace_back();
     env.next = next_law_binder(law.statement);
-    const auto& parameters = symbol(law.law_symbol).parameters;
-    const LawTerm* item = &law.statement;
-    std::size_t pos = 0;
-    for (std::uint32_t i = 0; i < law.introductions; ++i) {
-        // Named hypotheses carry void entries. Anonymous hypotheses have
-        // no reusable source name but still have a proof binder.
-        if (item->index == law_no_binding) {
-            item = &item->terms.back();
-            continue;
+    for (const auto* item = &law.statement; !item->terms.empty(); item = &item->terms.back()) {
+        const bool implication = item->kind == LawTermKind::Implies;
+        if (!implication && item->kind != LawTermKind::Forall && item->kind != LawTermKind::NullableForall &&
+            item->kind != LawTermKind::Exists)
+            break;
+        const auto id = item->symbol;
+        if (id == no_symbol) {
+            if (implication) continue;
+            break;
         }
-        if (pos < parameters.size()) {
-            auto id = parameters[pos++];
-            const auto& parameter = symbol(id);
-            if (item->kind == LawTermKind::Implies)
-                env.evidence.emplace(parameter.name, std::pair{item->index, item->terms.front()});
-            else {
-                env.context.scopes.back().emplace(parameter.name, id);
-                env.values.emplace(id, LawTerm{LawTermKind::Variable, item->type, item->span,
-                                              no_symbol, no_symbol, item->index});
-            }
+        const auto& parameter = symbol(id);
+        if (parameter.kind != SymbolKind::Parameter || parameter.owner != law.law_symbol) break;
+        if (implication) {
+            env.evidence.emplace(parameter.name, std::pair{item->index, item->terms.front()});
+        } else {
+            env.context.scopes.back().emplace(parameter.name, id);
+            env.values.emplace(id, LawTerm{LawTermKind::Variable, item->type, item->span,
+                                          no_symbol, no_symbol, item->index});
         }
-        item = &item->terms.back();
     }
-    while (item->kind == LawTermKind::Exists && pos < parameters.size()) {
-        const auto id = parameters[pos++];
-        env.context.scopes.back().emplace(symbol(id).name, id);
-        env.values.emplace(id, LawTerm{LawTermKind::Variable, item->type, item->span,
-                                      no_symbol, no_symbol, item->index});
-        item = &item->terms.back();
-    }
-    for (const auto& [name, value] : law.abbreviations) {
-        law_value_binding(env, name, value.span, value.type);
-        env.values[env.context.scopes.back().at(name)] = value;
+    for (const auto& abbreviation : law.abbreviations) {
+        const auto& value = abbreviation.value;
+        law_value_binding(env, abbreviation.name, value.span, value.type);
+        env.values[env.context.scopes.back().at(abbreviation.name)] = value;
     }
     return env;
 }
@@ -590,7 +577,8 @@ LawProof Lowering::law_proof(const ProofSyntax& syntax, LawEnvironment& env, con
             proof.proofs.push_back(law_proof(step, local, remaining));
             if (remaining && ((step.kind == Kind::Witness && remaining->kind == LawTermKind::Exists) ||
                 (step.kind == Kind::Intro && (remaining->kind == LawTermKind::Implies ||
-                                             remaining->kind == LawTermKind::Forall))))
+                                             remaining->kind == LawTermKind::Forall ||
+                                             remaining->kind == LawTermKind::NullableForall))))
                 remaining = &remaining->terms.back();
         }
         break;
@@ -627,15 +615,20 @@ LawProof Lowering::law_proof(const ProofSyntax& syntax, LawEnvironment& env, con
         proof.terms.push_back(law_term(*syntax.expression, env,
             goal && goal->kind == LawTermKind::Exists ? &goal->type : nullptr));
         break;
-    case Kind::Intro:
+    case Kind::Intro: {
         proof.kind = LawProofKind::Intro;
-        if (goal && goal->kind == LawTermKind::Implies)
-            proof.index = bind_evidence(syntax.bindings.front(), goal->terms.front());
-        else if (goal && goal->kind == LawTermKind::Forall)
-            proof.index = law_value_binding(env, syntax.bindings.front().text, syntax.bindings.front().span, goal->type);
-        else
+        const auto& name = syntax.bindings.front();
+        if (goal && goal->kind == LawTermKind::Implies) {
+            const auto existing = env.evidence.find(name.text);
+            proof.index = existing != env.evidence.end() && existing->second.first == goal->index
+                ? goal->index : bind_evidence(name, goal->terms.front());
+        } else if (goal && (goal->kind == LawTermKind::Forall || goal->kind == LawTermKind::NullableForall)) {
+            proof.index = law_value_binding(env, name.text, name.span, goal->type);
+        } else {
             bad_law_type(syntax.span, "intro requires an implication or universal goal");
+        }
         break;
+    }
     case Kind::Absurd:
     case Kind::Contradiction:
     case Kind::Inject: {

@@ -1,0 +1,32 @@
+let Base = module (
+    .Pure
+    export let spare = func -> bool => true;
+
+    .Pure
+    export let value = func -> bool => true;
+
+    .Pure
+    export let wrapped = func -> bool => value();
+
+    export let PreservesTrue = law (
+        claim: { wrapped() == true : bool };
+    );
+        | proof: {==};
+);
+
+let Derived = module:Base (
+    .Pure
+    export let.override spare = func -> bool => false;
+
+    .Pure
+    export let.override value = func -> bool => false;
+);
+
+let Leaf = module:Derived ();
+
+let Use = module (
+    let CallsInheritedLaw = law (
+        claim: { Leaf.wrapped() == true : bool };
+    );
+        | proof: Leaf.PreservesTrue();
+);

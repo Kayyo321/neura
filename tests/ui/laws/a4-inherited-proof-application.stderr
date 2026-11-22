@@ -1,0 +1,15 @@
+error[E1406]: override of 'value' invalidated the proof of 'Base.PreservesTrue'
+  --> $DIR/a4-inherited-proof-application.nra:22:25
+   |
+11 |     export let PreservesTrue = law (
+   |     --------------------------------... inherited law declared here
+...
+14 |         | proof: {==};
+   |                  ---- reflexivity failed: false differs from true
+...
+22 |     export let.override value = func -> bool => false;
+   |                         ^^^^^
+   |
+   = help: prove the unchanged statement with 'let.proof'
+
+For more information about this error, try `neura explain E1406`.

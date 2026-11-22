@@ -18,21 +18,28 @@
         return std::nullopt;
     }
 
+    bool at_law_body(std::size_t open) const {
+        return next_is(open, "(") && cursor_ + open + 1 < tokens_.size() &&
+               (next_is(open + 1, ")") || law_item_kind(tokens_[cursor_ + open + 1]).has_value());
+    }
+
     bool at_law_initializer() const {
         if (!at_contextual("law")) return false;
-        if (next_is(1, "(") && cursor_ + 2 < tokens_.size())
-            return next_is(2, ")") || law_item_kind(tokens_[cursor_ + 2]).has_value();
         if (next_is(1, ".")) return next_is_word(2, "invariant") && next_is(3, "(");
-        if (!next_is(1, "<") || next_is(2, "<")) return false;
-        // An ordering expression such as `law < limit` has no generic
-        // parameter list followed by a law body.
-        unsigned angles = 1;
-        for (std::size_t i = 2; cursor_ + i < tokens_.size(); ++i) {
-            if (next_is(i, ";") || next_is(i, ")") || next_is(i, "}")) return false;
-            if (next_is(i, "<")) ++angles;
-            if (next_is(i, ">") && --angles == 0) return next_is(i + 1, "(");
+        if (!next_is(1, "<")) return at_law_body(1);
+        if (next_is(2, "<")) return false;
+        // A comparison can contain balanced angle brackets, and an ordinary
+        // generic call can have the same prefix as a law. Check the actual
+        // generic parameter syntax and the law body's opening tokens.
+        Parser lookahead(tokens_, template_neura_);
+        lookahead.cursor_ = cursor_ + 1;
+        SpeculativeDiagnostics speculative;
+        try {
+            lookahead.generic_parameters();
+            return lookahead.at_law_body(0);
+        } catch (const Diagnostic&) {
+            return false;
         }
-        return false;
     }
 
     bool at_law_attachment() const {
@@ -88,6 +95,7 @@
         declaration.generics = generic_parameters();
         law.open = current().span;
         expect("(");
+        const bool bare_empty_law = !law.invariant && declaration.generics.empty() && at(")");
         while (!at_end() && !at(")")) {
             const auto start = cursor_;
             try {
@@ -98,6 +106,19 @@
         }
         law.close = current().span;
         expect(")");
+        const bool continued = !at_law_attachment() &&
+            (at("(") || at("[") || at(".") || at("?.") || at("as") || at("is") || at("?") || at("??") ||
+             at("..") || at("..=") || precedence() != 0);
+        if (!continued && block_depth_ == 0) return;
+
+        auto error = continued
+            ? Diagnostic(current().span, "a law declaration must be the whole initializer").with_code("E0202")
+                .label("an expression continues here").label(law.keyword, "the law declaration starts here")
+            : Diagnostic(law.keyword, "a law declaration belongs at file or module level").with_code("E0431")
+                .label("this law is declared inside a block");
+        if (bare_empty_law) error.help("write '(law)()' to call a function named 'law'");
+        if (continued) throw error;
+        record(error);
     }
 
     void law_attachment(Declaration& declaration) {

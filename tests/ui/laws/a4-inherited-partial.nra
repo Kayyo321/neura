@@ -1,0 +1,27 @@
+.[Immutable, Final]
+let Flag = class (
+    export last enabled: bool = true;
+);
+
+let Base = module (
+    .Pure
+    export let value = func(flag: Flag) -> bool => true;
+
+    export let ConstantTrue = law (
+        for? flag: Flag;
+        claim: { value(flag) == true : bool };
+    );
+        | proof: {==};
+);
+
+let Derived = module:Base (
+    .Pure
+    export let.override value = func(flag: Flag) -> bool => flag.enabled;
+);
+
+let Use = module (
+    let Trivial = law (
+        claim: { true == true : bool };
+    );
+        | proof: Derived.ConstantTrue(nil);
+);

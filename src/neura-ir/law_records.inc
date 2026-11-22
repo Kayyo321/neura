@@ -13,7 +13,7 @@ struct LawTerm {
     // Exists/Forall. Logical connectives without a value type carry Void.
     IrType type;
     Span span;
-    // Enum variant, function declaration, or projection field, as applicable.
+    // Enum variant, function declaration, projection field, or named declaration binder.
     SymbolId symbol = no_symbol;
     // A fixed module receiver on a call, or no_symbol for lexical dispatch.
     SymbolId receiver = no_symbol;
@@ -47,6 +47,8 @@ enum class LawStatus : std::uint8_t { Abstract, Proven, TrustedAxiom };
 struct IrLawAbbreviation {
     std::string name;
     LawTerm value;
+    // Number of source-ordered declaration binders preceding this definition.
+    std::uint32_t binders = 0;
 };
 
 struct IrLawRecord {

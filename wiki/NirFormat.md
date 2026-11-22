@@ -280,18 +280,18 @@ Paths in spans are recorded as the compiler saw them. They identify source locat
 
 ## Revision 1.16: laws
 
-A program with [laws](Laws) writes symbol kind 14 and a `LAWS` table after the optional `PNAM` table. It uses the same body and operation encoding as 1.15. A program without laws still uses the earliest version that can encode it.
+A program with [laws](Laws) writes symbol kind 14 and a `LAW2` table after the optional `PNAM` table. It uses the same body and operation encoding as 1.15. A program without laws still uses the earliest version that can encode it.
 
-The table starts with the four ASCII bytes `LAWS` followed by a nonempty counted vector of law records. The term and proof tags follow the declaration order of [the typed record definitions](https://github.com/Kayyo321/neura/blob/main/src/neura-ir/law_records.inc).
+The table starts with the four ASCII bytes `LAW2` followed by a nonempty counted vector of law records. The reader rejects the prerelease `LAWS` table because it may encode quantifiers in a different order from the source. Recompile those artifacts from source. The term and proof tags follow the declaration order of [the typed record definitions](https://github.com/Kayyo321/neura/blob/main/src/neura-ir/law_records.inc).
 
 | Record | Fields in order |
 | --- | --- |
 | Law | `law_symbol:u32`, `owner:u32`, `status:u8`, `introductions:u32`, `statement:Term`, `footprint:vector<u32>`, `abbreviations:vector<Abbreviation>`, `has_certificate:u8`, then `certificate:Proof` when present |
-| Abbreviation | `name:text`, `value:Term` |
+| Abbreviation | `name:text`, `binders:u32`, `value:Term` |
 | Term | `kind:u8`, `span:Span`, `type:Type`, `symbol:u32` optional, `receiver:u32` optional, `index:u32`, `terms:vector<Term>` |
 | Proof | `kind:u8`, `span:Span`, `symbol:u32` optional, `receiver:u32` optional, `index:u32`, `bindings:vector<u32>`, `terms:vector<Term>`, `proofs:vector<Proof>` |
 
-A declaration's owner is its module. A fulfillment names the original law symbol and the derived module that supplies a certificate for the same statement. Status 0 denotes an abstract law, 1 a law with a certificate, and 2 a trusted axiom reserved for Phase 2. Introductions count the leading universals and hypotheses that open the certificate's scope. The reader checks each certificate and recomputes its unfolding footprint. The linker remaps symbols and type references and rechecks obligations in the combined module hierarchy. The compiler erases the law table and its symbols before specializing executable NeuraIR.
+A declaration's owner is its module. A fulfillment names the original law symbol and the derived module that supplies a certificate for the same statement. Status 0 denotes an abstract law, 1 a law with a certificate, and 2 a trusted axiom reserved for Phase 2. Quantifier and hypothesis terms nest in source order. Introductions count the leading universals and hypotheses that open the certificate's scope before any explicit proof steps. A named declaration binder carries its law parameter symbol. Each abbreviation records how many declaration binders precede it so the reader can check its value in the original scope. The reader checks each certificate and recomputes its unfolding footprint. The linker remaps symbols and type references and rechecks obligations in the combined module hierarchy. The compiler erases the law table and its symbols before specializing executable NeuraIR.
 
 ### Reference nil summaries
 

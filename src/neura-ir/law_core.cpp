@@ -49,6 +49,7 @@ struct Proposition {
     const LawTerm* body = nullptr;
     SymbolId module = no_symbol;
     std::uint32_t binder = law_no_binding;
+    SymbolId binder_symbol = no_symbol;
     std::map<std::uint32_t, Value> values{};
 };
 
@@ -109,7 +110,8 @@ std::string show_type(const IrType& type) {
 } // namespace
 
 struct LawCheckSession::Checker {
-    Checker(const IrProgram& program, std::size_t fuel) : program(program), budget(fuel) {
+    Checker(const IrProgram& program, std::size_t fuel, InheritedFailure on_inherited_failure)
+        : program(program), budget(fuel), on_inherited_failure(std::move(on_inherited_failure)) {
         for (const auto& body : program.bodies) {
             bodies[body.owner].push_back(&body);
             if (body.owner >= program.symbols.size() || program.symbols[body.owner].kind == SymbolKind::Function)
@@ -202,8 +204,8 @@ struct LawCheckSession::Checker {
             return found->second;
         }
 
-        Value open(const IrType& type, bool non_nil = false) {
-            return make({Head::Open, type, no_symbol, no_symbol, next_open++, {},
+        Value open(const IrType& type, bool non_nil = false, SymbolId binder = no_symbol) {
+            return make({Head::Open, type, binder, no_symbol, next_open++, {},
                          non_nil && type.kind == TypeKind::Object});
         }
 
@@ -564,11 +566,18 @@ struct LawCheckSession::Checker {
                     ill_typed(term.span, "for? requires an immutable class type");
                 Proposition proposition{term.kind, term.type};
                 proposition.binder = term.index;
+                if (term.symbol != no_symbol) {
+                    const auto& binding = session.symbol(term.symbol, term.span);
+                    if (binding.kind != SymbolKind::Parameter || binding.type != term.type ||
+                        session.symbol(binding.owner, term.span).kind != SymbolKind::Law)
+                        ill_typed(term.span, "invalid law quantifier name");
+                    proposition.binder_symbol = term.symbol;
+                }
                 proposition.body = &term.terms.front();
                 proposition.module = scope.module;
                 proposition.values = scope.values;
                 auto inner = scope;
-                bind(inner, term.index, open(term.type, term.kind == Term::Forall), term.span);
+                bind(inner, term.index, open(term.type, term.kind != Term::NullableForall), term.span);
                 form(term.terms.front(), inner, hole);
                 // A motive with a bound proposition would need to close over
                 // its hole as well, so instantiate with the current value.
@@ -582,7 +591,7 @@ struct LawCheckSession::Checker {
 
         Proposition instantiate(const Proposition& quantified, Value input, const Scope& scope, const Span& at) {
             expect(input, quantified.type, at);
-            if (quantified.kind == Term::Forall && quantified.type.kind == TypeKind::Object &&
+            if (quantified.kind != Term::NullableForall && quantified.type.kind == TypeKind::Object &&
                 !non_nil(input, scope))
                 ill_typed(at, "the quantifier requires a non-nil immutable instance");
             auto inner = scope;
@@ -1346,7 +1355,7 @@ struct LawCheckSession::Checker {
             if (a.kind == Term::Equal)
                 return equivalent(a.left, b.left, scope, at) && equivalent(a.right, b.right, scope, at);
             if (a.body && b.body) {
-                const auto common = open(a.type, a.kind == Term::Forall);
+                const auto common = open(a.type, a.kind != Term::NullableForall);
                 const auto left = instantiate(a, common, scope, at);
                 const auto right = instantiate(b, common, scope, at);
                 return equivalent(left, right, scope, at);
@@ -1362,7 +1371,9 @@ struct LawCheckSession::Checker {
             switch (value.head) {
             case Head::Boolean: return value.index ? "true" : "false";
             case Head::Nil: return "nil";
-            case Head::Open: return "value " + std::to_string(value.index + 1);
+            case Head::Open:
+                return value.symbol == no_symbol ? "value " + std::to_string(value.index + 1)
+                                                 : session.name(value.symbol);
             case Head::Index: return std::to_string(value.index);
             case Head::Project:
                 // A case refinement can itself contain a projection of the
@@ -1465,6 +1476,12 @@ struct LawCheckSession::Checker {
             if (!declaration.exported && !session.derives(scope.module, declaration.owner))
                 ill_typed(proof.span, "law '" + declaration.name + "' is private to its declaring module");
             const auto& record = session.find_law(proof.symbol, module, proof.span);
+            const bool recursive = frame.law == proof.symbol && frame.module == module;
+            std::optional<std::vector<SymbolId>> inherited_dependencies;
+            // Forming the statement also validates the receiver's calls.
+            // Check the inherited certificate first so failures name its invalidating override.
+            if (!recursive && module != record.owner && record.status != LawStatus::Abstract)
+                inherited_dependencies = session.check(record, module, proof.span);
             auto statement_scope = scope;
             statement_scope.module = module;
             statement_scope.values.clear();
@@ -1492,7 +1509,7 @@ struct LawCheckSession::Checker {
             }
             if (used_values != proof.terms.size() || used_proofs != proof.proofs.size())
                 ill_typed(proof.span, "too many arguments for law '" + declaration.name + "'");
-            if (frame.law == proof.symbol && frame.module == module) {
+            if (recursive) {
                 if (!decreases(arguments, frame.arguments, scope))
                     throw Diagnostic(proof.span, "recursive law application does not decrease to a structural subterm")
                         .with_code("E1413").label("a quantified enum argument must be a matched payload subterm");
@@ -1500,7 +1517,8 @@ struct LawCheckSession::Checker {
                 if (record.status == LawStatus::Abstract)
                     throw Diagnostic(proof.span, "law '" + declaration.name + "' has no proof in this module")
                         .with_code("E1404").label(declaration.span, "this law requires a proof");
-                const auto dependencies = session.check(record, module, proof.span);
+                const auto dependencies = inherited_dependencies ? std::move(*inherited_dependencies)
+                    : session.check(record, module, proof.span);
                 footprint.insert(dependencies.begin(), dependencies.end());
             }
             return goal;
@@ -1778,8 +1796,12 @@ struct LawCheckSession::Checker {
             if (!result) ill_typed(at, "decide could not reduce the claim on this finite case");
             auto error = Diagnostic(at, "decide found a counterexample to the law").with_code("E1401")
                 .note("remaining claim: " + show(goal, scope, at));
-            for (std::size_t i = 0; i < frame.arguments.size(); ++i)
-                error.note("argument " + std::to_string(i + 1) + " = " + show(frame.arguments[i], scope, at));
+            for (std::size_t i = 0; i < frame.arguments.size(); ++i) {
+                const auto argument = frame.arguments[i];
+                const auto binder = normal(argument).symbol;
+                const auto name = binder == no_symbol ? std::to_string(i + 1) : session.name(binder);
+                error.note("argument " + name + " = " + show(argument, scope, at));
+            }
             throw error;
         }
 
@@ -1828,11 +1850,18 @@ struct LawCheckSession::Checker {
                 case Step::Inject:
                     inject(proof, scope);
                     continue;
-                case Step::Witness:
+                case Step::Witness: {
                     shape(proof, 1, 0);
                     if (goal.kind != Term::Exists) ill_typed(proof.span, "witness requires an existential goal");
-                    goal = instantiate(goal, value(proof.terms[0], scope), scope, proof.span);
+                    const auto binder = goal.binder;
+                    const auto& witness = proof.terms.front();
+                    auto input = value(witness, scope);
+                    if (goal.type.kind == TypeKind::Object && !non_nil(input, scope))
+                        input = whnf(input, scope, witness.span);
+                    goal = instantiate(goal, input, scope, witness.span);
+                    bind(scope, binder, input, proof.span);
                     continue;
+                }
                 case Step::Intro: {
                     shape(proof, 0, 0);
                     if (goal.kind == Term::Implies) {
@@ -1840,9 +1869,13 @@ struct LawCheckSession::Checker {
                         auto consequent = goal.parts[1];
                         goal = std::move(consequent);
                     } else if (quantifier(goal.kind)) {
-                        const auto arbitrary = open(goal.type, goal.kind == Term::Forall);
+                        const auto binder = goal.binder;
+                        const auto binding = goal.binder_symbol;
+                        const auto arbitrary = open(goal.type, goal.kind == Term::Forall, binding);
                         goal = instantiate(goal, arbitrary, scope, proof.span);
                         bind(scope, proof.index, arbitrary, proof.span);
+                        if (binding != no_symbol && binder != proof.index)
+                            bind(scope, binder, arbitrary, proof.span);
                     } else {
                         ill_typed(proof.span, "intro requires a universal or implication goal");
                     }
@@ -1903,19 +1936,40 @@ struct LawCheckSession::Checker {
             incomplete(goal, scope, end);
         }
 
+        void check_abbreviations(const IrLawRecord& record, SymbolId module) {
+            // These values must be total even when the proof never uses them.
+            // Walk the declaration in source order using arbitrary values,
+            // without pulling later quantifiers into an earlier definition.
+            Scope scope{module};
+            const LawTerm* binder = &record.statement;
+            std::uint32_t depth = 0;
+            for (const auto& abbreviation : record.abbreviations) {
+                if (abbreviation.binders < depth)
+                    ill_typed(abbreviation.value.span, "law abbreviations are out of order");
+                for (; depth < abbreviation.binders; ++depth) {
+                    if (quantifier(binder->kind) || binder->kind == Term::Exists) {
+                        const auto input = open(binder->type, binder->kind != Term::NullableForall);
+                        bind(scope, binder->index, input, binder->span);
+                    } else if (binder->kind != Term::Implies) {
+                        ill_typed(abbreviation.value.span, "invalid law abbreviation scope");
+                    }
+                    binder = &binder->terms.back();
+                }
+                value(abbreviation.value, scope);
+            }
+        }
+
         std::vector<SymbolId> check(const IrLawRecord& record, SymbolId module) {
             const auto& law = session.symbol(record.law_symbol, record.statement.span);
-            if (record.status == LawStatus::TrustedAxiom)
-                throw Diagnostic(law.span, "trusted axioms are reserved for the Phase 2 standard library")
-                    .with_code("E1420");
             allow_abstract = record.status == LawStatus::Abstract;
             frame = {record.law_symbol, module, {}};
             Scope scope{module};
             auto goal = form(record.statement, scope);
+            check_abbreviations(record, module);
             for (std::uint32_t i = 0; i < record.introductions; ++i) {
                 if (quantifier(goal.kind)) {
                     const auto binder = goal.binder;
-                    const auto input = open(goal.type, goal.kind == Term::Forall);
+                    const auto input = open(goal.type, goal.kind == Term::Forall, goal.binder_symbol);
                     goal = instantiate(goal, input, scope, law.span);
                     bind(scope, binder, input, law.span);
                     frame.arguments.push_back(input);
@@ -1927,8 +1981,6 @@ struct LawCheckSession::Checker {
                     ill_typed(law.span, "invalid leading binder count in law declaration");
                 }
             }
-            for (const auto& abbreviation : record.abbreviations)
-                value(abbreviation.value, scope);
             if (allow_abstract) {
                 if (record.certificate) ill_typed(law.span, "an abstract law must not carry a certificate");
             } else if (!record.certificate) {
@@ -1942,6 +1994,7 @@ struct LawCheckSession::Checker {
 
     const IrProgram& program;
     std::size_t budget;
+    InheritedFailure on_inherited_failure;
     std::unique_ptr<PurityAnalysis> purity;
     std::unique_ptr<DispatchTargets> dispatch;
     std::set<std::string> checked_immutable_layouts;
@@ -2153,14 +2206,25 @@ struct LawCheckSession::Checker {
             std::vector<Instance>& active;
             ~Pop() { active.pop_back(); }
         } pop{active};
-        const auto checked = Run(*this).check(law, module);
-        results.emplace(key, checked);
-        return checked;
+        // Confirm the certificate works in the declaring receiver before attributing a
+        // failure to an override. This also covers inherited laws checked during proof application.
+        std::vector<SymbolId> declaring_footprint;
+        if (module != law.owner) declaring_footprint = check(law, law.owner, at);
+        try {
+            const auto checked = Run(*this).check(law, module);
+            results.emplace(key, checked);
+            return checked;
+        } catch (const Diagnostic& error) {
+            if (module != law.owner && on_inherited_failure)
+                on_inherited_failure(law, module, declaring_footprint, error);
+            throw;
+        }
     }
 };
 
-LawCheckSession::LawCheckSession(const IrProgram& program, std::size_t fuel)
-    : checker_(std::make_unique<Checker>(program, fuel)) {}
+LawCheckSession::LawCheckSession(const IrProgram& program, std::size_t fuel,
+                                 InheritedFailure inherited_failure)
+    : checker_(std::make_unique<Checker>(program, fuel, std::move(inherited_failure))) {}
 
 LawCheckSession::~LawCheckSession() = default;
 

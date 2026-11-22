@@ -1,0 +1,10 @@
+error[E0202]: a law declaration must be the whole initializer
+ --> $DIR/law-expr-continuation.nra:3:20
+  |
+3 | let answer = law() && true;
+  |                    ^^ an expression continues here
+  |              --- the law declaration starts here
+  |
+  = help: write '(law)()' to call a function named 'law'
+
+For more information about this error, try `neura explain E0202`.

@@ -1,0 +1,3 @@
+let law = func<T>(value: T) -> T => value;
+
+let answer = law<bool>(true);

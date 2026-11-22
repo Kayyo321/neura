@@ -26,7 +26,7 @@ bool same_proof(const LawProof& a, const LawProof& b) {
 }
 
 bool same_abbreviation(const IrLawAbbreviation& a, const IrLawAbbreviation& b) {
-    return a.name == b.name && same_term(a.value, b.value);
+    return a.name == b.name && a.binders == b.binders && same_term(a.value, b.value);
 }
 
 const Span& location(const std::map<SymbolId, Span>& spans, SymbolId id, const IrSymbol& fallback) {
@@ -206,12 +206,44 @@ void check_program_laws(IrProgram& program, std::size_t fuel, LawCheckOrigin ori
             invalid_law(record->statement.span, "a fulfillment must prove the inherited law's unchanged statement");
     }
 
-    LawCheckSession checker(program, fuel);
+    const auto inherited_failure = [&](const IrLawRecord& law, SymbolId module,
+                                       const std::vector<SymbolId>& footprint, const Diagnostic& failure) {
+        if (failure.code() == "E1406" || failure.code() == "E1414" || failure.code() == "E1415") return;
+        SymbolId nearest_override = no_symbol;
+        SymbolId changed_dependency = no_symbol;
+        const auto depends_on = [&](SymbolId member) {
+            std::set<SymbolId> seen;
+            for (auto original = symbols[member].overrides;
+                 original < symbols.size() && seen.insert(original).second; original = symbols[original].overrides)
+                if (std::ranges::find(footprint, original) != footprint.end()) return true;
+            return false;
+        };
+        for (const auto scope : lineage(program, module)) {
+            if (scope == law.owner || changed_dependency != no_symbol) break;
+            for (const auto member : children[scope]) {
+                if (symbols[member].overrides == no_symbol) continue;
+                if (nearest_override == no_symbol) nearest_override = member;
+                if (!depends_on(member)) continue;
+                changed_dependency = member;
+                break;
+            }
+        }
+        const auto changed = changed_dependency != no_symbol ? changed_dependency : nearest_override;
+        if (changed == no_symbol) return;
+        const auto& replacement = symbols[changed];
+        const auto name = qualified_law_name(program, law.law_symbol);
+        throw Diagnostic(location(sites.declarations, changed, replacement),
+                         "override of '" + replacement.name + "' invalidated the proof of '" + name + "'")
+            .with_code("E1406").arg("law", name)
+            .label(failure.span, failure.what()).label(symbols[law.law_symbol].span, "inherited law declared here")
+            .help("prove the unchanged statement with 'let.proof'");
+    };
+    LawCheckSession checker(program, fuel, inherited_failure);
     const auto verify = [&](IrLawRecord& law, SymbolId module) {
         try {
             return checker.check(law, module);
         } catch (Diagnostic& error) {
-            error.arg("law", qualified_law_name(program, law.law_symbol));
+            if (!error.argument("law")) error.arg("law", qualified_law_name(program, law.law_symbol));
             throw;
         }
     };
@@ -270,30 +302,9 @@ void check_program_laws(IrProgram& program, std::size_t fuel, LawCheckOrigin ori
                     }
                     throw error;
                 }
-                try {
-                    // Even a proof with no unfolded definitions may rely on
-                    // totality of a call whose implementation was overridden.
-                    (void)verify(record, module);
-                } catch (const Diagnostic& error) {
-                    const auto override_of_ancestor = [&](SymbolId member) {
-                        const auto original = symbols[member].overrides;
-                        return original != no_symbol &&
-                            (std::ranges::find(record.footprint, original) != record.footprint.end() ||
-                             std::ranges::find(record.footprint, member) != record.footprint.end());
-                    };
-                    auto changed = std::ranges::find_if(children[module], override_of_ancestor);
-                    if (changed == children[module].end())
-                        changed = std::ranges::find_if(children[module], [&](SymbolId member) {
-                            return symbols[member].overrides != no_symbol;
-                        });
-                    if (changed == children[module].end()) throw;
-                    const auto& replacement = symbols[*changed];
-                    throw Diagnostic(location(sites.declarations, *changed, replacement),
-                                     "override of '" + replacement.name + "' invalidated the proof of '" +
-                                     qualified_law_name(program, law_id) + "'").with_code("E1406")
-                        .label(error.span, error.what()).label(law.span, "inherited law declared here")
-                        .help("prove the unchanged statement with 'let.proof'");
-                }
+                // A proof that unfolds no definitions can still depend on the
+                // totality of a call whose implementation was overridden.
+                (void)verify(record, module);
             }
         }
     }

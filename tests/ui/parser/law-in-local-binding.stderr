@@ -1,0 +1,9 @@
+error[E0431]: a law declaration belongs at file or module level
+ --> $DIR/law-in-local-binding.nra:4:17
+  |
+4 |     let value = law();
+  |                 ^^^ this law is declared inside a block
+  |
+  = help: write '(law)()' to call a function named 'law'
+
+For more information about this error, try `neura explain E0431`.

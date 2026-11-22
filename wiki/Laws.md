@@ -32,9 +32,9 @@ The proof considers both Boolean values. In each case `{==}` reduces the two sid
 
 ## Statements and proofs
 
-`for` introduces a universal variable, `given` introduces a hypothesis, and `last` names a pure expression. Use `claim` for a proposition or `holds` for a Boolean expression that must be true. More than one claim forms a conjunction. An `exists` binding requires a value supplied by a `witness` proof step.
+`for` introduces a universal variable, `given` introduces a hypothesis, and `last` names a pure expression. Use `claim` for a proposition or `holds` for a Boolean expression that must be true. More than one claim forms a conjunction. Quantifiers and hypotheses nest in the order they are written. Supply a value for `exists` with a `witness` step. A witness can use only the bindings in scope at that quantifier. Use `intro` for universals and named hypotheses that follow an existential.
 
-Phase 1 covers Booleans, enums with or without payloads, tuples, and immutable class values. A class quantifier ranges over live instances by default. Write `for?` to include `nil`. Propositional equality compares the contents of values according to their types. Laws can call pure functions whose admissible operations terminate without trapping.
+Phase 1 covers Booleans, enums with or without payloads, tuples, and immutable class values. Plain `for` and `exists` over a class range over live instances. Write `for?` to include `nil` in a universal quantifier. Propositional equality compares the contents of values according to their types. Laws can call pure functions whose admissible operations terminate without trapping.
 
 Use `match` to refine an enum or Boolean. Within a constructor arm, a recursive law call can serve as an induction hypothesis if it uses a strictly smaller structural subterm. `rewrite proof in { ... }` requires a motive with a hole written `_`. `rewrite.rev` reverses the direction. Use `have` to name an intermediate proof, `calc` for an equality chain, and `split` for a conjunction. `decide` checks closed or finite goals within the proof fuel budget.
 
@@ -46,6 +46,6 @@ Separately compiled modules retain law statements and certificates in [NeuraIR 1
 
 ## Diagnostics and later phases
 
-`neura prove` checks laws without compiling a circuit. A failed proof also prevents `neura check` and `neura build` from succeeding. [Diagnostics](Diagnostics#e14xx-laws-and-proofs) lists the law codes. E1412 is reserved for trap propositions. E1417 and E1418 are reserved for class invariants, and E1419 for the independent verdict checker. E1420 rejects an axiom declaration outside the trusted standard library.
+`neura prove` checks laws without compiling a circuit. A failed proof also prevents `neura check` and `neura build` from succeeding. [Diagnostics](Diagnostics#e14xx-laws-and-proofs) lists the law codes. E1412 is reserved for trap propositions. E1417 and E1418 are reserved for class invariants, and E1419 for the independent verdict checker. E1420 rejects an axiom declaration outside the trusted standard library. E1421 reports a feature deferred to a later phase.
 
 The [design](https://github.com/Kayyo321/neura/blob/main/docs/design/Laws031.md#7-phased-rollout-plan) describes later phases for machine numbers, traps, and trusted axioms, as well as interface and class declarations, generic laws, project-wide laws and loop induction. A later-phase construct receives a diagnostic when used with a Phase 1 compiler.

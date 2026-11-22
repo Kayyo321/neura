@@ -1,0 +1,13 @@
+error[E1406]: override of 'value' invalidated the proof of 'Base.ConstantTrue'
+  --> $DIR/a4-inherited-partial.nra:19:25
+   |
+10 |     export let ConstantTrue = law (
+   |     -------------------------------... inherited law declared here
+...
+19 |     export let.override value = func(flag: Flag) -> bool => flag.enabled;
+   |                         ^^^^^
+   |                                                             ------------ a total law cannot use a projection without a constructor or non-nil receiver because it may trap
+   |
+   = help: prove the unchanged statement with 'let.proof'
+
+For more information about this error, try `neura explain E1406`.

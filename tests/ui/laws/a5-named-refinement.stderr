@@ -1,0 +1,11 @@
+error[E1401]: reflexivity failed: false differs from true
+ --> $DIR/a5-named-refinement.nra:8:26
+  |
+8 |                 false => {==},
+  |                          ^^^^
+  |
+  = note: goal: { false == true : bool }
+  = note: first difference: false differs from true
+  = note: case refinement: right = false
+
+For more information about this error, try `neura explain E1401`.

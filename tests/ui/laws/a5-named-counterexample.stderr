@@ -1,0 +1,11 @@
+error[E1401]: decide found a counterexample to the law
+ --> $DIR/a5-named-counterexample.nra:6:18
+  |
+6 |         | proof: decide;
+  |                  ^^^^^^
+  |
+  = note: remaining claim: { false == true : bool }
+  = note: argument left = false
+  = note: argument right = false
+
+For more information about this error, try `neura explain E1401`.

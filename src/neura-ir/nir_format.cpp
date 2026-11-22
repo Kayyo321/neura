@@ -23,7 +23,8 @@ namespace {
 
 constexpr std::string_view magic = "NEIR";
 constexpr std::string_view payload_names_tag = "PNAM";
-constexpr std::string_view laws_tag = "LAWS";
+constexpr std::string_view laws_tag = "LAW2";
+constexpr std::string_view obsolete_laws_tag = "LAWS";
 constexpr std::string_view nil_summaries_tag = "NILS";
 constexpr std::string_view non_nil_uses_tag = "NNIL";
 constexpr std::uint32_t absent = 0xffffffffU;
@@ -435,6 +436,7 @@ public:
                 count(law.abbreviations.size());
                 for (const auto& abbreviation : law.abbreviations) {
                     text(abbreviation.name);
+                    u32(abbreviation.binders);
                     term(abbreviation.value);
                 }
                 u8(law.certificate.has_value());
@@ -773,6 +775,9 @@ public:
             if (minor_ < nir_laws_minor) fail("law records require NeuraIR format 1.16");
             position_ += laws_tag.size();
             program.laws = laws();
+        } else if (remaining() >= obsolete_laws_tag.size() &&
+                   std::equal(obsolete_laws_tag.begin(), obsolete_laws_tag.end(), bytes_.begin() + position_)) {
+            fail("obsolete NeuraIR law table; rebuild the artifact from source");
         } else if (std::ranges::any_of(program.symbols, [](const IrSymbol& value) {
             return value.kind == SymbolKind::Law;
         })) {
@@ -839,12 +844,13 @@ private:
             const auto unfolded = count(4);
             law.footprint.reserve(unfolded);
             for (std::uint32_t j = 0; j < unfolded; ++j) law.footprint.push_back(required_reference());
-            const auto abbreviations = count(5);
+            const auto abbreviations = count(9);
             law.abbreviations.reserve(abbreviations);
             for (std::uint32_t j = 0; j < abbreviations; ++j) {
                 auto name = text();
                 if (!is_identifier(name)) fail("invalid law abbreviation name");
-                law.abbreviations.push_back({std::move(name), term(0)});
+                const auto binders = u32();
+                law.abbreviations.push_back({std::move(name), term(0), binders});
             }
             if (tag(1, "law certificate flag")) law.certificate = proof(0);
             result.push_back(std::move(law));

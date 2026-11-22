@@ -1,4 +1,4 @@
-error[E1421]: trap and outcome claims is deferred to Phase 2
+error[E1421]: trap and outcome claims are deferred to Phase 2
  --> $DIR/trap-claim-deferred.nra:3:9
   |
 3 |         no_trap: true;

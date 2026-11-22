@@ -1,0 +1,12 @@
+let Booleans = module (
+    let BothTrue = law (
+        for (left: bool, right: bool);
+        claim: { right == true : bool };
+    );
+        | proof: {
+            match (right) {
+                false => {==},
+                true => {==},
+            }
+        };
+);
