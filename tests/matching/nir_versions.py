@@ -18,6 +18,7 @@ NEURA = pathlib.Path(sys.argv[1]).resolve()
 PROGRAMS = pathlib.Path(sys.argv[2]).resolve()
 EXPRESSIONS_MINOR = 15
 ANY_MINOR = 12
+NARROWING_MINOR = 16
 
 
 def run(*arguments):
@@ -39,13 +40,30 @@ def main():
         for name, minimum, maximum in (('guards', 0, ANY_MINOR - 1), ('match-is', 0, ANY_MINOR - 1),
                                        ('optional-access', 0, ANY_MINOR - 1),
                                        ('propagation', ANY_MINOR, ANY_MINOR)):
-            data = emit(PROGRAMS / (name + '.nra'), scratch / (name + '.nir'))
+            module = scratch / (name + '.nir')
+            data = emit(PROGRAMS / (name + '.nra'), module)
             minor = data[6] | (data[7] << 8)
-            # A program that links a string chain (concat text, NeuraIR 1.15) is 1.15 whatever else it
-            # uses: the standard library's error messages are chains since the 0.3.0 modernization.
-            if 'concat_text' in run('emit-ir', str(scratch / (name + '.nir'))).stdout:
+            listing = run('emit-ir', '--no-optimize', str(module))
+            if listing.returncode != 0:
+                failures.append(f'{name}: reading the emitted NeuraIR failed\n{listing.stderr}')
+                continue
+            # The standard library links string chains, a NeuraIR 1.15 feature.
+            if 'concat_text' in listing.stdout:
                 minimum = maximum = EXPRESSIONS_MINOR
-            if not minimum <= minor <= maximum:
+            if minor == NARROWING_MINOR:
+                # The prior feature version still represents the older program features. A reader
+                # rejection naming the nil tables establishes why this artifact needs the new version.
+                downgraded = bytearray(data)
+                downgraded[6:8] = maximum.to_bytes(2, 'little')
+                without_nil_version = scratch / (name + '.older.nir')
+                without_nil_version.write_bytes(downgraded)
+                result = run('emit-ir', '--no-optimize', str(without_nil_version))
+                expected = ('nil summaries require NeuraIR format 1.16',
+                            'nil-narrowing facts require NeuraIR format 1.16')
+                if result.returncode != 1 or not any(message in result.stderr for message in expected):
+                    failures.append(f'{name}: expected nil metadata to require NeuraIR 1.{minor}, '
+                                    f'got status {result.returncode}\n{result.stderr}')
+            elif not minimum <= minor <= maximum:
                 failures.append(f'{name}: NeuraIR 1.{minor}, expected 1.{minimum} to 1.{maximum}')
         data = bytearray((scratch / 'propagation.nir').read_bytes())
         data[6], data[7] = 10, 0

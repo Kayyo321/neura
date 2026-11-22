@@ -387,18 +387,17 @@ IrProgram without_attributes(IrProgram program) {
     return program;
 }
 
-// The minor version the writer picks for a linked program: the lowest that
-// holds every node. Since the 0.3.0 modernization the standard library builds
-// its messages with string chains (Std.Core.Error.message, io_text and
-// others), which are ConcatText nodes of NeuraIR 1.15, so a program that
-// links them is 1.15 whatever else it uses; one that does not keeps the
-// minor of its own features.
-int expected_minor(const IrProgram& program, int otherwise) {
-    bool expressions = false;
+// Linked standard library bodies can introduce expressions or nil metadata
+// beyond the version of the fixture's own feature.
+int expected_minor(const IrProgram& program, int feature_minor) {
+    auto minor = feature_minor;
     for_each_node(program, [&](const IrNode& item) {
-        expressions = expressions || item.op == IrOp::ConcatText || item.op == IrOp::TypeOf;
+        if (item.op == IrOp::ConcatText || item.op == IrOp::TypeOf)
+            minor = std::max(minor, static_cast<int>(nir_expressions_minor));
     });
-    return expressions ? static_cast<int>(nir_expressions_minor) : otherwise;
+    if (!program.nil_bindings.empty() || !program.nil_results.empty() || !program.non_nil_uses.empty())
+        minor = std::max(minor, static_cast<int>(nir_narrowing_minor));
+    return minor;
 }
 
 NEURA_TEST(nir, programs_with_tasks_are_written_as_1_9_and_keep_their_polls) {
@@ -1137,10 +1136,14 @@ NEURA_TEST(nir, symbol_attributes_and_deferred_initialization_round_trip_in_1_10
         check_equal(static_cast<int>(write_nir(deferred_only)[6]), expected_minor(deferred_only, 10),
                     "deferred initialization alone makes a file 1.10");
     }
-    check(static_cast<int>(write_nir(without_attributes(attributed_fixture(environment, false, false).program))[6]) < 10 ||
-              expected_minor(without_attributes(attributed_fixture(environment, false, false).program), 0) ==
-                  static_cast<int>(nir_expressions_minor),
-          "the fixture without either keeps an earlier version");
+    const auto plain = without_attributes(attributed_fixture(environment, false, false).program);
+    const auto plain_minor = static_cast<int>(write_nir(plain)[6]);
+    const auto unrelated_minor = expected_minor(plain, 0);
+    if (unrelated_minor != 0) {
+        check_equal(plain_minor, unrelated_minor, "the fixture without either uses only its other features");
+    } else {
+        check(plain_minor < 10, "the fixture without either keeps an earlier version");
+    }
 }
 
 NEURA_TEST(nir, attributed_programs_build_the_same_image_from_nir) {
@@ -1482,9 +1485,10 @@ NEURA_TEST(nir, any_round_trips_as_version_1_12_and_its_unpack_needs_a_tag_test)
 // version and reads back equal; a reader of an older minor version refuses
 // it, and a hook-free program keeps its version.
 NEURA_TEST(nir, class_hooks_are_written_with_their_minor_version) {
-    const auto program = lower_files({backend_dir(environment) / "nir-versions" / "hooks.nra"});
+    auto program = lower_files({backend_dir(environment) / "nir-versions" / "hooks.nra"});
     const auto bytes = write_nir(program);
-    check_equal(static_cast<int>(bytes[6]), static_cast<int>(nir_hooks_minor), "a class hook needs its minor version");
+    check_equal(static_cast<int>(bytes[6]), expected_minor(program, nir_hooks_minor),
+                "the class hook program uses the version required by its features");
     const auto read = read_nir(bytes, "hooks.nir");
     check(write_nir(read) == bytes, "a module with class hooks round-trips");
     std::size_t hooks = 0;
@@ -1492,7 +1496,13 @@ NEURA_TEST(nir, class_hooks_are_written_with_their_minor_version) {
         if (has_attribute(item, AttributeId::HookOf)) ++hooks;
     }
     check_equal(hooks, std::size_t{3}, "hook functions that read back");
-    auto older = bytes;
+    // The hook's inferred result summary can raise the version of the source fixture.
+    program.nil_bindings.clear();
+    program.nil_results.clear();
+    program.non_nil_uses.clear();
+    auto older = write_nir(program);
+    check_equal(static_cast<int>(older[6]), static_cast<int>(nir_hooks_minor),
+                "class hooks alone need their own minor version");
     older[6] = static_cast<std::uint8_t>(nir_hooks_minor - 1);
     expect_nir_error(older, "class hooks require NeuraIR format 1." + std::to_string(nir_hooks_minor));
     auto newer = bytes;
