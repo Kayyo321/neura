@@ -59,6 +59,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - Native fetch accepts a chunked response of any number of chunks: each chunk-size line and the trailer section have their own 16 KiB bound, instead of one budget for all chunk metadata.
 - Native fetch keys redirect-loop detection on the method as well as the URL, so a `POST` that a 303 sends to its own URL as a `GET` is not a loop.
 - Native HTTP/2 fetch writes each turn's frames in one write, so flow-control updates do not wait for delayed acknowledgements.
+- A desktop target with `http_client` and no `connect` list on it or its `ui` target now gets an empty origin list, so its native child reaches no origin, instead of an unrestricted grant. `neura run` and `neura dev` scope a server bundle's grant by its `http_client_origins` requirement, and refuse an `--allow-http-client` of either form after `--` for a scoped bundle instead of letting it lift or extend the manifest's list.
 
 ### Known limitations
 
