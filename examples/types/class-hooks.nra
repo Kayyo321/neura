@@ -38,7 +38,9 @@ let Desk = class (
 let App = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         let desk: Desk = new;
-        if (desk.current is guest: Session) {
+        last current = desk.current;
+        if (current is Session) {
+            let guest = current as Session;
             console.print_line(guest.user);
         }
         let admin: Admin = nil;
