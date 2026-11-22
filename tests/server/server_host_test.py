@@ -529,6 +529,21 @@ def test_streamed_request_body(args, image):
         host.stop()
 
 
+def test_http_body_adapters(args, image):
+    host = Host(args, image, "--config", "http_body_adapters=yes")
+    try:
+        content = b"host body read, write, and close"
+        with socket.create_connection(("127.0.0.1", host.port), timeout=5) as sock:
+            sock.sendall(b"POST /echo HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: "
+                         + str(len(content)).encode("ascii") + b"\r\n\r\n" + content)
+            response = http.client.HTTPResponse(sock)
+            response.begin()
+            check(response.status == 200 and response.chunked and response.read() == content,
+                  "HostBody and HostSink streamed the complete request")
+    finally:
+        host.stop()
+
+
 def test_deadline_from_head(args, image):
     # S-8 counts from the end of the head: a slow body plus the handler's
     # one-second nap pass a two-second deadline.
@@ -1129,7 +1144,7 @@ def main():
     if build.returncode != 0:
         print(build.stdout + build.stderr)
         return 1
-    tests = [test_basic, test_limits, test_step_limit, test_streaming, test_streamed_request_body,
+    tests = [test_basic, test_limits, test_step_limit, test_streaming, test_streamed_request_body, test_http_body_adapters,
              test_deadline_from_head, test_keep_alive_latency, test_admin, test_dead_ready_worker, test_refused_assignment, test_zygote_restart,
              test_process_bound, test_drain_completes_responses, test_startup_check, test_record_replay, test_without_host, test_tls,
              test_http2_curl, test_http2_streams, test_http2_reload, test_windows_commands]

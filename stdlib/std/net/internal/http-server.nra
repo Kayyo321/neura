@@ -1,5 +1,5 @@
-/// @brief The host services of a server image (docs/design/Backend030.md, "Provider ABI"). Only Std.App uses
-/// them. A request worker of neura-server-host answers them; under any other runner every call fails with
+/// @brief The host services of a server image (docs/design/Backend030.md, "Provider ABI").
+/// A request worker of neura-server-host answers them; under any other runner every call fails with
 /// error 14 (CapabilityDenied).
 export let HttpServer = module (
     /// @brief The assigned request: kind (1 request, 2 startup check), identifier, method, target, header

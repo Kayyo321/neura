@@ -13,6 +13,21 @@ let unit = import:Std.Core.Unit;
 let RequestTests = module (
     let bytes_of = func(text: string) -> uint8[list] => strings.to_bytes(text);
 
+    export let test_host_body_adapters_require_server_worker = func {
+        last source = new http.HostBody();
+        last sink = new http.HostSink();
+        assert_host_denied(test.assert_err<uint8[list]>(source.read(4)));
+        assert_host_denied(test.assert_err<unit.Unit>(sink.write(bytes_of("data"))));
+        assert_host_denied(test.assert_err<unit.Unit>(sink.close()));
+    };
+
+    let assert_host_denied = func(problem: errors.Error) {
+        test.assert(match (problem) {
+            errors.Error.Io { kind, message: _, path: _ } => kind == errors.IoErrorKind.CapabilityDenied,
+            _ => false,
+        });
+    };
+
     export let test_target_parts = func {
         last request = http.request("GET", "/parts/7?full=1&x=a+b");
         test.assert_equal_string("GET", request.method);
@@ -121,6 +136,7 @@ let RequestTests = module (
             id = number;
             name = label;
         };
+
         export let.override to_string = func -> string => "Part";
     );
 

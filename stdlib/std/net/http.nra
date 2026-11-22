@@ -6,6 +6,8 @@ let errors = import:Std.Core.Error;
 let filters = import:Std.Net.Filter;
 let hashing = import:Std.Core.Hash;
 let header_maps = import:Std.Net.Http.Headers;
+let host_errors = import:Std.Core.Internal.HostError;
+let http_server = import:Std.Net.Internal.HttpServer;
 let json_text = import:Std.Encoding.Json;
 let logging = import:Std.Log.Logger;
 let messages = import:Std.Net.Http.Message;
@@ -33,10 +35,8 @@ let.promote _ = import:Std.Core.Unit;
 /// to Backend030, see `Routes`). A `Router` is a `Std.Net.Service<Request, Response>`, and middleware converts
 /// to and from `Std.Net.Filter` simple filters.
 ///
-/// Host-dependent parts trap until the runtime provides their services: reading a body from the server host
-/// (`neura.http.server.body.read`), writing a streamed response to it (`neura.http.server.body.write`,
-/// `neura.http.server.body.close`), and the client's network call (`neura.http.fetch` version 1). Everything
-/// else, including requests with in-memory bodies, works today.
+/// Host-backed bodies use the request worker's `neura.http.server.body.*` services. Reading or writing one
+/// outside an assigned server request produces a typed error. In-memory bodies need no host services.
 /// @see [Std.Net.Http](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http)
 .Since("0.3.0")
 export let Http = module (
@@ -89,8 +89,8 @@ export let Http = module (
         export let.override to_string = func -> string => "MemoryBody(" .. data.length.to_string() .. " bytes)";
     );
 
-    /// @brief The body of the request the server host assigned to this worker. Host-dependent: its reads trap
-    /// until the runtime provides `neura.http.server.body.read`.
+    /// @brief The body of the request the server host assigned to this worker. Outside a server worker, reads
+    /// return CapabilityDenied.
     .[Final, NotThreadSafe]
     export let HostBody = class implements BodySource (
         /// @brief Whether the host reported the end.
@@ -217,8 +217,8 @@ export let Http = module (
         export let.override to_string = func -> string => "MemorySink(" .. collected.length.to_string() .. " bytes)";
     );
 
-    /// @brief The response body of the current host request. Host-dependent: writes trap until the runtime
-    /// provides `neura.http.server.body.write` and `neura.http.server.body.close`.
+    /// @brief The response body of the current host request, after its response head has been sent. Writes and
+    /// close return CapabilityDenied outside a server worker.
     .[Final, NotThreadSafe]
     export let HostSink = class implements BodySink (
         /// @brief The sink of the current host response.
@@ -1792,24 +1792,23 @@ export let Http = module (
 
     // ---------------------------------------------------------------- host service wrappers
 
-    /// @brief Reads the current host request's body: `neura.http.server.body.read` version 1 (maximum count
-    /// `int32`; bytes, empty at the end; overlapping and cancellable).
-    /// @stub needs the server host service neura.http.server.body.read (A4 runtime lane)
-    let host_body_read = func(max: int32) -> Result<uint8[list]> {
-        trap_with_message("unsupported: Std.Net.Http.host_body_read is not implemented in Neura 0.3.0 (needs the server host service neura.http.server.body.read)");
+    /// @brief Reads the current request's body under the server request deadline.
+    let host_body_read = func(max: int32) -> Result<uint8[list]> => match (http_server.read_body(max)) {
+        http_server.BytesOutcome.Ok(chunk) => Result<uint8[list]>.Ok(chunk),
+        http_server.BytesOutcome.Error(code) => Result<uint8[list]>.Err(
+            host_errors.io(code, "request body read failed", "")),
     };
 
-    /// @brief Writes response body bytes to the host: `neura.http.server.body.write` version 1 (bytes; none,
-    /// once the host has taken them; overlapping and cancellable).
-    /// @stub needs the server host service neura.http.server.body.write (A4 runtime lane)
-    let host_body_write = func(data: uint8[list]) -> Result<Unit> {
-        trap_with_message("unsupported: Std.Net.Http.host_body_write is not implemented in Neura 0.3.0 (needs the server host service neura.http.server.body.write)");
+    /// @brief Writes response body bytes under the server request deadline.
+    let host_body_write = func(data: uint8[list]) -> Result<Unit> => match (http_server.write_body(data)) {
+        http_server.DoneOutcome.Ok => Result<Unit>.Ok(Unit.Value),
+        http_server.DoneOutcome.Error(code) => Result<Unit>.Err(host_errors.io(code, "response body write failed", "")),
     };
 
-    /// @brief Ends the streamed response body: `neura.http.server.body.close` version 1 (no arguments; none).
-    /// @stub needs the server host service neura.http.server.body.close (A4 runtime lane)
-    let host_body_close = func -> Result<Unit> {
-        trap_with_message("unsupported: Std.Net.Http.host_body_close is not implemented in Neura 0.3.0 (needs the server host service neura.http.server.body.close)");
+    /// @brief Ends the streamed response body.
+    let host_body_close = func -> Result<Unit> => match (http_server.close_body()) {
+        http_server.DoneOutcome.Ok => Result<Unit>.Ok(Unit.Value),
+        http_server.DoneOutcome.Error(code) => Result<Unit>.Err(host_errors.io(code, "response body close failed", "")),
     };
 
     /// @brief One client exchange: `neura.http.fetch` version 1 (method text, URL text, header name and value

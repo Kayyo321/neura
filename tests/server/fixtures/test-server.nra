@@ -1,6 +1,7 @@
 // The server image of tests/server/server_host_test.py.
 let app = import:Std.App;
 let errors = import:Std.Core.Error;
+let http = import:Std.Net.Http;
 let optional = import:Std.Core.Optional;
 let program = import:Std.Program;
 let int32 = import:Std.Core.Int32;
@@ -19,6 +20,11 @@ let TestServer = module:program.Entry (
         if (refuse == "yes") {
             return Result<Unit>.Err(errors.custom("test.refuse", "configured to refuse"));
         }
+        if (optional.value_or<string>(context.config("http_body_adapters"), "no") == "yes") {
+            return context.serve_streamed(app.streaming_handler_of(
+                new func(request: app.Request, body: app.BodyReader) -> Result<app.Response> =>
+                    Result<app.Response>.Ok(app.stream(200, new, echo_host_body))));
+        }
         if (optional.value_or<string>(context.config("streamed_body"), "no") == "yes") {
             return context.serve_streamed(app.streaming_handler_of(
                 new func(request: app.Request, body: app.BodyReader) -> Result<app.Response> =>
@@ -26,6 +32,18 @@ let TestServer = module:program.Entry (
         }
         return context.serve(app.handler_of(new func(request: app.Request) -> Result<app.Response> =>
             route(context, request)));
+    };
+
+    /// @brief Echoes the request via the public HTTP body adapters.
+    let echo_host_body = func(writer: app.BodyWriter) -> Result<Unit> {
+        last source = new http.HostBody();
+        last sink = new http.HostSink();
+        let chunk = source.read(4)?;
+        while (chunk.length > 0) {
+            sink.write(chunk)?;
+            chunk = source.read(4)?;
+        }
+        return source.close();
     };
 
     /// @brief Counts the body as it arrives, in reads of at most 1,000 bytes, and answers the count and the
