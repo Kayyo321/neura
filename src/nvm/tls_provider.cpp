@@ -158,6 +158,7 @@ struct TlsStream {
     int pending_operation = 0;
     std::uint32_t terminal_error = 0;
     bool key_update_started = false;
+    bool datagram_handshake_complete = false;
     bool write_closed = false;
     std::int64_t write_timeout = default_transfer_timeout;
     ~TlsStream() {
@@ -706,7 +707,7 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
         if (stream.terminal_error) return fail(stream.terminal_error);
         // DTLS application records are not fragmented like handshake messages.
         // Reject an oversized message before changing the pending operation.
-        if (operation == 2 && (!stream.ssl || !SSL_is_init_finished(stream.ssl) ||
+        if (operation == 2 && (!stream.ssl || !stream.datagram_handshake_complete ||
                               message.empty() || message.size() > DTLS_get_data_mtu(stream.ssl)))
             return fail(host_error::invalid_input);
         if (stream.pending_operation == -1) {
@@ -746,7 +747,7 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
         }
         if (!failure && stream.ssl) {
             auto* ssl = stream.ssl;
-            if (operation != 0 && !SSL_is_init_finished(ssl)) return fail(host_error::invalid_input);
+            if (operation != 0 && !stream.datagram_handshake_complete) return fail(host_error::invalid_input);
             ERR_clear_error();
             int result = 0;
             if (!SSL_handle_events(ssl)) failure = host_error::connection_reset;
@@ -787,6 +788,23 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
                              ERR_GET_REASON(ERR_peek_last_error()) == SSL_R_PEER_DID_NOT_RETURN_A_CERTIFICATE)
                         failure = host_error::permission_denied;
                     else failure = host_error::connection_reset;
+                }
+                if (!failure && operation == 0 && result > 0) stream.datagram_handshake_complete = true;
+                // A requested reciprocal update may be queued while read asks
+                // for application input. Flush it now instead of waiting for
+                // an application write. The read itself still needs input.
+                if (!failure && operation == 1 && status == 0 &&
+                    SSL_get_key_update_type(ssl) != SSL_KEY_UPDATE_NONE) {
+                    const auto updated = SSL_do_handshake(ssl);
+                    if (updated <= 0) {
+                        const auto reason = SSL_get_error(ssl, updated);
+                        const bool write_retry = reason == SSL_ERROR_WANT_WRITE ||
+                            (reason == SSL_ERROR_SYSCALL && SSL_want_write(ssl) &&
+                             BIO_should_write(SSL_get_wbio(ssl)));
+                        if (ERR_peek_error() == 0 && (reason == SSL_ERROR_WANT_READ || write_retry))
+                            retry_output = write_retry;
+                        else failure = host_error::connection_reset;
+                    }
                 }
             }
         }
