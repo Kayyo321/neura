@@ -6,7 +6,7 @@ let aes = import:Std.Crypto.Internal.Aes;
 ///
 /// `decrypt` checks the padding with a mask over the whole block, without a data-dependent branch in source;
 /// the runtime does not guarantee constant time.
-#Since("0.3.0")
+.Since("0.3.0")
 export let PkiCbc = module (
     /// @brief The ciphertext of the padded plaintext under the key (16, 24 or 32 bytes) and a 16-byte IV.
     export let encrypt = func(key: uint8[list], iv: uint8[list], plaintext: uint8[list]) -> uint8[list] {

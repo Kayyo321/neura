@@ -20,13 +20,13 @@ let strings = import:Std.Text.Strings;
 /// returns Err for any element that does not fit the grammar, for an invalid percent-escape, an empty host
 /// port, a port outside 1 through 65535, or an invalid `ma`. Header order is the server's preference order.
 /// @see [Std.Net.Http.AltSvc](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-AltSvc)
-#Since("0.3.0")
+.Since("0.3.0")
 export let AltSvc = module (
     /// @brief The freshness of an advertisement without `ma`: 24 hours (section 3.1).
     export const DefaultMaxAge: int64 = 86400;
 
     /// @brief One alternative service: a protocol, an optional host, a port and the parameters.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Alternative = class (
         /// @brief The protocol-id as written (percent-encoded).
         export last protocol_id: string;
@@ -92,7 +92,7 @@ export let AltSvc = module (
     );
 
     /// @brief A parsed `Alt-Svc` field: `clear`, or the alternatives in preference order.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let AltSvc = class (
         /// @brief Whether the field is `clear`.
         export last clear: bool;
@@ -143,7 +143,7 @@ export let AltSvc = module (
     );
 
     /// @brief Parses an `Alt-Svc` field value (section 3); see the module description for the errors.
-    #[NoDiscard]
+    .[NoDiscard]
     export let parse = func(text: string) -> Result<AltSvc> {
         last elements = header_map.split_list(text);
         if (elements.length == 0) {
@@ -163,7 +163,7 @@ export let AltSvc = module (
 
     /// @brief The first alternative, in the server's preference order, whose protocol is one of `supported`;
     /// None for `clear` or when none matches.
-    #[NoDiscard]
+    .[NoDiscard]
     export let preferred = func(value: AltSvc, supported: uint8[list][list]) -> Optional<Alternative> {
         for (let i = 0; i < value.size(); i++) {
             last candidate = value.at(i);
@@ -178,7 +178,7 @@ export let AltSvc = module (
 
     /// @brief The protocol-id of an ALPN name (section 3): token characters other than `%` stay, every other
     /// byte becomes `%XX` with uppercase hex digits.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let encode_protocol_id = func(name: uint8[list]) -> string {
         last digits = "0123456789ABCDEF";
         let text = "";
@@ -196,7 +196,7 @@ export let AltSvc = module (
 
     /// @brief The ALPN name of a protocol-id: `%XX` escapes (either case) decoded, other bytes kept. Err
     /// (InvalidCharacter) at a byte that is not a token character or at a broken escape.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let decode_protocol_id = func(text: string) -> Result<uint8[list]> {
         last bytes: uint8[list] = new;
         if (text.byte_length == 0) {
@@ -377,7 +377,7 @@ export let AltSvc = module (
     };
 
     /// @brief The value of a hex digit (either case), or -1.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     let hex_value = func(b: uint8) -> int {
         if (b >= 48 && b <= 57) {
             return (b - 48) as int;
@@ -390,7 +390,7 @@ export let AltSvc = module (
     };
 
     /// @brief The one-character string of an ASCII byte.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     let ascii = func(b: uint8) -> string {
         last bytes: uint8[list] = new;
         bytes.append(b);
@@ -399,7 +399,7 @@ export let AltSvc = module (
     };
 
     /// @brief A Parse error.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     let failure = func(kind: ParseErrorKind, offset: int, message: string) -> Error =>
         Error.Parse { kind: kind, offset: offset, message: message };
 );

@@ -16,10 +16,10 @@ let words = import:Std.Crypto.Internal.Words;
 /// the encryption. A repeated nonce reveals only whether two messages with the same associated data were
 /// equal; it does not break confidentiality or authenticity as it does for GCM.
 /// @see [Std.Crypto.Symmetric.AesGcmSiv](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Symmetric-AesGcmSiv)
-#Since("0.3.0")
+.Since("0.3.0")
 export let AesGcmSiv = module (
     /// @brief AEAD_AES_128_GCM_SIV or AEAD_AES_256_GCM_SIV, chosen by the key length (16 or 32 bytes).
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let AesGcmSiv = class implements AeadCipher<SymmetricKey<AesGcmSiv>, uint8[list], uint8[list]> (
         let key_generator: aes.Cipher;
         let key_length: int = 32;

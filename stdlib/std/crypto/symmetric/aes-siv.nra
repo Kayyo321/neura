@@ -17,12 +17,12 @@ let words = import:Std.Crypto.Internal.Words;
 /// matched by equality, and nothing else about the plaintext leaks. The output is the 16-byte IV followed by
 /// the ciphertext.
 /// @see [Std.Crypto.Symmetric.AesSiv](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Symmetric-AesSiv)
-#Since("0.3.0")
+.Since("0.3.0")
 export let AesSiv = module (
     /// @brief AES-SIV with a 32-, 48- or 64-byte key: the first half keys CMAC, the second half CTR. As an
     /// `AeadCipher`, `seal(nonce, plaintext, data)` uses the items [data] for an empty nonce (deterministic) and
     /// [data, nonce] otherwise, so a nonce may have any length. `seal_items` takes RFC 5297's item vector.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let AesSiv = class implements AeadCipher<SymmetricKey<AesSiv>, uint8[list], uint8[list]> (
         let mac_key: uint8[list] = new;
         let ctr_cipher: aes.Cipher;
@@ -70,7 +70,7 @@ export let AesSiv = module (
         };
 
         /// @brief The IV followed by the ciphertext, for up to 126 associated-data items (more trap).
-        #NoDiscard
+        .NoDiscard
         export let seal_items = func(items: uint8[list][list], plaintext: uint8[list]) -> uint8[list] {
             last iv = s2v(items, plaintext);
             let out = words.copy(iv);
@@ -79,7 +79,7 @@ export let AesSiv = module (
         };
 
         /// @brief The plaintext of `seal_items`' output, or the "crypto.authentication" error.
-        #NoDiscard
+        .NoDiscard
         export let open_items = func(items: uint8[list][list], sealed: uint8[list]) -> Result<uint8[list]> {
             if (sealed.length < 16) {
                 return aead.failure();

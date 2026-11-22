@@ -11,7 +11,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// The runtime's native entropy services require the entropy capability. A recording run stores the provider
 /// responses in its trace. Fork and VM-restore detection still require a provider that covers both events.
 /// @see [Std.Crypto.Random.Entropy](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Random-Entropy)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Entropy = module (
     /// @brief Carries the provider's entropy bytes or error code.
     let FillOutcome = enum (Ok(uint8[list]), Error(uint32));
@@ -40,7 +40,7 @@ export let Entropy = module (
     /// @brief `count` bytes from the operating system's cryptographic generator, requested in pieces of at most
     /// 1 MiB. A denied capability or a failed request is an `Io` error ("entropy request failed",
     /// `CapabilityDenied` when denied). A short answer is `InvalidData`. A negative count traps.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let os_bytes = func(count: int) -> Result<uint8[list]> {
         if (count < 0) {
             trap_with_message("invalid argument: negative length");
@@ -61,7 +61,7 @@ export let Entropy = module (
     /// A count above 1 MiB gives `Io(InvalidInput)`. Missing hardware gives `Io(Unsupported)`. Retry
     /// exhaustion gives `Io(Other)`. The Modern policy admits this source.
     /// @see [Std.Crypto.Random.Entropy](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Random-Entropy)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let hardware_bytes = func(count: int) -> Result<uint8[list]> {
         if (count < 0) {
             trap_with_message("invalid argument: negative length");
@@ -73,7 +73,7 @@ export let Entropy = module (
     /// @brief SHA-512("Neura entropy fusion" || os_bytes(64) || hardware_bytes(64)).
     /// Both sources must be allowed by policy. Returns either provider's error without a fallback.
     /// @see [Std.Crypto.Random.Entropy](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Random-Entropy)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let fused_seed = func -> Result<uint8[list]> {
         last system = os_bytes(64)?;
         defer words.wipe(system);
@@ -92,7 +92,7 @@ export let Entropy = module (
     /// in 0.3.0 and traps on every host. The host service it would use, `neura.process.generation`, is the
     /// constant 0 on Windows: Windows has no `fork()`, and a snapshot restore is not detected.
     /// @stub the runtime has no host operation that reports fork or VM-clone generations
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let fork_generation = func -> uint64 {
         trap_with_message(
             "unsupported: Std.Crypto.Random.Entropy.fork_generation is not implemented in Neura 0.3.0 (the runtime has no host operation that reports fork or VM-clone generations)");

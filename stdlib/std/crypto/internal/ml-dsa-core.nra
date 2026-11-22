@@ -4,7 +4,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// @brief The algorithms of FIPS 204 (ML-DSA) over byte lists, without policy checks or key objects. Internal:
 /// Std.Crypto.Pqc.MlDsa wraps it. Polynomials are `int64[list]` of 256 coefficients in [0, q), q = 8380417, so
 /// a product of two coefficients stays below 2^46.
-#Since("0.3.0")
+.Since("0.3.0")
 export let MlDsaCore = module (
     const Q: int64 = 8380417;
 

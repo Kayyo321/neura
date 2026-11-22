@@ -5,8 +5,8 @@
 /// numbers the host issued to this run and checks on every call. `next_events` and `next_path` overlap in a
 /// program with tasks and can be cancelled (error 15). `focus` and `link_path` were added to the group in 0.3.0
 /// as `neura.ui.focus` and `neura.history.link`, version 1.
-#Internal
-#Since("0.3.0")
+.Internal
+.Since("0.3.0")
 export let Host = module (
     /// @brief A root or template handle, or a host error code.
     export let HandleOutcome = enum (Ok(int64), Error(uint32));

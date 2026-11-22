@@ -21,7 +21,7 @@ let strings = import:Std.Text.Strings;
 /// error of code `sse.limit`; the stream should then be abandoned. A `retry` value above `MaxRetryMillis`
 /// saturates at it.
 /// @see [Std.Net.Realtime.Sse.Parser](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-Sse-Parser)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Parser = module (
     /// @brief The default longest line, in bytes: 1 MiB.
     export const DefaultMaxLineBytes: int = 1048576;
@@ -34,7 +34,7 @@ export let Parser = module (
     export const LimitErrorCode: string = "sse.limit";
 
     /// @brief An incremental event-stream parser holding the WHATWG data, event type and last event ID buffers.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let EventStreamParser = class (
         /// @brief The longest line accepted, in bytes.
         export last max_line_bytes: int;
@@ -89,7 +89,7 @@ export let Parser = module (
             .. max_event_bytes.to_string() .. " bytes)";
 
         /// @brief Parses the chunk and returns the events it completes, in order, or a `sse.limit` error.
-        #NoDiscard
+        .NoDiscard
         export let feed = func(chunk: uint8[list]) -> Result<SseEvent[list]> {
             ready = new;
             for (let b in chunk) {
@@ -249,18 +249,18 @@ export let Parser = module (
     };
 
     /// @brief A parser for a new stream with the default limits and no last event ID.
-    #NoDiscard
+    .NoDiscard
     export let create = func -> EventStreamParser => new EventStreamParser("", DefaultMaxLineBytes, DefaultMaxEventBytes);
 
     /// @brief A parser for a resumed stream: its ID buffer starts as `last_event_id`, so an event without an
     /// `id` field keeps the cursor.
-    #NoDiscard
+    .NoDiscard
     export let resuming = func(last_event_id: string) -> EventStreamParser =>
         new EventStreamParser(last_event_id, DefaultMaxLineBytes, DefaultMaxEventBytes);
 
     /// @brief The value of a `retry` field: one or more ASCII digits read in base ten, saturating at
     /// `MaxRetryMillis`; `None` for anything else, including the empty value.
-    #[NoDiscard, Pure]
+    .[NoDiscard, Pure]
     export let parse_retry = func(value: string) -> Optional<int64> {
         last length = value.byte_length;
         if (length == 0) {

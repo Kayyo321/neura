@@ -4,7 +4,7 @@ let list = import:Std.Collections.List;
 /// list collections of different classes (section 9.10). An index outside a
 /// list is the language's bounds trap.
 /// @see [Std.Collections.Lists](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-Lists)
-#Since("0.1.0")
+.Since("0.1.0")
 export let Lists = module (
     /// @brief A new list with the same elements.
     export let copy = func<T>(items: T[list]) -> T[list] {

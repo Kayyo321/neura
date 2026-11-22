@@ -21,7 +21,7 @@ let.promote _ = import:Std.Core.Optional;
 ///
 /// A clock failure makes `get` miss and `put_*` store nothing.
 /// @see [Std.Net.Dns.DnsCache](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-DnsCache)
-#Since("0.3.0")
+.Since("0.3.0")
 export let DnsCache = module (
     /// @brief The default capacity.
     export const DefaultCapacity: int = 1024;
@@ -41,7 +41,7 @@ export let DnsCache = module (
     );
 
     /// @brief One cached entry.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     let Entry = class (
         /// @brief Answer, NameError or NoData.
         export last result: CacheResult;
@@ -62,7 +62,7 @@ export let DnsCache = module (
     );
 
     /// @brief The cache.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let DnsCache = class (
         /// @brief The time source.
         last clock: Clock;
@@ -105,24 +105,24 @@ export let DnsCache = module (
         };
 
         /// @brief The entries held, expired ones included until they are dropped.
-        #NoDiscard
+        .NoDiscard
         export let size = func -> int => entries.size();
 
         /// @brief Lookups that found an entry.
-        #NoDiscard
+        .NoDiscard
         export let hits = func -> int => hit_count;
 
         /// @brief Lookups that found none.
-        #NoDiscard
+        .NoDiscard
         export let misses = func -> int => miss_count;
 
         /// @brief Entries dropped to make room.
-        #NoDiscard
+        .NoDiscard
         export let evictions = func -> int => eviction_count;
 
         /// @brief The cached result for a question: a name error for its name and class, otherwise the answer or
         /// no-data entry for its name, type and class; Miss when none is live.
-        #NoDiscard
+        .NoDiscard
         export let get = func(question: messages.Question) -> CacheResult {
             last now = now_nanos();
             if (now < 0) {
@@ -292,7 +292,7 @@ export let DnsCache = module (
 
     /// @brief The negative TTL of an authority section: the smaller of the first SOA record's TTL and its
     /// MINIMUM (RFC 2308 sections 3 and 5), or -1 when there is no SOA.
-    #NoDiscard
+    .NoDiscard
     export let negative_ttl = func(authority: messages.ResourceRecord[list]) -> int64 {
         for (let record in authority) {
             match (record.data) {

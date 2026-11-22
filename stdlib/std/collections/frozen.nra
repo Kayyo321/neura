@@ -7,18 +7,18 @@ let optional = import:Std.Core.Optional;
 /// operation that would change it returns a new list instead. Its element type must be
 /// deeply immutable (E0580), so a UI state may hold one. In 0.3.0 a FrozenList cannot be sent to
 /// another task: the image format admits no list in a transferable layout (E0602).
-#Since("0.3.0")
+.Since("0.3.0")
 export let Frozen = module (
     /// @brief An ordered list of deeply immutable elements in storage that no other code holds.
     /// Indexes are zero-based `int` positions; an index out of range traps as a list index does.
-    #[Final, Immutable, Frozen, NoDiscard]
+    .[Final, Immutable, Frozen, NoDiscard]
     export let FrozenList = class<T> implements Iterable<T> (
         /// @brief The private copy of the elements. Only this class reads it, by index and length.
-        #Frozen
+        .Frozen
         last storage: T[list];
 
         /// @brief Copies `values` into new storage.
-        #Internal
+        .Internal
         export let init = func(values: T[list]) {
             last copy: T[list] = new;
             last count = values.length;
@@ -172,7 +172,7 @@ export let Frozen = module (
     );
 
     /// @brief A traversal over a FrozenList in index order.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     let FrozenListIterator = class<T> implements Iterator<T> (
         /// @brief The list being traversed.
         last source: FrozenList<T>;

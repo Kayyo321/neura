@@ -18,7 +18,7 @@ let ws = import:Std.Net.Realtime.Ws.WebSocket;
 /// library has no HTTP/2 or HTTP/3 transport yet. Once a stream is open, `WebSocket.over_upgraded` runs the
 /// WebSocket protocol on it. Failures are Custom errors with the code `ws.handshake`.
 /// @see [Std.Net.Realtime.Ws.ExtendedConnect](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-Ws-ExtendedConnect)
-#Since("0.3.0")
+.Since("0.3.0")
 export let ExtendedConnect = module (
     /// @brief The identifier of SETTINGS_ENABLE_CONNECT_PROTOCOL in HTTP/2 (RFC 8441 section 9.1) and HTTP/3
     /// (RFC 9220 section 5).
@@ -29,7 +29,7 @@ export let ExtendedConnect = module (
 
     /// @brief Whether a received SETTINGS_ENABLE_CONNECT_PROTOCOL value allows extended CONNECT: 1 allows it, 0
     /// does not, and any other value is a connection error (RFC 8441 section 3).
-    #NoDiscard
+    .NoDiscard
     export let enables_extended_connect = func(value: int64) -> Result<bool> {
         return if (value == 0 || value == 1) -> Result<bool>.Ok(value == 1)
             else -> fail<bool>("SETTINGS_ENABLE_CONNECT_PROTOCOL must be 0 or 1, not " .. value.to_string());
@@ -38,7 +38,7 @@ export let ExtendedConnect = module (
     /// @brief The request fields of an extended CONNECT for a WebSocket (RFC 8441 section 5 and its example in
     /// section 5.1). `secure` selects `https` (wss) or `http` (ws); an empty `origin` or `extensions` is left
     /// out, as is an empty protocol list.
-    #NoDiscard
+    .NoDiscard
     export let request_headers = func(secure: bool, authority: string, path: string, protocols: string[list],
         extensions: string, origin: string) -> handshake.Header[list] {
         last list: handshake.Header[list] = new;
@@ -65,7 +65,7 @@ export let ExtendedConnect = module (
     /// 3 suggests answering 501), non-empty `:scheme` (`http` or `https`), `:path` and `:authority`, no
     /// Connection or Upgrade field, and `sec-websocket-version: 13`. The offer's key is empty: extended CONNECT
     /// has no key.
-    #NoDiscard
+    .NoDiscard
     export let validate_request = func(headers: handshake.Header[list]) -> Result<handshake.ClientOffer> {
         for (let header in headers) {
             if (strings.to_ascii_lower(header.name) != header.name) {
@@ -100,7 +100,7 @@ export let ExtendedConnect = module (
 
     /// @brief The fields of a successful response (`:status 200`) with the chosen subprotocol and extension
     /// response.
-    #NoDiscard
+    .NoDiscard
     export let response_headers = func(protocol: Optional<string>, extensions: string) -> handshake.Header[list] {
         last list: handshake.Header[list] = new;
         list.append(new handshake.Header(":status", "200"));
@@ -118,7 +118,7 @@ export let ExtendedConnect = module (
 
     /// @brief Checks a response as a client must: `:status` 2xx (a CONNECT succeeds with 2xx, RFC 9110 section
     /// 9.3.6), a subprotocol the client offered if any, and only extensions the client offered.
-    #NoDiscard
+    .NoDiscard
     export let validate_response = func(offered_protocols: string[list], offered_extensions: string,
         headers: handshake.Header[list]) -> Result<handshake.ServerAcceptance> {
         last status = field(headers, ":status");
@@ -159,7 +159,7 @@ export let ExtendedConnect = module (
 
     /// @brief Opens a WebSocket on a new HTTP/2 stream of a connection to `authority` with extended CONNECT.
     /// @stub no HTTP/2 client transport in the standard library
-    #NoDiscard
+    .NoDiscard
     export let connect_http2 = func(secure: bool, authority: string, path: string, protocols: string[list],
         random: Random, options: ws.WebSocketOptions) -> Result<ws.WebSocket> {
         trap_with_message("unsupported: Std.Net.Realtime.Ws.ExtendedConnect.connect_http2 is not implemented in Neura 0.3.0 (no HTTP/2 client transport in the standard library)");
@@ -168,7 +168,7 @@ export let ExtendedConnect = module (
     /// @brief Opens a WebSocket on a new HTTP/3 request stream of a QUIC connection to `authority` with
     /// extended CONNECT.
     /// @stub no HTTP/3 or QUIC transport in the runtime
-    #NoDiscard
+    .NoDiscard
     export let connect_http3 = func(authority: string, path: string, protocols: string[list], random: Random,
         options: ws.WebSocketOptions) -> Result<ws.WebSocket> {
         trap_with_message("unsupported: Std.Net.Realtime.Ws.ExtendedConnect.connect_http3 is not implemented in Neura 0.3.0 (no HTTP/3 or QUIC transport in the runtime)");

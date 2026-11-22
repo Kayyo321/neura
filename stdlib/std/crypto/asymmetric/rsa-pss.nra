@@ -22,10 +22,10 @@ let words = import:Std.Crypto.Internal.Words;
 /// Verification takes a fixed salt length, or any length with `RsaPssVerifier(key, hash, -1)`. A signature
 /// is exactly the modulus length; any other length is false.
 /// @see [Std.Crypto.Asymmetric.RsaPss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-RsaPss)
-#Since("0.3.0")
+.Since("0.3.0")
 export let RsaPss = module (
     /// @brief Signs with RSASSA-PSS; it also verifies against the matching public key.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let RsaPssSigner = class implements Signer<rsa.RsaPrivateKey, uint8[list]>,
         Verifier<rsa.RsaPublicKey, uint8[list]> (
         last key: rsa.RsaPrivateKey;
@@ -73,7 +73,7 @@ export let RsaPss = module (
         export let public_key = func -> rsa.RsaPublicKey => key.public_key;
 
         /// @brief The signature with the given salt. A wiped key or a salt of the wrong length traps.
-        #NoDiscard
+        .NoDiscard
         export let sign_with_salt = func(message: uint8[list], salt: uint8[list]) -> Result<uint8[list]> {
             last core = key.core;
             core.require_live();
@@ -90,7 +90,7 @@ export let RsaPss = module (
 
         /// @brief The signature with a fresh salt. Fails when the entropy source or the private operation's
         /// check fails. A wiped key traps before requesting a salt.
-        #NoDiscard
+        .NoDiscard
         export let try_sign = func(message: uint8[list]) -> Result<uint8[list]> {
             key.core.require_live();
             last salt: Result<uint8[list]> = has_generator ? Result<uint8[list]>.Ok(generator.fill(salt_length))
@@ -125,14 +125,14 @@ export let RsaPss = module (
     );
 
     /// @brief Verifies RSASSA-PSS signatures under a public key.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let RsaPssVerifier = class implements Verifier<rsa.RsaPublicKey, uint8[list]> (
         last key: rsa.RsaPublicKey;
         /// @brief The hash of the message.
         export last hash: Algorithm;
         /// @brief The digest used by MGF1.
         /// @see [Std.Crypto.Asymmetric.RsaPss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-RsaPss)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export last mask_hash: Algorithm;
         /// @brief The salt length, or -1 for any.
         export last salt_length: int;
@@ -140,7 +140,7 @@ export let RsaPss = module (
         /// @brief A verifier with SHA-256 and a 32-byte salt, or the given digest and salt length (-1 accepts
         /// any). MGF1 uses the message digest unless an explicit MGF1 digest is supplied.
         /// @see [Std.Crypto.Asymmetric.RsaPss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-RsaPss)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let init = func(public_key: rsa.RsaPublicKey) {
             key = public_key;
             hash = Algorithm.Sha256;
@@ -183,7 +183,7 @@ export let RsaPss = module (
             verify_digest(asym_hash.digest(hash, message), signature);
 
         /// @brief Whether the signature is valid for a digest computed elsewhere.
-        #NoDiscard
+        .NoDiscard
         export let verify_digest = func(digest: uint8[list], signature: uint8[list]) -> bool {
             last core = key.core;
             if (signature.length != core.k || digest.length != asym_hash.output_length(hash)) {

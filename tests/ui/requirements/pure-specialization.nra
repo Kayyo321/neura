@@ -19,7 +19,7 @@ let Quiet = class implements Additive<Quiet> (
     export static let zero = func() -> Quiet => new Quiet(0);
     export static let add = func(left: Quiet, right: Quiet) -> Quiet => new Quiet(left.cents + right.cents);
 );
-#Pure
+.Pure
 let sum = func<T: Additive<T>>(a: T, b: T) -> T => T.add(a, b);
 let quiet = sum<Quiet>(new Quiet(1), new Quiet(2));
 let loud = sum<Loud>(new Loud(1), new Loud(2));

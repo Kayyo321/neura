@@ -10,7 +10,7 @@ let sha2 = import:Std.Crypto.Hash.Sha2;
 let words = import:Std.Crypto.Internal.Words;
 
 /// @brief The protected ECDH-ES parameters and the RFC 7518 Concat KDF. Internal.
-#Since("0.3.0")
+.Since("0.3.0")
 export let JweEcdh = module (
     const InvalidJwe = "crypto.invalid_jwe";
 

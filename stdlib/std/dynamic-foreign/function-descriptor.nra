@@ -4,10 +4,10 @@ let.promote _ = import:Std.Core.Optional;
 /// @brief The C signature of a native function (ForeignInterop.md), the counterpart of Java's
 /// FunctionDescriptor: an optional result layout and the argument layouts.
 /// @see [Std.DynamicForeign.FunctionDescriptor](https://github.com/Kayyo321/neura/wiki/Stdlib-DynamicForeign-FunctionDescriptor)
-#Since("0.1.0")
+.Since("0.1.0")
 export let FunctionDescriptor = module (
     /// @brief A result layout, or none for void, and the argument layouts in order.
-    #Final
+    .Final
     export let FunctionDescriptor = class (
         /// @brief The result layout, or None for a void function.
         last result: Optional<MemoryLayout>;
@@ -24,11 +24,11 @@ export let FunctionDescriptor = module (
         };
 
         /// @brief The result layout, or None for void.
-        #Pure
+        .Pure
         export let return_layout = func -> Optional<MemoryLayout> => result;
 
         /// @brief A copy of the argument layouts.
-        #Pure
+        .Pure
         export let argument_layouts = func -> MemoryLayout[list] {
             last copy: MemoryLayout[list] = new;
             for (let layout in arguments) {
@@ -56,11 +56,11 @@ export let FunctionDescriptor = module (
         };
 
         /// @brief Hashes the text form.
-        #Pure
+        .Pure
         export let.override hash_code = func -> uint32 => to_string().hash_code();
 
         /// @brief A form such as `(i32i32)i32` or `(a)v`.
-        #Pure
+        .Pure
         export let.override to_string = func -> string {
             let text = "(";
             for (let layout in arguments) {

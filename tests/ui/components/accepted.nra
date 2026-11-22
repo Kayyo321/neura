@@ -2,7 +2,7 @@
 let frozen = import:Std.Collections.Frozen;
 let ui = import:Std.Ui;
 
-#Immutable
+.Immutable
 let Stock = class (
     export last name: string;
     export last count: int32;

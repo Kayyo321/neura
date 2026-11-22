@@ -11,7 +11,7 @@ let scale = func(value: int64) -> int64 {
     return value * 3;
 };
 
-#Pure
+.Pure
 let area = func(width: int64, height: int64) -> int64 {
     return scale(width) * height;
 };

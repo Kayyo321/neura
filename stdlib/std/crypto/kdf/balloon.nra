@@ -12,11 +12,11 @@ let words = import:Std.Crypto.Internal.Words;
 /// with an independent Python reference (scripts/crypto-vectors/balloon_reference.py), and the output matches
 /// another implementation only if it makes the same choices.
 /// @see [Std.Crypto.Kdf.Balloon](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Kdf-Balloon)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Balloon = module (
     /// @brief The H-length Balloon hash of the password and salt with `space_cost` blocks of memory and
     /// `time_cost` mixing rounds; a cost below 1 traps with "invalid argument: Balloon costs".
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let derive = func<H: StreamingDigest<H>>(password: uint8[list], salt: uint8[list], space_cost: int,
         time_cost: int) -> uint8[list] {
         crypto_policy.require(Algorithm.Balloon);

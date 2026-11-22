@@ -37,13 +37,13 @@ let timers = import:Std.Concurrent.Timer;
 /// clock, so the injected clock should be `Std.Time.SystemClock`, which `neura test --virtual-time` makes
 /// deterministic.
 /// @see [Std.Net.Resilience.HedgingFilter](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-HedgingFilter)
-#Since("0.3.0")
+.Since("0.3.0")
 export let HedgingFilter = module (
     /// @brief The error code when the next service is not a `SpawnableService`.
     export const UnsupportedCode = "resilience.hedging_unsupported";
 
     /// @brief Hedges slow requests with a backup request.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let HedgingFilter = class<Req, Resp> implements SimpleFilter<Req, Resp> (
         /// @brief Recent request latencies.
         last window: windows.LatencyWindow;
@@ -82,7 +82,7 @@ export let HedgingFilter = module (
 
         /// @brief The hedge delay now: the window's percentile, or None while it holds fewer than `min_samples` or
         /// when the percentile is zero (a zero delay would hedge every request).
-        #NoDiscard
+        .NoDiscard
         export let hedge_delay = func -> optional.Optional<durations.Duration> {
             if (window.size() < min_samples) {
                 return optional.Optional<durations.Duration>.None;
@@ -193,14 +193,14 @@ export let HedgingFilter = module (
 
     /// @brief A filter hedging at percentile `percentile` of the last `window` latencies once it holds
     /// `min_samples`, with backups bounded by `budget`, sending backups to the same function.
-    #NoDiscard
+    .NoDiscard
     export let of = func<Req, Resp>(window: int, percentile: int, min_samples: int, budget: budgets.RetryBudget,
         clock: Clock) -> HedgingFilter<Req, Resp> =>
             new HedgingFilter<Req, Resp>(windows.of(window), percentile, min_samples, budget, clock,
                 optional.Optional<func(Req) -> Result<Resp>>.None);
 
     /// @brief As `of`, sending backups to `replica`.
-    #NoDiscard
+    .NoDiscard
     export let with_replica = func<Req, Resp>(window: int, percentile: int, min_samples: int,
         budget: budgets.RetryBudget, clock: Clock, replica: func(Req) -> Result<Resp>) -> HedgingFilter<Req, Resp> =>
             new HedgingFilter<Req, Resp>(windows.of(window), percentile, min_samples, budget, clock,

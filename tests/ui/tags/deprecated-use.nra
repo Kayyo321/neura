@@ -5,7 +5,7 @@
 // an override of a deprecated method, and a use inside deprecated code, which
 // does not warn.
 let Shapes = module (
-    #Deprecated(as_of: "0.2.0", use_instead: area, reason: "it rounds the result")
+    .Deprecated(as_of: "0.2.0", use_instead: area, reason: "it rounds the result")
     export let rough_area = func(width: int32) -> int32 {
         return width * width;
     };
@@ -14,12 +14,12 @@ let Shapes = module (
         return width * width;
     };
 
-    #Deprecated(use_instead: "Shapes.Box")
+    .Deprecated(use_instead: "Shapes.Box")
     export let OldBox = class (
         export let width: int32 = 0;
     );
 
-    #Deprecated(as_of: "0.1.0")
+    .Deprecated(as_of: "0.1.0")
     export let legacy_total = func() -> int32 {
         return rough_area(2);
     };
@@ -30,7 +30,7 @@ let Shapes = module (
 );
 
 let Base = class (
-    #Deprecated(reason: "describe() replaces it")
+    .Deprecated(reason: "describe() replaces it")
     export let name = func() -> string {
         return "base";
     };

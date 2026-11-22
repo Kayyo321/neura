@@ -1,7 +1,7 @@
 error[E0908]: #Isolated is reserved: the compiler does not do what it promises yet
  --> $DIR/reserved-concurrency-tag.nra:6:5
   |
-6 |     #Isolated
+6 |     .Isolated
   |     ^^^^^^^^^ reserved tag
   |
   = note: #Isolated: touches no state shared with other tasks

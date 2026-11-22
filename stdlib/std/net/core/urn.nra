@@ -14,14 +14,14 @@ let strings = import:Std.Text.Strings;
 /// `?=`; any other `?` outside those components is an error. The registration rules on new NIDs (sections 5.1
 /// and 5.2, such as the reserved `urn-` and two-letter prefixes) are not parse rules and are not applied.
 /// @see [Std.Net.Core.Urn](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Core-Urn)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Urn = module (
     /// @brief Restricts construction to parse.
     let Seal = enum (Token);
 
     /// @brief A parsed URN. Equality is URN-equivalence: the lowercased NID and the NSS with uppercase
     /// percent-encoding hex digits are compared, and the r-, q- and f-components are ignored.
-    #[Final, Immutable, ThreadSafe, Since("0.3.0")]
+    .[Final, Immutable, ThreadSafe, Since("0.3.0")]
     export let Urn = class (
         /// @brief The text as parsed.
         last text: string;
@@ -53,16 +53,16 @@ export let Urn = module (
 
         /// @brief `urn:` + the lowercased NID + `:` + the NSS with percent-encoding hex in uppercase: the text
         /// URN-equivalence compares (RFC 8141 section 3.1). Percent-encoded bytes are not decoded.
-        #Pure
+        .Pure
         export let equivalence_key = func -> string =>
             "urn:" .. strings.to_ascii_lower(nid) .. ":" .. uppercase_triplets(nss);
 
         /// @brief The assigned name `urn:<NID>:<NSS>` as written, without the optional components.
-        #Pure
+        .Pure
         export let assigned_name = func -> string => scheme .. ":" .. nid .. ":" .. nss;
 
         /// @brief The NSS with percent-encoding decoded. Errors as in PercentEncoding.decode.
-        #NoDiscard
+        .NoDiscard
         export let decoded_nss = func -> Result<string> => percent.decode(nss);
 
         /// @brief URN-equivalence (RFC 8141 section 3).
@@ -74,11 +74,11 @@ export let Urn = module (
         };
 
         /// @brief The hash of the equivalence key, consistent with equals.
-        #Pure
+        .Pure
         export let.override hash_code = func -> uint32 => hashing.combine(17, equivalence_key().hash_code());
 
         /// @brief The text as parsed.
-        #Pure
+        .Pure
         export let.override to_string = func -> string => text;
     );
 
@@ -88,7 +88,7 @@ export let Urn = module (
     /// in any case, the NID is malformed or not followed by `:`, the NSS is empty or starts with `/`, an r- or
     /// q-component is empty or starts with `/` or `?`, or a `?` is not followed by `+` or `=` in its place;
     /// InvalidCharacter at a byte that the component does not allow, including a `%` without two hex digits.
-    #[NoDiscard, Pure, ThreadSafe, Since("0.3.0")]
+    .[NoDiscard, Pure, ThreadSafe, Since("0.3.0")]
     export let parse = func(text: string) -> Result<Urn> {
         last length = text.byte_length;
         if (length == 0) {

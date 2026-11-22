@@ -9,7 +9,7 @@ let xmd = import:Std.Crypto.Internal.HashToCurveXmd;
 /// @brief RFC 9496 ristretto255 over the shared Edwards25519 implementation. Internal.
 export let Ristretto255Core = module (
     /// @brief Field scratch belongs to one operation or task. Scalars are canonical ordinary eight-limb values.
-    #Final
+    .Final
     export let Group = class (
         last curve: edwards.Group;
         last field: mp.Modulus;

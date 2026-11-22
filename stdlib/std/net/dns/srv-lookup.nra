@@ -18,10 +18,10 @@ let resolvers = import:Std.Net.Dns.StubResolver;
 /// every target in that order into `SocketAddr` values, the endpoint list a `Std.Net.Resilience` load balancer
 /// such as `RoundRobin<SocketAddr>` takes (its RFC 2782 order is lost once a balancer picks).
 /// @see [Std.Net.Dns.SrvLookup](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-SrvLookup)
-#Since("0.3.0")
+.Since("0.3.0")
 export let SrvLookup = module (
     /// @brief One SRV target.
-    #Final
+    .Final
     export let SrvTarget = class (
         /// @brief The priority (lower first).
         export last priority: int;
@@ -59,7 +59,7 @@ export let SrvLookup = module (
     );
 
     /// @brief SRV lookups through a resolver.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let SrvLookup = class (
         /// @brief The resolver.
         last resolver: resolvers.StubResolver;
@@ -74,7 +74,7 @@ export let SrvLookup = module (
 
         /// @brief The ordered targets of `_service._proto.domain`; empty when the service is not available (no
         /// records, a name error, or the single target ".").
-        #NoDiscard
+        .NoDiscard
         export let lookup = func(service: string, proto: string, domain: string) -> Result<SrvTarget[list]> {
             last answer = resolver.lookup(service_name(service, proto, domain), messages.TypeSrv)?;
             last found = targets_from(answer.records);
@@ -84,7 +84,7 @@ export let SrvLookup = module (
 
         /// @brief The socket addresses of every target, in target order, each target's addresses in resolver
         /// order. Targets that do not resolve are skipped; Err (Io NotFound) when none resolves.
-        #NoDiscard
+        .NoDiscard
         export let socket_addresses = func(service: string, proto: string, domain: string) -> Result<SocketAddr[list]> {
             last out: SocketAddr[list] = new;
             for (let target in lookup(service, proto, domain)?) {
@@ -110,7 +110,7 @@ export let SrvLookup = module (
     );
 
     /// @brief The owner name "_service._proto.domain." (underscores added when missing).
-    #NoDiscard
+    .NoDiscard
     export let service_name = func(service: string, proto: string, domain: string) -> string {
         last head = service.byte_length > 0 && service.byte_at(0) == 95 ? service : "_" .. service;
         last middle = proto.byte_length > 0 && proto.byte_at(0) == 95 ? proto : "_" .. proto;
@@ -119,7 +119,7 @@ export let SrvLookup = module (
     };
 
     /// @brief The SRV targets among records.
-    #NoDiscard
+    .NoDiscard
     export let targets_from = func(records: messages.ResourceRecord[list]) -> SrvTarget[list] {
         last out: SrvTarget[list] = new;
         for (let record in records) {
@@ -135,7 +135,7 @@ export let SrvLookup = module (
     };
 
     /// @brief Orders targets by priority, and within a priority by RFC 2782 weighted random selection.
-    #NoDiscard
+    .NoDiscard
     export let order_targets = func(targets: SrvTarget[list], source: Random) -> SrvTarget[list] {
         last out: SrvTarget[list] = new;
         last priorities: int[list] = new;

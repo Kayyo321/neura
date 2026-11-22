@@ -6,14 +6,14 @@ let kinds = import:Std.Reflect.Type.TypeKind;
 /// A visitor sees each value before its children and may skip them or stop the walk; an object reached again
 /// while it is being walked is reported as a cycle instead of being entered.
 /// @see [Std.Reflect.Codec.Walk](https://github.com/Kayyo321/neura/wiki/Stdlib-Reflect-Codec-Walk)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Walk = module (
     /// @brief What a visitor asks for after seeing a value, and how a walk ended.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let WalkControl = enum (Continue, SkipChildren, Stop, Cycle);
 
     /// @brief A read-only visitor. `path` is the JSON-like path of the value (`$`, `$.name`, `$[2]`).
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let ReflectVisitor = interface (
         /// @brief Called before the value's children. `Cycle` is passed for an object already open on the path.
         export let enter = func(path: string, value: model.Variant, control: WalkControl) -> WalkControl;
@@ -23,13 +23,13 @@ export let Walk = module (
 
     /// @brief A visitor that may replace field values: `visit_field` returns the value to store, which is
     /// written through `Variant.set_field` when it differs from the current one.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let ReflectMutVisitor = interface (
         export let visit_field = func(owner: model.Variant, field: model.FieldInfo, value: model.Variant) -> model.Variant;
     );
 
     /// @brief The walker. It allocates only its path stack.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let WalkEngine = class (
         export let init = func {};
 

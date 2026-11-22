@@ -15,7 +15,7 @@ let.promote _ = import:Std.Core.Unit;
 /// transport and TLS 1.3 from the runtime; field-section compression needs QPACK (RFC 9204), which is not
 /// implemented.
 /// @see [Std.Net.Http.H3](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-H3)
-#Since("0.3.0")
+.Since("0.3.0")
 export let H3 = module (
     /// @brief The largest QUIC variable-length integer, 2^62 - 1 (RFC 9000 section 16).
     export const MaxVarint: uint64 = 4611686018427387903;
@@ -83,7 +83,7 @@ export let H3 = module (
     export const ErrorVersionFallback: uint64 = 272;
 
     /// @brief A decoded value and the offset just after it.
-    #[Final, Immutable, ThreadSafe]
+    .[Final, Immutable, ThreadSafe]
     export let Decoded = class (
         /// @brief The value.
         export last value: uint64;
@@ -114,7 +114,7 @@ export let H3 = module (
     );
 
     /// @brief A frame header: the type and the payload length, and the offset of the payload.
-    #[Final, Immutable, ThreadSafe]
+    .[Final, Immutable, ThreadSafe]
     export let FrameHeader = class (
         /// @brief The frame type.
         export last frame_type: uint64;
@@ -148,7 +148,7 @@ export let H3 = module (
     );
 
     /// @brief The identifiers and values of a SETTINGS frame, in order.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Settings = class (
         /// @brief The identifiers.
         export last ids: uint64[list] = new;
@@ -201,7 +201,7 @@ export let H3 = module (
 
     /// @brief The shortest encoding of `value` (RFC 9000 section 16): 1, 2, 4 or 8 bytes with the length in
     /// the two high bits. Traps with "invalid argument: varint out of range" above 2^62 - 1.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let encode_varint = func(value: uint64) -> uint8[list] {
         last bytes: uint8[list] = new;
         append_varint(bytes, value);
@@ -234,7 +234,7 @@ export let H3 = module (
 
     /// @brief The variable-length integer at `offset` (RFC 9000 section 16, Appendix A.1). Err (UnexpectedEnd)
     /// when the bytes end inside it.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let decode_varint = func(bytes: uint8[list], offset: int) -> Result<Decoded> {
         if (offset < 0 || offset >= bytes.length) {
             return Result<Decoded>.Err(failure(ParseErrorKind.UnexpectedEnd, offset, "missing varint"));
@@ -252,7 +252,7 @@ export let H3 = module (
     };
 
     /// @brief The frame header Type (i), Length (i) (RFC 9114 section 7.1).
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let encode_frame_header = func(frame_type: uint64, length: uint64) -> uint8[list] {
         last bytes: uint8[list] = new;
         append_varint(bytes, frame_type);
@@ -262,7 +262,7 @@ export let H3 = module (
 
     /// @brief The frame header at `offset`; errors are those of `decode_varint`. The payload may extend past
     /// the end of `bytes`.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let decode_frame_header = func(bytes: uint8[list], offset: int) -> Result<FrameHeader> {
         last kind = decode_varint(bytes, offset)?;
         last size = decode_varint(bytes, kind.next)?;
@@ -270,7 +270,7 @@ export let H3 = module (
     };
 
     /// @brief The SETTINGS frame payload holding `settings` in order (section 7.2.4).
-    #[NoDiscard]
+    .[NoDiscard]
     export let encode_settings = func(settings: Settings) -> uint8[list] {
         last bytes: uint8[list] = new;
         for (let i = 0; i < settings.ids.length; i++) {
@@ -283,7 +283,7 @@ export let H3 = module (
     /// @brief The settings of a SETTINGS frame payload (section 7.2.4). Err for a truncated pair (UnexpectedEnd),
     /// a repeated identifier, or an HTTP/2 identifier reserved by section 11.2.2 (0x00, 0x02 through 0x05);
     /// the last two are H3_SETTINGS_ERROR conditions (Syntax, at the identifier). Unknown identifiers are kept.
-    #[NoDiscard]
+    .[NoDiscard]
     export let decode_settings = func(payload: uint8[list]) -> Result<Settings> {
         last settings = new Settings();
         let at = 0;
@@ -305,16 +305,16 @@ export let H3 = module (
     };
 
     /// @brief Whether `id` is an HTTP/2 setting identifier reserved in HTTP/3 (section 11.2.2).
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let is_reserved_setting = func(id: uint64) -> bool => id == 0 || (id >= 2 && id <= 5);
 
     /// @brief Whether `value` has the form 0x1f * N + 0x21 used for reserved ("grease") types, settings and
     /// error codes (sections 6.2.3, 7.2.8, 7.2.4.1, 8.1).
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let is_grease = func(value: uint64) -> bool => value >= 33 && (value - 33) % 31 == 0;
 
     /// @brief An HTTP/3 connection over QUIC.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let H3Connection = class (
         /// @brief The authority the connection was opened to.
         export last authority: string;
@@ -340,20 +340,20 @@ export let H3 = module (
     /// @brief Opens an HTTP/3 connection to `authority` (host:port): QUIC with TLS 1.3 and ALPN "h3", then the
     /// control stream and SETTINGS (sections 3.2, 6.2.1).
     /// @stub needs TLS/QUIC transport; connection management is not implemented
-    #NoDiscard
+    .NoDiscard
     export let connect = func(authority: string, settings: Settings) -> Result<H3Connection> =>
         host_connect(authority, encode_settings(settings));
 
     /// @brief The QPACK encoding of a field section (RFC 9204).
     /// @stub QPACK (RFC 9204) field compression is not implemented
-    #NoDiscard
+    .NoDiscard
     export let encode_field_section = func(fields: header_map.Headers) -> uint8[list] {
         trap_with_message("unsupported: Std.Net.Http.H3.encode_field_section is not implemented in Neura 0.3.0 (QPACK (RFC 9204) field compression is not implemented)");
     };
 
     /// @brief The field section of a QPACK-encoded HEADERS payload (RFC 9204).
     /// @stub QPACK (RFC 9204) field compression is not implemented
-    #NoDiscard
+    .NoDiscard
     export let decode_field_section = func(encoded: uint8[list]) -> Result<header_map.Headers> {
         trap_with_message("unsupported: Std.Net.Http.H3.decode_field_section is not implemented in Neura 0.3.0 (QPACK (RFC 9204) field compression is not implemented)");
     };
@@ -374,7 +374,7 @@ export let H3 = module (
     };
 
     /// @brief A Parse error.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     let failure = func(kind: ParseErrorKind, offset: int, message: string) -> Error =>
         Error.Parse { kind: kind, offset: offset, message: message };
 );

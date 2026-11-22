@@ -9,13 +9,13 @@ let.promote _ = import:Std.Time.Duration;
 /// ping, data, any frame) proves it alive and ends the wait; when the wait reaches `timeout`, `poll` answers
 /// `PeerDead`, and keeps answering it.
 /// @see [Std.Net.Realtime.Ws.Heartbeat](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-Ws-Heartbeat)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Heartbeat = module (
     /// @brief What the connection should do now.
     export let HeartbeatAction = enum (Wait, SendPing, PeerDead);
 
     /// @brief The supervision state of one connection.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Heartbeat = class (
         /// @brief The idle time after which a ping is sent.
         export last interval: Duration;
@@ -45,7 +45,7 @@ export let Heartbeat = module (
         };
 
         /// @brief Whether a ping is waiting for an answer.
-        #NoDiscard
+        .NoDiscard
         export let awaiting_pong = func -> bool => waiting;
 
         /// @brief Records that something arrived from the peer at `now`.
@@ -58,7 +58,7 @@ export let Heartbeat = module (
         };
 
         /// @brief The action due at `now`. `SendPing` marks the ping as sent at `now`.
-        #NoDiscard
+        .NoDiscard
         export let poll = func(now: Duration) -> HeartbeatAction {
             if (dead) {
                 return HeartbeatAction.PeerDead;
@@ -80,7 +80,7 @@ export let Heartbeat = module (
         };
 
         /// @brief The monotonic time of the next action: the ping deadline, or the timeout of the outstanding ping.
-        #NoDiscard
+        .NoDiscard
         export let next_deadline = func -> Duration => waiting ? ping_sent_at.plus(timeout) : last_heard.plus(interval);
 
         /// @brief The interval, timeout and state.

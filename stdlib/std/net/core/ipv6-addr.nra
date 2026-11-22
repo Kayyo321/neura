@@ -19,10 +19,10 @@ let.promote _ = import:Std.Core.Result;
 /// or more zero groups shortened to `::` (the first such run on a tie), a single zero group written `0`, and
 /// (section 5) an IPv4-mapped address written `::ffff:a.b.c.d`.
 /// @see [Std.Net.Core.Ipv6Addr](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Core-Ipv6Addr)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Ipv6Addr = module (
     /// @brief An IPv6 address and zone, ordered by the unsigned 128-bit value and then by the zone's bytes.
-    #[Final, NoDiscard, Immutable, ThreadSafe, Since("0.3.0")]
+    .[Final, NoDiscard, Immutable, ThreadSafe, Since("0.3.0")]
     export let Ipv6Addr = class implements NetAddress, Comparable<Ipv6Addr> (
         /// @brief The most significant 64 bits (groups 1 to 4).
         export last high: uint64;
@@ -44,7 +44,7 @@ export let Ipv6Addr = module (
         };
 
         /// @brief The eight 16-bit groups, most significant first, as a new list.
-        #Pure
+        .Pure
         export let segments = func -> uint16[list] {
             last groups: uint16[list] = new;
             for (let i = 0; i < 8; i++) {
@@ -54,7 +54,7 @@ export let Ipv6Addr = module (
         };
 
         /// @brief The sixteen bytes in network order, as a new list.
-        #Pure
+        .Pure
         export let octets = func -> uint8[list] {
             last bytes: uint8[list] = new;
             for (let i = 0; i < 16; i++) {
@@ -66,51 +66,51 @@ export let Ipv6Addr = module (
         };
 
         /// @brief The same address with no zone.
-        #Pure
+        .Pure
         export let without_zone = func -> Ipv6Addr => new Ipv6Addr(high, low, "");
 
         /// @brief The IPv4 address of an IPv4-mapped address (`::ffff:a.b.c.d`, RFC 4291 section 2.5.5.2);
         /// None for any other address.
-        #[NoDiscard, Pure]
+        .[NoDiscard, Pure]
         export let to_ipv4_mapped = func -> Optional<v4.Ipv4Addr> {
             return Optional<v4.Ipv4Addr>.None unless is_ipv4_mapped();
             return Optional<v4.Ipv4Addr>.Some(new v4.Ipv4Addr((low & 4294967295) as uint32));
         };
 
         /// @brief Tests for `::` (zone ignored).
-        #Pure
+        .Pure
         export let is_unspecified = func -> bool => high == 0 && low == 0;
 
         /// @brief Tests for `::1` (zone ignored).
-        #Pure
+        .Pure
         export let is_loopback = func -> bool => high == 0 && low == 1;
 
         /// @brief Tests for `ff00::/8` (RFC 4291 section 2.7).
-        #Pure
+        .Pure
         export let is_multicast = func -> bool => (high >> 56) == 255;
 
         /// @brief Tests for the link-local unicast prefix `fe80::/10` (RFC 4291 section 2.5.6).
-        #Pure
+        .Pure
         export let is_link_local = func -> bool => (high >> 54) == 1018;
 
         /// @brief Tests for unique local addresses, `fc00::/7` (RFC 4193).
-        #Pure
+        .Pure
         export let is_unique_local = func -> bool => (high >> 57) == 126;
 
         /// @brief Tests for `::ffff:0:0/96` (RFC 4291 section 2.5.5.2).
-        #Pure
+        .Pure
         export let is_ipv4_mapped = func -> bool => high == 0 && (low >> 32) == 65535;
 
         /// @brief Tests for the documentation prefix `2001:db8::/32` (RFC 3849).
-        #Pure
+        .Pure
         export let is_documentation = func -> bool => (high >> 32) == 536939960;
 
         /// @brief Always `AddressFamily.Ipv6`.
-        #Pure
+        .Pure
         export let family = func -> AddressFamily => AddressFamily.Ipv6;
 
         /// @brief Compares the unsigned 128-bit values, then the zones bytewise ("" first).
-        #Pure
+        .Pure
         export let compare_to = func(other: Ipv6Addr) -> Ordering {
             if (high != other.high) {
                 return high < other.high ? Ordering.Less : Ordering.Greater;
@@ -128,13 +128,13 @@ export let Ipv6Addr = module (
         };
 
         /// @brief Combines 17 with both halves and the zone's hash.
-        #Pure
+        .Pure
         export let.override hash_code = func -> uint32 =>
             hashing.combine(hashing.combine(hashing.combine(17, hashing.of_uint64(high)), hashing.of_uint64(low)),
                 zone.hash_code());
 
         /// @brief The RFC 5952 text, followed by `%` and the zone when there is one.
-        #Pure
+        .Pure
         export let.override to_string = func -> string {
             let text = "";
             if (is_ipv4_mapped()) {
@@ -200,7 +200,7 @@ export let Ipv6Addr = module (
     /// fifth digit); Syntax for a second `::`, a lone leading or trailing `:`, a wrong group count (at the end
     /// of the address), an IPv4 part not at the end, or an empty or invalid zone; UnexpectedEnd when the text
     /// stops after `:`; errors of the embedded IPv4 part are reported at their offset in the whole text.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let parse = func(text: string) -> Result<Ipv6Addr> {
         last length = text.byte_length;
         if (length == 0) {
@@ -310,7 +310,7 @@ export let Ipv6Addr = module (
 
     /// @brief The address held in `bytes[offset]` to `bytes[offset + 15]`, network order, with no zone;
     /// traps when fewer than sixteen bytes follow `offset`.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let from_bytes = func(bytes: uint8[list], offset: int) -> Ipv6Addr {
         if (offset < 0 || offset + 16 > bytes.length) {
             trap_with_message("Ipv6Addr.from_bytes: fewer than 16 bytes at the offset");
@@ -326,7 +326,7 @@ export let Ipv6Addr = module (
 
     /// @brief The address with the eight given groups, most significant first, and no zone; traps unless the
     /// list holds exactly eight groups.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let of_segments = func(segments: uint16[list]) -> Ipv6Addr {
         if (segments.length != 8) {
             trap_with_message("Ipv6Addr.of_segments: exactly 8 groups are needed");
@@ -339,16 +339,16 @@ export let Ipv6Addr = module (
     };
 
     /// @brief The IPv4-mapped address `::ffff:a.b.c.d` (RFC 4291 section 2.5.5.2).
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let from_ipv4_mapped = func(address: v4.Ipv4Addr) -> Ipv6Addr =>
         new Ipv6Addr(0, (65535 << 32) | (address.bits as uint64), "");
 
     /// @brief `::1`.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let localhost = func -> Ipv6Addr => new Ipv6Addr(0, 1, "");
 
     /// @brief `::`.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let unspecified = func -> Ipv6Addr => new Ipv6Addr(0, 0, "");
 
     /// @brief Four groups from `groups[start]` packed into 64 bits.

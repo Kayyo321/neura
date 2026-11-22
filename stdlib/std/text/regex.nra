@@ -26,10 +26,10 @@ let result = import:Std.Core.Result;
 /// can merge with the unfinished previous iteration; the match can then differ from every backtracking order.
 /// Loops whose body cannot match empty are exact.
 /// @see [Std.Text.Regex](https://github.com/Kayyo321/neura/wiki/Stdlib-Text-Regex)
-#Since("0.1.0")
+.Since("0.1.0")
 export let Regex = module (
     /// @brief Stores three matching options whose values participate in equality and hashing.
-    #[Final, Since("0.1.0")]
+    .[Final, Since("0.1.0")]
     export let RegexFlags = class (
         /// @brief Enables ASCII-only case-insensitive matching.
         export let ignore_ascii_case: bool = false;
@@ -49,19 +49,19 @@ export let Regex = module (
         };
 
         /// @brief Encodes the enabled flags as a bit mask.
-        #Pure
+        .Pure
         export let.override hash_code = func -> uint32 =>
             (ignore_ascii_case ? 1 : 0) | (multi_line ? 2 : 0) | (dot_all ? 4 : 0);
 
         /// @brief Formats the flags as a RegexFlags description.
-        #Pure
+        .Pure
         export let.override to_string = func -> string =>
             "RegexFlags(ignore_ascii_case=" .. ignore_ascii_case.to_string() ..
             ", multi_line=" .. multi_line.to_string() .. ", dot_all=" .. dot_all.to_string() .. ")";
     );
 
     /// @brief One match: group 0 is the whole match. Immutable.
-    #[Final, Since("0.1.0")]
+    .[Final, Since("0.1.0")]
     export let RegexMatch = class (
         /// @brief The original input retained by the match.
         last input: string;
@@ -71,12 +71,12 @@ export let Regex = module (
         last names: string[list];
 
         /// @brief The inclusive byte offset of the whole match.
-        #Since("0.2.0")
+        .Since("0.2.0")
         export last start: int;
             | get: start;
 
         /// @brief The exclusive byte offset of the whole match.
-        #Since("0.2.0")
+        .Since("0.2.0")
         export last end: int;
             | get: end;
 
@@ -90,7 +90,7 @@ export let Regex = module (
         };
 
         /// @brief Returns the whole matched substring.
-        #[NoDiscard, Pure]
+        .[NoDiscard, Pure]
         export let text = func -> string => input.slice(start, end);
 
         /// @brief Tests equality of input, capture offsets, and group names.
@@ -103,17 +103,17 @@ export let Regex = module (
         };
 
         /// @brief Combines the hashes of the input, capture offsets, and group names.
-        #Pure
+        .Pure
         export let.override hash_code = func -> uint32 =>
             hashing.combine(hashing.combine(input.hash_code(), slots.hash_code()), names.hash_code());
 
         /// @brief Returns the whole matched substring.
-        #Pure
+        .Pure
         export let.override to_string = func -> string => text();
 
         /// @brief The group's text, or None when the group did not participate. An index outside 0 through
         /// the Regex's group_count traps with "invalid argument: no such group".
-        #[NoDiscard, Pure]
+        .[NoDiscard, Pure]
         export let group = func(index: int) -> optional.Optional<string> {
             check_group(index);
             last start_offset = slots[2 * index];
@@ -124,7 +124,7 @@ export let Regex = module (
         };
 
         /// @brief The group's start offset, or -1 when it did not participate.
-        #Pure
+        .Pure
         export let group_start = func(index: int) -> int {
             check_group(index);
             return slots[2 * index];
@@ -132,7 +132,7 @@ export let Regex = module (
 
         /// @brief The named group's text, or None when it did not participate. A name the pattern does not
         /// define traps with "invalid argument: no such group".
-        #[NoDiscard, Pure]
+        .[NoDiscard, Pure]
         export let named_group = func(name: string) -> optional.Optional<string> =>
             group(group_index(names, name));
 
@@ -145,7 +145,7 @@ export let Regex = module (
     );
 
     /// @brief Stores a compiled pattern and provides matching, replacement, and splitting.
-    #[Final, Since("0.1.0"), NotThreadSafe]
+    .[Final, Since("0.1.0"), NotThreadSafe]
     export let Regex = class (
         /// @brief The compiled program and its reusable execution state.
         last program: machine.Program;
@@ -153,12 +153,12 @@ export let Regex = module (
         last names: string[list];
 
         /// @brief The original pattern text.
-        #Since("0.2.0")
+        .Since("0.2.0")
         export last pattern: string;
             | get: pattern;
 
         /// @brief The number of capturing groups, not counting group 0.
-        #Since("0.2.0")
+        .Since("0.2.0")
         export last group_count: int;
             | get: group_count;
 
@@ -256,12 +256,12 @@ export let Regex = module (
         };
 
         /// @brief Hashes the original pattern and recorded compilation options.
-        #Pure
+        .Pure
         export let.override hash_code = func -> uint32 =>
             hashing.combine(pattern.hash_code(), compile_options().hash_code());
 
         /// @brief Returns the original pattern text.
-        #Pure
+        .Pure
         export let.override to_string = func -> string => pattern;
 
         /// @brief Returns the option bits or -1 for an uninitialized program.
@@ -304,12 +304,12 @@ export let Regex = module (
     );
 
     /// @brief Compiles the pattern with every flag off.
-    #[NoDiscard, Since("0.1.0"), Pure, ThreadSafe]
+    .[NoDiscard, Since("0.1.0"), Pure, ThreadSafe]
     export let compile = func(pattern: string) -> result.Result<Regex> => compile_with(pattern, new RegexFlags());
 
     /// @brief Compiles the pattern; a syntax error or an exceeded limit is a Parse error at the offending
     /// pattern offset. The flags are read once.
-    #[NoDiscard, Since("0.1.0"), Pure, ThreadSafe]
+    .[NoDiscard, Since("0.1.0"), Pure, ThreadSafe]
     export let compile_with = func(pattern: string, flags: RegexFlags) -> result.Result<Regex> {
         last syntax: parser.Parser = new(pattern);
         syntax.parse();

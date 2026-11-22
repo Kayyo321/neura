@@ -6,7 +6,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// module only where a standard fixes SHA-1 as a name and not as a security function: OCSP CertIDs and
 /// responder key hashes (RFC 6960 and the lightweight profile of RFC 5019, which most responders require). It
 /// never computes or checks a signature digest with it.
-#Since("0.3.0")
+.Since("0.3.0")
 export let PkiSha1 = module (
     /// @brief The 20-byte SHA-1 digest of the bytes.
     export let digest = func(message: uint8[list]) -> uint8[list] {

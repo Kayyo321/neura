@@ -10,10 +10,10 @@ let words = import:Std.Crypto.Internal.Words;
 /// window, including the identity. That is branch-free in source; the runtime does not guarantee constant
 /// time. Decoding works on public data. The constants come from
 /// scripts/crypto-vectors/gen-asymmetric-constants.py.
-#Since("0.3.0")
+.Since("0.3.0")
 export let Edwards448 = module (
     /// @brief A point in projective coordinates (Montgomery-form field elements). Immutable by convention.
-    #Final
+    .Final
     export let Point = class (
         export last x: uint32[list];
         export last y: uint32[list];
@@ -30,7 +30,7 @@ export let Edwards448 = module (
 
     /// @brief The group: the field modulo p = 2^448 - 2^224 - 1, the scalars modulo L, and d = -39081. Build one
     /// per operation (it holds scratch state, so a task must not share it).
-    #Final
+    .Final
     export let Group = class (
         /// @brief The field modulo p.
         export last field: mp.Modulus;

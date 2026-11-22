@@ -10,7 +10,7 @@ let.promote _ = import:Std.Core.Result;
 /// Every operation uses checked arithmetic; the wrapping forms follow the recipes of section 7.2, so no
 /// intermediate value leaves its type.
 /// @see [Std.Core.UInt64](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-UInt64)
-#Since("0.1.0")
+.Since("0.1.0")
 export let UInt64 = module implements Additive<uint64>, Multiplicative<uint64>, Ordered<uint64>, Parseable<uint64> (
     /// @brief The smallest value representable by this integer type.
     export const Min: uint64 = 0;
@@ -20,19 +20,19 @@ export let UInt64 = module implements Additive<uint64>, Multiplicative<uint64>, 
     export const Bits: int = 64;
 
     /// @brief Returns zero for zero and one for every other value.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let sign = func(v: uint64) -> int => v == 0 ? 0 : 1;
 
     /// @brief Returns the smaller of the two operands.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let min = func(a: uint64, b: uint64) -> uint64 => b < a ? b : a;
 
     /// @brief Returns the larger of the two operands.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let max = func(a: uint64, b: uint64) -> uint64 => b > a ? b : a;
 
     /// @brief Traps with "invalid argument: low exceeds high".
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let clamp = func(v: uint64, low: uint64, high: uint64) -> uint64 {
         if (low > high) {
             trap_with_message("invalid argument: low exceeds high");
@@ -44,7 +44,7 @@ export let UInt64 = module implements Additive<uint64>, Multiplicative<uint64>, 
     };
 
     /// @brief The natural order; usable as a comparator.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let compare = func(a: uint64, b: uint64) -> Ordering {
         if (a < b) {
             return Ordering.Less;
@@ -56,7 +56,7 @@ export let UInt64 = module implements Additive<uint64>, Multiplicative<uint64>, 
     ///
     /// The factor is squared only while exponent bits remain, so each intermediate divides the result. A
     /// negative exponent traps; pow(0, 0) is 1.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let pow = func(base: uint64, exponent: int) -> uint64 {
         if (exponent < 0) {
             trap_with_message("invalid argument: negative exponent");
@@ -77,7 +77,7 @@ export let UInt64 = module implements Additive<uint64>, Multiplicative<uint64>, 
     };
 
     /// @brief Euclid's algorithm. gcd(0, 0) is 0.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let gcd = func(a: uint64, b: uint64) -> uint64 {
         let x = a;
         let y = b;
@@ -90,45 +90,45 @@ export let UInt64 = module implements Additive<uint64>, Multiplicative<uint64>, 
     };
 
     /// @brief None where the operator would trap. Each test runs before the operation, so nothing overflows.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let checked_add = func(a: uint64, b: uint64) -> Optional<uint64> {
         return if (b > Max - a) -> Optional<uint64>.None else -> Optional<uint64>.Some(a + b);
     };
 
     /// @brief Returns the difference in Some, or None when it falls outside the type's range.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let checked_sub = func(a: uint64, b: uint64) -> Optional<uint64> {
         return if (a < b) -> Optional<uint64>.None else -> Optional<uint64>.Some(a - b);
     };
 
     /// @brief Returns the product in Some, or None when it falls outside the type's range.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let checked_mul = func(a: uint64, b: uint64) -> Optional<uint64> {
         return if (a != 0 && b > Max / a) -> Optional<uint64>.None else -> Optional<uint64>.Some(a * b);
     };
 
     /// @brief Returns the quotient in Some, or None when the divisor is zero.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let checked_div = func(a: uint64, b: uint64) -> Optional<uint64> {
         return if (b == 0) -> Optional<uint64>.None else -> Optional<uint64>.Some(a / b);
     };
 
     /// @brief Returns the remainder in Some, or None when the divisor is zero.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let checked_rem = func(a: uint64, b: uint64) -> Optional<uint64> {
         return if (b == 0) -> Optional<uint64>.None else -> Optional<uint64>.Some(a % b);
     };
 
     /// @brief The result modulo 2^64 (section 7.2). `room` is Max - a, which cannot underflow; when b exceeds
     /// it, b - room - 1 is the wrapped sum.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let wrapping_add = func(a: uint64, b: uint64) -> uint64 {
         last room = Max - a;
         return if (b > room) -> b - room - 1 else -> a + b;
     };
 
     /// @brief When a < b, b - a is between 1 and Max, so Max - (b - a) + 1 fits.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let wrapping_sub = func(a: uint64, b: uint64) -> uint64 {
         return if (a >= b) -> a - b else -> Max - (b - a) + 1;
     };
@@ -136,7 +136,7 @@ export let UInt64 = module implements Additive<uint64>, Multiplicative<uint64>, 
     /// @brief Low and high 32-bit halves: every partial product has two factors below 2^32, the cross products
     /// are masked to 32 bits before they are added (their sum is below 2^33), and the shift discards the bits
     /// above 64.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let wrapping_mul = func(a: uint64, b: uint64) -> uint64 {
         last a_low = a & 4294967295;
         last a_high = a >> 32;
@@ -147,39 +147,39 @@ export let UInt64 = module implements Additive<uint64>, Multiplicative<uint64>, 
     };
 
     /// @brief Negates modulo two raised to the type's bit width.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let wrapping_neg = func(a: uint64) -> uint64 => wrapping_sub(0, a);
 
     /// @brief Clamp to Min or Max instead of overflowing.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let saturating_add = func(a: uint64, b: uint64) -> uint64 {
         return if (b > Max - a) -> Max else -> a + b;
     };
 
     /// @brief Subtracts and clamps an out-of-range result to the nearest representable bound.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let saturating_sub = func(a: uint64, b: uint64) -> uint64 {
         return if (a < b) -> Min else -> a - b;
     };
 
     /// @brief Multiplies and clamps an out-of-range result to the nearest representable bound.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let saturating_mul = func(a: uint64, b: uint64) -> uint64 {
         return if (a != 0 && b > Max / a) -> Max else -> a * b;
     };
 
     /// @brief For unsigned operands these are the ordinary quotient and remainder. A zero divisor traps (reason
     /// 1).
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let floor_div = func(a: uint64, b: uint64) -> uint64 => a / b;
 
     /// @brief Returns the unsigned remainder. A zero divisor traps.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let floor_mod = func(a: uint64, b: uint64) -> uint64 => a % b;
 
     /// @brief Bit counts over Bits bits by masks and shifts. Each step adds neighbouring fields whose sums fit
     /// in the wider field, so nothing overflows.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let count_ones = func(v: uint64) -> int {
         let x = v;
         x = (x & 6148914691236517205) + ((x >> 1) & 6148914691236517205);
@@ -193,7 +193,7 @@ export let UInt64 = module implements Additive<uint64>, Multiplicative<uint64>, 
 
     /// @brief A binary search for the highest set bit: a left shift only discards bits already known to be
     /// zero.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let leading_zeros = func(v: uint64) -> int {
         if (v == 0) {
             return Bits;
@@ -228,7 +228,7 @@ export let UInt64 = module implements Additive<uint64>, Multiplicative<uint64>, 
     };
 
     /// @brief Counts zero bits from the least significant end. Zero returns the full bit width.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let trailing_zeros = func(v: uint64) -> int {
         if (v == 0) {
             return Bits;
@@ -264,25 +264,25 @@ export let UInt64 = module implements Additive<uint64>, Multiplicative<uint64>, 
 
     /// @brief `n` is reduced to 0 through Bits - 1 first. A rotation by 0 returns `v`; otherwise both shift
     /// counts are between 1 and Bits - 1.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let rotate_left = func(v: uint64, n: int) -> uint64 {
         last count = rotation(n);
         return if (count == 0) -> v else -> (v << count) | (v >> (Bits - count));
     };
 
     /// @brief Rotates the bits right, reducing the distance modulo the bit width.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let rotate_right = func(v: uint64, n: int) -> uint64 {
         last count = rotation(n);
         return if (count == 0) -> v else -> (v >> count) | (v << (Bits - count));
     };
 
     /// @brief The identity: every integer module has both conversions.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let to_unsigned = func(v: uint64) -> uint64 => v;
 
     /// @brief The same-width signed type with the same bit pattern (section 7.2).
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let to_signed = func(v: uint64) -> int64 {
         if (v < 9223372036854775808) {
             return v as int64;
@@ -293,28 +293,28 @@ export let UInt64 = module implements Additive<uint64>, Multiplicative<uint64>, 
 
     /// @brief Section 5.2: the two's complement pattern as a uint32; the 64-bit types fold the high half into
     /// the low half.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let hash = func(v: uint64) -> uint32 => v.hash_code();
 
     /// @brief Decimal, with `-` for negative values (section 5.2).
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let to_string = func(v: uint64) -> string => v.to_string();
 
     /// @brief Lowercase digits. A radix outside 2 through 36 traps. The neura.integer.format_u64 kernel
     /// writes the digits.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let to_string_radix = func(v: uint64, radix: int) -> string =>
         integer_kernels.format_u64(v as uint64, radix as int64);
 
     /// @brief to_string_radix, left-padded with copies of `pad` to `min_width` characters, sign included. A `0`
     /// pad goes after the sign. `pad` must be one scalar value.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let format = func(v: uint64, radix: int, min_width: int, pad: string) -> string =>
         integer_text.pad_number(to_string_radix(v, radix), min_width, pad);
 
     /// @brief Parses a base-10 integer, returning an error for invalid text or a value outside the type's
     /// range.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let parse = func(text: string) -> Result<uint64> => parse_radix(text, 10);
 
     /// @brief An optional `+` or `-`, then one or more digits of the radix in either case.
@@ -324,7 +324,7 @@ export let UInt64 = module implements Additive<uint64>, Multiplicative<uint64>, 
     /// for zero. A radix outside 2 through 36 traps.
     ///
     /// The neura.integer.parse_u64 kernel parses the text.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let parse_radix = func(text: string, radix: int) -> Result<uint64> {
         let [status, offset, value] = integer_kernels.parse_u64(text, radix as int64);
         if (status != kernel_status.Ok) {
@@ -340,18 +340,18 @@ export let UInt64 = module implements Additive<uint64>, Multiplicative<uint64>, 
     };
 
     /// @brief The additive identity, 0 (Std.Core.Arithmetic.Additive).
-    #[Pure, ThreadSafe, Since("0.3.0")]
+    .[Pure, ThreadSafe, Since("0.3.0")]
     export let zero = func() -> uint64 => 0;
 
     /// @brief The sum `left + right`, at the type's width; traps (reason 1) on overflow.
-    #[Pure, ThreadSafe, Since("0.3.0")]
+    .[Pure, ThreadSafe, Since("0.3.0")]
     export let add = func(left: uint64, right: uint64) -> uint64 => left + right;
 
     /// @brief The multiplicative identity, 1 (Std.Core.Arithmetic.Multiplicative).
-    #[Pure, ThreadSafe, Since("0.3.0")]
+    .[Pure, ThreadSafe, Since("0.3.0")]
     export let one = func() -> uint64 => 1;
 
     /// @brief The product `left * right`, at the type's width; traps (reason 1) on overflow.
-    #[Pure, ThreadSafe, Since("0.3.0")]
+    .[Pure, ThreadSafe, Since("0.3.0")]
     export let multiply = func(left: uint64, right: uint64) -> uint64 => left * right;
 );

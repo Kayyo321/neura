@@ -2,7 +2,7 @@
 /// inputs: `reset` starts a new message without allocating, bytes are absorbed straight into the lanes, and
 /// the permutation is unrolled over the 25 lanes. Internal. The round constants are those of
 /// Std.Crypto.Internal.Keccak (printed by scripts/crypto-vectors/constants.py), and the results equal it.
-#Since("0.3.0")
+.Since("0.3.0")
 export let PqcKeccak = module (
     /// @brief A sponge with a fixed rate and domain byte, reused for many messages.
     export let Xof = class (

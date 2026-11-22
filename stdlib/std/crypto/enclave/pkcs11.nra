@@ -3,17 +3,17 @@ let versioned = import:Std.Crypto.Enclave.VersionedKeyStore;
 
 /// @brief A PKCS #11 token-backed key store provider.
 /// @see [Std.Crypto.Enclave.Pkcs11](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Pkcs11)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Pkcs11 = module (
     /// @brief An opaque versioned key store for this backend. String handles have meaning only to their provider.
     /// @see [Std.Crypto.Enclave.Pkcs11](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Pkcs11)
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let Provider = interface:versioned.VersionedKeyStore<string> ();
 
     /// @brief Opens this configured provider.
     /// @stub the runtime has no PKCS #11 token and session host service
     /// @see [Std.Crypto.Enclave.Pkcs11](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Pkcs11)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let open = func(library_path: string, token_label: string) -> Result<Provider> {
         trap_with_message("unsupported: Std.Crypto.Enclave.Pkcs11.open is not implemented in Neura 0.3.0 (the runtime has no PKCS #11 token and session host service)");
     };

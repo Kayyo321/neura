@@ -1,7 +1,7 @@
 warning[W0003]: unused result of #NoDiscard function 'write': check whether it was written
   --> $DIR/no-discard.nra:16:5
    |
- 3 | #NoDiscard(reason: "check whether it was written")
+ 3 | .NoDiscard(reason: "check whether it was written")
    | -------------------------------------------------- 'write' is marked #NoDiscard here
 ...
 16 |     write("data");
@@ -15,7 +15,7 @@ help: bind the result to '_' to discard it on purpose
 warning[W0003]: unused value of #NoDiscard type 'Status'
   --> $DIR/no-discard.nra:17:5
    |
- 8 | #NoDiscard
+ 8 | .NoDiscard
    | ---------- 'Status' is marked #NoDiscard here
 ...
 17 |     finish();

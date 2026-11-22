@@ -8,7 +8,7 @@
 /// `NewReno`, `Cubic` and `Ledbat` implement it; `Bbr.bbr3` is a stub. `delay_nanos` of an acknowledgment is
 /// the latest round-trip time for loss-based controllers and the latest one-way delay for LEDBAT.
 /// @see [Std.Net.Quic.CongestionController](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Quic-CongestionController)
-#Since("0.3.0")
+.Since("0.3.0")
 export let CongestionController = module (
     /// @brief The largest congestion window, 1,000,000,000 bytes, which keeps the window arithmetic in 64 bits.
     export const MaxWindow: int64 = 1000000000;
@@ -40,7 +40,7 @@ export let CongestionController = module (
     );
 
     /// @brief The initial window: min(10 * size, max(14,720, 2 * size)) (RFC 9002 section 7.2).
-    #Pure
+    .Pure
     export let initial_window = func(max_datagram_size: int64) -> int64 {
         last ten = 10 * max_datagram_size;
         last floor = 2 * max_datagram_size > 14720 ? 2 * max_datagram_size : 14720;
@@ -48,7 +48,7 @@ export let CongestionController = module (
     };
 
     /// @brief The minimum window: 2 * size (RFC 9002 section 7.2).
-    #Pure
+    .Pure
     export let minimum_window = func(max_datagram_size: int64) -> int64 => 2 * max_datagram_size;
 
     /// @brief Traps with "invalid argument: max datagram size" unless the size is from 1,200 through 65,527.
@@ -69,7 +69,7 @@ export let CongestionController = module (
     };
 
     /// @brief `bytes_in_flight - bytes`, trapping with "invalid argument: more bytes than in flight" below zero.
-    #Pure
+    .Pure
     export let remove_in_flight = func(in_flight: int64, bytes: int64) -> int64 {
         if (bytes > in_flight) {
             trap_with_message("invalid argument: more bytes than in flight");
@@ -78,6 +78,6 @@ export let CongestionController = module (
     };
 
     /// @brief `window` capped at `MaxWindow`.
-    #Pure
+    .Pure
     export let capped = func(window: int64) -> int64 => window > MaxWindow ? MaxWindow : window;
 );

@@ -1,7 +1,7 @@
 error[E0907]: #NoInline conflicts with #Inline
  --> $DIR/conflicting-tags.nra:2:25
   |
-2 | #[Inline(always: true), NoInline]
+2 | .[Inline(always: true), NoInline]
   |                         ^^^^^^^^ #NoInline given here
   |   -------------------- #Inline given here
   |

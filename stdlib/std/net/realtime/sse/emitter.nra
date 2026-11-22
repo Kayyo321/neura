@@ -15,7 +15,7 @@ let.promote _ = import:Std.Core.Unit;
 /// U+0000, and a negative reconnection time are rejected with a Custom error of code `sse.emit`, because the
 /// parser could not read them back. Lines end with LF.
 /// @see [Std.Net.Realtime.Sse.Emitter](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-Sse-Emitter)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Emitter = module (
     /// @brief The error code of an event that cannot be written.
     export const ErrorCode: string = "sse.emit";
@@ -24,7 +24,7 @@ export let Emitter = module (
 
     /// @brief The text of one event. The identifier is written only when it is not empty; use `format_fields`
     /// to send an empty `id` line that resets the client's cursor.
-    #NoDiscard
+    .NoDiscard
     export let format = func(event: SseEvent) -> Result<string> {
         last id = event.id.byte_length == 0 ? Optional<string>.None : Optional<string>.Some(event.id);
         return format_fields(event.event_type, event.data, id, event.retry);
@@ -32,7 +32,7 @@ export let Emitter = module (
 
     /// @brief The text of one event from its parts. An empty type or `message` writes no `event:` line; `id`
     /// `Some("")` writes a bare `id` line, which resets the last event ID.
-    #NoDiscard
+    .NoDiscard
     export let format_fields = func(event_type: string, data: string, id: Optional<string>, retry: Optional<int64>)
         -> Result<string> {
         if (has_line_break(event_type)) {
@@ -67,7 +67,7 @@ export let Emitter = module (
     };
 
     /// @brief Comment lines, ignored by the parser: each line of the text after `: `.
-    #NoDiscard
+    .NoDiscard
     export let comment = func(text: string) -> string {
         let out = "";
         for (let piece in split_lines(text)) {
@@ -77,19 +77,19 @@ export let Emitter = module (
     };
 
     /// @brief A keep-alive: a single empty comment line.
-    #NoDiscard
+    .NoDiscard
     export let keep_alive = func -> string => ":\n";
 
     /// @brief A block that only sets the client's reconnection time; it dispatches no event. A negative time
     /// fails.
-    #NoDiscard
+    .NoDiscard
     export let retry_only = func(millis: int64) -> Result<string> {
         return if (millis < 0) -> fail("the reconnection time is negative")
             else -> Result<string>.Ok("retry: " .. millis.to_string() .. "\n\n");
     };
 
     /// @brief Writes events to a byte sink, such as the write method of a stream or a response body.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let EventWriter = class (
         /// @brief Receives the UTF-8 bytes of each block.
         last sink: func(uint8[list]) -> Result<Unit>;
@@ -100,7 +100,7 @@ export let Emitter = module (
         };
 
         /// @brief Writes one event, or fails without writing when it cannot be formatted.
-        #NoDiscard
+        .NoDiscard
         export let send = func(event: SseEvent) -> Result<Unit> {
             return match (format(event)) {
                 Result.Ok(text) => sink(strings.to_bytes(text)),
@@ -109,15 +109,15 @@ export let Emitter = module (
         };
 
         /// @brief Writes a block of `data` lines with the default type and no identifier.
-        #NoDiscard
+        .NoDiscard
         export let send_data = func(data: string) -> Result<Unit> => send(sse_event.message(data));
 
         /// @brief Writes a comment.
-        #NoDiscard
+        .NoDiscard
         export let send_comment = func(text: string) -> Result<Unit> => sink(strings.to_bytes(comment(text)));
 
         /// @brief Writes a keep-alive comment.
-        #NoDiscard
+        .NoDiscard
         export let send_keep_alive = func -> Result<Unit> => sink(strings.to_bytes(keep_alive()));
 
         /// @brief `EventWriter`.
@@ -125,7 +125,7 @@ export let Emitter = module (
     );
 
     /// @brief Writes values of `T` as events through an encoder, for typed streams such as model tokens.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let TypedEventWriter = class<T> (
         /// @brief The underlying writer.
         last writer: EventWriter;
@@ -139,7 +139,7 @@ export let Emitter = module (
         };
 
         /// @brief Encodes and writes one value; an encoder error is returned and nothing is written.
-        #NoDiscard
+        .NoDiscard
         export let send = func(value: T) -> Result<Unit> {
             return match (encode(value)) {
                 Result.Ok(event) => writer.send(event),
@@ -152,7 +152,7 @@ export let Emitter = module (
     );
 
     /// @brief The lines of the text split at CRLF, LF and CR; the empty text is one empty line.
-    #[NoDiscard, Pure]
+    .[NoDiscard, Pure]
     export let split_lines = func(text: string) -> string[list] {
         last pieces: string[list] = new;
         last length = text.byte_length;

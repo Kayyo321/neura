@@ -12,7 +12,7 @@ let.promote _ = import:Std.Core.Result;
 /// transport error for a peer is STREAM_LIMIT_ERROR) and `quic.stream_state` (a peer used an ID of a type it
 /// cannot open). An ID outside 0 through 2^62 - 1 traps with "invalid argument: stream ID".
 /// @see [Std.Net.Quic.StreamId](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Quic-StreamId)
-#Since("0.3.0")
+.Since("0.3.0")
 export let StreamId = module (
     /// @brief The largest stream ID, 2^62 - 1.
     export const MaxStreamId: int64 = 4611686018427387903;
@@ -26,7 +26,7 @@ export let StreamId = module (
     );
 
     /// @brief The type of a stream ID.
-    #Pure
+    .Pure
     export let type_of = func(id: int64) -> StreamType {
         check(id);
         last bits = id % 4;
@@ -35,32 +35,32 @@ export let StreamId = module (
     };
 
     /// @brief The two low bits of a type (0 through 3).
-    #Pure
+    .Pure
     export let type_bits = func(kind: StreamType) -> int64 => kind == StreamType.ClientBidirectional ? 0
         : kind == StreamType.ServerBidirectional ? 1 : kind == StreamType.ClientUnidirectional ? 2 : 3;
 
     /// @brief The type of streams that `client` (true) or the server opens in the given direction.
-    #Pure
+    .Pure
     export let type_for = func(client: bool, bidirectional: bool) -> StreamType => client
         ? (bidirectional ? StreamType.ClientBidirectional : StreamType.ClientUnidirectional)
         : (bidirectional ? StreamType.ServerBidirectional : StreamType.ServerUnidirectional);
 
     /// @brief True when the client opened the stream (bit 0x01 clear).
-    #Pure
+    .Pure
     export let is_client_initiated = func(id: int64) -> bool {
         check(id);
         return id % 2 == 0;
     };
 
     /// @brief True for a bidirectional stream (bit 0x02 clear).
-    #Pure
+    .Pure
     export let is_bidirectional = func(id: int64) -> bool {
         check(id);
         return (id / 2) % 2 == 0;
     };
 
     /// @brief The position of the stream among the streams of its type, from 0.
-    #Pure
+    .Pure
     export let index_of = func(id: int64) -> int64 {
         check(id);
         return id / 4;
@@ -68,7 +68,7 @@ export let StreamId = module (
 
     /// @brief The ID of the `index`-th stream of `kind` (from 0). An index from which no valid ID follows traps
     /// with "invalid argument: stream index".
-    #Pure
+    .Pure
     export let nth = func(kind: StreamType, index: int64) -> int64 {
         if (index < 0 || index >= MaxStreamCount) {
             trap_with_message("invalid argument: stream index");
@@ -78,18 +78,18 @@ export let StreamId = module (
 
     /// @brief True when the client (`local_client`) or the server may send on stream `id`: on every
     /// bidirectional stream and on its own unidirectional streams.
-    #Pure
+    .Pure
     export let may_send = func(id: int64, local_client: bool) -> bool =>
         is_bidirectional(id) || is_client_initiated(id) == local_client;
 
     /// @brief True when the client (`local_client`) or the server may receive on stream `id`: on every
     /// bidirectional stream and on the peer's unidirectional streams.
-    #Pure
+    .Pure
     export let may_receive = func(id: int64, local_client: bool) -> bool =>
         is_bidirectional(id) || is_client_initiated(id) != local_client;
 
     /// @brief Allocates the IDs of the streams one endpoint opens, within the peer's stream limits.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let StreamIdAllocator = class (
         /// @brief True for the client side.
         export last client: bool;
@@ -115,7 +115,7 @@ export let StreamId = module (
 
         /// @brief The next stream ID of the direction, or a `quic.stream_limit` error when the peer's limit is
         /// reached (the endpoint would then send STREAMS_BLOCKED).
-        #NoDiscard
+        .NoDiscard
         export let open = func(bidirectional: bool) -> Result<int64> {
             last opened = bidirectional ? bidirectional_opened : unidirectional_opened;
             last limit = bidirectional ? bidirectional_limit : unidirectional_limit;
@@ -144,7 +144,7 @@ export let StreamId = module (
         };
 
         /// @brief The number of streams opened in the direction.
-        #Pure
+        .Pure
         export let opened = func(bidirectional: bool) -> int64 =>
             bidirectional ? bidirectional_opened : unidirectional_opened;
 
@@ -155,7 +155,7 @@ export let StreamId = module (
     );
 
     /// @brief Tracks the streams a peer opens, applying the implicit opening of lower-numbered streams.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let PeerStreams = class (
         /// @brief True when the local endpoint is the client (so the peer is the server).
         export last local_client: bool;
@@ -180,7 +180,7 @@ export let StreamId = module (
         /// @brief Records a frame on stream `id` from the peer and returns the IDs it newly opens, in increasing
         /// order (empty when the stream was already open). Err `quic.stream_state` when `id` is of a type the
         /// local endpoint opens, and `quic.stream_limit` when it exceeds the advertised limit.
-        #NoDiscard
+        .NoDiscard
         export let receive = func(id: int64) -> Result<int64[list]> {
             if (is_client_initiated(id) == local_client) {
                 return Result<int64[list]>.Err(errors.custom("quic.stream_state",

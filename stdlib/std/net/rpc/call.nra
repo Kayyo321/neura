@@ -18,13 +18,13 @@ let timeouts = import:Std.Net.Rpc.Timeout;
 /// injected transport. A response with no messages and a non-OK status is sent Trailers-Only (the status in the
 /// header block, no body, no trailers).
 /// @see [Std.Net.Rpc.Call](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Rpc-Call)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Call = module (
     /// @brief The content type prefix of native gRPC.
     export const GrpcContentType: string = "application/grpc";
 
     /// @brief A method path `/Service-Name/method`, where the service name is `package.Service` for protobuf.
-    #Final
+    .Final
     export let MethodPath = class (
         /// @brief The fully qualified service name, such as `grpc.health.v1.Health`.
         export last service: string;
@@ -59,7 +59,7 @@ export let Call = module (
     );
 
     /// @brief Parses a `:path` of the form `/service/method`; anything else is a Parse error.
-    #NoDiscard
+    .NoDiscard
     export let parse_path = func(text: string) -> Result<MethodPath> {
         if (text.byte_length < 4 || text.byte_at(0) != 47) {
             return Result<MethodPath>.Err(parse_error("method path must start with /"));
@@ -71,7 +71,7 @@ export let Call = module (
     };
 
     /// @brief One call's request: the method, metadata, messages, and optional timeout.
-    #Final
+    .Final
     export let RpcRequest = class (
         /// @brief The method.
         export last path: MethodPath;
@@ -92,7 +92,7 @@ export let Call = module (
         };
 
         /// @brief The same request with another timeout.
-        #NoDiscard
+        .NoDiscard
         export let with_timeout = func(budget: Optional<Duration>) -> RpcRequest =>
             new RpcRequest(path, metadata, messages, budget);
 
@@ -106,7 +106,7 @@ export let Call = module (
     );
 
     /// @brief A unary request with one message.
-    #NoDiscard
+    .NoDiscard
     export let unary_request = func(method_path: MethodPath, message: uint8[list], request_metadata: meta.Metadata,
         budget: Optional<Duration>) -> RpcRequest {
         last messages: uint8[list][list] = new;
@@ -115,7 +115,7 @@ export let Call = module (
     };
 
     /// @brief One call's response: header metadata, messages, final status and trailing metadata.
-    #Final
+    .Final
     export let RpcResponse = class (
         /// @brief Custom metadata from the response headers.
         export last headers: meta.Metadata;
@@ -141,7 +141,7 @@ export let Call = module (
     );
 
     /// @brief An OK response with one message and no metadata.
-    #NoDiscard
+    .NoDiscard
     export let unary_response = func(message: uint8[list]) -> RpcResponse {
         last messages: uint8[list][list] = new;
         messages.append(message);
@@ -149,12 +149,12 @@ export let Call = module (
     };
 
     /// @brief A response with no messages and a status (sent Trailers-Only when the status is not OK).
-    #NoDiscard
+    .NoDiscard
     export let status_response = func(final_status: statuses.RpcStatus) -> RpcResponse =>
         new RpcResponse(meta.empty(), new, final_status, meta.empty());
 
     /// @brief An HTTP request as gRPC sends it: header pairs in order and the whole body.
-    #Final
+    .Final
     export let WireRequest = class (
         /// @brief Header pairs, pseudo-headers first.
         export last headers: [string, string][list];
@@ -168,7 +168,7 @@ export let Call = module (
         };
 
         /// @brief The first value of header `name` (case-insensitive).
-        #NoDiscard
+        .NoDiscard
         export let header = func(name: string) -> Optional<string> => find(headers, name);
 
         /// @brief The header count and body size.
@@ -177,7 +177,7 @@ export let Call = module (
     );
 
     /// @brief An HTTP response as gRPC receives it: status, header pairs, whole body, trailer pairs.
-    #Final
+    .Final
     export let WireResponse = class (
         /// @brief The HTTP statuses.
         export last http_status: int;
@@ -198,7 +198,7 @@ export let Call = module (
         };
 
         /// @brief The first value of header `name` (case-insensitive).
-        #NoDiscard
+        .NoDiscard
         export let header = func(name: string) -> Optional<string> => find(headers, name);
 
         /// @brief The status, header count, body size and trailer count.
@@ -208,7 +208,7 @@ export let Call = module (
     );
 
     /// @brief Whether a content type is gRPC: `application/grpc` alone or followed by `+` or `;`.
-    #NoDiscard
+    .NoDiscard
     export let is_grpc_content_type = func(content_type: string) -> bool {
         last lower = strings.to_ascii_lower(content_type);
         return if (lower == GrpcContentType) -> true
@@ -218,7 +218,7 @@ export let Call = module (
     /// @brief The client's HTTP request: `:method POST`, `:scheme`, `:path`, `:authority`, then `grpc-timeout` when
     /// set, `content-type application/grpc+<subtype>`, `te trailers`, then the custom metadata; the body holds each
     /// message uncompressed.
-    #NoDiscard
+    .NoDiscard
     export let encode_request = func(request: RpcRequest, authority: string, scheme: string, subtype: string)
         -> WireRequest {
         last headers: [string, string][list] = new;
@@ -249,7 +249,7 @@ export let Call = module (
     /// when malformed), `grpc-timeout` (INTERNAL when malformed), `grpc-encoding` (UNIMPLEMENTED unless absent or
     /// `identity`), custom metadata (reserved `grpc-` entries and pseudo-headers removed), and the messages (framing
     /// errors as in `Framing.MessageDecoder`). Failures are `Std.Net.Rpc.Status` errors.
-    #NoDiscard
+    .NoDiscard
     export let decode_request = func(wire: WireRequest, max_message_size: int) -> Result<RpcRequest> {
         last path_text = optional.value_or<string>(wire.header(":path"), "");
         last parsed_path = parse_path(path_text);
@@ -294,7 +294,7 @@ export let Call = module (
     /// @brief The server's HTTP response: `:status 200` with `content-type`; Trailers-Only (status in the header
     /// block) when there are no messages and the status is not OK; otherwise headers, the framed messages, and
     /// trailers with the status first and then the custom trailing metadata.
-    #NoDiscard
+    .NoDiscard
     export let encode_response = func(response: RpcResponse, subtype: string) -> WireResponse {
         last headers: [string, string][list] = new;
         headers.append(["content-type", GrpcContentType .. "+" .. subtype]);
@@ -328,7 +328,7 @@ export let Call = module (
     /// @brief The client's reading of an HTTP response. A non-200 status or a non-gRPC content type gives a
     /// status synthesized from the HTTP status (http-grpc-status-mapping.md); a Trailers-Only response takes its
     /// status from the header block. Fails only on framing errors of the body (INTERNAL or RESOURCE_EXHAUSTED).
-    #NoDiscard
+    .NoDiscard
     export let decode_response = func(wire: WireResponse, max_message_size: int) -> Result<RpcResponse> {
         last content_type = optional.value_or<string>(wire.header("content-type"), "");
         if (wire.http_status != 200 || not is_grpc_content_type(content_type)) {
@@ -360,7 +360,7 @@ export let Call = module (
 
     /// @brief Custom metadata of header pairs: pseudo-headers, the call-definition headers and reserved `grpc-`
     /// names removed.
-    #NoDiscard
+    .NoDiscard
     export let custom_metadata = func(pairs: [string, string][list]) -> meta.Metadata {
         last kept: [string, string][list] = new;
         for (let pair in pairs) {

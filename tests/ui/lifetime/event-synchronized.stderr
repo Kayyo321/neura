@@ -1,7 +1,7 @@
 error[E0550]: handlers would run while 'Account' is locked
   --> $DIR/event-synchronized.nra:10:9
    |
- 4 | #Synchronized
+ 4 | .Synchronized
    | ------------- this method runs under its instance's guard
 ...
 10 |         changed.emit(balance);

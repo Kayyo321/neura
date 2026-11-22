@@ -13,13 +13,13 @@ let.promote _ = import:Std.Net.Service;
 /// (clock or store) is returned as is. `last_decision` reports the decision for the latest request, for a server
 /// that sets `RateLimit` or `Retry-After` headers.
 /// @see [Std.Net.Resilience.RateLimitFilter](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-RateLimitFilter)
-#Since("0.3.0")
+.Since("0.3.0")
 export let RateLimitFilter = module (
     /// @brief The error code of a request the limiter denied.
     export const LimitedCode = "resilience.rate_limited";
 
     /// @brief Admits requests through a keyed limiter.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let RateLimitFilter = class<Req, Resp> implements SimpleFilter<Req, Resp> (
         /// @brief The limiter consulted per request.
         last limiter: limiters.RateLimiter;
@@ -50,7 +50,7 @@ export let RateLimitFilter = module (
         };
 
         /// @brief The decision for the latest request that reached the limiter, or None before the first.
-        #NoDiscard
+        .NoDiscard
         export let last_decision = func -> optional.Optional<limiters.RateDecision> {
             return if (latest.length == 0) -> optional.Optional<limiters.RateDecision>.None
                 else -> optional.Optional<limiters.RateDecision>.Some(latest[0]);
@@ -61,7 +61,7 @@ export let RateLimitFilter = module (
     );
 
     /// @brief A filter over `limiter` keyed by `key`.
-    #NoDiscard
+    .NoDiscard
     export let of = func<Req, Resp>(limiter: limiters.RateLimiter, key: func(Req) -> string)
         -> RateLimitFilter<Req, Resp> => new RateLimitFilter<Req, Resp>(limiter, key);
 );

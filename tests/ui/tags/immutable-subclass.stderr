@@ -1,7 +1,7 @@
 error[E0920]: class 'Polygon' extends the #Immutable class 'Shape' and is not #Immutable
  --> $DIR/immutable-subclass.nra:7:5
   |
-2 | #Immutable
+2 | .Immutable
   | ---------- 'Shape' is marked #Immutable here
 ...
 7 | let Polygon = class:Shape (

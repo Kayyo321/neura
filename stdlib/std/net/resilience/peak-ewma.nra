@@ -22,10 +22,10 @@ let.promote _ = import:Std.Core.Unit;
 /// `rtt * (pending + 1)`. `pick` draws two distinct endpoints as `PowerOfTwoChoices` does and takes the one with the
 /// lower cost; a tie goes to the first draw. One endpoint is picked without drawing.
 /// @see [Std.Net.Resilience.PeakEwma](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-PeakEwma)
-#Since("0.3.0")
+.Since("0.3.0")
 export let PeakEwma = module (
     /// @brief P2C over Peak EWMA cost.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let PeakEwma = class<Endpoint> implements balancers.LoadBalancer<Endpoint> (
         /// @brief The endpoints, copied at construction.
         last endpoints: Endpoint[list] = new;
@@ -103,7 +103,7 @@ export let PeakEwma = module (
         };
 
         /// @brief The cost of endpoint `index` now: the decayed estimate times (pending + 1).
-        #NoDiscard
+        .NoDiscard
         export let cost = func(index: int) -> Result<float64> {
             last now = now_nanos()?;
             return Result<float64>.Ok(cost_at(index, now));
@@ -150,7 +150,7 @@ export let PeakEwma = module (
 
     /// @brief A Peak EWMA balancer over a copy of `endpoints` with decay time `tau` and initial estimate
     /// `default_rtt`.
-    #NoDiscard
+    .NoDiscard
     export let of = func<Endpoint>(endpoints: Endpoint[list], tau: durations.Duration, default_rtt: durations.Duration,
         random: randoms.Random, clock: Clock) -> PeakEwma<Endpoint> =>
             new PeakEwma<Endpoint>(endpoints, tau, default_rtt, random, clock);

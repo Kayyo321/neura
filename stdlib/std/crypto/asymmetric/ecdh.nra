@@ -19,10 +19,10 @@ let words = import:Std.Crypto.Internal.Words;
 /// cofactor 1). The scalar multiplication is branch-free in source; the runtime does not guarantee constant
 /// time.
 /// @see [Std.Crypto.Asymmetric.Ecdh](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-Ecdh)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Ecdh = module (
     /// @brief The ECDH primitive of one curve, for the policy.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Ecdh = class implements CryptographicPrimitive<Ecdh> (
         /// @brief The curve.
         export last curve: ecdsa.Curve;
@@ -37,7 +37,7 @@ export let Ecdh = module (
         export let algorithm = func -> Algorithm => ecdsa.algorithm_of(curve);
 
         /// @brief See the module function `diffie_hellman`; keys of another curve trap.
-        #NoDiscard
+        .NoDiscard
         export let diffie_hellman = func(private_key: ecdsa.EcPrivateKey, peer: ecdsa.EcPublicKey) -> Result<SecretBytes> {
             if (private_key.curve != curve) {
                 trap_with_message("invalid argument: the key is for another curve");
@@ -51,7 +51,7 @@ export let Ecdh = module (
     /// @brief The x-coordinate of d Q. Keys on different curves trap with `invalid argument`. A result at
     /// infinity, which a validated key on these prime-order curves cannot give, would be `Custom` code
     /// `crypto.key_agreement`.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let diffie_hellman = func(private_key: ecdsa.EcPrivateKey, peer: ecdsa.EcPublicKey) -> Result<SecretBytes> =>
         shared_secret(private_key, peer);
 

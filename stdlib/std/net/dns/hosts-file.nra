@@ -20,7 +20,7 @@ let strings = import:Std.Text.Strings;
 /// case-insensitively and answer in file order, both families together. A carriage return before the line feed
 /// is ignored, so a table written with CRLF line ends, as Windows writes its own, parses the same.
 /// @see [Std.Net.Dns.HostsFile](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-HostsFile)
-#Since("0.3.0")
+.Since("0.3.0")
 export let HostsFile = module (
     /// @brief The usual location of the host table on Linux and macOS. Windows keeps its table at
     /// `%SystemRoot%/System32/drivers/etc/hosts` (usually `C:/Windows/System32/drivers/etc/hosts`), and a Windows
@@ -29,7 +29,7 @@ export let HostsFile = module (
     export const DefaultPath = "/etc/hosts";
 
     /// @brief One accepted line: an address and its names, the canonical name first.
-    #Final
+    .Final
     export let HostsEntry = class (
         /// @brief The address of the line.
         export last address: ips.IpAddr;
@@ -43,11 +43,11 @@ export let HostsFile = module (
         };
 
         /// @brief The first name on the line.
-        #NoDiscard
+        .NoDiscard
         export let canonical_name = func -> string => names[0];
 
         /// @brief Whether `name` is one of the entry's names, ASCII case-insensitively, a trailing dot ignored.
-        #NoDiscard
+        .NoDiscard
         export let has_name = func(name: string) -> bool {
             last wanted = normalize(name);
             for (let n in names) {
@@ -89,7 +89,7 @@ export let HostsFile = module (
     );
 
     /// @brief A skipped line: its 1-based number, its text, and why it was skipped.
-    #Final
+    .Final
     export let HostsProblem = class (
         /// @brief The 1-based line number.
         export last line: int;
@@ -122,7 +122,7 @@ export let HostsFile = module (
     );
 
     /// @brief A parsed host table: its entries in file order and the lines it skipped.
-    #Final
+    .Final
     export let HostsFile = class (
         /// @brief The accepted lines in file order.
         last table: HostsEntry[list];
@@ -136,19 +136,19 @@ export let HostsFile = module (
         };
 
         /// @brief The accepted entries in file order.
-        #NoDiscard
+        .NoDiscard
         export let entries = func -> HostsEntry[list] => table;
 
         /// @brief The skipped lines in file order.
-        #NoDiscard
+        .NoDiscard
         export let problems = func -> HostsProblem[list] => skipped;
 
         /// @brief The number of accepted entries.
-        #NoDiscard
+        .NoDiscard
         export let size = func -> int => table.length;
 
         /// @brief Every address listed for `name`, in file order, both families; empty when none.
-        #NoDiscard
+        .NoDiscard
         export let lookup = func(name: string) -> ips.IpAddr[list] {
             last found: ips.IpAddr[list] = new;
             for (let entry in table) {
@@ -160,7 +160,7 @@ export let HostsFile = module (
         };
 
         /// @brief The addresses of `name` of one family (`AddressFamily.Ipv4` or `Ipv6`), in file order.
-        #NoDiscard
+        .NoDiscard
         export let lookup_family = func(name: string, wanted: AddressFamily) -> ips.IpAddr[list] {
             last found: ips.IpAddr[list] = new;
             for (let ip in lookup(name)) {
@@ -172,16 +172,16 @@ export let HostsFile = module (
         };
 
         /// @brief The IPv4 addresses of `name`.
-        #NoDiscard
+        .NoDiscard
         export let lookup_v4 = func(name: string) -> ips.IpAddr[list] => lookup_family(name, AddressFamily.Ipv4);
 
         /// @brief The IPv6 addresses of `name`.
-        #NoDiscard
+        .NoDiscard
         export let lookup_v6 = func(name: string) -> ips.IpAddr[list] => lookup_family(name, AddressFamily.Ipv6);
 
         /// @brief Every name listed for `ip` (equal addresses, zone included), in file order, canonical names
         /// first within each line; empty when none.
-        #NoDiscard
+        .NoDiscard
         export let reverse = func(ip: ips.IpAddr) -> string[list] {
             last found: string[list] = new;
             for (let entry in table) {
@@ -229,11 +229,11 @@ export let HostsFile = module (
     );
 
     /// @brief A table with no entries.
-    #NoDiscard
+    .NoDiscard
     export let empty = func -> HostsFile => new HostsFile(new, new);
 
     /// @brief Parses host-table text; never fails. Invalid lines are skipped and listed in `problems`.
-    #NoDiscard
+    .NoDiscard
     export let parse = func(text: string) -> HostsFile {
         last accepted: HostsEntry[list] = new;
         last rejected: HostsProblem[list] = new;
@@ -277,14 +277,14 @@ export let HostsFile = module (
 
     /// @brief Reads and parses the file at `path` (usually `DefaultPath`, or the Windows location it names).
     /// Fails only when the file cannot be read as UTF-8 text.
-    #NoDiscard
+    .NoDiscard
     export let read = func(path: string) -> Result<HostsFile> {
         last text = filesystem.read_text(new paths.Path(path))?;
         return Result<HostsFile>.Ok(parse(text));
     };
 
     /// @brief Why `name` is not a valid host-table name, or "" when it is.
-    #NoDiscard
+    .NoDiscard
     export let name_problem = func(name: string) -> string {
         last body = drop_trailing_dot(name);
         if (body.byte_length == 0) {

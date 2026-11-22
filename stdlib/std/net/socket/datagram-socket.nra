@@ -9,10 +9,10 @@ let.promote _ = import:Std.Core.Result;
 /// `UdpSocket` (`Std.Net.Core.SocketAddr`) and `UnixDatagram` (`Std.Net.Core.UnixAddr`) implement it. Each
 /// `receive_from` returns one whole datagram, truncated to the maximum the caller passes.
 /// @see [Std.Net.Socket.DatagramSocket](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-DatagramSocket)
-#Since("0.3.0")
+.Since("0.3.0")
 export let DatagramSocket = module (
     /// @brief One received datagram and the address of its sender, when it has one.
-    #Final
+    .Final
     export let Datagram = class<Addr> (
         /// @brief The payload, truncated to the maximum of the receive call.
         export last data: uint8[list];

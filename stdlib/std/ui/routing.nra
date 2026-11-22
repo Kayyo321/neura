@@ -11,15 +11,15 @@ let ui = import:Std.Ui;
 /// of the route its location matches, and replaces that child when the location changes. Mounted
 /// on a host that keeps history, it starts at the host's location (a deep link), `navigate` adds a
 /// history entry, and a navigation the program did not make (back, forward) moves it in a turn.
-#Since("0.3.0")
+.Since("0.3.0")
 export let Routing = module (
     /// @brief The parameter values of a matched route, by name, percent-decoded.
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let Params = class (
         last names: frozen.FrozenList<string>;
         last values: frozen.FrozenList<string>;
 
-        #Internal
+        .Internal
         export let init = func(names: frozen.FrozenList<string>, values: frozen.FrozenList<string>) => set;
 
         /// @brief The value of the parameter `name`; traps when the route has no such parameter.
@@ -63,14 +63,14 @@ export let Routing = module (
 
     /// @brief Where the router is: the path, the query after `?`, the pattern it matched (empty when
     /// none did) and the route's parameters.
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let Location = class (
         export last path: string;
         export last query: string;
         export last route: string;
         export last params: Params;
 
-        #Internal
+        .Internal
         export let init = func(path: string, query: string, route: string, params: Params) => set;
 
         /// @brief Reports whether a route matched.
@@ -94,7 +94,7 @@ export let Routing = module (
     );
 
     /// One route: its pattern, the pattern's segments, and the factory of its component.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     let Route = class (
         export last pattern: string;
         export last segments: string[list];
@@ -116,7 +116,7 @@ export let Routing = module (
 
     /// @brief Paths to components, and the location that chooses one. Build it, `add` the routes,
     /// and mount `component()` (or embed it with `ui.slot`).
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Router = class (
         let routes: Route[list] = new;
         let fallback: func(string) -> ui.Component;
@@ -271,7 +271,7 @@ export let Routing = module (
         /// @brief The component of the current route as last rendered, or nil before the first render.
         export let current_page = func -> ui.Component => page;
 
-        #Internal
+        .Internal
         export let page_for = func(at: Location) -> ui.Component {
             last key = at.route .. " " .. at.to_string();
             if (page_made && key == page_key) {
@@ -293,7 +293,7 @@ export let Routing = module (
             return page;
         };
 
-        #Internal
+        .Internal
         export let attach = func(root: ui.Root) {
             history = root.history();
             if (history != nil) {
@@ -311,7 +311,7 @@ export let Routing = module (
             });
         };
 
-        #Internal
+        .Internal
         export let detach = func {
             if (listening != nil) {
                 listening.close();

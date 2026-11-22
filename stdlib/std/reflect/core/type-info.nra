@@ -4,17 +4,17 @@ let kinds = import:Std.Reflect.Type.TypeKind;
 /// type arguments, and its qualified name. Reflection data is part of the program, so it is the same in an image
 /// without names or a source map. This record is the extension point of Std.Reflect: later packages add to it.
 /// @see [Std.Reflect.Core.TypeInfo](https://github.com/Kayyo321/neura/wiki/Stdlib-Reflect-Core-TypeInfo)
-#Since("0.3.0")
+.Since("0.3.0")
 export let TypeInfo = module (
     /// @brief A described type. As a record it compares, hashes and prints by value: `typeof(a) === typeof(b)`
     /// compares types, `==` compares identity.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let TypeInfo = record (kind: kinds.TypeKind, name: string, qualified_name: string);
 
     /// @brief The record for the parts the compiler passes for one `typeof`: the kind's ordinal, the name and
     /// the qualified name. Programs call `typeof` instead.
-    #[Pure, ThreadSafe]
-    #Since("0.3.0")
+    .[Pure, ThreadSafe]
+    .Since("0.3.0")
     export let from_parts = func(parts: [int, string, string]) -> TypeInfo =>
         new TypeInfo(kinds.of_ordinal(parts[0]), parts[1], parts[2]);
 );

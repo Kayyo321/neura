@@ -22,10 +22,10 @@ let.promote _ = import:Std.Core.Unit;
 /// narrower version range needs an extended host service that no runtime offers yet. For certificate rotation,
 /// build a new acceptor from `DynamicCertResolver.current()`; streams already accepted keep their certificate.
 /// @see [Std.Net.Tls.TlsAcceptor](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Tls-TlsAcceptor)
-#Since("0.3.0")
+.Since("0.3.0")
 export let TlsAcceptor = module (
     /// @brief A listening socket that accepts TLS streams.
-    #[Final, NoDiscard(reason: "an acceptor must be closed"), NotThreadSafe]
+    .[Final, NoDiscard(reason: "an acceptor must be closed"), NotThreadSafe]
     export let TlsAcceptor = class implements Listener<SocketAddr, TlsStream> (
         /// @brief The host's listener ID.
         last id: int64;
@@ -48,7 +48,7 @@ export let TlsAcceptor = module (
 
         /// @brief Accepts one connection and completes the TLS handshake (`neura.net.tls.accept`); fails with
         /// Unsupported in a build without TLS, and with Closed after close.
-        #NoDiscard
+        .NoDiscard
         export let accept = func -> Result<TlsStream> {
             return Result<TlsStream>.Err(bytes.closed("listener", bound.to_string())) unless open_now;
             last nanos = support.timeout_nanos(config.handshake_timeout);
@@ -84,7 +84,7 @@ export let TlsAcceptor = module (
     /// @brief Listens on `address` (port 0 asks for a free port) for TLS connections with a server
     /// configuration; a client configuration traps with "invalid argument: a TLS acceptor needs a server
     /// configuration". Works today; accepting does not.
-    #NoDiscard
+    .NoDiscard
     export let bind = func(address: SocketAddr, server: TlsConfig) -> Result<TlsAcceptor> {
         if (server.role != TlsRole.Server) {
             trap_with_message("invalid argument: a TLS acceptor needs a server configuration");

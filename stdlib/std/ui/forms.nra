@@ -7,18 +7,18 @@ let ui = import:Std.Ui;
 /// the function that parses it, and a `Form` validates its fields on submit and moves the focus to
 /// the first invalid one. Validation that a server shares is an ordinary function of a shared
 /// package; it never replaces the server's own. `Std.Ui.Controls` renders fields as real elements.
-#Since("0.3.0")
+.Since("0.3.0")
 export let Forms = module (
     /// @brief What a field shows: the draft, whether the person has left it or submitted the form
     /// (`touched`), and the parse error's message when the draft is not valid.
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let FieldState = class (
         export last draft: string;
         export last touched: bool;
         export last valid: bool;
         export last message: string;
 
-        #Internal
+        .Internal
         export let init = func(draft: string, touched: bool, valid: bool, message: string) => set;
 
         /// @brief Reports whether the field shows its error: it is touched and not valid.
@@ -62,7 +62,7 @@ export let Forms = module (
     /// @brief One input: an element `id`, a label, the draft in a `ui.State<FieldState>`, and `parse`,
     /// which turns the draft into a `T` or an error whose message the field shows. `parse` runs on
     /// every change of the draft and must not keep state.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Field = class<T> implements Validated (
         last id: string;
         last caption: string;
@@ -161,13 +161,13 @@ export let Forms = module (
 
     /// @brief What a form has done: the submits attempted, those that were valid, and the `id` of the
     /// first invalid field of the last attempt (empty when it was valid or none was made).
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let FormState = class (
         export last attempts: int32;
         export last submitted: int32;
         export last first_invalid: string;
 
-        #Internal
+        .Internal
         export let init = func(attempts: int32, submitted: int32, first_invalid: string) => set;
 
         /// @brief `FormState(` the counts and the first invalid field `)`.
@@ -191,7 +191,7 @@ export let Forms = module (
     /// @brief Fields that are submitted together. `submit` validates every field, so each shows its
     /// error, and either calls the submit action or asks the root of the form's component to focus
     /// the first invalid field after the turn's commit.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Form = class (
         let fields: Validated[list] = new;
         let owner: ui.Component = nil;

@@ -6,11 +6,11 @@ let.promote _ = import:Std.Net.Quic.CongestionController;
 /// stable published specification there is nothing to test an implementation against, so `bbr3` traps. Use
 /// `Cubic`, `NewReno` or `Ledbat`.
 /// @see [Std.Net.Quic.Bbr](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Quic-Bbr)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Bbr = module (
     /// @brief A BBRv3 controller for a path with this maximum datagram size.
     /// @stub no stable published BBRv3 specification to implement and test against
-    #NoDiscard
+    .NoDiscard
     export let bbr3 = func(max_datagram_size: int64) -> CongestionController {
         trap_with_message("unsupported: Std.Net.Quic.Bbr.bbr3 is not implemented in Neura 0.3.0 (no stable published BBRv3 specification to implement and test against)");
     };

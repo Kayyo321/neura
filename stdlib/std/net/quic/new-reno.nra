@@ -11,10 +11,10 @@ let.promote _ = import:Std.Net.Quic.CongestionController;
 /// the sender is application-limited. "No recovery period" is represented by a start time of -1, since times
 /// may start at 0.
 /// @see [Std.Net.Quic.NewReno](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Quic-NewReno)
-#Since("0.3.0")
+.Since("0.3.0")
 export let NewReno = module (
     /// @brief One connection's NewReno state.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let NewReno = class implements CongestionController (
         /// @brief The maximum datagram size in bytes.
         export last max_datagram_size: int64;
@@ -41,14 +41,14 @@ export let NewReno = module (
         export let window = func -> int64 => congestion_window;
 
         /// @brief The slow-start threshold.
-        #Pure
+        .Pure
         export let ssthresh = func -> int64 => threshold;
 
         /// @brief The bytes in flight.
         export let bytes_in_flight = func -> int64 => in_flight;
 
         /// @brief True when the sender is in a recovery period for a packet sent at `sent_nanos`.
-        #Pure
+        .Pure
         export let in_recovery = func(sent_nanos: int64) -> bool => sent_nanos <= recovery_start;
 
         /// @brief True when `bytes` more fit in the window.

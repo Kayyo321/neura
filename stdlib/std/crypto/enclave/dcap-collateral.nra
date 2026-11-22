@@ -29,7 +29,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// signing certificates, the PCK issuer certificate, and the root and PCK full CRLs. The validation instant
 /// and the Intel trust anchor come through Dcap.verify. The allowed TCB status policy defaults to UpToDate.
 /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
-#Since("0.3.0")
+.Since("0.3.0")
 export let DcapCollateral = module (
     const IntelSgxExtension = "1.2.840.113741.1.13.1";
     const AuthorityKeyIdentifier = "2.5.29.35";
@@ -37,7 +37,7 @@ export let DcapCollateral = module (
 
     /// @brief Intel platform, QE, or TDX module TCB statuses the caller can explicitly allow. Revoked always fails.
     /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let TcbStatus = enum (
         UpToDate, SwHardeningNeeded, ConfigurationNeeded, ConfigurationAndSwHardeningNeeded,
         OutOfDate, OutOfDateConfigurationNeeded
@@ -71,18 +71,18 @@ export let DcapCollateral = module (
 
     /// @brief A signed Intel collateral body and its directly Intel-rooted signing certificate.
     /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let SignedJson = class (
         /// @brief Exact UTF-8 JSON signed by Intel, without its outer response envelope.
         /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export last body: string;
         last raw_signature: uint8[list];
         last signer: uint8[list];
 
         /// @brief Copies the 64-byte signature and signing certificate DER alongside the signed JSON text.
         /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let init = func(payload: string, signature_bytes, signer_certificate: uint8[list]) {
             body = payload;
             raw_signature = words.copy(signature_bytes);
@@ -91,17 +91,17 @@ export let DcapCollateral = module (
 
         /// @brief A copy of the fixed-width P-256 signature.
         /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
-        #[NoDiscard, Since("0.3.0")]
+        .[NoDiscard, Since("0.3.0")]
         export let signature_bytes = func -> uint8[list] => words.copy(raw_signature);
 
         /// @brief A copy of the signing certificate.
         /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
-        #[NoDiscard, Since("0.3.0")]
+        .[NoDiscard, Since("0.3.0")]
         export let certificate_der = func -> uint8[list] => words.copy(signer);
 
         /// @brief Whether the signed content, signature and signing certificate are equal.
         /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let.override equals = func(other: class) -> bool {
             if (other is not right: SignedJson) {
                 return false;
@@ -112,7 +112,7 @@ export let DcapCollateral = module (
 
         /// @brief A hash of the signed body and supporting bytes.
         /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let.override hash_code = func -> uint32 {
             let hash = body.hash_code();
             for (let byte in raw_signature) {
@@ -126,7 +126,7 @@ export let DcapCollateral = module (
 
         /// @brief The type without the signed body.
         /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let.override to_string = func -> string => "DcapCollateral.SignedJson";
     );
 
@@ -808,14 +808,14 @@ export let DcapCollateral = module (
     /// @brief Validates SGX v3 collateral for Dcap.verify. This profile supports
     /// standard SGX PCKs, TCB Info v3 of type zero, QE Identity v2 and full root and issuer CRLs.
     /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let SgxCollateralVerifier = class implements dcap.CollateralVerifier (
         last collateral: Collateral;
 
         /// @brief Copies the exact collateral bytes. The default policy accepts only UpToDate. An explicit
         /// allowlist applies to each selected TCB status. Revocation always fails.
         /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let init = func(tcb_info: SignedJson, qe_identity: SignedJson, issuer_der, root_list, pck_list: uint8[list]) {
             collateral = new Collateral(tcb_info, qe_identity, issuer_der, root_list, pck_list, new([TcbStatus.UpToDate]));
         } or func(tcb_info: SignedJson, qe_identity: SignedJson, issuer_der, root_list, pck_list: uint8[list],
@@ -825,13 +825,13 @@ export let DcapCollateral = module (
 
         /// @brief Validates collateral for the quote and PCK previously authenticated by Dcap.verify.
         /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
-        #[NoDiscard, Since("0.3.0")]
+        .[NoDiscard, Since("0.3.0")]
         export let verify = func(quote: dcap.Quote, pck_der: uint8[list], trusted_root_der: uint8[list],
             at: instant.Instant) -> Result<Unit> => collateral.verify(quote, pck_der, trusted_root_der, at, dcap.Platform.Sgx);
 
         /// @brief The verifier type without the collateral bytes.
         /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let.override to_string = func -> string => "DcapCollateral.SgxCollateralVerifier";
     );
 
@@ -839,14 +839,14 @@ export let DcapCollateral = module (
     /// scalable PCKs, TDX TCB Info v3 of type zero, TD_QE Identity v2 and full root and issuer CRLs.
     /// It checks the selected SEAM module signer, attributes and security version.
     /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let TdxCollateralVerifier = class implements dcap.CollateralVerifier (
         last collateral: Collateral;
 
         /// @brief Copies the exact collateral bytes. The default policy accepts only UpToDate. An explicit
         /// allowlist applies to each selected TCB status. Revocation always fails.
         /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let init = func(tcb_info: SignedJson, qe_identity: SignedJson, issuer_der, root_list, pck_list: uint8[list]) {
             collateral = new Collateral(tcb_info, qe_identity, issuer_der, root_list, pck_list, new([TcbStatus.UpToDate]));
         } or func(tcb_info: SignedJson, qe_identity: SignedJson, issuer_der, root_list, pck_list: uint8[list],
@@ -856,13 +856,13 @@ export let DcapCollateral = module (
 
         /// @brief Validates collateral for the quote and PCK previously authenticated by Dcap.verify.
         /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
-        #[NoDiscard, Since("0.3.0")]
+        .[NoDiscard, Since("0.3.0")]
         export let verify = func(quote: dcap.Quote, pck_der: uint8[list], trusted_root_der: uint8[list],
             at: instant.Instant) -> Result<Unit> => collateral.verify(quote, pck_der, trusted_root_der, at, dcap.Platform.Tdx);
 
         /// @brief The verifier type without the collateral bytes.
         /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let.override to_string = func -> string => "DcapCollateral.TdxCollateralVerifier";
     );
 );

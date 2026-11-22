@@ -6,10 +6,10 @@
 /// literal child before the parameter child and backtracking, so a literal segment beats a parameter at every
 /// depth and matching is exact on segment count.
 /// @see [Std.Net.Http](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http)
-#Since("0.3.0")
+.Since("0.3.0")
 export let RouteTree = module (
     /// @brief One node: the routes ending here and the children below.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Node = class (
         /// @brief The segment texts of the literal children.
         last literal_keys: string[list] = new;

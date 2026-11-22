@@ -9,7 +9,7 @@ let take = func(point: class (
 
 let call = func() -> int32 {
     let tagged: class (
-        #Unit("px")
+        .Unit("px")
         export let x: int32 = 1;
     ) = new;
     return take(tagged);

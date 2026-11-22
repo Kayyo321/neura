@@ -16,13 +16,13 @@ let.promote _ = import:Std.Core.Result;
 /// abstract name (Linux autobind) is not modelled. A `UnixAddr` is an immutable class, so each value is one
 /// heap object; this runtime does not provide zero-allocation value types.
 /// @see [Std.Net.Core.UnixAddr](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Core-UnixAddr)
-#Since("0.3.0")
+.Since("0.3.0")
 export let UnixAddr = module (
     /// @brief The most bytes a path or an abstract name may hold (108-byte `sun_path` less one).
     const MaxNameBytes: int = 107;
 
     /// @brief A Unix-domain socket address.
-    #[Final, NoDiscard, Immutable, ThreadSafe, Since("0.3.0")]
+    .[Final, NoDiscard, Immutable, ThreadSafe, Since("0.3.0")]
     export let UnixAddr = class implements NetAddress (
         /// @brief The filesystem path, or the abstract name without its leading NUL.
         export last path: string;
@@ -41,7 +41,7 @@ export let UnixAddr = module (
         };
 
         /// @brief Always `AddressFamily.Unix`.
-        #Pure
+        .Pure
         export let family = func -> AddressFamily => AddressFamily.Unix;
 
         /// @brief Tests whether another object is a `UnixAddr` of the same kind and name.
@@ -53,30 +53,30 @@ export let UnixAddr = module (
         };
 
         /// @brief Combines the kind with the name's hash.
-        #Pure
+        .Pure
         export let.override hash_code = func -> uint32 =>
             hashing.combine(hashing.of_bool(is_abstract), path.hash_code());
 
         /// @brief The path, or `@` followed by the abstract name.
-        #Pure
+        .Pure
         export let.override to_string = func -> string => is_abstract ? "@" .. path : path;
     );
 
     /// @brief The address of a filesystem path; traps when the path is empty, longer than 107 bytes, or
     /// contains NUL.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let of_path = func(path: string) -> UnixAddr => new UnixAddr(path, false);
 
     /// @brief The address of a Linux abstract-namespace name (given without the leading NUL); traps when the
     /// name is empty or longer than 107 bytes.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let abstract_name = func(name: string) -> UnixAddr => new UnixAddr(name, true);
 
     /// @brief Parses `@name` as an abstract name and any other text as a path.
     ///
     /// Errors: Empty for "" or a lone `@`; OutOfRange at offset 107 (108 for `@name`) when the name is too
     /// long; InvalidCharacter at a NUL byte in a path.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let parse = func(text: string) -> Result<UnixAddr> {
         last abstract_namespace = text.byte_length > 0 && text.byte_at(0) == 64;
         last start = abstract_namespace ? 1 : 0;

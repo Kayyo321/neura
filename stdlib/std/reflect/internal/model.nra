@@ -10,10 +10,10 @@ let kinds = import:Std.Reflect.Type.TypeKind;
 /// @brief The descriptors of Std.Reflect and the dynamic value, in one module because they refer to each other
 /// (docs/design/Reflect030.md). The public modules re-export these classes under the names of the
 /// specification.
-#Since("0.3.0")
+.Since("0.3.0")
 export let Model = module (
     /// @brief A tag written on a declaration, with its arguments as written (`name` and value text, in order).
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let Attribute = class (
         export last name: string;
         export last arguments: [string, string][list];
@@ -56,7 +56,7 @@ export let Model = module (
     );
 
     /// @brief A parameter of a method or constructor, or a payload of an enum variant.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let ParamInfo = class (
         export last index: int;
         export last name: string;
@@ -87,7 +87,7 @@ export let Model = module (
     );
 
     /// @brief A field of a class or record: its position (base fields first), name, declared type and flags.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let FieldInfo = class (
         export last owner: int;
         export last index: int;
@@ -142,7 +142,7 @@ export let Model = module (
     );
 
     /// @brief A variant of an enum, with its payloads (named or numbered from 0).
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let VariantInfo = class (
         export last owner: int;
         export last index: int;
@@ -181,7 +181,7 @@ export let Model = module (
     );
 
     /// @brief A constructor of a class or record, by position among its `init` functions.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let ConstructorInfo = class (
         export last owner: int;
         export last index: int;
@@ -207,7 +207,7 @@ export let Model = module (
     );
 
     /// @brief An instance method: its name, parameters, result type and whether `invoke` can call it.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let MethodInfo = class (
         export last owner: int;
         export last index: int;
@@ -247,7 +247,7 @@ export let Model = module (
     );
 
     /// @brief The full descriptor of one type of the program's reflection universe.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let TypeDescriptor = class (
         /// @brief The type's ordinal in this program: 0 is nil, 1 to 14 the scalars and `string`.
         export last ordinal: int;
@@ -418,7 +418,7 @@ export let Model = module (
 
     /// @brief A value of any type of the reflection universe together with its type (docs/design/Reflect030.md,
     /// Dynamic values). A value an `any` cannot hold is kept in a compiler box that the program never sees.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let Variant = class (
         /// @brief The value as an `any` (a box for arrays, lists, tuples, enums and function values).
         export last raw: any;
@@ -531,7 +531,7 @@ export let Model = module (
     );
 
     /// @brief One call of a proxy's method: the interface, the method, and the arguments as Variants.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let MethodCallContext = class (
         export last interface_type: TypeDescriptor;
         export last method: MethodInfo;
@@ -554,13 +554,13 @@ export let Model = module (
 
     /// @brief What a proxy calls for each method: the result is unpacked to the method's result type, and a
     /// value of another type traps. A `void` method ignores the result.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let InvocationHandler = interface (
         export let invoke = func(context: MethodCallContext) -> Variant;
     );
 
     /// @brief The entry of every proxy method (docs/design/Reflect030.md, Proxies); the compiler calls it.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let proxy_dispatch = func(handler: class, type: int, method: int, arguments: any[list]) -> any {
         last values: Variant[list] = new;
         for (let item in arguments) {
@@ -572,36 +572,36 @@ export let Model = module (
     };
 
     /// @brief The value of `value`'s type.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let variant_of = func<T>(value: T) -> Variant => new Variant(intrinsics.pack(value), intrinsics.ordinal(value));
 
     /// @brief A Variant of a value already held in an any.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let wrap = func(value: any) -> Variant => new Variant(value, intrinsics.ordinal(value));
 
     /// @brief A new value of the type at `ordinal`: constructor `selector` of a class or record, variant
     /// `selector` of an enum, or an array, list or tuple of the arguments (selector 0).
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let construct = func(ordinal: int, selector: int, arguments: Variant[list]) -> Variant =>
         wrap(intrinsics.construct(ordinal, selector, raws(arguments)));
 
     /// @brief The number of types in the program's reflection universe.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let count = func -> int {
         load();
         return table.length;
     };
 
     /// @brief The descriptor of the type at `ordinal`; an ordinal outside the universe traps.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let descriptor_of = func(ordinal: int) -> TypeDescriptor => descriptor(ordinal);
 
     /// @brief The descriptor of `T`.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let descriptor_for = func<T>() -> TypeDescriptor => descriptor(intrinsics.ordinal_of<T>());
 
     /// @brief The first attribute of `items` named `tag`, or nil.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let find_attribute = func(items: Attribute[list], tag: string) -> Attribute {
         for (let item in items) {
             if (item.name == tag) {

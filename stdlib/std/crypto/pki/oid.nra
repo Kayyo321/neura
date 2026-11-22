@@ -7,14 +7,14 @@ let builders = import:Std.Core.StringBuilder;
 /// An `Oid` holds the DER content octets of an OBJECT IDENTIFIER and its dotted-decimal text. Arcs of any size
 /// are kept exactly, including the 128-bit arcs under 2.25. Two OIDs are equal when their encodings are.
 /// @see [Std.Crypto.Pki.Oid](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Oid)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Oid = module (
     /// @brief The longest OID content this library accepts, in bytes.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export const MaxContentLength: int = 1024;
 
     /// @brief An object identifier: an immutable value compared by its DER content octets.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Oid = class (
         /// @brief The DER content octets (no tag or length). Do not change the list.
         export last content: uint8[list];
@@ -49,7 +49,7 @@ export let Oid = module (
     /// @brief Validates DER content octets and builds the OID. `offset` is the position of the content in the
     /// enclosing input, used in error offsets. Empty content, a subidentifier with a leading 0x80 byte (not
     /// minimal), a truncated last subidentifier, or content over `MaxContentLength` bytes is a `Parse` error.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let from_content = func(bytes: uint8[list], offset: int) -> Result<Oid> {
         if (bytes.length == 0) {
             return fail(offset, "empty OBJECT IDENTIFIER");
@@ -89,7 +89,7 @@ export let Oid = module (
 
     /// @brief Parses dotted-decimal text: at least two arcs, the first 0, 1 or 2, the second at most 39 under
     /// 0 and 1, decimal arcs without leading zeros. Anything else is a `Parse` error at the offending offset.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse = func(text: string) -> Result<Oid> {
         let arcs: string[list] = new;
         let starts: int[list] = new;
@@ -141,7 +141,7 @@ export let Oid = module (
 
     /// @brief The OID with the dotted text; malformed text traps with "invalid argument: OID <text>", because a
     /// literal OID in a program is not data.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let of = func(text: string) -> Oid {
         match (parse(text)) {
             Result.Ok(value) => {

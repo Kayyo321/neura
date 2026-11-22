@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check compiler, artifact, source-doc and diagnostic parity of tag sigils."""
+"""Check compiler, artifact, source-doc, diagnostic and formatter parity of tag sigils."""
 import json
 import os
 from pathlib import Path
@@ -56,6 +56,11 @@ class DotTagTests(unittest.TestCase):
         self.assertEqual(metrics["documentation"]["text"], "Reads the elapsed time with calibration.")
         self.assertEqual([tag["name"] for tag in metrics["tags"]], ["Since", "Stable", "Example"])
         self.assertNotIn("internal_count", [symbol["name"] for symbol in symbols])
+
+    def test_tag_fixtures_are_formatted(self):
+        self.require_success("fmt", "--check", *(
+            str(FIXTURES / f"{spelling}-tags.nra") for spelling in ("hash", "dot", "mixed")
+        ))
 
     def diagnostic(self, source, code, line, column, length):
         self.source.write_bytes(source.encode("utf-8"))

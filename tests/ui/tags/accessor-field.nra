@@ -3,11 +3,11 @@
 // the class use the field without a warning. Tags also go before `last`
 // fields and `last` locals.
 let Ticket = class (
-    #Deprecated(as_of: "0.2.0", reason: "use label")
+    .Deprecated(as_of: "0.2.0", reason: "use label")
     export let code = "X";
         | get: code;
 
-    #Note("set once by the constructor")
+    .Note("set once by the constructor")
     export last label: string;
 
     export let init = func(text: string) -> void {
@@ -20,7 +20,7 @@ let Ticket = class (
 );
 
 let read = func() -> string {
-    #Unit("characters")
+    .Unit("characters")
     last width: int32 = 3;
     let ticket = new Ticket("A");
     return ticket.code + ticket.describe() + width.to_string();

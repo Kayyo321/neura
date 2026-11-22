@@ -17,10 +17,10 @@ let writer = import:Std.Crypto.Pki.DerWriter;
 /// StringPrep this library applies); other values compare by their encodings; the pairs of a multi-valued RDN
 /// compare without regard to order, matching each occurrence once. `to_string` is RFC 4514 text, most specific RDN first.
 /// @see [Std.Crypto.Pki.Name](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Name)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Name = module (
     /// @brief One attribute type and value.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let AttributeTypeAndValue = class (
         /// @brief The attribute type, such as 2.5.4.3 (commonName).
         export last type: Oid;
@@ -72,7 +72,7 @@ export let Name = module (
     );
 
     /// @brief A distinguished name: RDNs from the most general (such as C) to the most specific (such as CN).
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Name = class (
         /// @brief The RDNs in encoding order; each holds one or more pairs.
         export last rdns: AttributeTypeAndValue[list][list];
@@ -245,7 +245,7 @@ export let Name = module (
 
     /// @brief Reads a Name (an RDNSequence) from its element. An empty RDN, a non-SET RDN or a pair that is not
     /// SEQUENCE { OBJECT IDENTIFIER, value } is a `Parse` error; a string value must be valid for its type.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse = func(element: der.Element) -> Result<Name> {
         if (not element.is_universal(der.TagSequence)) {
             return fail<Name>(element.offset, "Name must be a SEQUENCE");
@@ -279,14 +279,14 @@ export let Name = module (
     };
 
     /// @brief Parses the DER encoding of a Name.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_der = func(bytes: uint8[list]) -> Result<Name> => parse(der.parse(bytes)?);
 
     /// @brief A name of single-valued RDNs in the order given, such as `of(["C", "O", "CN"], ["US", "Example",
     /// "host"])` with attribute types given by short name (C, O, OU, L, ST, CN, DC, UID, serialNumber,
     /// emailAddress) or dotted OID. Country and serialNumber are PrintableString, emailAddress and DC are
     /// IA5String, the others UTF8String. An unknown short name traps.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let of = func(types: string[], values: string[]) -> Name {
         if (types.length != values.length) {
             trap_with_message("invalid argument: Name types and values differ in length");

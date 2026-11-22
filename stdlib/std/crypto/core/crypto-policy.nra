@@ -9,19 +9,19 @@ let.promote _ = import:Std.Crypto.Algorithm;
 /// Std.Concurrent.AtomicInt64, so primitives can be created in spawned tasks; set it at startup, because a
 /// change while tasks run takes effect for each task at its next creation of a primitive.
 /// @see [Std.Crypto.Core.CryptoPolicy](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Core-CryptoPolicy)
-#Since("0.3.0")
+.Since("0.3.0")
 export let CryptoPolicy = module (
     /// @brief The policies. `Modern` (the default) allows everything Std.Crypto implements and denies MD5,
     /// SHA-1 and RSA-1024. `Fips140_3` allows only FIPS-approved algorithms. `Cnsa2_0` allows only the
     /// CNSA 2.0 suite (AES-256, SHA-384 and SHA-512, ML-KEM-1024 and ML-DSA-87) and the constructions over it.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let Policy = enum (Modern, Fips140_3, Cnsa2_0);
 
     /// @brief The current policy's code: 0 Modern, 1 Fips140_3, 2 Cnsa2_0.
     last current: atomics.AtomicInt64 = atomics.create(0);
 
     /// @brief Replaces the process-wide policy.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let set_policy = func(policy: Policy) {
         current.store(match (policy) {
             Policy.Modern => 0,
@@ -31,7 +31,7 @@ export let CryptoPolicy = module (
     };
 
     /// @brief The process-wide policy.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let policy = func -> Policy {
         last code = current.load();
         if (code == 1) {
@@ -41,7 +41,7 @@ export let CryptoPolicy = module (
     };
 
     /// @brief Whether the policy allows the algorithm.
-    #[NoDiscard, Pure, Since("0.3.0")]
+    .[NoDiscard, Pure, Since("0.3.0")]
     export let allowed_by = func(policy: Policy, algorithm: Algorithm) -> bool => match (policy) {
         Policy.Modern => modern(algorithm),
         Policy.Fips140_3 => fips(algorithm),
@@ -49,12 +49,12 @@ export let CryptoPolicy = module (
     };
 
     /// @brief Whether the current policy allows the algorithm.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let allows = func(algorithm: Algorithm) -> bool => allowed_by(policy(), algorithm);
 
     /// @brief Traps with "denied: <Algorithm> is not allowed under the <Policy> policy" unless the current
     /// policy allows the algorithm.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let require = func(algorithm: Algorithm) {
         last active = policy();
         if (not allowed_by(active, algorithm)) {

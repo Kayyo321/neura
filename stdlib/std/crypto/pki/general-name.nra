@@ -10,10 +10,10 @@ let writer = import:Std.Crypto.Pki.DerWriter;
 
 /// @brief The GeneralName CHOICE of RFC 5280, section 4.2.1.6 (Stdlib.md section 21.10).
 /// @see [Std.Crypto.Pki.GeneralName](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-GeneralName)
-#Since("0.3.0")
+.Since("0.3.0")
 export let GeneralName = module (
     /// @brief The alternatives, in the order of their context tags [0] to [8].
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let GeneralNameKind = enum (
         OtherName, Rfc822Name, DnsName, X400Address, DirectoryName, EdiPartyName, Uri,
         IpAddress, RegisteredId
@@ -22,7 +22,7 @@ export let GeneralName = module (
     /// @brief One general name. `text` holds rfc822Name, dNSName and uniformResourceIdentifier (IA5String);
     /// `bytes` holds iPAddress (4 or 16 bytes, or 8 or 32 with a mask in name constraints) and the content of
     /// the other alternatives; `directory` holds directoryName; `oid` holds registeredID and otherName's type.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let GeneralName = class (
         export last kind: GeneralNameKind;
         export last text: string;
@@ -115,7 +115,7 @@ export let GeneralName = module (
     };
 
     /// @brief Dotted IPv4, RFC 5952 IPv6 text, or either followed by "/" and the mask for 8 or 32 bytes.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let ip_text = func(bytes: uint8[list]) -> string {
         if (bytes.length == 4 || bytes.length == 16) {
             return address_text(bytes, 0, bytes.length);
@@ -188,7 +188,7 @@ export let GeneralName = module (
 
     /// @brief Reads one GeneralName. The IA5String alternatives must hold only ASCII; an iPAddress must have
     /// 4, 8, 16 or 32 bytes; otherName and directoryName must be well formed.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse = func(e: der.Element) -> Result<GeneralName> {
         if (e.tag_class != der.ContextSpecific || e.tag_number > 8) {
             return fail<GeneralName>(e.offset, "expected a GeneralName");
@@ -247,7 +247,7 @@ export let GeneralName = module (
     };
 
     /// @brief Reads GeneralNames: a non-empty SEQUENCE of GeneralName.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_names = func(e: der.Element) -> Result<GeneralName[list]> {
         if (not e.is_universal(der.TagSequence)) {
             return fail<GeneralName[list]>(e.offset, "GeneralNames must be a SEQUENCE");
@@ -282,23 +282,23 @@ export let GeneralName = module (
     };
 
     /// @brief dNSName; a non-ASCII name traps.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let dns = func(name: string) -> GeneralName => built(writer.implicit(2, false, ascii(name)));
 
     /// @brief rfc822Name; a non-ASCII address traps.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let email = func(address: string) -> GeneralName => built(writer.implicit(1, false, ascii(address)));
 
     /// @brief uniformResourceIdentifier; a non-ASCII URI traps.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let uri = func(text: string) -> GeneralName => built(writer.implicit(6, false, ascii(text)));
 
     /// @brief iPAddress of 4 or 16 bytes (8 or 32 with a mask); another length traps.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let ip = func(address: uint8[list]) -> GeneralName => built(writer.implicit(7, false, address));
 
     /// @brief directoryName.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let directory_name = func(name: names.Name) -> GeneralName =>
         built(writer.tlv(2, true, 4, name.der_bytes));
 

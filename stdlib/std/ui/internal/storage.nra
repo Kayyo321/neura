@@ -1,7 +1,7 @@
 /// @brief Mutable link storage owned by a view builder.
-#Internal
+.Internal
 export let Storage = module (
-    #NotThreadSafe
+    .NotThreadSafe
     export let Slot = class (
         export last index: uint32;
         /// The slot evaluated before this one; the builder sets it when it links the slot.
@@ -14,7 +14,7 @@ export let Storage = module (
     );
 
     /// @brief Preserves a slot's ordinary Neura type, including a callable's signature.
-    #NotThreadSafe
+    .NotThreadSafe
     export let Payload = class<T>:Slot (
         export last value: T;
 

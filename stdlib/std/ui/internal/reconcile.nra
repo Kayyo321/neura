@@ -13,14 +13,14 @@ let.promote string_maps = import:Std.Collections.StringMap;
 /// one once the host has applied them. Operations are the decoded operations of `hosts/web/README.md`, in the
 /// order a commit applies them: removals in the old document order; creations and moves in the new document
 /// order; text, attribute and custom-property changes in document order; handler changes; property writes.
-#Internal
-#Since("0.3.0")
+.Internal
+.Since("0.3.0")
 export let Reconcile = module (
     /// @brief The kinds of a decoded operation; their codes in the commit encoding are 1 to 9 in this order.
     export let OpKind = enum (Remove, Element, Text, Move, SetText, Attribute, Variable, Handler, Property);
 
     /// @brief One decoded operation. Fields an operation does not use hold their defaults.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Operation = class (
         export last kind: OpKind;
         export last id: uint32;
@@ -112,7 +112,7 @@ export let Reconcile = module (
     );
 
     // A template descriptor, parsed once per root.
-    #NotThreadSafe
+    .NotThreadSafe
     let TNode = class (
         // 0 text, 1 element, 2 slot
         export let kind: int = 0;
@@ -128,7 +128,7 @@ export let Reconcile = module (
         export let.override to_string = func -> string => "TNode(" .. name .. ")";
     );
 
-    #NotThreadSafe
+    .NotThreadSafe
     let TSlot = class (
         export let kind: string = "";
         export let name: string = "";
@@ -140,7 +140,7 @@ export let Reconcile = module (
         export let.override to_string = func -> string => "TSlot(" .. kind .. " " .. name .. ")";
     );
 
-    #NotThreadSafe
+    .NotThreadSafe
     let TFragment = class (
         export let nodes: TNode[list] = new();
         export let slots: TSlot[list] = new();
@@ -149,7 +149,7 @@ export let Reconcile = module (
         export let.override to_string = func -> string => "TFragment(" .. nodes.length.to_string() .. " nodes)";
     );
 
-    #NotThreadSafe
+    .NotThreadSafe
     let Template = class (
         export last id: int;
         export let fragments: TFragment[list] = new();
@@ -310,7 +310,7 @@ export let Reconcile = module (
         return result;
     };
 
-    #NotThreadSafe
+    .NotThreadSafe
     let Listener = class (
         export last event: string;
         export last prevent_default: bool;
@@ -327,7 +327,7 @@ export let Reconcile = module (
         export let.override to_string = func -> string => "Listener(" .. event .. ")";
     );
 
-    #NotThreadSafe
+    .NotThreadSafe
     let Property = class (
         export last name: string;
         export last boolean: bool;
@@ -341,7 +341,7 @@ export let Reconcile = module (
     );
 
     // One host node of an expanded view.
-    #NotThreadSafe
+    .NotThreadSafe
     let VNode = class (
         export last element: bool;
         export last name: string;
@@ -375,7 +375,7 @@ export let Reconcile = module (
     // A component's part of the mounted tree: its top-level nodes, under the key path they were expanded at, the
     // views claimed and the nodes counted while expanding them, and the memos of the components inside it. It is
     // valid while `pass` is the pass of the mounted tree.
-    #NotThreadSafe
+    .NotThreadSafe
     let Memo = class (
         export last owner: class;
         export last key: string;
@@ -403,17 +403,17 @@ export let Reconcile = module (
     );
 
     /// @brief The result of `prepare`: a refusal, or the operations of a valid commit.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Plan = class (
         /// @brief Why the view was refused, or nil.
         export let diagnostic: ui.Diagnostic = nil;
         export let operations: Operation[list] = new();
-        #Internal
+        .Internal
         export let tree: VNode[list] = new();
-        #Internal
+        .Internal
         export let pass: uint64 = 0;
         // Set when a reused node could not keep its place, so the plan must be computed without reuse.
-        #Internal
+        .Internal
         export let reuse_failed: bool = false;
 
         /// @brief The operations in the commit encoding, version 1 (docs/runtime/Providers.md).
@@ -425,7 +425,7 @@ export let Reconcile = module (
     );
 
     // Thrown out of an expansion when the view is refused.
-    #NotThreadSafe
+    .NotThreadSafe
     let Refusal = class (
         export last diagnostic: ui.Diagnostic;
 
@@ -440,7 +440,7 @@ export let Reconcile = module (
     let MaxValueBytes: int = 1048576;
 
     // Expansion state for one prepare.
-    #NotThreadSafe
+    .NotThreadSafe
     let Expansion = class (
         export let nodes: int = 0;
         export let refusal: ui.Diagnostic = nil;
@@ -493,7 +493,7 @@ export let Reconcile = module (
         return out;
     };
 
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Reconciler = class (
         let templates: StringMap<Template> = string_maps.create<Template>();
         let mounted: VNode[list] = new();

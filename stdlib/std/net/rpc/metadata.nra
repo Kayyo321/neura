@@ -16,7 +16,7 @@ let.promote _ = import:Std.Core.Unit;
 /// headers whose ASCII value is outside the range are dropped rather than failing the call (the protocol leaves
 /// the behavior open and forbids an error).
 /// @see [Std.Net.Rpc.Metadata](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Rpc-Metadata)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Metadata = module (
     /// @brief The suffix of a binary header name.
     export const BinarySuffix: string = "-bin";
@@ -24,7 +24,7 @@ export let Metadata = module (
     export const FieldOverhead: int = 32;
 
     /// @brief Whether `name` is a valid header name: 1 or more of `0-9 a-z _ - .`.
-    #NoDiscard
+    .NoDiscard
     export let is_valid_name = func(name: string) -> bool {
         if (name.byte_length == 0) {
             return false;
@@ -37,7 +37,7 @@ export let Metadata = module (
     };
 
     /// @brief Whether `value` is a valid ASCII value: 1 or more bytes in 0x20 to 0x7E.
-    #NoDiscard
+    .NoDiscard
     export let is_valid_ascii_value = func(value: string) -> bool {
         if (value.byte_length == 0) {
             return false;
@@ -52,12 +52,12 @@ export let Metadata = module (
     };
 
     /// @brief Whether `name` names a binary header.
-    #NoDiscard
+    .NoDiscard
     export let is_binary_name = func(name: string) -> bool => strings.ends_with(name, BinarySuffix);
 
     /// @brief Decodes a binary header value: splits on `,`, then decodes each part as padded or unpadded
     /// base64 and joins the bytes of the parts in order.
-    #NoDiscard
+    .NoDiscard
     export let decode_binary = func(value: string) -> Result<uint8[list][list]> {
         last parts: uint8[list][list] = new;
         for (let part in strings.split(value, ",")) {
@@ -72,7 +72,7 @@ export let Metadata = module (
     };
 
     /// @brief Ordered gRPC metadata entries as they travel: names lower-case, binary values base64.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Metadata = class (
         /// @brief The names, lower-case.
         let names: string[list] = new;
@@ -84,12 +84,12 @@ export let Metadata = module (
         };
 
         /// @brief The number of entries.
-        #NoDiscard
+        .NoDiscard
         export let size = func -> int => names.length;
 
         /// @brief Adds an ASCII entry. The name is lower-cased first. Fails with a Parse error for an invalid
         /// name, a `-bin` name (use `add_binary`), or an invalid value.
-        #NoDiscard
+        .NoDiscard
         export let add = func(name: string, value: string) -> Result<Unit> {
             last lower = strings.to_ascii_lower(name);
             return invalid("invalid metadata name '" .. name .. "'") unless is_valid_name(lower);
@@ -103,7 +103,7 @@ export let Metadata = module (
         };
 
         /// @brief Adds a binary entry, stored as unpadded base64. The name must end in `-bin`.
-        #NoDiscard
+        .NoDiscard
         export let add_binary = func(name: string, value: uint8[list]) -> Result<Unit> {
             last lower = strings.to_ascii_lower(name);
             if (not is_valid_name(lower) || not is_binary_name(lower)) {
@@ -115,7 +115,7 @@ export let Metadata = module (
         };
 
         /// @brief The first value of `name` as sent (base64 for a binary name).
-        #NoDiscard
+        .NoDiscard
         export let get = func(name: string) -> Optional<string> {
             last lower = strings.to_ascii_lower(name);
             for (let i = 0; i < names.length; i++) {
@@ -127,7 +127,7 @@ export let Metadata = module (
         };
 
         /// @brief Every value of `name` in order.
-        #NoDiscard
+        .NoDiscard
         export let get_all = func(name: string) -> string[list] {
             last lower = strings.to_ascii_lower(name);
             last out: string[list] = new;
@@ -140,7 +140,7 @@ export let Metadata = module (
         };
 
         /// @brief Every decoded value of the binary header `name`, after splitting joined values on `,`.
-        #NoDiscard
+        .NoDiscard
         export let get_binary = func(name: string) -> Result<uint8[list][list]> {
             last out: uint8[list][list] = new;
             for (let value in get_all(name)) {
@@ -152,7 +152,7 @@ export let Metadata = module (
         };
 
         /// @brief Whether an entry named `name` exists.
-        #NoDiscard
+        .NoDiscard
         export let contains = func(name: string) -> bool => is_some<string>(get(name));
 
         /// @brief Removes every entry named `name`; returns how many were removed.
@@ -189,7 +189,7 @@ export let Metadata = module (
         };
 
         /// @brief The entries as `[name, value]` pairs in order (a copy).
-        #NoDiscard
+        .NoDiscard
         export let entries = func -> [string, string][list] {
             last out: [string, string][list] = new;
             for (let i = 0; i < names.length; i++) {
@@ -199,7 +199,7 @@ export let Metadata = module (
         };
 
         /// @brief The header list size: for each entry its name and value lengths plus 32.
-        #NoDiscard
+        .NoDiscard
         export let header_list_size = func -> int {
             let total = 0;
             for (let i = 0; i < names.length; i++) {
@@ -245,13 +245,13 @@ export let Metadata = module (
     );
 
     /// @brief New empty metadata.
-    #NoDiscard
+    .NoDiscard
     export let empty = func -> Metadata => new;
 
     /// @brief Metadata from received header pairs. Names are lower-cased; pseudo-headers (`:`), invalid names
     /// and ASCII entries with invalid values are dropped; binary values are kept as received and decoded by
     /// `get_binary`.
-    #NoDiscard
+    .NoDiscard
     export let from_entries = func(pairs: [string, string][list]) -> Metadata {
         last out: Metadata = new;
         for (let pair in pairs) {

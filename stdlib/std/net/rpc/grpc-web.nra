@@ -16,7 +16,7 @@ let strings = import:Std.Text.Strings;
 /// the byte stream; a sender may flush with padding at any point, so the decoder works in 4-character groups and
 /// accepts padding inside the stream.
 /// @see [Std.Net.Rpc.GrpcWeb](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Rpc-GrpcWeb)
-#Since("0.3.0")
+.Since("0.3.0")
 export let GrpcWeb = module (
     /// @brief The binary content type prefix (`+proto`, `+json` follow).
     export const ContentType: string = "application/grpc-web";
@@ -26,7 +26,7 @@ export let GrpcWeb = module (
     export const TrailerFrameFlags: int = 128;
 
     /// @brief The payload of a trailer frame: `name: value\r\n` for each entry, in order.
-    #NoDiscard
+    .NoDiscard
     export let trailer_block = func(trailers: metadata.Metadata) -> uint8[list] {
         last out: uint8[list] = new;
         for (let pair in trailers.entries()) {
@@ -39,7 +39,7 @@ export let GrpcWeb = module (
     };
 
     /// @brief The length-prefixed trailer frame (flags 0x80) of `trailers`.
-    #NoDiscard
+    .NoDiscard
     export let encode_trailers = func(trailers: metadata.Metadata) -> uint8[list] {
         last out: uint8[list] = new;
         framing.append_frame(out, TrailerFrameFlags, trailer_block(trailers));
@@ -49,7 +49,7 @@ export let GrpcWeb = module (
     /// @brief Parses a trailer block: lines ending in CRLF (a final line without one is accepted), each
     /// `name: value` with optional whitespace around the value. A line without `:` or with an empty name fails
     /// with a Parse error. Names are lower-cased.
-    #NoDiscard
+    .NoDiscard
     export let parse_trailer_block = func(block: uint8[list]) -> Result<metadata.Metadata> {
         last decoded = string.from_utf8(block);
         if (not decoded[0]) {
@@ -73,7 +73,7 @@ export let GrpcWeb = module (
     };
 
     /// @brief A decoded gRPC-Web response body: its messages in order and its trailers.
-    #Final
+    .Final
     export let WebBody = class (
         /// @brief The message frames before the trailers.
         export last messages: framing.Frame[list];
@@ -97,7 +97,7 @@ export let GrpcWeb = module (
     /// @brief Splits a complete gRPC-Web response body into messages and trailers. Fails with INTERNAL when a
     /// frame follows the trailer frame, when the trailer frame is compressed (no DEFLATE in this library), or
     /// when the trailer block is malformed; framing failures as in `Framing.MessageDecoder`.
-    #NoDiscard
+    .NoDiscard
     export let decode_body = func(body: uint8[list], max_message_size: int) -> Result<WebBody> {
         last frames = framing.decode_all(body, max_message_size, true)?;
         last messages: framing.Frame[list] = new;
@@ -130,12 +130,12 @@ export let GrpcWeb = module (
 
     /// @brief The text variant of bytes: padded standard base64. A sender may encode each flush separately and
     /// concatenate the texts.
-    #NoDiscard
+    .NoDiscard
     export let encode_text = func(bytes: uint8[list]) -> string => base64.encode(bytes);
 
     /// @brief Decodes a text-variant stream that arrives in chunks: whole 4-character groups are decoded as they
     /// arrive, and padding may end any group, not only the last.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let TextDecoder = class (
         /// @brief Characters of an incomplete group.
         let pending: string = "";
@@ -146,7 +146,7 @@ export let GrpcWeb = module (
 
         /// @brief Decodes the whole groups of `pending + chunk`; keeps the rest. A non-ASCII byte or a group with
         /// characters outside the alphabet fails with an Encoding error.
-        #NoDiscard
+        .NoDiscard
         export let push = func(chunk: string) -> Result<uint8[list]> {
             for (let i = 0; i < chunk.byte_length; i++) {
                 if (chunk.byte_at(i) >= 128) {
@@ -167,7 +167,7 @@ export let GrpcWeb = module (
         };
 
         /// @brief Whether the stream ended on a group boundary.
-        #NoDiscard
+        .NoDiscard
         export let is_complete = func -> bool => pending.byte_length == 0;
 
         /// @brief The pending character count.
@@ -176,7 +176,7 @@ export let GrpcWeb = module (
     );
 
     /// @brief Decodes a complete text-variant body; fails on bad base64 or a body that ends inside a group.
-    #NoDiscard
+    .NoDiscard
     export let decode_text = func(text: string) -> Result<uint8[list]> {
         last decoder = new TextDecoder();
         last bytes = decoder.push(text)?;

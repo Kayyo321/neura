@@ -176,6 +176,18 @@ let read = func(.Note("parameter") item: Cell) -> int32 {
         hash_source = self.formatted(source, "--tag-style=hash")
         self.assertEqual(execute("--check", source=hash_source.encode()).returncode, 0)
 
+    def test_comments_among_standalone_tags_keep_the_declaration_indent(self):
+        for sigil in ("#", "."):
+            with self.subTest(sigil=sigil):
+                source = f"""let Values = module (
+    {sigil}[Since("0.3.1"), Stable]
+    /// A reading in milliseconds.
+    {sigil}Unit("ms")
+    export let period = 1;
+);
+"""
+                self.assertEqual(self.formatted(source), source)
+
     def test_tag_conversions_only_replace_sigil_bytes(self):
         # Preserve a BOM, mixed line endings, unformatted layout, no final
         # newline, and the sigils inside comments, strings and member access.
@@ -277,6 +289,15 @@ let t=['\t','\\','\'','\x41','\xff'];let n='a'..'z';let y=t[0]+'B';let s=$"{'}'}
         formatted = self.formatted(source)
         self.assertIn('if (let ready = true; ready) {', formatted)
         self.assertIn('} else if (let other = false; other) {', formatted)
+
+    def test_if_initializer_tags_stay_inline(self):
+        for sigil in ("#", "."):
+            with self.subTest(sigil=sigil):
+                source = (f'let run=func{{if({sigil}Note("m") let p=1;p>0){{return;}}'
+                          f'else if({sigil}[Note("n"), Unit("ms")] let q=2;q>0){{return;}}}};')
+                formatted = self.formatted(source, "--tag-style=keep")
+                self.assertIn(f'    if ({sigil}Note("m") let p = 1; p > 0) {{\n', formatted)
+                self.assertIn(f'    }} else if ({sigil}[Note("n"), Unit("ms")] let q = 2; q > 0) {{\n', formatted)
 
     def test_for_header_and_overload_groups(self):
         source = '''let Example=module(export let run=func(){for(let i=0;i<10;i++){if(i==3){continue;}else{let last=i;last++;}}}or func(value:int){do{value--;}while(value>0);};);'''

@@ -9,10 +9,10 @@ let words = import:Std.Crypto.Internal.Words;
 /// Memory is one list of 64-bit words, 128 per 1 KiB block; lanes are filled one after another within each
 /// slice, which gives the same result as filling them in parallel. Argon2d and Argon2i are not offered.
 /// @see [Std.Crypto.Kdf.Argon2](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Kdf-Argon2)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Argon2 = module (
     /// @brief The cost parameters of an Argon2id hash.
-    #[Final, Immutable, Since("0.3.0")]
+    .[Final, Immutable, Since("0.3.0")]
     export let Argon2Params = class (
         /// @brief Memory in KiB (m), at least 8 per lane.
         export last memory_kib: int;
@@ -60,12 +60,12 @@ export let Argon2 = module (
     );
 
     /// @brief The Argon2id tag of the password with the salt (at least 8 bytes) and parameters.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let argon2id = func(password: uint8[list], salt: uint8[list], params: Argon2Params) -> uint8[list] =>
         argon2id_with(password, salt, new, new, params);
 
     /// @brief Argon2id with the optional secret value K and associated data X of RFC 9106, section 3.1.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let argon2id_with = func(password: uint8[list], salt: uint8[list], secret: uint8[list],
         associated_data: uint8[list], params: Argon2Params) -> uint8[list] {
         crypto_policy.require(Algorithm.Argon2id);

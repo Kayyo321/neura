@@ -19,7 +19,7 @@ let wire = import:Std.Net.Realtime.WebTransport.Wire;
 /// (`quic_*`, `h3_send_data`) and `connect` are stubs, so every session operation traps today. Validation
 /// failures are Custom errors with the code `webtransport.connect`.
 /// @see [Std.Net.Realtime.WebTransport.Session](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-WebTransport-Session)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Session = module (
     /// @brief The `:protocol` value of a WebTransport extended CONNECT.
     export const ProtocolToken: string = "webtransport";
@@ -39,7 +39,7 @@ export let Session = module (
     export const FlowControlError: uint64 = 73221255;
 
     /// @brief One header field of an HTTP/3 request or response.
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let Field = class (
         /// @brief The lowercase field name.
         export last name: string;
@@ -68,7 +68,7 @@ export let Session = module (
     );
 
     /// @brief What a server learned from a valid session request.
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let SessionRequest = class (
         /// @brief The `:authority` value.
         export last authority: string;
@@ -102,7 +102,7 @@ export let Session = module (
     );
 
     /// @brief The request fields that open a session (draft section 3.2). An empty origin is left out.
-    #NoDiscard
+    .NoDiscard
     export let connect_request = func(authority: string, path: string, origin: string) -> Field[list] {
         last list: Field[list] = new;
         list.append(new Field(":method", "CONNECT"));
@@ -119,7 +119,7 @@ export let Session = module (
     /// @brief Checks a session request as a server must: `:method CONNECT`, `:protocol webtransport`,
     /// `:scheme https`, and non-empty `:authority` and `:path`. The caller then checks the origin and answers
     /// 404 for an unknown resource or 403 for a refused origin (draft section 3.2).
-    #NoDiscard
+    .NoDiscard
     export let validate_connect_request = func(fields: Field[list]) -> Result<SessionRequest> {
         if (value_of(fields, ":method") != "CONNECT") {
             return fail<SessionRequest>("the method must be CONNECT");
@@ -138,7 +138,7 @@ export let Session = module (
     };
 
     /// @brief Whether a response status accepts the session (2xx).
-    #NoDiscard
+    .NoDiscard
     export let accepts = func(status: int) -> bool => status >= 200 && status <= 299;
 
     /// @brief One WebTransport session: streams identified by QUIC stream IDs carrying byte chunks, and
@@ -149,7 +149,7 @@ export let Session = module (
     /// `Wire.bidi_stream_header`), `accept_stream` reads and checks it, `send` and `receive` frame datagrams
     /// with the quarter stream ID (datagrams of other sessions are skipped), and `close_with` sends the
     /// WT_CLOSE_SESSION capsule on the request stream and finishes it.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let WebTransportSession = class implements MultiplexedTransport<int64, uint8[list]> (
         /// @brief The host handle of the QUIC connection.
         last connection: int64;
@@ -170,7 +170,7 @@ export let Session = module (
         };
 
         /// @brief The next datagram of the session, or `None` once the connection is closed.
-        #NoDiscard
+        .NoDiscard
         export let receive = func -> Result<Optional<uint8[list]>> {
             while (true) {
                 last next = quic_datagram_receive(connection)?;
@@ -190,12 +190,12 @@ export let Session = module (
         };
 
         /// @brief Sends one datagram (unreliable, unordered).
-        #NoDiscard
+        .NoDiscard
         export let send = func(data: uint8[list]) -> Result<Unit> =>
             quic_datagram_send(connection, wire.encode_datagram(session_id, data));
 
         /// @brief Opens a stream and writes the WebTransport header of this session on it.
-        #NoDiscard
+        .NoDiscard
         export let open_stream = func(bidirectional: bool) -> Result<int64> {
             last stream = quic_open_stream(connection, bidirectional)?;
             last header = bidirectional ? wire.bidi_stream_header(session_id) : wire.uni_stream_header(session_id);
@@ -205,7 +205,7 @@ export let Session = module (
 
         /// @brief Waits for the next stream the peer opens and reads its WebTransport header. A stream for
         /// another session, or without a WebTransport header, fails.
-        #NoDiscard
+        .NoDiscard
         export let accept_stream = func -> Result<int64> {
             last stream = quic_accept_stream(connection)?;
             last bidirectional = wire.is_bidirectional(stream);
@@ -238,12 +238,12 @@ export let Session = module (
         };
 
         /// @brief Writes bytes on a stream of this session.
-        #NoDiscard
+        .NoDiscard
         export let send_on = func(stream: int64, frame: uint8[list]) -> Result<Unit> =>
             quic_stream_write(connection, stream, frame, false);
 
         /// @brief The next bytes of a stream (at most 64 KiB), or `None` once the peer finished it.
-        #NoDiscard
+        .NoDiscard
         export let receive_on = func(stream: int64) -> Result<Optional<uint8[list]>> {
             last bytes = quic_stream_read(connection, stream, 65536)?;
             return if (bytes.length == 0) -> Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.None)
@@ -251,7 +251,7 @@ export let Session = module (
         };
 
         /// @brief Finishes the local side of a stream (QUIC FIN).
-        #NoDiscard
+        .NoDiscard
         export let finish_stream = func(stream: int64) -> Result<Unit> => quic_stream_write(connection, stream, new, true);
 
         /// @brief Ends the session: the WT_CLOSE_SESSION capsule (`Wire.encode_close_capsule`) in an HTTP/3 DATA
@@ -270,7 +270,7 @@ export let Session = module (
     /// @brief Opens a QUIC connection to `authority`, waits for the server's settings to allow WebTransport, and
     /// sends the session request.
     /// @stub no HTTP/3 or QUIC transport in the runtime
-    #NoDiscard
+    .NoDiscard
     export let connect = func(authority: string, path: string, origin: string) -> Result<WebTransportSession> {
         trap_with_message("unsupported: Std.Net.Realtime.WebTransport.Session.connect is not implemented in Neura 0.3.0 (no HTTP/3 or QUIC transport in the runtime)");
     };

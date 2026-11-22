@@ -1,7 +1,7 @@
 // Implementing a #Sealed interface outside its module (E0914). Classes inside
 // the module may implement it.
 let Shapes = module (
-    #Sealed
+    .Sealed
     export let Shape = interface (
         let area = func() -> int32;
     );

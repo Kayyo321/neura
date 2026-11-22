@@ -11,7 +11,7 @@ let utf8 = import:Std.Encoding.Utf8;
 /// RFC 7515, section 5.2 and RFC 7516, section 5.2 let a recipient reject a header with a repeated member name,
 /// and this library does, because `Std.Encoding.Json.parse` keeps only the last value of a repeated name. The
 /// check counts the colons at the top level of the object outside strings: a valid object has one per member.
-#Since("0.3.0")
+.Since("0.3.0")
 export let JoseJson = module (
     /// @brief A `Custom` error of the code with the message.
     export let fail = func<T>(code: string, message: string) -> Result<T> => Result<T>.Err(error.custom(code, message));

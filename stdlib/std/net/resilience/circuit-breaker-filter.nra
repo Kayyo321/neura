@@ -12,13 +12,13 @@ let.promote _ = import:Std.Net.Service;
 /// otherwise. The default classifier counts every `Err` as a failure. A clock failure in the breaker is returned
 /// as the request's error.
 /// @see [Std.Net.Resilience.CircuitBreakerFilter](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-CircuitBreakerFilter)
-#Since("0.3.0")
+.Since("0.3.0")
 export let CircuitBreakerFilter = module (
     /// @brief The error code of a request rejected by an open breaker.
     export const OpenCode = "resilience.circuit_open";
 
     /// @brief Guards the next service with a circuit breaker.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let CircuitBreakerFilter = class<Req, Resp> implements SimpleFilter<Req, Resp> (
         /// @brief The breaker that admits calls.
         last breaker: breakers.CircuitBreaker;
@@ -50,17 +50,17 @@ export let CircuitBreakerFilter = module (
     );
 
     /// @brief A filter over `breaker` that counts every `Err` as a failure.
-    #NoDiscard
+    .NoDiscard
     export let of = func<Req, Resp>(breaker: breakers.CircuitBreaker) -> CircuitBreakerFilter<Req, Resp> =>
         new CircuitBreakerFilter<Req, Resp>(breaker, func(outcome: Result<Resp>) -> bool => is_err<Resp>(outcome));
 
     /// @brief A filter over `breaker` with a failure classifier.
-    #NoDiscard
+    .NoDiscard
     export let classified = func<Req, Resp>(breaker: breakers.CircuitBreaker, classify: func(Result<Resp>) -> bool)
         -> CircuitBreakerFilter<Req, Resp> => new CircuitBreakerFilter<Req, Resp>(breaker, classify);
 
     /// @brief Whether `outcome` is an `Err`.
-    #Pure
+    .Pure
     export let is_err = func<Resp>(outcome: Result<Resp>) -> bool => match (outcome) {
         Result.Ok(value) => false,
         Result.Err(e) => true,

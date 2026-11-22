@@ -16,14 +16,14 @@ let transports = import:Std.Net.Dns.DnsTransport;
 /// injected `Std.Net.Http.Transport`; the client's default transport is the host's `neura.http.fetch`, a stub until
 /// the A4 runtime lane provides it (`Std.Net.Http.host_fetch`).
 /// @see [Std.Net.Dns.DohTransport](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-DohTransport)
-#Since("0.3.0")
+.Since("0.3.0")
 export let DohTransport = module (
     /// @brief The media type of DNS messages over HTTP (RFC 8484 section 6).
     export const MediaType = "application/dns-message";
 
     /// @brief A DoH transport: an HTTP client, the endpoint URL (for example "https://dns.example/dns-query"), and
     /// the method.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let DohTransport = class implements transports.DnsTransport (
         /// @brief The HTTP client.
         last client: http.Client;
@@ -56,7 +56,7 @@ export let DohTransport = module (
     );
 
     /// @brief The query's wire form with DNS ID 0 (RFC 8484 section 4.1).
-    #NoDiscard
+    .NoDiscard
     export let wire_query = func(query: messages.Message) -> Result<uint8[list]> {
         last bytes = messages.encode(query)?;
         bytes[0] = 0;
@@ -65,7 +65,7 @@ export let DohTransport = module (
     };
 
     /// @brief The GET URL: `endpoint` plus `?dns=` (or `&dns=` when it has a query) and the base64url text.
-    #NoDiscard
+    .NoDiscard
     export let get_url = func(endpoint: string, query: messages.Message) -> Result<string> {
         last text = base64.encode_url_unpadded(wire_query(query)?);
         last separator = strings.contains(endpoint, "?") ? "&" : "?";
@@ -73,7 +73,7 @@ export let DohTransport = module (
     };
 
     /// @brief The GET request.
-    #NoDiscard
+    .NoDiscard
     export let get_request = func(endpoint: string, query: messages.Message) -> Result<http.ClientRequest> {
         last request = new http.ClientRequest("GET", get_url(endpoint, query)?);
         request.headers.set("Accept", MediaType);
@@ -81,7 +81,7 @@ export let DohTransport = module (
     };
 
     /// @brief The POST request.
-    #NoDiscard
+    .NoDiscard
     export let post_request = func(endpoint: string, query: messages.Message) -> Result<http.ClientRequest> {
         last request = new http.ClientRequest("POST", endpoint);
         request.headers.set("Accept", MediaType);
@@ -92,7 +92,7 @@ export let DohTransport = module (
 
     /// @brief The DNS message of a DoH response. Err (Custom `dns.doh_status`) for a status outside 200-299,
     /// (`dns.doh_media_type`) for another content type, or the decode error.
-    #NoDiscard
+    .NoDiscard
     export let decode_response = func(response: http.Response) -> Result<messages.Message> {
         if (response.status < 200 || response.status > 299) {
             return Result<messages.Message>.Err(errors.custom("dns.doh_status", "DoH server answered status "

@@ -20,10 +20,10 @@ let.promote _ = import:Std.Core.Unit;
 /// After close every operation except close fails with Closed. Windows has no Unix-domain datagram sockets (its
 /// `AF_UNIX` implements streams only), so there `bind` and `unbound` fail with Unsupported for every address.
 /// @see [Std.Net.Socket.UnixDatagram](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-UnixDatagram)
-#Since("0.3.0")
+.Since("0.3.0")
 export let UnixDatagram = module (
     /// @brief One Unix-domain datagram socket.
-    #[Final, NoDiscard(reason: "a socket must be closed"), NotThreadSafe]
+    .[Final, NoDiscard(reason: "a socket must be closed"), NotThreadSafe]
     export let UnixDatagram = class implements DatagramSocket<UnixAddr> (
         /// @brief The host's socket ID.
         last id: int64;
@@ -41,7 +41,7 @@ export let UnixDatagram = module (
         };
 
         /// @brief The bound address. An unbound socket has none: Err with InvalidInput.
-        #NoDiscard
+        .NoDiscard
         export let local_address = func -> Result<UnixAddr> {
             return Result<UnixAddr>.Err(bytes.closed("socket", label())) unless open_now;
             return match (bound) {
@@ -52,7 +52,7 @@ export let UnixDatagram = module (
         };
 
         /// @brief Sends `data` as one datagram to `target`; the count the host sent.
-        #NoDiscard
+        .NoDiscard
         export let send_to = func(data: uint8[list], target: UnixAddr) -> Result<int> {
             return Result<int>.Err(bytes.closed("socket", label())) unless open_now;
             return match (host.unix_send_to(id, target.to_string(), data)) {
@@ -63,7 +63,7 @@ export let UnixDatagram = module (
         };
 
         /// @brief One datagram of at most `max` bytes, waiting up to the read timeout. A maximum below 1 traps.
-        #NoDiscard
+        .NoDiscard
         export let receive_from = func(max: int) -> Result<Datagram<UnixAddr>> {
             bytes.check_maximum(max);
             return Result<Datagram<UnixAddr>>.Err(bytes.closed("socket", label())) unless open_now;
@@ -103,12 +103,12 @@ export let UnixDatagram = module (
     );
 
     /// @brief A socket bound to `address`.
-    #NoDiscard
+    .NoDiscard
     export let bind = func(address: UnixAddr) -> Result<UnixDatagram> =>
         open(address.to_string(), Optional<UnixAddr>.Some(address));
 
     /// @brief An unnamed socket.
-    #NoDiscard
+    .NoDiscard
     export let unbound = func -> Result<UnixDatagram> => open("", Optional<UnixAddr>.None);
 
     /// @brief Opens the host socket.

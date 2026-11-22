@@ -26,10 +26,10 @@ let words = import:Std.Crypto.Internal.Words;
 /// of the commitment hash c-tilde in verification is branch-free in source; signing branches on secret values
 /// (reduction, norm checks, rejection), and the runtime does not guarantee constant time in any case.
 /// @see [Std.Crypto.Pqc.MlDsa](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-MlDsa)
-#Since("0.3.0")
+.Since("0.3.0")
 export let MlDsa = module (
     /// @brief The parameter sets of FIPS 204, section 4: ML-DSA-44, ML-DSA-65 and ML-DSA-87.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let ParameterSet = enum (MlDsa44, MlDsa65, MlDsa87);
 
     let level = func(set: ParameterSet) -> int => match (set) {
@@ -45,11 +45,11 @@ export let MlDsa = module (
     };
 
     /// @brief The standard's name of the parameter set, such as "ML-DSA-65".
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let name = func(set: ParameterSet) -> string => "ML-DSA-" .. level(set).to_string();
 
     /// @brief The public-key length in bytes: 1312, 1952 or 2592.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let public_key_length = func(set: ParameterSet) -> int => match (set) {
         ParameterSet.MlDsa44 => 1312,
         ParameterSet.MlDsa65 => 1952,
@@ -57,7 +57,7 @@ export let MlDsa = module (
     };
 
     /// @brief The private-key length in bytes: 2560, 4032 or 4896.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let private_key_length = func(set: ParameterSet) -> int => match (set) {
         ParameterSet.MlDsa44 => 2560,
         ParameterSet.MlDsa65 => 4032,
@@ -65,7 +65,7 @@ export let MlDsa = module (
     };
 
     /// @brief The signature length in bytes: 2420, 3309 or 4627.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let signature_length = func(set: ParameterSet) -> int => match (set) {
         ParameterSet.MlDsa44 => 2420,
         ParameterSet.MlDsa65 => 3309,
@@ -75,7 +75,7 @@ export let MlDsa = module (
     let invalid_key = func<T>(text: string) -> Result<T> => Result<T>.Err(error.custom("crypto.invalid_key", text));
 
     /// @brief An ML-DSA public key (rho || t1). Equal keys have equal bytes.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let MlDsaPublicKey = class (
         /// @brief The parameter set.
         export last parameter_set: ParameterSet;
@@ -94,7 +94,7 @@ export let MlDsa = module (
         };
 
         /// @brief A copy of the encoded key.
-        #NoDiscard
+        .NoDiscard
         export let to_bytes = func -> uint8[list] => words.copy(encoded);
 
         export let.override equals = func(other: class) -> bool {
@@ -127,7 +127,7 @@ export let MlDsa = module (
 
     /// @brief An ML-DSA private key (FIPS 204 skEncode) in secret memory, with its public key. `to_string`
     /// never prints it.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let MlDsaPrivateKey = class implements PrivateKey<MlDsaSigner> (
         /// @brief The parameter set.
         export last parameter_set: ParameterSet;
@@ -169,7 +169,7 @@ export let MlDsa = module (
         export let public_key_bytes = func -> uint8[list] => words.copy(public_encoded);
 
         /// @brief The matching public key.
-        #NoDiscard
+        .NoDiscard
         export let public_key = func -> MlDsaPublicKey => new(parameter_set, public_encoded);
 
         /// @brief A fixed placeholder, never the key.
@@ -177,7 +177,7 @@ export let MlDsa = module (
     );
 
     /// @brief ML-DSA.KeyGen_internal (FIPS 204, Algorithm 6) from the 32-byte seed xi; another length traps.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let key_pair_from_seed = func(set: ParameterSet, xi: uint8[list]) -> MlDsaPrivateKey {
         crypto_policy.require(algorithm_of(set));
         if (xi.length != 32) {
@@ -191,7 +191,7 @@ export let MlDsa = module (
 
     /// @brief ML-DSA.KeyGen (FIPS 204, Algorithm 1) with a seed from `Entropy.os_bytes`, or from the given
     /// generator. Fails when the entropy source fails.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let generate_key_pair = func(set: ParameterSet) -> Result<MlDsaPrivateKey> {
         match (entropy.os_bytes(32)) {
             Result.Ok(xi) => {
@@ -211,7 +211,7 @@ export let MlDsa = module (
     };
 
     /// @brief A public key from outside the program. A wrong length is `Custom` code `crypto.invalid_key`.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_public_key = func(set: ParameterSet, bytes: uint8[list]) -> Result<MlDsaPublicKey> {
         if (bytes.length != public_key_length(set)) {
             return invalid_key<MlDsaPublicKey>(name(set) .. " public key must be " .. public_key_length(set).to_string() .. " bytes");
@@ -221,7 +221,7 @@ export let MlDsa = module (
 
     /// @brief A private key from outside the program, checked as the constructor does. A failure is `Custom`
     /// code `crypto.invalid_key`.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_private_key = func(set: ParameterSet, bytes: uint8[list]) -> Result<MlDsaPrivateKey> {
         crypto_policy.require(algorithm_of(set));
         if (bytes.length != private_key_length(set)) {
@@ -235,7 +235,7 @@ export let MlDsa = module (
     };
 
     /// @brief Signs with an ML-DSA private key. `sign` is hedged pure ML-DSA with an empty context.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let MlDsaSigner = class implements Signer<MlDsaPrivateKey, uint8[list]> (
         last key: MlDsaPrivateKey;
         last engine: core.Engine;
@@ -276,7 +276,7 @@ export let MlDsa = module (
 
         /// @brief ML-DSA.Sign_internal (FIPS 204, Algorithm 7) over a formatted message M' with the given
         /// 32-byte rnd.
-        #NoDiscard
+        .NoDiscard
         export let sign_internal = func(message_prime: uint8[list], rnd: uint8[list]) -> uint8[list] {
             check(new, rnd);
             last sk = key.expose();
@@ -285,7 +285,7 @@ export let MlDsa = module (
 
         /// @brief ML-DSA.Sign_internal with the 64-byte message representative mu computed elsewhere (the
         /// "external mu" form) and the given 32-byte rnd.
-        #NoDiscard
+        .NoDiscard
         export let sign_mu = func(mu: uint8[list], rnd: uint8[list]) -> uint8[list] {
             check(new, rnd);
             if (mu.length != 64) {
@@ -296,20 +296,20 @@ export let MlDsa = module (
 
         /// @brief ML-DSA.Sign (FIPS 204, Algorithm 2) with the context string and the given 32-byte rnd;
         /// 32 zero bytes give the deterministic variant.
-        #NoDiscard
+        .NoDiscard
         export let sign_with = func(message: uint8[list], context: uint8[list], rnd: uint8[list]) -> uint8[list] {
             check(context, rnd);
             return sign_internal(prehash.formatted(0, context, message), rnd);
         };
 
         /// @brief The deterministic variant of ML-DSA.Sign: rnd is 32 zero bytes.
-        #NoDiscard
+        .NoDiscard
         export let sign_deterministic = func(message: uint8[list], context: uint8[list]) -> uint8[list] =>
             sign_with(message, context, words.zeros(32));
 
         /// @brief HashML-DSA.Sign (FIPS 204, Algorithm 4) with the pre-hash function `hash` (one of the SHA-2,
         /// SHA-3 and SHAKE algorithms of Std.Crypto.Hash) and the given 32-byte rnd.
-        #NoDiscard
+        .NoDiscard
         export let sign_prehash_with = func(message: uint8[list], context: uint8[list], hash: Algorithm,
             rnd: uint8[list]) -> uint8[list] {
             check(context, rnd);
@@ -317,7 +317,7 @@ export let MlDsa = module (
         };
 
         /// @brief Hedged ML-DSA.Sign with the context string. Fails when the entropy source fails.
-        #NoDiscard
+        .NoDiscard
         export let try_sign = func(message: uint8[list], context: uint8[list]) -> Result<uint8[list]> {
             match (random_rnd()) {
                 Result.Ok(rnd) => {
@@ -330,7 +330,7 @@ export let MlDsa = module (
         };
 
         /// @brief Hedged HashML-DSA.Sign. Fails when the entropy source fails.
-        #NoDiscard
+        .NoDiscard
         export let try_sign_prehash = func(message: uint8[list], context: uint8[list], hash: Algorithm) -> Result<uint8[list]> {
             match (random_rnd()) {
                 Result.Ok(rnd) => {
@@ -361,7 +361,7 @@ export let MlDsa = module (
     /// @brief Verifies ML-DSA signatures under a public key. `verify` is pure ML-DSA with an empty context.
     /// A signature of the wrong length, a malformed hint, a context longer than 255 bytes, or any failed check
     /// of FIPS 204, Algorithm 8, gives false.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let MlDsaVerifier = class implements Verifier<MlDsaPublicKey, uint8[list]> (
         last key: MlDsaPublicKey;
         last engine: core.Engine;
@@ -381,7 +381,7 @@ export let MlDsa = module (
         export let public_key = func -> MlDsaPublicKey => key;
 
         /// @brief ML-DSA.Verify_internal (FIPS 204, Algorithm 8) with the 64-byte message representative mu.
-        #NoDiscard
+        .NoDiscard
         export let verify_mu = func(mu: uint8[list], signature: uint8[list]) -> bool {
             if (mu.length != 64) {
                 trap_with_message("invalid argument: ML-DSA mu must be 64 bytes");
@@ -393,12 +393,12 @@ export let MlDsa = module (
         };
 
         /// @brief ML-DSA.Verify_internal over a formatted message M'.
-        #NoDiscard
+        .NoDiscard
         export let verify_internal = func(message_prime: uint8[list], signature: uint8[list]) -> bool =>
             verify_mu(engine.message_representative(tr, message_prime), signature);
 
         /// @brief ML-DSA.Verify (FIPS 204, Algorithm 3) with the context string.
-        #NoDiscard
+        .NoDiscard
         export let verify_with_context = func(message: uint8[list], signature: uint8[list], context: uint8[list]) -> bool {
             if (context.length > 255) {
                 return false;
@@ -407,7 +407,7 @@ export let MlDsa = module (
         };
 
         /// @brief HashML-DSA.Verify (FIPS 204, Algorithm 5) with the pre-hash function `hash`.
-        #NoDiscard
+        .NoDiscard
         export let verify_prehash = func(message: uint8[list], signature: uint8[list], context: uint8[list],
             hash: Algorithm) -> bool {
             if (context.length > 255) {

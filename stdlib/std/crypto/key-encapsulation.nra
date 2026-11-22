@@ -4,10 +4,10 @@ let.promote _ = import:Std.Crypto.CryptographicPrimitive;
 
 /// @brief The contract of a key-encapsulation mechanism (Stdlib.md section 21.1).
 /// @see [Std.Crypto.KeyEncapsulation](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-KeyEncapsulation)
-#Since("0.3.0")
+.Since("0.3.0")
 export let KeyEncapsulation = module (
     /// @brief The result of `encapsulate`: the shared secret to keep and the ciphertext to send.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Encapsulation = class<SharedSecret, Ciphertext> (
         /// @brief The shared secret.
         export last shared_secret: SharedSecret;
@@ -26,7 +26,7 @@ export let KeyEncapsulation = module (
 
     /// @brief Establishes a shared secret for the holder of a key pair, classically or post-quantum. The
     /// primitive is named by `Ciphertext`.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let KeyEncapsulation = interface<PubKey, PrivKey, SharedSecret, Ciphertext>:CryptographicPrimitive<Ciphertext> (
         /// @brief A fresh shared secret and its encapsulation to the public key.
         let encapsulate = func(public_key: PubKey) -> Encapsulation<SharedSecret, Ciphertext>;

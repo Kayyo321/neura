@@ -4,7 +4,7 @@ let Account = class (
 
     let balance: int32 = 0;
 
-    #Synchronized
+    .Synchronized
     export let deposit = func(amount: int32) {
         balance += amount;
     };

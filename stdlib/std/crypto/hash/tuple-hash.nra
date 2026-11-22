@@ -12,11 +12,11 @@ let words = import:Std.Crypto.Internal.Words;
 /// ("ab", "c") and ("a", "bc") hash differently. Each item is absorbed as encode_string(item) into
 /// cSHAKE(N = "TupleHash", S = customization).
 /// @see [Std.Crypto.Hash.TupleHash](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Hash-TupleHash)
-#Since("0.3.0")
+.Since("0.3.0")
 export let TupleHash = module (
     /// @brief A running TupleHash128: `add` each item, then `finish(length)` for TupleHash128 or
     /// `finish_xof(length)` and `squeeze` for TupleHashXOF128. A second finish, or an `add` after one, traps.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let TupleHash128 = class (
         /// @brief The cSHAKE128 sponge.
         let sponge: keccak.Sponge;
@@ -54,7 +54,7 @@ export let TupleHash = module (
     );
 
     /// @brief TupleHash128(items, length, customization).
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let tuple_hash128 = func(items: uint8[list][list], length: int, customization: uint8[list]) -> uint8[list] {
         let hash = new TupleHash128(customization);
         for (let item in items) {
@@ -64,7 +64,7 @@ export let TupleHash = module (
     };
 
     /// @brief The first `length` bytes of TupleHashXOF128(items, customization).
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let tuple_hash128_xof = func(items: uint8[list][list], length: int, customization: uint8[list])
         -> uint8[list] {
         let hash = new TupleHash128(customization);
@@ -76,7 +76,7 @@ export let TupleHash = module (
 
     /// @brief A running TupleHash256: `add` each item, then `finish(length)` for TupleHash256 or
     /// `finish_xof(length)` and `squeeze` for TupleHashXOF256. A second finish, or an `add` after one, traps.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let TupleHash256 = class (
         /// @brief The cSHAKE256 sponge.
         let sponge: keccak.Sponge;
@@ -114,7 +114,7 @@ export let TupleHash = module (
     );
 
     /// @brief TupleHash256(items, length, customization).
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let tuple_hash256 = func(items: uint8[list][list], length: int, customization: uint8[list]) -> uint8[list] {
         let hash = new TupleHash256(customization);
         for (let item in items) {
@@ -124,7 +124,7 @@ export let TupleHash = module (
     };
 
     /// @brief The first `length` bytes of TupleHashXOF256(items, customization).
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let tuple_hash256_xof = func(items: uint8[list][list], length: int, customization: uint8[list])
         -> uint8[list] {
         let hash = new TupleHash256(customization);

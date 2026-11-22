@@ -1,7 +1,7 @@
 error[E0907]: #Final conflicts with #Sealed
  --> $DIR/sealed.nra:3:9
   |
-2 | #Sealed
+2 | .Sealed
   | ------- #Sealed given here
 3 | let P = record (x: int);
   |         ^^^^^^ #Final given here

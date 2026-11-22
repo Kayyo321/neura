@@ -474,8 +474,8 @@ private:
             if (accessor.expression) expression(*accessor.expression);
             for (const auto& body : accessor.body) statement(body);
         }
-        // Standalone declaration tags stay on their own lines. Parameter
-        // and enum-variant tags are deliberately left inline.
+        // Standalone declaration tags stay on their own lines. Tags in
+        // parameter lists, enum variants, records and if headers stay inline.
         if (!inline_tags) {
             const auto start = first_offset(value);
             for (auto sigil = hints_.tag_sigils.lower_bound(start);
@@ -498,7 +498,7 @@ private:
         for (const auto& element : value.elements) pattern(element);
     }
 
-    void statement(const Statement& value) {
+    void statement(const Statement& value, bool inline_tags = false) {
         if (value.kind == Statement::Kind::Yield && !value.expressions.empty())
             hints_.keyword_operands.insert(value.expressions.front().span.offset);
         if (value.kind == Statement::Kind::Defer && !value.expressions.empty())
@@ -525,12 +525,12 @@ private:
             if (close) hints_.do_closes.insert(close->span.offset);
         }
         if (value.kind == Statement::Kind::If && value.keyword.length != 0) hints_.guards.insert(value.keyword.offset);
-        if (value.declaration) declaration(*value.declaration);
+        if (value.declaration) declaration(*value.declaration, inline_tags);
         if (value.binding_type) type(*value.binding_type);
         for (const auto& item : value.expressions) expression(item);
         for (const auto& item : value.body) statement(item);
         for (const auto& item : value.alternative) statement(item);
-        for (const auto& item : value.initializer) statement(item);
+        for (const auto& item : value.initializer) statement(item, value.kind == Statement::Kind::If);
         for (const auto& item : value.step) statement(item);
         for (const auto& arm : value.arms) {
             if (arm.named) {
@@ -980,13 +980,16 @@ std::string render(std::string_view source, const std::vector<Token>& tokens, co
                 if (blank_before.contains(item.offset)) out.line(2);
                 else out.line(item.lines_before > 1 ? 2 : 1);
                 comment_continues = inside;
-                // A comment above an `or` alternative is indented with it.
                 std::size_t following = i + 1;
                 while (following < items.size() && items[following].comment) ++following;
+                // Comments among standalone tags share the declaration's depth.
+                if (following < items.size() && hints.before.contains(items[following].offset))
+                    comment_continues = false;
+                // A comment above an `or` alternative is indented with it.
                 const bool before_alternative = inside && following < items.size() && items[following].text == "or" &&
                                                 items[following].kind == TokenKind::Keyword;
                 if (before_alternative && out.at_line_start()) out.text(text, statement_indent + 1, false);
-                else emit(text, inside, false);
+                else emit(text, comment_continues, false);
             }
             out.line();
             previous = &item;
@@ -1032,7 +1035,7 @@ std::string render(std::string_view source, const std::vector<Token>& tokens, co
                    (!joins || ((text == "}" || text == ")") && !delimiters.empty() && delimiters.back().multiline))) {
             // A blank line before a block's closing delimiter is kept.
             out.line(2);
-        } else if (previous && previous->comment && inside) {
+        } else if (previous && previous->comment && inside && !structural) {
             continuation = true;
         }
         // Whether the next item starts a new source line after this opening

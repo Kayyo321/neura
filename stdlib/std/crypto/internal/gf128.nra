@@ -6,7 +6,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// coefficient of x^0). The multiplication runs 128 steps that each select with a mask, never with a branch on
 /// the data. POLYVAL is computed through GHASH as RFC 8452, Appendix A shows: POLYVAL(H, X) =
 /// ByteReverse(GHASH(mulX_GHASH(ByteReverse(H)), ByteReverse(X))).
-#Since("0.3.0")
+.Since("0.3.0")
 export let Gf128 = module (
     /// @brief A running GHASH or POLYVAL: absorb blocks, then read the 16-byte result.
     export let Hasher = class (

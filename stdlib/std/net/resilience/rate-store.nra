@@ -10,17 +10,17 @@ let.promote _ = import:Std.Core.Result;
 /// still holds what it read, retrying otherwise. `InMemoryRateStore` is the in-process implementation. All
 /// limiters sharing a store must read the same wall clock, within the clock skew the limit can tolerate.
 /// @see [Std.Net.Resilience.RateStore](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-RateStore)
-#Since("0.3.0")
+.Since("0.3.0")
 export let RateStore = module (
     /// @brief An atomic per-key store of theoretical arrival times.
     export let RateStore = interface (
         /// @brief The value stored for `key`, or None. Err when the store cannot be read.
-        #NoDiscard
+        .NoDiscard
         let get = func(key: string) -> Result<optional.Optional<int64>>;
         /// @brief Stores `value` for `key` only if the key holds `expected` (None: the key is absent) and returns
         /// whether it did. `ttl` is how long the value matters; a store may drop the key after it. Err when the
         /// store cannot be written.
-        #NoDiscard
+        .NoDiscard
         let compare_and_set = func(key: string, expected: optional.Optional<int64>, value: int64,
             ttl: durations.Duration) -> Result<bool>;
     );

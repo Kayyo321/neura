@@ -18,13 +18,13 @@ let.promote _ = import:Std.Core.Unit;
 /// waits in its own task while other tasks run, and cancelling the task's scope ends a waiting exchange with
 /// Cancelled. Name resolution inside `connect` is not used (the address is numeric).
 /// @see [Std.Net.Dns.TcpDnsTransport](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-TcpDnsTransport)
-#Since("0.3.0")
+.Since("0.3.0")
 export let TcpDnsTransport = module (
     /// @brief The DNS port.
     export const DnsPort: int = 53;
 
     /// @brief A DNS transport over one TCP connection per exchange.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let TcpDnsTransport = class implements transports.DnsTransport (
         /// @brief The server.
         export last server: SocketAddr;
@@ -60,7 +60,7 @@ export let TcpDnsTransport = module (
     );
 
     /// @brief Encodes `query`, writes it framed, and reads and decodes one framed response.
-    #NoDiscard
+    .NoDiscard
     export let exchange_on = func(read: func(int) -> Result<uint8[list]>, write: func(uint8[list]) -> Result<Unit>,
         query: messages.Message) -> Result<messages.Message> {
         write_framed(write, messages.encode(query)?)?;
@@ -73,7 +73,7 @@ export let TcpDnsTransport = module (
         write(frame(message));
 
     /// @brief The two-byte length followed by the message.
-    #NoDiscard
+    .NoDiscard
     export let frame = func(message: uint8[list]) -> uint8[list] {
         if (message.length > 65535) {
             trap_with_message("invalid argument: message length");
@@ -89,7 +89,7 @@ export let TcpDnsTransport = module (
 
     /// @brief Reads one framed message, however the bytes are split across reads. Err (Io UnexpectedEnd) when the
     /// stream ends inside the length or the message.
-    #NoDiscard
+    .NoDiscard
     export let read_framed = func(read: func(int) -> Result<uint8[list]>) -> Result<uint8[list]> {
         last prefix = read_exactly(read, 2)?;
         last length = (prefix[0] as int) * 256 + (prefix[1] as int);

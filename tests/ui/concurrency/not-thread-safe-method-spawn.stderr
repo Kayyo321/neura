@@ -1,7 +1,7 @@
 error[E0601]: the spawned call is not task-safe: it reaches 'flush', which is marked #NotThreadSafe
   --> $DIR/not-thread-safe-method-spawn.nra:24:9
    |
-12 |     #NotThreadSafe
+12 |     .NotThreadSafe
    |     -------------- is marked #NotThreadSafe here
 ...
 19 |     return report.flush();

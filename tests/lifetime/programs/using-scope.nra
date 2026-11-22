@@ -7,7 +7,7 @@ let closeable = import:Std.Io.Closeable;
 let.promote _ = import:Std.Core.Result;
 let.promote _ = import:Std.Core.Unit;
 
-#Synchronized
+.Synchronized
 let Log = class implements closeable.Closeable (
     let lines: int = 0;
     export let write = func(line: string) -> void {

@@ -7,7 +7,7 @@ let console = import:Std.Io.Console;
 let program = import:Std.Program;
 let channels = import:Std.Concurrent.Channel;
 
-#Synchronized
+.Synchronized
 let Left = class (
     export let cross = func(other: Right, mine: channels.Sender<int64>, theirs: channels.Receiver<int64>) -> int64 {
         mine.send(1);
@@ -18,7 +18,7 @@ let Left = class (
     export let touch = func -> int64 => 1;
 );
 
-#Synchronized
+.Synchronized
 let Right = class (
     export let cross = func(other: Left, mine: channels.Sender<int64>, theirs: channels.Receiver<int64>) -> int64 {
         mine.send(2);

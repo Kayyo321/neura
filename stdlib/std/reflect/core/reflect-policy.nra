@@ -1,22 +1,22 @@
 /// @brief What reflection keeps of a class (docs/design/Reflect030.md, The descriptor model). A class chooses by
 /// implementing one marker interface; a class with neither is `Full`. Value types are always `Full`.
 /// @see [Std.Reflect.Core.ReflectPolicy](https://github.com/Kayyo321/neura/wiki/Stdlib-Reflect-Core-ReflectPolicy)
-#Since("0.3.0")
+.Since("0.3.0")
 export let ReflectPolicy = module (
     /// @brief Keep only the kind, names, identity and layout; dynamic access traps.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let Strip = interface ();
 
     /// @brief Keep fields, variants, elements and constructors as well; methods and tags are left out.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let Layout = interface ();
 
     /// @brief The retention levels, as descriptors report them.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let Level = enum (Strip, Layout, Full);
 
     /// @brief The level a descriptor reports in its text form (`strip`, `layout` or `full`).
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let of_text = func(text: string) -> Level {
         if (text == "strip") {
             return Level.Strip;

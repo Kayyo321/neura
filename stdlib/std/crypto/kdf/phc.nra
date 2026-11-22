@@ -12,13 +12,13 @@ let.promote _ = import:Std.Core.Result;
 /// more characters of a-z, A-Z, 0-9, '/', '+', '.' and '-'; salt and hash are standard Base64 without
 /// padding ("B64" of the PHC specification).
 /// @see [Std.Crypto.Kdf.Phc](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Kdf-Phc)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Phc = module (
     /// @brief One parsed or built PHC string. A version of -1 means none; an empty salt or hash means the field
     /// is absent (a hash needs a salt). `to_string` gives the canonical encoding, which is also what `equals`
     /// and `hash_code` compare: a PHC string is a stored verifier, not a secret. The constructor copies the
     /// lists it is given; do not change `salt` or `hash` afterwards.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let PhcString = class (
         /// @brief The function identifier, such as "argon2id".
         export last algorithm: string;
@@ -158,7 +158,7 @@ export let Phc = module (
         Result<PhcString>.Err(Error.Parse { kind: ParseErrorKind.Syntax, offset: offset, message: message });
 
     /// @brief Parses a PHC string. A malformed string fails with a `Parse` error at the offending field.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse = func(text: string) -> Result<PhcString> {
         if (text.byte_length == 0 || text.byte_at(0) != 36) {
             return fail(0, "PHC string must start with '$'");

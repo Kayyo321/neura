@@ -10,7 +10,7 @@ let.promote _ = import:Std.Collections.SortedMap;
 /// a stack. Updating a value for an existing key preserves iterator validity. Iterators and
 /// member callbacks detect structural changes and trap with `collection modified during iteration`.
 /// @see [Std.Collections.TreeMap](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-TreeMap)
-#Since("0.1.0")
+.Since("0.1.0")
 export let TreeMap = module (
     /// @brief A private token type that restricts construction to module factories.
     let Seal = enum (Token);
@@ -43,7 +43,7 @@ export let TreeMap = module (
     );
 
     /// @brief A mutable AVL tree map that identifies keys by comparator equality.
-    #NotThreadSafe
+    .NotThreadSafe
     export let TreeMap = class<K, V> implements MutableMap<K, V>, SortedMap<K, V> (
         /// @brief The root node, or `nil` when the tree is empty.
         let root: Node<K, V> = nil;
@@ -79,7 +79,7 @@ export let TreeMap = module (
         export let contains_key = func(key: K) -> bool => find_node(key) != nil;
 
         /// @brief Returns the associated value as `Some`, or `None` when the key is absent.
-        #NoDiscard
+        .NoDiscard
         export let get = func(key: K) -> optional.Optional<V> {
             last node = find_node(key);
             return if (node == nil) -> optional.Optional<V>.None else -> optional.Optional<V>.Some(node.value);
@@ -402,36 +402,36 @@ export let TreeMap = module (
         };
 
         /// @brief Returns the greatest key at most `key` as `Some`, or `None` when absent.
-        #NoDiscard
+        .NoDiscard
         export let floor = func(key: K) -> optional.Optional<K> => key_of(floor_node(key, true));
 
         /// @brief Returns the least key at least `key` as `Some`, or `None` when absent.
-        #NoDiscard
+        .NoDiscard
         export let ceiling = func(key: K) -> optional.Optional<K> => key_of(ceiling_node(key, true));
 
         /// @brief Returns the greatest key strictly below `key` as `Some`, or `None` when absent.
-        #NoDiscard
+        .NoDiscard
         export let lower = func(key: K) -> optional.Optional<K> => key_of(floor_node(key, false));
 
         /// @brief Returns the least key strictly above `key` as `Some`, or `None` when absent.
-        #NoDiscard
+        .NoDiscard
         export let higher = func(key: K) -> optional.Optional<K> => key_of(ceiling_node(key, false));
 
         /// @brief Returns the entry with the greatest key at most `key`, or `None` when absent.
-        #NoDiscard
+        .NoDiscard
         export let floor_entry = func(key: K) -> optional.Optional<[K, V]> => entry_of(floor_node(key, true));
 
         /// @brief Returns the entry with the least key at least `key`, or `None` when absent.
-        #NoDiscard
+        .NoDiscard
         export let ceiling_entry = func(key: K) -> optional.Optional<[K, V]> =>
             entry_of(ceiling_node(key, true));
 
         /// @brief Returns the entry with the greatest key strictly below `key`, or `None` when absent.
-        #NoDiscard
+        .NoDiscard
         export let lower_entry = func(key: K) -> optional.Optional<[K, V]> => entry_of(floor_node(key, false));
 
         /// @brief Returns the entry with the least key strictly above `key`, or `None` when absent.
-        #NoDiscard
+        .NoDiscard
         export let higher_entry = func(key: K) -> optional.Optional<[K, V]> =>
             entry_of(ceiling_node(key, false));
 

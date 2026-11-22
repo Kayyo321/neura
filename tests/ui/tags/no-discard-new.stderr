@@ -1,7 +1,7 @@
 warning[W0003]: unused value of #NoDiscard type 'Lease': a lease must be returned
  --> $DIR/no-discard-new.nra:9:5
   |
-3 | #NoDiscard(reason: "a lease must be returned")
+3 | .NoDiscard(reason: "a lease must be returned")
   | ---------------------------------------------- 'Lease' is marked #NoDiscard here
 ...
 9 |     new Lease();

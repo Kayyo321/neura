@@ -5,7 +5,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// @brief The algorithms of FIPS 205 (SLH-DSA) over byte lists, for the twelve parameter sets, without policy
 /// checks or key objects. Internal: Std.Crypto.Pqc.SlhDsa wraps it. Addresses are 32-byte lists changed in
 /// place; tree addresses are `uint64` (at most 64 bits in every parameter set).
-#Since("0.3.0")
+.Since("0.3.0")
 export let SlhDsaCore = module (
     const WotsHash = 0;
     const WotsPk = 1;

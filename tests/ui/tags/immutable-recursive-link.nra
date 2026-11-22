@@ -6,7 +6,7 @@ let Recursive = module (
         export let text: string = "";
     );
 
-    #[Final, Immutable]
+    .[Final, Immutable]
     let Link = class (
         export last cause: Chain;
 

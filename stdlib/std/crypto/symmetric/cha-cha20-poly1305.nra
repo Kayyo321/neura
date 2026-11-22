@@ -15,10 +15,10 @@ let words = import:Std.Crypto.Internal.Words;
 /// A nonce must never repeat under one key. For random nonces use XChaCha20Poly1305, whose 192-bit nonces do
 /// not collide in practice.
 /// @see [Std.Crypto.Symmetric.ChaCha20Poly1305](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Symmetric-ChaCha20Poly1305)
-#Since("0.3.0")
+.Since("0.3.0")
 export let ChaCha20Poly1305 = module (
     /// @brief The AEAD under a 32-byte key.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let ChaCha20Poly1305 = class implements AeadCipher<SymmetricKey<ChaCha20Poly1305>, uint8[list], uint8[list]> (
         let key_bytes: uint8[list] = new;
 
@@ -74,7 +74,7 @@ export let ChaCha20Poly1305 = module (
     };
 
     /// @brief Seals under a 32-byte key and 12-byte nonce. Used by XChaCha20Poly1305 with its subkey.
-    #[Internal, Since("0.3.0")]
+    .[Internal, Since("0.3.0")]
     export let seal_with = func(key: uint8[list], nonce: uint8[list], plaintext: uint8[list], data: uint8[list]) -> uint8[list] {
         let out = chacha.xor_stream(key, 1, nonce, plaintext);
         words.append_all(out, tag_of(key, nonce, out, data));
@@ -82,7 +82,7 @@ export let ChaCha20Poly1305 = module (
     };
 
     /// @brief Opens under a 32-byte key and 12-byte nonce. Used by XChaCha20Poly1305 with its subkey.
-    #[Internal, Since("0.3.0")]
+    .[Internal, Since("0.3.0")]
     export let open_with = func(key: uint8[list], nonce: uint8[list], sealed: uint8[list], data: uint8[list])
         -> Result<uint8[list]> {
         if (sealed.length < 16) {

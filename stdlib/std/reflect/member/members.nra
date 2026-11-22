@@ -4,49 +4,49 @@ let model = import:Std.Reflect.Internal.Model;
 /// parameters and constructors, with their visibility and flags. A member's position is its index in its type's
 /// descriptor; `Std.Reflect.Dynamic.Variant` reads, writes and calls members by that index.
 /// @see [Std.Reflect.Member.Members](https://github.com/Kayyo321/neura/wiki/Stdlib-Reflect-Member-Members)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Members = module (
     /// @brief A field of a class or record.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let FieldInfo = model.FieldInfo;
 
     /// @brief A variant of an enum and its payloads.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let VariantInfo = model.VariantInfo;
 
     /// @brief An instance method.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let MethodInfo = model.MethodInfo;
 
     /// @brief A parameter, or a payload of a variant.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let ParamInfo = model.ParamInfo;
 
     /// @brief A constructor of a class or record.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let ConstructorInfo = model.ConstructorInfo;
 
     /// @brief Whether a member is visible outside its declaration's module.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let Visibility = enum (Exported, Private);
 
     /// @brief The flags of a field. `Secret` is the `#Sensitive` tag; Neura has no volatile fields.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let FieldFlags = record (constant: bool, last: bool, property: bool, secret: bool, skipped: bool);
 
     /// @brief The visibility of a field.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let visibility = func(field: FieldInfo) -> Visibility => field.exported ? Visibility.Exported : Visibility.Private;
 
     /// @brief The flags of a field.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let flags = func(field: FieldInfo) -> FieldFlags =>
         new FieldFlags(field.is_const, field.is_last, field.is_property(),
             model.find_attribute(field.attributes, "Sensitive") != nil,
             model.find_attribute(field.attributes, "Skip") != nil);
 
     /// @brief The fields that are properties: read and written through accessor clauses rather than storage.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let properties = func(type: model.TypeDescriptor) -> FieldInfo[list] {
         last result: FieldInfo[list] = new;
         for (let field in type.fields) {

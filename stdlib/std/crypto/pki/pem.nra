@@ -10,10 +10,10 @@ let builders = import:Std.Core.StringBuilder;
 /// but the last has exactly 64 characters, the last has 1 to 64, and there are no headers, blank lines or
 /// spaces. Lines end in LF or CRLF. Text outside blocks is ignored, as the RFC allows.
 /// @see [Std.Crypto.Pki.Pem](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Pem)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Pem = module (
     /// @brief One PEM block: a label and the DER bytes.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let PemBlock = class (
         /// @brief The label, such as "CERTIFICATE" or "PRIVATE KEY".
         export last label: string;
@@ -81,7 +81,7 @@ export let Pem = module (
 
     /// @brief Every block in the text, in order. A BEGIN line without its END line, a mismatched label, or a
     /// line inside a block that breaks the strict grammar is a `Parse` error at the offset of the line.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let decode_all = func(text: string) -> Result<PemBlock[list]> {
         let blocks: PemBlock[list] = new;
         let lines: string[list] = new;
@@ -180,7 +180,7 @@ export let Pem = module (
     };
 
     /// @brief The bytes of the only block with the label. No such block, or more than one, is a `Parse` error.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let decode = func(text: string, label: string) -> Result<uint8[list]> {
         last blocks = decode_all(text)?;
         let found: uint8[list] = new;
@@ -198,7 +198,7 @@ export let Pem = module (
     };
 
     /// @brief The PEM text of a block: BEGIN line, Base64 in lines of 64, END line, each ending in LF.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let encode = func(label: string, der: uint8[list]) -> string {
         if (not valid_label(label)) {
             trap_with_message("invalid argument: PEM label");

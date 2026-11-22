@@ -31,7 +31,7 @@ let v6 = import:Std.Net.Core.Ipv6Addr;
 /// groups: a zone (`%`) or an embedded dotted IPv4 tail is rejected, and `encode` writes the groups itself
 /// (RFC 5952 compression, never the `::ffff:a.b.c.d` form).
 /// @see [Std.Net.Mesh.ProxyProtocol](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Mesh-ProxyProtocol)
-#Since("0.3.0")
+.Since("0.3.0")
 export let ProxyProtocol = module (
     /// @brief `PP2_TYPE_ALPN` (0x01): the application protocol, as in the TLS ALPN extension.
     export const TypeAlpn: int = 1;
@@ -90,7 +90,7 @@ export let ProxyProtocol = module (
     export let Detection = enum (NeedMore, V1, V2, NotProxy);
 
     /// @brief One version 2 Type-Length-Value vector.
-    #Final
+    .Final
     export let Tlv = class (
         /// @brief The type, 0 to 255.
         export last type_code: int;
@@ -127,7 +127,7 @@ export let ProxyProtocol = module (
     );
 
     /// @brief The decoded value of a `PP2_TYPE_SSL` TLV (section 2.2.6).
-    #Final
+    .Final
     export let SslInfo = class (
         /// @brief The `PP2_CLIENT_*` bit field.
         export last client: int;
@@ -163,7 +163,7 @@ export let ProxyProtocol = module (
         export let verified = func -> bool => verify == 0;
 
         /// @brief The text of the first sub-TLV of type `code`, if present and UTF-8.
-        #NoDiscard
+        .NoDiscard
         export let text = func(code: int) -> Optional<string> {
             for (let t in subs) {
                 if (t.type_code == code) {
@@ -174,27 +174,27 @@ export let ProxyProtocol = module (
         };
 
         /// @brief The TLS version (`PP2_SUBTYPE_SSL_VERSION`).
-        #NoDiscard
+        .NoDiscard
         export let version = func -> Optional<string> => text(SubtypeSslVersion);
 
         /// @brief The client certificate's Common Name (`PP2_SUBTYPE_SSL_CN`).
-        #NoDiscard
+        .NoDiscard
         export let common_name = func -> Optional<string> => text(SubtypeSslCn);
 
         /// @brief The cipher (`PP2_SUBTYPE_SSL_CIPHER`).
-        #NoDiscard
+        .NoDiscard
         export let cipher = func -> Optional<string> => text(SubtypeSslCipher);
 
         /// @brief The certificate signature algorithm (`PP2_SUBTYPE_SSL_SIG_ALG`).
-        #NoDiscard
+        .NoDiscard
         export let signature_algorithm = func -> Optional<string> => text(SubtypeSslSigAlg);
 
         /// @brief The certificate key algorithm (`PP2_SUBTYPE_SSL_KEY_ALG`).
-        #NoDiscard
+        .NoDiscard
         export let key_algorithm = func -> Optional<string> => text(SubtypeSslKeyAlg);
 
         /// @brief The TLV this record encodes to.
-        #NoDiscard
+        .NoDiscard
         export let to_tlv = func -> Tlv {
             last bytes: uint8[list] = new;
             bytes.append(client as uint8);
@@ -223,7 +223,7 @@ export let ProxyProtocol = module (
     );
 
     /// @brief A PROXY protocol header, parsed or to be sent.
-    #Final
+    .Final
     export let ProxyHeader = class (
         /// @brief The protocol version it was read in or is meant for: 1 or 2.
         export last version: int;
@@ -254,7 +254,7 @@ export let ProxyProtocol = module (
         };
 
         /// @brief The original client address, when the header carries IP addresses.
-        #NoDiscard
+        .NoDiscard
         export let source = func -> Optional<sockets.SocketAddr> => match (addresses) {
             Addresses.Inet { source, destination } => Optional<sockets.SocketAddr>.Some(source),
             Addresses.Unspecified => Optional<sockets.SocketAddr>.None,
@@ -262,7 +262,7 @@ export let ProxyProtocol = module (
         };
 
         /// @brief The original destination address, when the header carries IP addresses.
-        #NoDiscard
+        .NoDiscard
         export let destination = func -> Optional<sockets.SocketAddr> => match (addresses) {
             Addresses.Inet { source, destination } => Optional<sockets.SocketAddr>.Some(destination),
             Addresses.Unspecified => Optional<sockets.SocketAddr>.None,
@@ -273,7 +273,7 @@ export let ProxyProtocol = module (
         export let is_local = func -> bool => command == Command.Local;
 
         /// @brief The value of the first TLV of type `code`.
-        #NoDiscard
+        .NoDiscard
         export let tlv = func(code: int) -> Optional<uint8[list]> {
             for (let t in tlvs) {
                 if (t.type_code == code) {
@@ -284,23 +284,23 @@ export let ProxyProtocol = module (
         };
 
         /// @brief The ALPN protocol bytes (`PP2_TYPE_ALPN`).
-        #NoDiscard
+        .NoDiscard
         export let alpn = func -> Optional<uint8[list]> => tlv(TypeAlpn);
 
         /// @brief The authority (`PP2_TYPE_AUTHORITY`), when present and UTF-8.
-        #NoDiscard
+        .NoDiscard
         export let authority = func -> Optional<string> => text_tlv(TypeAuthority);
 
         /// @brief The unique connection id (`PP2_TYPE_UNIQUE_ID`).
-        #NoDiscard
+        .NoDiscard
         export let unique_id = func -> Optional<uint8[list]> => tlv(TypeUniqueId);
 
         /// @brief The network namespace (`PP2_TYPE_NETNS`), when present and UTF-8.
-        #NoDiscard
+        .NoDiscard
         export let netns = func -> Optional<string> => text_tlv(TypeNetns);
 
         /// @brief The checksum carried in a `PP2_TYPE_CRC32C` TLV (already verified by the decoder).
-        #NoDiscard
+        .NoDiscard
         export let crc32c = func -> Optional<uint32> => match (tlv(TypeCrc32c)) {
             Optional.Some(bytes) => bytes.length == 4 ? Optional<uint32>.Some(get_u32(bytes, 0))
                 : Optional<uint32>.None,
@@ -308,7 +308,7 @@ export let ProxyProtocol = module (
         };
 
         /// @brief The decoded `PP2_TYPE_SSL` TLV.
-        #NoDiscard
+        .NoDiscard
         export let ssl = func -> Optional<SslInfo> {
             for (let t in tlvs) {
                 if (t.type_code == TypeSsl) {
@@ -351,32 +351,32 @@ export let ProxyProtocol = module (
     );
 
     /// @brief A PROXY header for a TCP connection from `source` to `destination` in `version` 1 or 2.
-    #NoDiscard
+    .NoDiscard
     export let tcp = func(version: int, source: sockets.SocketAddr, destination: sockets.SocketAddr) -> ProxyHeader =>
         new ProxyHeader(version, Command.Proxy, Transport.Stream,
             Addresses.Inet { source: source, destination: destination }, new);
 
     /// @brief A version 2 PROXY header with every part given.
-    #NoDiscard
+    .NoDiscard
     export let v2 = func(transport: Transport, addresses: Addresses, tlvs: Tlv[list]) -> ProxyHeader =>
         new ProxyHeader(2, Command.Proxy, transport, addresses, tlvs);
 
     /// @brief A version 2 LOCAL header (a health check), with no addresses.
-    #NoDiscard
+    .NoDiscard
     export let local = func(tlvs: Tlv[list]) -> ProxyHeader =>
         new ProxyHeader(2, Command.Local, Transport.Unspec, Addresses.Unspecified, tlvs);
 
     /// @brief A version 1 `PROXY UNKNOWN` header.
-    #NoDiscard
+    .NoDiscard
     export let unknown = func -> ProxyHeader =>
         new ProxyHeader(1, Command.Proxy, Transport.Unspec, Addresses.Unspecified, new);
 
     /// @brief A TLV holding UTF-8 `text`.
-    #NoDiscard
+    .NoDiscard
     export let text_tlv = func(code: int, text: string) -> Tlv => new Tlv(code, strings.to_bytes(text));
 
     /// @brief The header in its own version's form; version 2 adds a CRC32C TLV when `with_crc` is true.
-    #NoDiscard
+    .NoDiscard
     export let encode = func(header: ProxyHeader, with_crc: bool) -> Result<uint8[list]> {
         return if (header.version == 1) -> Result<uint8[list]>.Ok(strings.to_bytes(encode_v1(header)?))
             else -> encode_v2(header, with_crc);
@@ -384,7 +384,7 @@ export let ProxyProtocol = module (
 
     /// @brief The version 1 line, CRLF included. Fails for LOCAL, for Unix or datagram addresses, for mixed
     /// families and for an IPv6 zone, none of which version 1 can say.
-    #NoDiscard
+    .NoDiscard
     export let encode_v1 = func(header: ProxyHeader) -> Result<string> {
         if (header.command == Command.Local) {
             return Result<string>.Err(custom("mesh.proxy_unencodable", "version 1 has no LOCAL command"));
@@ -400,7 +400,7 @@ export let ProxyProtocol = module (
     /// @brief The version 2 bytes; with `with_crc` any CRC32C TLV is replaced by a computed one at the end.
     /// Fails for mixed IP families, for addresses with an UNSPEC transport, and above 65535 bytes after the fixed
     /// part.
-    #NoDiscard
+    .NoDiscard
     export let encode_v2 = func(header: ProxyHeader, with_crc: bool) -> Result<uint8[list]> {
         last out = signature();
         out.append((header.command == Command.Local ? 32 : 33) as uint8);
@@ -466,11 +466,11 @@ export let ProxyProtocol = module (
 
     /// @brief What `bytes` start with (section 2.2 "Identifying the protocol version"), decided as soon as the
     /// prefix cannot match either signature.
-    #NoDiscard
+    .NoDiscard
     export let detect = func(bytes: uint8[list]) -> Detection => detect_at(bytes, 0);
 
     /// @brief The header at the start of `bytes`, which must be complete; bytes after it are ignored.
-    #NoDiscard
+    .NoDiscard
     export let parse = func(bytes: uint8[list]) -> Result<ProxyHeader> {
         last step = decode_at(bytes, 0)?;
         return match (step) {
@@ -485,7 +485,7 @@ export let ProxyProtocol = module (
     /// Push bytes, then call `next`: it returns the header, `None` while more bytes are needed, or the failure.
     /// `needed` says how many more bytes `next` needs at least, so a reader can avoid reading past the header.
     /// After the header, `remaining` holds the bytes that followed it. After a failure the decoder stays failed.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let ProxyDecoder = class (
         /// @brief Bytes received so far.
         let buffer: uint8[list] = new;
@@ -509,7 +509,7 @@ export let ProxyProtocol = module (
         export let buffered = func -> int => buffer.length;
 
         /// @brief The header, `None` while more bytes are needed, or the failure.
-        #NoDiscard
+        .NoDiscard
         export let next = func -> Result<Optional<ProxyHeader>> {
             if (failure.length > 0) {
                 return Result<Optional<ProxyHeader>>.Err(failure[0]);
@@ -540,7 +540,7 @@ export let ProxyProtocol = module (
         /// @brief The fewest further bytes `next` needs to make progress: 8 to tell the version (both forms are at
         /// least 15 bytes long), then for version 1 one byte at a time up to the CRLF, and for version 2 the rest of
         /// the 16 fixed bytes and then the announced length. Reading exactly this many never reads past the header. Zero once a header or a failure is known.
-        #NoDiscard
+        .NoDiscard
         export let needed = func -> int {
             if (found.length > 0 || failure.length > 0) {
                 return 0;
@@ -564,7 +564,7 @@ export let ProxyProtocol = module (
         };
 
         /// @brief The bytes received after the header (empty before the header is decoded).
-        #NoDiscard
+        .NoDiscard
         export let remaining = func -> uint8[list] {
             last rest: uint8[list] = new;
             if (consumed < 0) {
@@ -582,7 +582,7 @@ export let ProxyProtocol = module (
     );
 
     /// @brief A decoded header and its length in bytes.
-    #Final
+    .Final
     let Decoded = class (
         /// @brief The header.
         export last header: ProxyHeader;

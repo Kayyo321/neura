@@ -17,7 +17,7 @@ export let UnicodeNameLookup = module (
     /// @brief Java's getName: the stored or patterned Unicode name, Java's name of a control, or the block
     /// form (the Java block name, a space, and the code point in uppercase hex without leading zeros);
     /// the empty string for an unassigned code point. The code point is at most 0x10FFFF.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let java_name = func(code_point: uint32) -> string {
         last point = code_point as int;
         last special = find_special(point);
@@ -37,7 +37,7 @@ export let UnicodeNameLookup = module (
     /// @brief The Unicode Name property: the stored or patterned name, or the empty string when the code
     /// point has none (controls, surrogates, private use, noncharacters, and unassigned code points). The
     /// code point is at most 0x10FFFF.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let unicode_name = func(code_point: uint32) -> string {
         last point = code_point as int;
         last special = find_special(point);
@@ -50,7 +50,7 @@ export let UnicodeNameLookup = module (
     /// @brief The code point that a Java name or a Unicode name names, after removing leading and trailing
     /// characters up to U+0020 and uppercasing with the root rules, as Java's codePointOf does; -1 when no
     /// code point has the name.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let code_point_of = func(text: string) -> int {
         last key = upper(trim(text));
         if (key.byte_length == 0) {
@@ -75,7 +75,7 @@ export let UnicodeNameLookup = module (
     // Stored names
 
     /// @brief The stored name of a code point, or the empty string.
-    #Pure
+    .Pure
     let stored_name = func(point: int) -> string {
         let low = 0;
         let high = names.RunCount + 1;
@@ -99,7 +99,7 @@ export let UnicodeNameLookup = module (
     };
 
     /// @brief The code point of record number `index`.
-    #Pure
+    .Pure
     let record_code_point = func(index: int) -> int {
         let low = 0;
         let high = names.RunCount + 1;
@@ -116,7 +116,7 @@ export let UnicodeNameLookup = module (
 
     /// @brief The code point of a stored name, or -1: the blocks listed for the key's first word are decoded
     /// and compared.
-    #Pure
+    .Pure
     let stored = func(key: string) -> int {
         let first_end = 0;
         while (first_end < key.byte_length && key.byte_at(first_end) != 32) {
@@ -141,7 +141,7 @@ export let UnicodeNameLookup = module (
     };
 
     /// @brief The number of a first word in FirstWords, or -1.
-    #Pure
+    .Pure
     let find_word = func(word: string) -> int {
         let low = 0;
         let high = (names.FirstWordOffsets.byte_length >> 2) - 1;
@@ -161,7 +161,7 @@ export let UnicodeNameLookup = module (
     };
 
     /// @brief The first `limit` records of a block, fewer in the last block.
-    #Pure
+    .Pure
     let decode = func(block: int, limit: int) -> string[list] {
         last result: string[list] = new;
         let position = number(names.BlockOffsets, block << 2);
@@ -179,7 +179,7 @@ export let UnicodeNameLookup = module (
     };
 
     /// @brief Decodes the record at a Stream offset, given the previous name of its block.
-    #Pure
+    .Pure
     let decode_record = func(start: int, previous: string) -> string {
         let position = start;
         last shared = digit(names.Stream, position);
@@ -249,7 +249,7 @@ export let UnicodeNameLookup = module (
     // Generated names
 
     /// @brief The number of the Special range holding a code point, or -1.
-    #Pure
+    .Pure
     let find_special = func(point: int) -> int {
         let low = 0;
         let high = names.SpecialCount;
@@ -265,7 +265,7 @@ export let UnicodeNameLookup = module (
     };
 
     /// @brief The Unicode name of a code point in Special range `special`, or the empty string.
-    #Pure
+    .Pure
     let special_name = func(point: int, special: int) -> string {
         last prefix = digit(names.SpecialKinds, special << 1);
         if (prefix == 0) {
@@ -291,7 +291,7 @@ export let UnicodeNameLookup = module (
 
     /// @brief The code point of a name that ends in a hexadecimal number after a space or hyphen, when the
     /// number names a code point of a Special range whose Java or Unicode name is the key; otherwise -1.
-    #Pure
+    .Pure
     let patterned = func(key: string) -> int {
         let start = key.byte_length;
         while (start > 0 && is_hex(key.byte_at(start - 1))) {
@@ -321,7 +321,7 @@ export let UnicodeNameLookup = module (
     };
 
     /// @brief The code point of a Hangul syllable name, or -1.
-    #Pure
+    .Pure
     let hangul = func(key: string) -> int {
         last prefix = "HANGUL SYLLABLE ";
         if (key.byte_length <= prefix.byte_length || not starts_with(key, prefix, 0)) {
@@ -353,28 +353,28 @@ export let UnicodeNameLookup = module (
 
     /// @brief Jamo short name number `index`: leading consonants from 0, vowels from 19, trailing
     /// consonants from 40.
-    #Pure
+    .Pure
     let jamo = func(index: int) -> string => entry(names.Jamo, names.JamoOffsets, index);
 
     // Table and text helpers
 
     /// @brief The four-digit number at a byte offset.
-    #Pure
+    .Pure
     let number = func(table: string, offset: int) -> int =>
         (digit(table, offset) << 18) | (digit(table, offset + 1) << 12) | (digit(table, offset + 2) << 6) |
         digit(table, offset + 3);
 
     /// @brief The one-digit number at a byte offset.
-    #Pure
+    .Pure
     let digit = func(table: string, offset: int) -> int => (table.byte_at(offset) as int) - 48;
 
     /// @brief Text number `index` of a joined list with four-digit offsets.
-    #Pure
+    .Pure
     let entry = func(texts: string, offsets: string, index: int) -> string =>
         texts.slice(number(offsets, index << 2), number(offsets, (index + 1) << 2));
 
     /// @brief The text without leading and trailing characters up to U+0020 (Java's String.trim).
-    #Pure
+    .Pure
     let trim = func(text: string) -> string {
         let start = 0;
         let end = text.byte_length;
@@ -390,7 +390,7 @@ export let UnicodeNameLookup = module (
     /// @brief The text uppercased with the root rules, as Java's toUpperCase(Locale.ROOT) does, when the result
     /// is ASCII; otherwise the empty string, which is no name. The root rules map each character on its own, and
     /// the characters above U+007F that map to ASCII are those of UpperFrom, such as U+0131 to I and U+00DF to SS.
-    #Pure
+    .Pure
     let upper = func(text: string) -> string {
         let bytes: uint8[list] = new;
         let i = 0;
@@ -423,7 +423,7 @@ export let UnicodeNameLookup = module (
     };
 
     /// @brief Uppercase hex of a value with at least `width` digits.
-    #Pure
+    .Pure
     let hex = func(value: int, width: int) -> string {
         last digits = "0123456789ABCDEF";
         let count = 1;
@@ -442,11 +442,11 @@ export let UnicodeNameLookup = module (
     };
 
     /// @brief Tests an uppercase hexadecimal digit.
-    #Pure
+    .Pure
     let is_hex = func(byte: uint8) -> bool => (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 70);
 
     /// @brief Tests whether `text` holds `part` at a byte offset.
-    #Pure
+    .Pure
     let starts_with = func(text: string, part: string, offset: int) -> bool {
         if (offset + part.byte_length > text.byte_length) {
             return false;
@@ -460,7 +460,7 @@ export let UnicodeNameLookup = module (
     };
 
     /// @brief Byte-wise order of two strings.
-    #Pure
+    .Pure
     let before = func(left: string, right: string) -> bool {
         last count = left.byte_length < right.byte_length ? left.byte_length : right.byte_length;
         for (let i in 0 .. count) {

@@ -12,13 +12,13 @@ let unit = import:Std.Core.Unit;
 /// ascending. Iterators and callbacks fail fast with "collection modified
 /// during iteration".
 /// @see [Std.Collections.TreeSet](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-TreeSet)
-#Since("0.1.0")
+.Since("0.1.0")
 export let TreeSet = module (
     /// @brief A private token type that restricts construction to module factories.
     let Seal = enum (Token);
 
     /// @brief A mutable set that identifies and orders elements using its comparator.
-    #NotThreadSafe
+    .NotThreadSafe
     export let TreeSet = class<T> implements MutableSet<T>, SortedSet<T> (
         /// @brief The backing tree with one unit-valued entry per element.
         last map: tree_map.TreeMap<T, unit.Unit>;
@@ -133,19 +133,19 @@ export let TreeSet = module (
         export let descending = func -> T[list] => map.descending_keys();
 
         /// @brief Returns the greatest element at most `value` as `Some`, or `None` when absent.
-        #NoDiscard
+        .NoDiscard
         export let floor = func(value: T) -> optional.Optional<T> => map.floor(value);
 
         /// @brief Returns the least element at least `value` as `Some`, or `None` when absent.
-        #NoDiscard
+        .NoDiscard
         export let ceiling = func(value: T) -> optional.Optional<T> => map.ceiling(value);
 
         /// @brief Returns the greatest element strictly below `value` as `Some`, or `None` when absent.
-        #NoDiscard
+        .NoDiscard
         export let lower = func(value: T) -> optional.Optional<T> => map.lower(value);
 
         /// @brief Returns the least element strictly above `value` as `Some`, or `None` when absent.
-        #NoDiscard
+        .NoDiscard
         export let higher = func(value: T) -> optional.Optional<T> => map.higher(value);
 
         /// @brief Whether every element of this set is in `other`, by the other

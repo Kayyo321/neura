@@ -5,7 +5,7 @@ error[E0602]: a value of type Sequence<int32> is not transferable, so it cannot 
    |                       ^^^^^^^^^ not transferable
   ::: $ROOT/stdlib/std/collections/sequence.nra:19:25
    |
-19 |     #[Final, NoDiscard, NotThreadSafe]
+19 |     .[Final, NoDiscard, NotThreadSafe]
    |                         ------------- 'Sequence<int32>' is marked #NotThreadSafe here
    |
    = note: the instances of a #NotThreadSafe class, and of a class that extends one, stay in the task that holds them

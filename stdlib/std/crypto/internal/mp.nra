@@ -8,7 +8,7 @@
 /// branch-free in source; the runtime does not guarantee constant time. The few functions that are not
 /// branch-free say so and are used only on public values. `Modulus` gives Montgomery arithmetic modulo an odd
 /// number; the curves of Std.Crypto.Asymmetric and RSA share it.
-#Since("0.3.0")
+.Since("0.3.0")
 export let Mp = module (
     /// @brief The mask of the low 32 bits of a limb calculation.
     const Mask: uint64 = 4294967295;
@@ -355,7 +355,7 @@ export let Mp = module (
     /// Elements are numbers of n limbs below m. `mul` and `sqr` take and give Montgomery forms (x R mod m);
     /// `add`, `sub` and `neg` work in either form. `to_mont` and `from_mont` convert. Every operation is
     /// branch-free in source.
-    #Final
+    .Final
     export let Modulus = class (
         /// @brief The limb count n.
         export last n: int;

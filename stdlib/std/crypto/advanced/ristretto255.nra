@@ -7,7 +7,7 @@ let ristretto = import:Std.Crypto.Internal.Ristretto255Core;
 
 /// @brief The prime-order ristretto255 group of RFC 9496.
 /// @see [Std.Crypto.Advanced.Ristretto255](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Ristretto255)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Ristretto255 = module (
     let read_element = func(group: ristretto.Group, bytes: uint8[list]) -> Result<edwards.Point> {
         match (group.decode(bytes)) {
@@ -36,7 +36,7 @@ export let Ristretto255 = module (
 
     /// @brief The canonical 32-byte encoding of the identity.
     /// @see [Std.Crypto.Advanced.Ristretto255](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Ristretto255)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let identity = func -> uint8[list] {
         let group: ristretto.Group = new;
         return group.encode(group.identity());
@@ -44,7 +44,7 @@ export let Ristretto255 = module (
 
     /// @brief The canonical 32-byte encoding of the RFC 9496 generator.
     /// @see [Std.Crypto.Advanced.Ristretto255](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Ristretto255)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let generator = func -> uint8[list] {
         let group: ristretto.Group = new;
         return group.encode(group.base());
@@ -52,7 +52,7 @@ export let Ristretto255 = module (
 
     /// @brief Validates and canonically re-encodes an element. The identity is a valid group element.
     /// @see [Std.Crypto.Advanced.Ristretto255](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Ristretto255)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_element = func(bytes: uint8[list]) -> Result<uint8[list]> {
         let group: ristretto.Group = new;
         return Result<uint8[list]>.Ok(group.encode(read_element(group, bytes)?));
@@ -60,7 +60,7 @@ export let Ristretto255 = module (
 
     /// @brief Tests a canonical encoded point for the group identity.
     /// @see [Std.Crypto.Advanced.Ristretto255](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Ristretto255)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let is_identity = func(bytes: uint8[list]) -> Result<bool> {
         let group: ristretto.Group = new;
         return Result<bool>.Ok(group.is_identity(read_element(group, bytes)?));
@@ -68,7 +68,7 @@ export let Ristretto255 = module (
 
     /// @brief Adds two canonically encoded points.
     /// @see [Std.Crypto.Advanced.Ristretto255](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Ristretto255)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let add = func(left: uint8[list], right: uint8[list]) -> Result<uint8[list]> {
         let group: ristretto.Group = new;
         last a = read_element(group, left)?;
@@ -78,7 +78,7 @@ export let Ristretto255 = module (
 
     /// @brief Subtracts two canonically encoded points.
     /// @see [Std.Crypto.Advanced.Ristretto255](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Ristretto255)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let subtract = func(left: uint8[list], right: uint8[list]) -> Result<uint8[list]> {
         let group: ristretto.Group = new;
         last a = read_element(group, left)?;
@@ -89,7 +89,7 @@ export let Ristretto255 = module (
     /// @brief Multiplies a canonical encoded point by a canonical 32-byte little-endian scalar.
     /// The multiplication is branch-free in source. The runtime does not guarantee constant time.
     /// @see [Std.Crypto.Advanced.Ristretto255](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Ristretto255)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let multiply = func(scalar: uint8[list], point: uint8[list]) -> Result<uint8[list]> {
         let group: ristretto.Group = new;
         last k = read_scalar(group, scalar)?;
@@ -99,7 +99,7 @@ export let Ristretto255 = module (
 
     /// @brief Multiplies the standardized generator by a canonical 32-byte little-endian scalar.
     /// @see [Std.Crypto.Advanced.Ristretto255](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Ristretto255)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let multiply_base = func(scalar: uint8[list]) -> Result<uint8[list]> {
         let group: ristretto.Group = new;
         return Result<uint8[list]>.Ok(group.encode(group.multiply_base(read_scalar(group, scalar)?)));
@@ -107,7 +107,7 @@ export let Ristretto255 = module (
 
     /// @brief Derives a point from exactly 64 bytes as specified in RFC 9496. Another width traps.
     /// @see [Std.Crypto.Advanced.Ristretto255](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Ristretto255)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let from_uniform = func(bytes: uint8[list]) -> uint8[list] {
         let group: ristretto.Group = new;
         return group.encode(group.from_uniform(bytes));
@@ -115,7 +115,7 @@ export let Ristretto255 = module (
 
     /// @brief Reduces exactly 64 little-endian bytes modulo the group order. Another width traps.
     /// @see [Std.Crypto.Advanced.Ristretto255](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Ristretto255)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let scalar_reduce = func(bytes: uint8[list]) -> uint8[list] {
         if (bytes.length != 64) {
             trap_with_message("invalid argument: ristretto255 scalar reduction requires 64 bytes");
@@ -126,7 +126,7 @@ export let Ristretto255 = module (
 
     /// @brief Adds canonically encoded scalars modulo the group order.
     /// @see [Std.Crypto.Advanced.Ristretto255](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Ristretto255)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let scalar_add = func(left: uint8[list], right: uint8[list]) -> Result<uint8[list]> {
         let group: ristretto.Group = new;
         last a = read_scalar(group, left)?;
@@ -136,7 +136,7 @@ export let Ristretto255 = module (
 
     /// @brief Subtracts canonically encoded scalars modulo the group order.
     /// @see [Std.Crypto.Advanced.Ristretto255](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Ristretto255)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let scalar_subtract = func(left: uint8[list], right: uint8[list]) -> Result<uint8[list]> {
         let group: ristretto.Group = new;
         last a = read_scalar(group, left)?;
@@ -146,7 +146,7 @@ export let Ristretto255 = module (
 
     /// @brief Multiplies canonically encoded scalars modulo the group order.
     /// @see [Std.Crypto.Advanced.Ristretto255](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Ristretto255)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let scalar_multiply = func(left: uint8[list], right: uint8[list]) -> Result<uint8[list]> {
         let group: ristretto.Group = new;
         last a = read_scalar(group, left)?;
@@ -156,7 +156,7 @@ export let Ristretto255 = module (
 
     /// @brief Inverts a nonzero canonical scalar modulo the group order. Zero returns a Result error.
     /// @see [Std.Crypto.Advanced.Ristretto255](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Ristretto255)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let scalar_invert = func(scalar: uint8[list]) -> Result<uint8[list]> {
         let group: ristretto.Group = new;
         last value = read_scalar(group, scalar)?;
