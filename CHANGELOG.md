@@ -64,6 +64,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - On Linux, `neura.net.send_file` to a peer that has closed or reset the connection returns `ConnectionReset` instead of ending `neura run` or a native executable with SIGPIPE: `sendfile(2)` now runs with SIGPIPE blocked on the calling thread, as TLS writes do. An offset past a 32-bit `off_t` returns `InvalidInput` instead of wrapping.
 - Native fetch under an origin list reads an IP literal with a final dot (`http://1.2.3.4.:80`) as that address: it matched the listed numeric origin but was then treated as a name whose global answers were all allowed, instead of allowing exactly the listed address.
 - A DTLS read whose deadline passed while a peer datagram was on its way returns the packets that datagram produced, such as an ACK or the reply to a KeyUpdate, with `TimedOut`, instead of draining and dropping them, so the peer's KeyUpdate still completes.
+- Native fetch bounds the total framing of a chunked response to 64 KiB or eight times the body received so far, whichever is larger, and returns `TooLarge` past it, so one-byte chunks with 16 KiB extensions can no longer cost thousands of times the body in parsing.
 
 ### Known limitations
 

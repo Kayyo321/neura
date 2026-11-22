@@ -46,6 +46,12 @@ namespace {
 using Clock = std::chrono::steady_clock;
 constexpr std::size_t body_limit = 8 * 1024 * 1024;
 constexpr std::size_t head_limit = 16384;
+// Chunked framing (size lines, extensions and each chunk's CRLF) may total
+// 64 KiB or eight times the body bytes received so far, whichever is larger.
+// A one-byte chunk needs five framing bytes, so only extensions reach it:
+// they cannot make each body byte cost a 16 KiB line of parsing.
+constexpr std::size_t chunk_framing_floor = 64 * 1024;
+constexpr std::size_t chunk_framing_factor = 8;
 constexpr std::uint32_t too_large = 16, busy = 17, unknown = 18;
 // Codes 23 to 25 are the fetch services' own, in the shared table of
 // providers.hpp after the SQL provider's 19 to 22.
@@ -750,9 +756,15 @@ Response http1(Connection& connection, const Url& url, const Request& request) {
     }
     if (request.method == "HEAD" || response.status == 204 || response.status == 304) return response;
     if (chunked) {
+        std::size_t framing = 0;
+        const auto framing_limit = [&] {
+            return std::max(chunk_framing_floor, chunk_framing_factor * response.body.size());
+        };
         for (;;) {
             std::size_t line_budget = head_limit;
             const auto line = input.line(line_budget);
+            framing += head_limit - line_budget;
+            if (framing > framing_limit()) reject(too_large);
             const auto semi = line.find(';');
             auto digits = std::string_view(line).substr(0, semi);
             if (semi != std::string::npos)
@@ -764,6 +776,7 @@ Response http1(Connection& connection, const Url& url, const Request& request) {
             std::string ending;
             input.take(2, ending);
             if (ending != "\r\n") reject(unknown);
+            framing += 2;
         }
         std::size_t trailer_budget = head_limit;
         for (std::size_t fields = 0;; ++fields) {
