@@ -1,12 +1,12 @@
 # Neura 0.3.1 Specification
 
-This update will take all stubs left in 0.3.0, including unfinished Net standard libraries/host functionality and implement it. What 0.3.1 will finally do is verify end to end that Neura fufills the following: 
+Neura 0.3.1 extends the networking library and host providers introduced in 0.3.0. HTTP/3 transport, QPACK and MASQUE operations are deferred and return typed `Unsupported`. General QUIC, RPC, Realtime and Mesh remain in progress, and some cryptography providers remain subject to qualification.
+
+The release aims to verify this memory-safety property end to end.
+
 ### "Every valid, safe Neura program must be unable to access memory outside a live, authorized allocation, regardless of its inputs or execution schedule."
 
-and then we can genuinely say that Neura is a memory safe programming langauge.
-
-This will also add langauge features, and only one new Std library, 
-> Std.Core.Pointer
+The release also adds language features and one new standard library module, `Std.Core.Pointer`.
 
 ## Typed numeric literals
 

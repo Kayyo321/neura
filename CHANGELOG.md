@@ -36,7 +36,10 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - The condition diagnostic now reads "expected bool or a class or interface reference".
 - The single TLS provider is pinned to OpenSSL 4.1.0. Builds with TLS enabled use it for server HTTPS, `Std.Net.Tls`, DNS over QUIC and the PostgreSQL provider.
 - `EventLoop.select` returns `Ok(Poll)` on Windows. Successful event-loop installs apply to the native driver and debugger. Replays use the recorded result.
-- Raw IP sockets require the explicit `raw` capability and network access. SPIFFE SVID verification requires a nonempty trust domain.
+- Raw IP sockets require the explicit `raw` capability and network access.
+- `H2.hpack_encode` and `H3.encode_field_section` return `Result<uint8[list]>`. Handle the result at existing call sites.
+- `H2Connection.init(target: string)` is now `init(seal: Seal, target: string, stream: int64, timeout: int64)`. Create connections through `H2.connect` or `H2.connect_with`.
+- SPIFFE X.509-SVID and JWT-SVID verification require callers to pass a nonempty `trust_domain` argument.
 - Unqualified device and enclave evidence APIs and FN-DSA return typed `Unsupported` results. FN-DSA signing and verification now return `Result`.
 
 ### Known limitations
