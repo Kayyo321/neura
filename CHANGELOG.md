@@ -282,6 +282,7 @@ Standard library:
 
 Applications and platforms:
 
+- Under AddressSanitizer and UBSan (Tier 2's sanitizer job), `backend-reference`, which runs the standard library tests on the reference evaluator, has not finished: it ran into its 5.5-hour limit without a sanitizer report (Tier 2 run 44953295679), and a hosted runner's 6-hour job leaves no room for a longer one. It passes in Tier 1 and in every other Tier 2 job, on Linux, macOS and Windows; the reference evaluator has no sanitized run of that suite for 0.3.0.
 - Browser budgets B-W5 (about 130 ms against 8 ms) and B-W6 (about 290 ms against 50 ms) are missed; WebAssembly is several times slower than native code; continuous integration does not run browser or desktop tests.
 - `neura.http.fetch` is served only in a browser. Desktop packages are built for Linux only (`.dmg`, `.msix` and Windows targets are refused with `E1033`); `neura package --sign`, `--source-map` and `--report` are not implemented.
 - Native tier 3 runs only on x86-64 Linux. On macOS and AArch64 Linux, programs run on tier 2, and the advanced, asymmetric and post-quantum cryptography suites are not run on x86-64 macOS in continuous integration because they exceed its time limit there.
