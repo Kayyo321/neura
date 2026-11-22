@@ -1406,13 +1406,13 @@ StandardServices::StandardServices(ConsoleSink& output, ConsoleSink& error, Cons
     };
     add_net_services(adder, overlap, *tables_, capabilities_);
     add_socket_services(adder, overlap, *tables_, capabilities_);
-    add_tls_services(adder, *tables_, capabilities_, prefixes_);
-    add_doq_services(adder, capabilities_, prefixes_);
     const OverlapAdder fetch_adder = [this](HostSignature signature, FunctionService::Handler handler,
                                           FunctionService::Begin begin) {
         services_.push_back(std::make_unique<FunctionService>(std::move(signature), std::move(handler),
                                                             std::move(begin), true));
     };
+    add_tls_services(adder, fetch_adder, *tables_, capabilities_, prefixes_);
+    add_doq_services(adder, capabilities_, prefixes_);
     add_http_fetch_services(fetch_adder, capabilities_);
     add_hpack_services(adder);
     add_ffi_services(adder, *tables_, capabilities_);

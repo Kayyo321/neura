@@ -1,0 +1,81 @@
+let config = import:Std.Net.Tls.TlsConfig;
+let console = import:Std.Io.Console;
+let duration = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let h2 = import:Std.Net.Http.H2;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let system_clock = import:Std.Time.SystemClock;
+let unit = import:Std.Core.Unit;
+
+let H2OverlapClient = module:program.Entry (
+    let heartbeat = func {
+        last clock = system_clock.create();
+        while (result.is_ok<unit.Unit>(clock.sleep(duration.of_millis(25)))) {
+            console.print_line("heartbeat");
+        }
+    };
+
+    let exercise = func(scenario: string, authority: string, ca_file: string) -> result.Result<unit.Unit> {
+        last settings: h2.Settings = new;
+        settings.add(h2.SettingEnablePush, 0);
+        settings.add(h2.SettingHeaderTableSize, 0);
+        last builder = config.builder();
+        builder.set_alpn(new(["h2"]));
+        builder.set_ca_file(ca_file);
+        builder.set_server_name("localhost");
+        builder.set_handshake_timeout(duration.of_millis(500));
+        last connection = h2.connect_with(authority, settings, builder.build_client()?)?;
+        if (scenario != "blocked-write") {
+            last closed = connection.close(h2.ErrorNoError);
+            connection.close(h2.ErrorNoError)?;
+            return closed;
+        }
+        last payload = strings.to_bytes(strings.repeat("x", 16384));
+        // An extension frame does not spend a DATA stream's flow-control window.
+        // Keep the maximum number of writes fixed as well as each write's deadline.
+        for (let i in 0 .. 1024) {
+            match (connection.send_frame(new h2.FrameHeader(payload.length, 250, 0, 0), payload)) {
+                result.Result.Ok(_) => {},
+                result.Result.Err(failure) => {
+                    connection.close(h2.ErrorNoError)?;
+                    return result.Result<unit.Unit>.Err(failure);
+                },
+            }
+        }
+        let _ = connection.close(h2.ErrorNoError);
+        return result.Result<unit.Unit>.Err(errors.custom("test.h2.no-backpressure", "all writes completed"));
+    };
+
+    let cancel_operation = func(scenario: string, authority: string, ca_file: string) -> result.Result<unit.Unit> {
+        scope (request) {
+            request.cancel_after(duration.of_millis(200))?;
+            last blocked = spawn exercise(scenario, authority, ca_file);
+            return blocked.join();
+        }
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        scope (test) {
+            let _ = spawn heartbeat();
+            last outcome = (args[0] == "cancel-connect" || args[0] == "cancel-close")
+                ? cancel_operation(args[0], args[1], args[2])
+                : exercise(args[0], args[1], args[2]);
+            test.cancel();
+            match (outcome) {
+                result.Result.Err(errors.Error.Io { kind, message: _, path: _ }) => {
+                    console.print_line(kind.to_string());
+                    return program.ExitCode.Ok;
+                },
+                result.Result.Err(problem) => {
+                    console.print_line(errors.message(problem));
+                },
+                result.Result.Ok(_) => {
+                    console.print_line("unexpected success");
+                },
+            }
+        }
+        return program.ExitCode.Failure;
+    };
+);

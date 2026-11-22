@@ -42,6 +42,7 @@ struct UpcallDeleter {
 };
 // A TLS stream (tls_provider.cpp); destroyed with TlsDeleter.
 struct TlsStream;
+struct TlsConnectJobs;
 struct TlsDeleter {
     void operator()(TlsStream* stream) const;
 };
@@ -95,6 +96,7 @@ struct StandardServices::Tables {
         std::vector<std::unique_ptr<Upcall, provider::UpcallDeleter>> upcalls;
     };
     Native native;
+    std::shared_ptr<provider::TlsConnectJobs> tls_connect_jobs;
 };
 
 namespace provider {
@@ -199,7 +201,8 @@ std::optional<SocketReference> hold_socket(NativeSocket descriptor);
 void add_socket_services(const Adder& add, const OverlapAdder& overlap, StandardServices::Tables& tables,
                          const Capabilities& capabilities);
 // TLS client and server streams (OpenSSL when built with NEURA_NVM_TLS).
-void add_tls_services(const Adder& add, StandardServices::Tables& tables, const Capabilities& capabilities,
+void add_tls_services(const Adder& add, const OverlapAdder& cancellable, StandardServices::Tables& tables,
+                      const Capabilities& capabilities,
                       const std::vector<ResolvedPath>& prefixes);
 void close_tls(StandardServices::Tables& tables);
 void add_doq_services(const Adder& add, const Capabilities& capabilities,

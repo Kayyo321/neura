@@ -4,6 +4,7 @@
 import argparse
 import concurrent.futures
 import pathlib
+import re
 import socket
 import ssl
 import struct
@@ -38,7 +39,7 @@ def serve(listener, context, case, release):
     with listener.accept()[0] as accepted:
         accepted.settimeout(5)
         accepted.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
-        if case == "handshake-timeout":
+        if case in {"handshake-timeout", "cancel-connect"}:
             assert release.wait(10), "harness did not release silent peer"
             return
         try:
@@ -62,7 +63,7 @@ def serve(listener, context, case, release):
                 assert release.wait(20), "harness did not release non-reading peer"
                 return
             connection.sendall(b"\0\0\0\x04\0\0\0\0\0")
-            if case == "close-timeout":
+            if case in {"close-timeout", "cancel-close"}:
                 assert frame(connection) == (7, 0, 0, b"\0" * 8)
                 assert release.wait(10), "harness did not release non-closing peer"
                 return
@@ -70,6 +71,70 @@ def serve(listener, context, case, release):
             assert frame(connection) == (250, 0, 0, b"abc")
             assert frame(connection) == (7, 0, 0, b"\0" * 8)
             connection.unwrap().close()
+
+
+def assert_heartbeat_during_wait(trace, service, error):
+    requests = []
+    completions = {}
+    lines = trace.read_text(encoding="utf-8").splitlines()
+    for index, line in enumerate(lines):
+        if line.startswith("request "):
+            request = re.fullmatch(r"request (\S+) \d+ (.*) task (\d+) tick (\d+)(?: (\w+))?", line)
+            assert request, line
+            name, arguments, task, issued, overlap = request.groups()
+            requests.append((name, arguments, task, int(issued), overlap, lines[index + 1]))
+        elif line.startswith("deliver "):
+            _, tick, request_id, *flags = line.split()
+            completions[int(request_id)] = (int(tick), flags)
+    stalled = [(i, request) for i, request in enumerate(requests)
+               if request[0] == "neura.net.tls." + service and request[-1] == f"error {error}"]
+    assert len(stalled) == 1, (service, error, [(r[0], r[-1]) for r in requests if r[-1].startswith("error")])
+    index, (_, _, task, issued, overlap, _) = stalled[0]
+    assert overlap == "cancellable", (service, overlap)
+    delivered, flags = completions[index]
+    assert flags == (["cancelled"] if error == 15 else []), (service, flags)
+    assert any(name == "neura.console.write_line" and args == '["heartbeat"]' and other != task
+               and issued < tick < delivered for name, args, other, tick, _, _ in requests), (
+        service, task, issued, delivered, [request[:4] for request in requests if "console" in request[0]])
+
+
+def check_overlap(args, root, cert, key):
+    image = root / "h2-overlap.nvr"
+    source = pathlib.Path(__file__).with_name("loopback") / "h2-overlap-client.nra"
+    run([str(args.compiler or args.neura), "build", str(source), "-o", str(image)])
+    runner = [str(args.neura), "run", str(image)]
+    scenarios = [
+        ("handshake-timeout", "connect_overlapped", "TimedOut", 12),
+        ("blocked-write", "write_overlapped", "TimedOut", 12),
+        ("close-timeout", "read_overlapped", "TimedOut", 12),
+        ("cancel-connect", "connect_overlapped", "Cancelled", 15),
+        ("cancel-close", "read_overlapped", "Cancelled", 15),
+    ]
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.set_alpn_protocols(["h2"])
+    context.load_cert_chain(cert, key)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        for case, service, expected, error in scenarios:
+            trace = root / f"{case}.trace"
+            with socket.socket() as listener:
+                listener.bind(("127.0.0.1", 0))
+                listener.settimeout(5)
+                listener.listen(1)
+                release = threading.Event()
+                future = pool.submit(serve, listener, context, case, release)
+                target = f"127.0.0.1:{listener.getsockname()[1]}"
+                arguments = ["--", case, target, str(cert)]
+                try:
+                    actual = run(runner + ["--record", str(trace)] + arguments, timeout=25)
+                finally:
+                    release.set()
+                future.result(timeout=5)
+            assert [line for line in actual.splitlines() if line != "heartbeat"] == [expected], (case, actual)
+            assert_heartbeat_during_wait(trace, service, error)
+            print(f"PASS h2-{case}-heartbeat", flush=True)
+            if case in {"handshake-timeout", "cancel-connect"}:
+                assert run(runner + ["--replay", str(trace)] + arguments) == actual
+                print(f"PASS h2-{case}-replay", flush=True)
 
 
 def main():
@@ -133,6 +198,7 @@ def main():
             assert run(runner + ["--record", str(trace)] + codec) == "ok\n"
             assert run(runner + ["--replay", str(trace)] + codec) == "ok\n"
             print("PASS hpack-denied-all-record-replay", flush=True)
+        check_overlap(args, root, cert, key)
 
 
 if __name__ == "__main__":
