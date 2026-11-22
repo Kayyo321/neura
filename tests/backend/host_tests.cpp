@@ -1828,11 +1828,13 @@ NEURA_TEST(host, doq_loopback_checks_identity_and_exact_stream_framing) {
     const auto arguments = [](int port, std::string name, std::string payload = std::string(test_dns_query)) {
         return std::vector<HostValue>{text("127.0.0.1"), i32(port), text(std::move(name)), bytes(std::move(payload))};
     };
-    const auto exchange = [&](DoqTestServer::Response response, std::string name) {
+    const auto exchange = [&](DoqTestServer::Response response, std::string name, bool explicit_ca = false) {
         DoqTestServer peer(certificate, key);
         bool received_query = false;
         std::jthread serving([&](std::stop_token stop) { peer.serve(stop, response, received_query); });
-        auto result = client.call("neura.net.quic.dns_exchange", arguments(peer.port, std::move(name)));
+        auto args = arguments(peer.port, std::move(name));
+        if (explicit_ca) args.push_back(text(certificate));
+        auto result = client.call("neura.net.quic.dns_exchange", std::move(args), explicit_ca ? 2 : 1);
         serving.request_stop();
         serving.join();
         if (response != DoqTestServer::Response::Rejected) check(received_query, "query and stream FIN received");
@@ -1853,6 +1855,16 @@ NEURA_TEST(host, doq_loopback_checks_identity_and_exact_stream_framing) {
     configure_trust(dir / "untrusted.pem");
     expect_error(exchange(DoqTestServer::Response::Rejected, "localhost"), host_error::permission_denied,
                  "certificate is not in the configured trust store");
+    const auto explicit_reply = exchange(DoqTestServer::Response::Valid, "localhost", true);
+    expect_ok(explicit_reply, "caller CA bundle works independently of system trust");
+    check_equal(explicit_reply.value.bytes, expected, "explicit CA DoQ response");
+    auto only_net = everything();
+    only_net.fs = false;
+    Host no_files(only_net);
+    auto with_ca = arguments(853, "localhost");
+    with_ca.push_back(text(certificate));
+    expect_error(no_files.call("neura.net.quic.dns_exchange", with_ca, 2), host_error::capability_denied,
+                 "explicit DoQ CA requires fs permission");
     configure_trust(certificate);
     DoqTestServer silent_peer(certificate, key);
     expect_error(client.call("neura.net.quic.dns_exchange", arguments(silent_peer.port, "localhost")),
@@ -1906,6 +1918,8 @@ NEURA_TEST(ktls, both_directions_transfer_over_kernel_records) {
 }
 #endif
 
+// Neither side reads records after the handshake. Every direct write must
+// return TimedOut, including streams created by both service versions.
 NEURA_TEST(host, tls_write_deadlines_cover_connect_and_accept_versions) {
     const LoopbackTlsKeys material;
     constexpr auto budget = 150'000'000LL;
@@ -1942,6 +1956,24 @@ NEURA_TEST(host, tls_write_deadlines_cover_connect_and_accept_versions) {
             server.call("neura.net.tls.close", {accepted.value.elements.at(0)});
         }
     }
+}
+
+NEURA_TEST(host, tls_material_checks_the_opened_file_target) {
+    const LoopbackTlsKeys material;
+    TemporaryDirectory allowed("tls-allowed");
+    const auto link = allowed.path() / "ca.pem";
+    fs::create_symlink(material.certificate, link);
+    auto caps = everything();
+    caps.fs_prefixes.push_back(allowed.path().string());
+    Host restricted(caps);
+    expect_error(restricted.call("neura.net.tls.connect", {text("127.0.0.1"), i32(9), i64(100'000'000),
+        text("localhost"), tls_names({}), text(link.string())}), host_error::capability_denied,
+        "opened symlink target is outside the permitted prefix");
+    fs::remove(link);
+    fs::copy_file(material.certificate, link);
+    expect_error(restricted.call("neura.net.tls.connect", {text("127.0.0.1"), i32(9), i64(100'000'000),
+        text("localhost"), tls_names({}), text(link.string())}), host_error::connection_refused,
+        "opened regular CA file inside the permitted prefix is usable");
 }
 
 NEURA_TEST(host, tls_v2_requires_exact_versions_and_mutual_identity) {

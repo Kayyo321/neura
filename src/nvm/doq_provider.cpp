@@ -20,6 +20,7 @@
 #include <openssl/quic.h>
 #include <openssl/ssl.h>
 #include <openssl/x509v3.h>
+#include "tls_material.hpp"
 #endif
 
 namespace neura::nvm::provider {
@@ -153,7 +154,7 @@ std::uint32_t read_exact(SSL* connection, SSL* stream, platform::native_socket d
 }
 
 HostCompletion exchange(const std::string& host, std::int32_t port, const std::string& name,
-                        const std::string& payload) {
+                        const std::string& payload, const std::string& ca_bundle) {
     if (port < 1 || port > 65535 || !usable_text(host) || !usable_text(name) ||
         payload.size() < dns_header_size + 2 || payload.size() > 65537 ||
         framed_size(payload) != payload.size() - 2 || payload[2] != 0 || payload[3] != 0) {
@@ -168,13 +169,7 @@ HostCompletion exchange(const std::string& host, std::int32_t port, const std::s
     Context context(SSL_CTX_new(OSSL_QUIC_client_method()), SSL_CTX_free);
     if (!context) return fail(host_error::other);
     SSL_CTX_set_verify(context.get(), SSL_VERIFY_PEER, nullptr);
-#ifdef _WIN32
-    if (SSL_CTX_load_verify_store(context.get(), "org.openssl.winstore:") != 1) {
-        return fail(host_error::permission_denied);
-    }
-#else
-    if (SSL_CTX_set_default_verify_paths(context.get()) != 1) return fail(host_error::permission_denied);
-#endif
+    if (!tls_material::trust(context.get(), ca_bundle)) return fail(host_error::permission_denied);
     Ssl ssl(SSL_new(context.get()), SSL_free);
     if (!ssl || !verify_identity(ssl.get(), name) ||
         SSL_set_alpn_protos(ssl.get(), doq_alpn, sizeof doq_alpn) != 0 ||
@@ -236,19 +231,25 @@ HostCompletion exchange(const std::string& host, std::int32_t port, const std::s
 
 } // namespace
 
-void add_doq_services(const Adder& add, const Capabilities& capabilities) {
+void add_doq_services(const Adder& add, const Capabilities& capabilities,
+                      const std::vector<ResolvedPath>& prefixes) {
     const auto* granted = &capabilities;
-    add(signature("neura.net.quic.dns_exchange", {text(), int32(), text(), byte_list()}, byte_list()),
-        [=](const HostRequest& request) {
-            if (!granted->net) return denied();
+    const auto* allowed = &prefixes;
+    const auto handler = [=](const HostRequest& request) {
+        if (!granted->net) return denied();
 #if defined(NEURA_NVM_TLS) && !defined(OPENSSL_NO_QUIC)
-            return exchange(request.arguments.at(0).bytes, as_int32(request.arguments.at(1)),
-                            request.arguments.at(2).bytes, request.arguments.at(3).bytes);
+        auto ca_bundle = request.arguments.size() > 4 ? request.arguments.at(4).bytes : std::string();
+        if (const auto error = tls_material::read(*granted, *allowed, ca_bundle)) return fail(error);
+        return exchange(request.arguments.at(0).bytes, as_int32(request.arguments.at(1)),
+                        request.arguments.at(2).bytes, request.arguments.at(3).bytes, ca_bundle);
 #else
-            (void)request;
-            return fail(host_error::unsupported);
+        (void)request;
+        (void)allowed;
+        return fail(host_error::unsupported);
 #endif
-        });
+    };
+    add(signature("neura.net.quic.dns_exchange", {text(), int32(), text(), byte_list()}, byte_list()), handler);
+    add({"neura.net.quic.dns_exchange", 2, {text(), int32(), text(), byte_list(), text()}, byte_list(), uint32()}, handler);
 }
 
 } // namespace neura::nvm::provider

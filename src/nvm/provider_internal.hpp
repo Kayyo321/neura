@@ -195,7 +195,8 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
 void add_tls_services(const Adder& add, StandardServices::Tables& tables, const Capabilities& capabilities,
                       const std::vector<ResolvedPath>& prefixes);
 void close_tls(StandardServices::Tables& tables);
-void add_doq_services(const Adder& add, const Capabilities& capabilities);
+void add_doq_services(const Adder& add, const Capabilities& capabilities,
+                      const std::vector<ResolvedPath>& prefixes);
 
 } // namespace provider
 } // namespace neura::nvm

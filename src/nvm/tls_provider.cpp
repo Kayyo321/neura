@@ -36,6 +36,7 @@
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 #include <openssl/x509v3.h>
+#include "tls_material.hpp"
 #endif
 
 namespace neura::nvm::provider {
@@ -381,42 +382,18 @@ bool init_context(TlsStream& stream, bool server, std::int32_t low, std::int32_t
     return true;
 }
 
-bool load_trust(SSL_CTX* context, const std::string& ca_file) {
-    if (!ca_file.empty()) return SSL_CTX_load_verify_locations(context, ca_file.c_str(), nullptr) == 1;
-#ifdef _WIN32
-    return SSL_CTX_load_verify_store(context, "org.openssl.winstore:") == 1;
-#else
-    return SSL_CTX_set_default_verify_paths(context) == 1;
-#endif
-}
+bool load_trust(SSL_CTX* context, const std::string& bytes) { return tls_material::trust(context, bytes); }
 
-// Inspect path restrictions before passing any explicit caller path to OpenSSL.
 std::uint32_t permitted_paths(const Capabilities& capabilities, const std::vector<ResolvedPath>& prefixes,
                               std::initializer_list<std::string*> paths) {
     for (auto* path : paths) {
-        if (path->empty()) continue;
-        if (!capabilities.fs) return host_error::capability_denied;
-        if (!usable_text(*path)) return host_error::invalid_input;
-#ifdef _WIN32
-        if (const auto refused = windows_path_error(*path); refused != 0) return refused;
-#endif
-        if (prefixes.empty()) continue;
-        const auto resolved = resolve_path(*path, true);
-        if (resolved.error != 0) return resolved.error;
-        if (std::none_of(prefixes.begin(), prefixes.end(), [&](const auto& prefix) { return resolved.within(prefix); })) {
-            return host_error::capability_denied;
-        }
-        *path = resolved.text();
+        if (const auto error = tls_material::read(capabilities, prefixes, *path)) return error;
     }
     return 0;
 }
 
 bool load_identity(SSL_CTX* context, const std::string& certificate, const std::string& key) {
-    // OpenSSL's default callback can prompt on stderr for an encrypted key.
-    SSL_CTX_set_default_passwd_cb(context, [](char*, int, int, void*) { return 0; });
-    return SSL_CTX_use_certificate_chain_file(context, certificate.c_str()) == 1 &&
-           SSL_CTX_use_PrivateKey_file(context, key.c_str(), SSL_FILETYPE_PEM) == 1 &&
-           SSL_CTX_check_private_key(context) == 1;
+    return tls_material::identity(context, certificate, key);
 }
 
 bool set_identity_check(SSL* ssl, const std::string& name) {
@@ -538,9 +515,7 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
         if (!client_ca.empty()) {
             if (!load_trust(stream->context, client_ca)) return fail(host_error::invalid_input);
             SSL_CTX_set_verify(stream->context, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, nullptr);
-            auto* ca_names = SSL_load_client_CA_file(client_ca.c_str());
-            if (!ca_names) return fail(host_error::invalid_input);
-            SSL_CTX_set_client_CA_list(stream->context, ca_names);
+            if (!tls_material::client_names(stream->context, client_ca)) return fail(host_error::invalid_input);
         }
         stream->alpn = *alpn;
         if (!alpn->empty()) SSL_CTX_set_alpn_select_cb(stream->context, server_alpn, &stream->alpn);

@@ -14,7 +14,7 @@ let.promote _ = import:Std.Core.Unit;
 /// @brief A TLS 1.2 or 1.3 stream over TCP: a `Std.Net.Socket.StreamSocket` of `Std.Net.Core.SocketAddr` whose
 /// bytes are encrypted by the host's TLS provider. Needs the net capability.
 ///
-/// `TlsConnector` and `TlsAcceptor` open streams. The record layer runs in the host's TLS library (OpenSSL 3.5 in
+/// `TlsConnector` and `TlsAcceptor` open streams. The record layer runs in the host's TLS library (OpenSSL 4.1 in
 /// builds configured with `NEURA_ENABLE_SERVER_TLS`): Neura 0.3.0 has no pure-Neura TLS (see
 /// `Std.Net.Tls.Handshake`). Reading, writing and close call the host's `neura.net.tls.*` services. `close` sends `close_notify`.
 /// Shutdown sends TLS `close_notify` on the write side. `local_address` reports the underlying socket address.
@@ -138,11 +138,14 @@ export let TlsStream = module (
             };
         };
 
-        /// @brief Ends reading or sends an authenticated `close_notify` to end writing. The socket stays open.
+        /// @brief Sends authenticated `close_notify` for Write. Read and Both return Unsupported without changing state.
         .NoDiscard
         export let shutdown = func(how: Shutdown) -> Result<Unit> {
             return Result<Unit>.Err(bytes.closed("stream", label)) unless open_now;
-            if (how != Shutdown.Read && not write_closed) {
+            if (how != Shutdown.Write) {
+                return Result<Unit>.Err(host_error.io(13 as uint32, "TLS read shutdown is unsupported", label));
+            }
+            if (not write_closed) {
                 match (tls_shutdown_write(id, timeout_nanos)) {
                     host.DoneOutcome.Ok => {
                         write_closed = true;
@@ -151,9 +154,6 @@ export let TlsStream = module (
                         return Result<Unit>.Err(host_error.io(failure, "TLS write shutdown failed", label));
                     },
                 }
-            }
-            if (how != Shutdown.Write) {
-                read_closed = true;
             }
             return bytes.ok();
         };

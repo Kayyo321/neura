@@ -31,10 +31,14 @@ export let DoqTransport = module (
         /// @brief The TLS server name.
         export last server_name: string;
 
-        /// @brief A transport to `address`, verifying `name`.
-        export let init = func(address: SocketAddr, name: string) {
+        /// @brief Optional PEM CA bundle; an explicit path also needs fs permission.
+        last ca_file: string;
+
+        /// @brief A transport to `address`, verifying `name`, using system trust unless `ca_bundle` is supplied.
+        export let init = func(address: SocketAddr, name: string, ca_bundle: string = "") {
             server = address;
             server_name = name;
+            ca_file = ca_bundle;
         };
 
         /// @brief A stream transport.
@@ -43,7 +47,7 @@ export let DoqTransport = module (
         /// @brief One exchange on a new QUIC stream.
         export let exchange = func(query: messages.Message) -> Result<messages.Message> {
             last payload = stream_payload(query)?;
-            return match (quic_exchange(server.host_text(), server.port, server_name, payload)) {
+            return match (quic_exchange(server.host_text(), server.port, server_name, payload, ca_file)) {
                 BytesOutcome.Ok(reply) => restore_id(query, reply),
                 BytesOutcome.Error(code) => Result<messages.Message>.Err(host_error.io(code, "DoQ exchange failed",
                     server.to_string())),
@@ -92,6 +96,6 @@ export let DoqTransport = module (
     };
 
     /// @brief Opens a verified QUIC connection with ALPN "doq" and exchanges a single framed DNS message.
-    let quic_exchange = func(address: string, port: int, server_name: string, payload: uint8[list]) -> BytesOutcome
-        host("neura.net.quic.dns_exchange", 1);
+    let quic_exchange = func(address: string, port: int, server_name: string, payload: uint8[list], ca_file: string) -> BytesOutcome
+        host("neura.net.quic.dns_exchange", 2);
 );

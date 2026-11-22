@@ -17,9 +17,8 @@ let.promote _ = import:Std.Net.Tls.TlsStream;
 /// its server name (or, when that is empty, the dialed address, which the host matches as an IP address). The
 /// server name is sent as SNI and the ALPN list is offered. The handshake runs in the host's TLS provider
 /// (`neura.net.tls.connect`), which a build configured with `NEURA_ENABLE_SERVER_TLS` has; in another build
-/// `connect` fails with Unsupported. A
-/// configuration with a client certificate (mutual TLS) or a version range narrower than TLS 1.2 through 1.3
-/// needs an extended host service that no runtime offers yet.
+/// `connect` fails with Unsupported. The extended provider supports mutual TLS, narrowed version ranges,
+/// and a request for kernel TLS record processing.
 /// @see [Std.Net.Tls.TlsConnector](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Tls-TlsConnector)
 .Since("0.3.0")
 export let TlsConnector = module (
