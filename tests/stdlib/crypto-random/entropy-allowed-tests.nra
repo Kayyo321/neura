@@ -54,4 +54,11 @@ let EntropyAllowedTests = module (
         let _ = test.assert_ok(generator.reseed_from_entropy());
         test.assert_equal_int32(3, generator.fill(3).length);
     };
+
+    export let test_fork_generation_and_drbg = func {
+        last generation = entropy.fork_generation();
+        let generator = test.assert_ok(drbg.fork_safe());
+        test.assert_equal_int32(40, generator.fill(40).length);
+        test.assert_equal_uint64(generation, entropy.fork_generation());
+    };
 );

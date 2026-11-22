@@ -9,6 +9,7 @@
 #include <climits>
 #include <cstdlib>
 #include <deque>
+#include <optional>
 #include <thread>
 
 #if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
@@ -24,11 +25,14 @@
 #include <unistd.h>
 #endif
 #ifdef __linux__
-#include <filesystem>
-#include <linux/netlink.h>
+#if __has_include(<linux/vmclock-abi.h>)
+#include <endian.h>
+#include <fcntl.h>
+#include <linux/vmclock-abi.h>
+#include <pthread.h>
+#endif
 #include <sys/auxv.h>
 #include <sys/random.h>
-#include <sys/socket.h>
 #elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
 #include <sys/random.h>
 #elif defined(_WIN32)
@@ -39,7 +43,8 @@
 
 #include <bcrypt.h>
 #include <io.h>
-#include <optional>
+#include <mutex>
+#include <winioctl.h>
 #include <string_view>
 #endif
 
@@ -958,74 +963,113 @@ bool hardware_word(std::uint64_t&) { return false; }
 bool hardware_available() { return false; }
 #endif
 
-#ifdef __linux__
-// A virtual machine generation change: the vmgenid driver (Linux 5.18 and
-// later; ACPI "VM Generation ID" under QEMU, Hyper-V and VMware, or the
-// device tree "microsoft,vmgenid") sends a uevent carrying NEW_VMGENID=1 when
-// the machine is restored from a snapshot or cloned. The socket is opened
-// only when such a device exists; without one, nothing is listened to.
-int vm_generation_socket() {
-    static const int descriptor = [] {
-        namespace fs = std::filesystem;
-        bool present = false;
-        for (const char* driver : {"/sys/bus/acpi/drivers/vmgenid", "/sys/bus/platform/drivers/vmgenid"}) {
-            std::error_code error;
-            for (const auto& entry : fs::directory_iterator(driver, error)) {
-                if (entry.is_symlink(error) && entry.path().filename() != "module") present = true;
-            }
-        }
-        if (!present) return -1;
-        const int socket = ::socket(AF_NETLINK, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, NETLINK_KOBJECT_UEVENT);
-        if (socket < 0) return -1;
-        sockaddr_nl address{};
-        address.nl_family = AF_NETLINK;
-        address.nl_groups = 1; // Kernel uevents.
-        if (::bind(socket, reinterpret_cast<sockaddr*>(&address), sizeof address) != 0) {
-            ::close(socket);
-            return -1;
-        }
-        return socket;
-    }();
-    return descriptor;
-}
+#if defined(VMCLOCK_FLAG_VM_GEN_COUNTER_PRESENT)
+// The Linux VMClock driver's character-device read takes a coherent
+// sequence-counted snapshot. Only the explicit generation field denotes
+// restore; a clock disruption can occur during ordinary live migration.
+struct VmGeneration {
+    pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+    std::uint64_t epoch = 0;
+    std::optional<std::uint64_t> observed;
+};
+VmGeneration vm_generation;
 
-// How many VM generation uevents arrived since the last call.
-std::uint64_t vm_generation_events() {
-    const int socket = vm_generation_socket();
-    if (socket < 0) return 0;
-    std::uint64_t count = 0;
-    char message[8192];
-    for (;;) {
-        const auto got = ::recv(socket, message, sizeof message, MSG_DONTWAIT);
-        if (got < 0 && errno == EINTR) continue;
-        if (got <= 0) break;
-        if (vm_generation_uevent(std::string_view(message, static_cast<std::size_t>(got)))) ++count;
+void prepare_generation_fork() { ::pthread_mutex_lock(&vm_generation.mutex); }
+void finish_generation_fork() { ::pthread_mutex_unlock(&vm_generation.mutex); }
+void child_generation_fork() {
+    ++vm_generation.epoch;
+    finish_generation_fork();
+}
+const int vm_generation_fork_hooks =
+    ::pthread_atfork(prepare_generation_fork, finish_generation_fork, child_generation_fork);
+
+HostCompletion process_generation() {
+    if (vm_generation_fork_hooks != 0) return fail(host_error::other);
+    struct Lock {
+        Lock() { prepare_generation_fork(); }
+        ~Lock() { finish_generation_fork(); }
+    } lock;
+    const int device = ::open("/dev/vmclock0", O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    std::optional<std::uint64_t> observed;
+    if (device < 0) {
+        if (errno != ENOENT && errno != ENODEV) return fail(host_error::from_errno(errno));
+    } else {
+        vmclock_abi snapshot{};
+        ssize_t size = 0;
+        do {
+            size = ::read(device, &snapshot, sizeof snapshot);
+        } while (size < 0 && errno == EINTR);
+        const int read_error = errno;
+        ::close(device);
+        if (size < 0) return fail(host_error::from_errno(read_error));
+        constexpr auto flags_end = offsetof(vmclock_abi, pad);
+        constexpr auto generation_end = offsetof(vmclock_abi, vm_generation_counter) + sizeof(snapshot.vm_generation_counter);
+        const std::size_t bytes = static_cast<std::size_t>(size);
+        if (bytes < flags_end || le32toh(snapshot.magic) != VMCLOCK_MAGIC || le16toh(snapshot.version) != 1) {
+            return fail(host_error::other);
+        }
+        if ((le64toh(snapshot.flags) & VMCLOCK_FLAG_VM_GEN_COUNTER_PRESENT) != 0) {
+            if (bytes < generation_end || le32toh(snapshot.size) < generation_end) return fail(host_error::other);
+            observed = le64toh(snapshot.vm_generation_counter);
+        }
     }
-    return count;
+    if (vm_generation.observed != observed) {
+        vm_generation.observed = observed;
+        ++vm_generation.epoch;
+    }
+    return HostCompletion::ok(scalar(vm_generation.epoch));
 }
-#endif
-
-// The process generation for neura.process.generation: it grows by one in a
-// child created by fork (detected by a change of process ID) and, on Linux
-// with a vmgenid device, after each restore or clone of the virtual machine.
-// On Windows it is the constant 0 (W21): there is no fork, and Windows gives
-// user mode no notification of a new virtual machine generation, so a
-// restore is not detected.
-std::uint64_t process_generation() {
-#ifndef _WIN32
-    static std::atomic<std::uint64_t> generation{0};
+#elif defined(_WIN32)
+HostCompletion process_generation() {
+    // vmgenerationcounter.h specifies this ABI. Older SDKs and some cross
+    // toolchains omit the header, so use its documented control code and POD.
+    constexpr DWORD read_generation = CTL_CODE(FILE_DEVICE_ACPI, 1, METHOD_BUFFERED,
+                                              FILE_READ_ACCESS | FILE_WRITE_ACCESS);
+    struct VmGenerationId {
+        ULONGLONG low;
+        ULONGLONG high;
+        bool operator==(const VmGenerationId&) const = default;
+    };
+    static std::mutex mutex;
+    static std::optional<VmGenerationId> previous;
+    static std::uint64_t generation = 0;
+    const std::lock_guard lock(mutex);
+    const platform::UniqueFile device(::CreateFileW(L"\\\\.\\VmGenerationCounter",
+        GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
+    if (!device) {
+        const DWORD error = ::GetLastError();
+        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) {
+            if (previous) {
+                previous.reset();
+                ++generation;
+            }
+            return HostCompletion::ok(scalar(generation));
+        }
+        return fail(host_error::from_win32(error));
+    }
+    VmGenerationId observed{};
+    DWORD returned = 0;
+    if (!::DeviceIoControl(device.get(), read_generation, nullptr, 0, &observed, sizeof observed, &returned, nullptr)) {
+        return fail(host_error::from_win32(::GetLastError()));
+    }
+    if (returned != sizeof observed) return fail(host_error::other);
+    if (previous != observed) {
+        previous = observed;
+        ++generation;
+    }
+    return HostCompletion::ok(scalar(generation));
+}
+#else
+HostCompletion process_generation() {
     static std::atomic<long> owner{static_cast<long>(::getpid())};
+    static std::atomic<std::uint64_t> generation{0};
     const long now = static_cast<long>(::getpid());
     long seen = owner.load();
     if (seen != now && owner.compare_exchange_strong(seen, now)) generation.fetch_add(1);
-#ifdef __linux__
-    if (const auto events = vm_generation_events(); events != 0) generation.fetch_add(events);
-#endif
-    return generation.load();
-#else
-    return 0;
-#endif
+    return HostCompletion::ok(scalar(generation.load()));
 }
+#endif
 
 #ifdef _WIN32
 // Sleeps below the system timer's default period (15.6 ms), which
@@ -1046,18 +1090,6 @@ bool sleep_precisely(std::int64_t nanos) {
 #endif
 
 } // namespace
-
-bool vm_generation_uevent(std::string_view message) {
-    // NUL-separated fields: "change@/devices/...", then KEY=VALUE pairs.
-    while (!message.empty()) {
-        const auto end = message.find('\0');
-        const auto field = message.substr(0, end);
-        if (field == "NEW_VMGENID=1") return true;
-        if (end == std::string_view::npos) break;
-        message.remove_prefix(end + 1);
-    }
-    return false;
-}
 
 StandardServices::StandardServices(ConsoleSink& output, ConsoleSink& error, ConsoleSource& input,
                                    Capabilities capabilities)
@@ -1239,7 +1271,7 @@ StandardServices::StandardServices(ConsoleSink& output, ConsoleSink& error, Cons
 
     add(signature("neura.process.generation", {}, HostType(Kind::Unsigned, 64)), [this](const HostRequest&) {
         if (!capabilities_.entropy) return denied();
-        return HostCompletion::ok(scalar(process_generation()));
+        return process_generation();
     });
 
     add(signature("neura.entropy.fill", {int32()}, byte_list()), [this](const HostRequest& request) {

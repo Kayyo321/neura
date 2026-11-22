@@ -1280,11 +1280,8 @@ NEURA_TEST(host, entropy_comes_from_the_system_generator) {
     int status = 0;
     ::waitpid(child, &status, 0);
     check(WIFEXITED(status) && WEXITSTATUS(status) == 0, "a forked child sees the next generation");
-    using namespace std::string_view_literals;
-    check(nvm::vm_generation_uevent("change@/devices/LNXSYSTM:00/QEMUVGID:00\0ACTION=change\0NEW_VMGENID=1\0"sv),
-          "a vmgenid uevent is a new generation");
-    check(!nvm::vm_generation_uevent("change@/devices/x\0ACTION=change\0NEW_VMGENID=10\0"sv), "only the exact field");
-    check(!nvm::vm_generation_uevent("add@/devices/y\0ACTION=add\0"sv), "another uevent");
+    check_equal(host.call("neura.process.generation", {}).value.bits, generation.value.bits,
+                "forking does not change the parent's generation");
     Host nothing({});
     expect_error(nothing.call("neura.entropy.hardware", {i32(1)}), host_error::capability_denied, "hardware denied");
     expect_error(nothing.call("neura.process.generation", {}), host_error::capability_denied, "generation denied");

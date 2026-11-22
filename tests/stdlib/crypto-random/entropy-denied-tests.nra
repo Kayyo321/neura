@@ -27,4 +27,10 @@ let EntropyDeniedTests = module (
     export let test_drbg_from_entropy_denied = func {
         let _ = test.assert_err(drbg.from_entropy());
     };
+
+    export let test_fork_generation_denied = func {
+        last failure = test.assert_err(entropy.try_fork_generation());
+        test.assert_equal_string("CapabilityDenied: process generation failed", error.message(failure));
+        let _ = test.assert_err(drbg.fork_safe());
+    };
 );

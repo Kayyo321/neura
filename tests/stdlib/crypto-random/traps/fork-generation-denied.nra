@@ -1,0 +1,12 @@
+// status: 134
+// run-options: --deny-entropy
+// stderr: explicit program failure \(trap reason 3\): process generation failed, host code 14
+let entropy = import:Std.Crypto.Random.Entropy;
+let program = import:Std.Program;
+
+export let ForkGenerationDenied = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = entropy.fork_generation();
+        return program.ExitCode.Ok;
+    };
+);

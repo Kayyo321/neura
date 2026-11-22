@@ -31,8 +31,8 @@ export let ChaCha20Drbg = module (
 
     /// @brief A ChaCha20 generator. Seeded from caller bytes it is reproducible; `from_entropy` seeds it from
     /// the operating system. A fork-safe generator (`fork_safe`) checks Entropy.fork_generation before every
-    /// output and reseeds from the operating system when it changed; that check is a stub until the runtime
-    /// reports fork and VM-clone generations, so a fork-safe generator traps on its first use.
+    /// output and reseeds from the operating system when it changes. It traps on a failed observation or
+    /// reseed before producing output.
     .[Final, NotThreadSafe, Since("0.3.0")]
     export let ChaCha20Drbg = class (
         let key: uint8[list];
@@ -75,9 +75,9 @@ export let ChaCha20Drbg = module (
         /// @brief Turns on fork detection: from now on every output first compares Entropy.fork_generation with
         /// the value it saw last and reseeds from the operating system when it changed.
         .Internal
-        export let enable_fork_checks = func {
+        export let enable_fork_checks = func(initial: uint64) {
+            generation = initial;
             check_forks = true;
-            generation = entropy.fork_generation();
         };
 
         /// @brief `count` random bytes. A negative count traps.
@@ -88,9 +88,9 @@ export let ChaCha20Drbg = module (
             if (check_forks) {
                 last now = entropy.fork_generation();
                 if (now != generation) {
-                    generation = now;
                     match (reseed_from_entropy()) {
                         Result.Ok(_) => {
+                            generation = now;
                         },
                         Result.Err(e) => {
                             trap_with_message("invalid state: reseed after fork failed: " .. error.message(e));
@@ -153,17 +153,14 @@ export let ChaCha20Drbg = module (
     };
 
     /// @brief A generator seeded from the operating system that checks for fork and VM clones before every
-    /// output (see the class). Traps while Entropy.fork_generation is a stub.
+    /// output (see the class). Requires the entropy capability throughout use.
     .[NoDiscard, Since("0.3.0")]
     export let fork_safe = func -> Result<ChaCha20Drbg> {
-        match (from_entropy()) {
-            Result.Ok(drbg) => {
-                drbg.enable_fork_checks();
-                return Result<ChaCha20Drbg>.Ok(drbg);
-            },
-            Result.Err(e) => {
-                return Result<ChaCha20Drbg>.Err(e);
-            },
-        }
+        // Observe before seeding so a generation change while the seed is
+        // acquired is checked again before the first output.
+        last generation = entropy.try_fork_generation()?;
+        last drbg = from_entropy()?;
+        drbg.enable_fork_checks(generation);
+        return Result<ChaCha20Drbg>.Ok(drbg);
     };
 );

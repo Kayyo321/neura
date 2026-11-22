@@ -111,11 +111,6 @@ struct Capabilities {
     bool sql = false;
 };
 
-// Whether a kernel uevent message (NUL-separated fields) reports a new
-// virtual machine generation (NEW_VMGENID=1), which neura.process.generation
-// counts on Linux.
-bool vm_generation_uevent(std::string_view message);
-
 // The target triple of this runner, such as x86_64-linux-gnu; an image's
 // embedded native library must name the same one.
 std::string native_target_triple();

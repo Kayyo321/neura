@@ -9,7 +9,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// @brief Operating-system and hardware entropy for seeding (Stdlib.md section 21.3).
 ///
 /// The runtime's native entropy services require the entropy capability. A recording run stores the provider
-/// responses in its trace. Fork and VM-restore detection still require a provider that covers both events.
+/// responses in its trace. Fork and VM-generation observations depend on the host and guest driver.
 /// @see [Std.Crypto.Random.Entropy](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Random-Entropy)
 .Since("0.3.0")
 export let Entropy = module (
@@ -86,15 +86,32 @@ export let Entropy = module (
         return Result<uint8[list]>.Ok(digest.finish());
     };
 
-    /// @brief A number that changes whenever the process may have been duplicated: a POSIX `fork()` in the
-    /// child, or a restore of a virtual machine snapshot (the Linux VM generation ID, `MADV_WIPEONFORK` pages).
-    /// A generator that sees it change must reseed before it produces output. This function is not implemented
-    /// in 0.3.0 and traps on every host. The host service it would use, `neura.process.generation`, is the
-    /// constant 0 on Windows: Windows has no `fork()`, and a snapshot restore is not detected.
-    /// @stub the runtime has no host operation that reports fork or VM-clone generations
+    let GenerationOutcome = enum (Ok(uint64), Error(uint32));
+    let generation = func -> GenerationOutcome host("neura.process.generation", 1);
+
+    /// @brief Observes the host generation, returning its typed error if the observation fails.
+    .NoDiscard
+    export let try_fork_generation = func -> Result<uint64> {
+        return match (generation()) {
+            GenerationOutcome.Ok(value) => Result<uint64>.Ok(value),
+            GenerationOutcome.Error(code) => Result<uint64>.Err(host_error.io(code, "process generation failed", "")),
+        };
+    };
+
+    /// @brief The current host generation token. On POSIX it changes in a forked child.
+    /// Linux checks the VMClock generation counter. Windows polls the guest generation driver.
+    /// A machine without a recognized guest driver cannot report VM restores. Requires entropy
+    /// capability and traps with the provider's error if the observation fails.
     .[NoDiscard, Since("0.3.0")]
     export let fork_generation = func -> uint64 {
-        trap_with_message(
-            "unsupported: Std.Crypto.Random.Entropy.fork_generation is not implemented in Neura 0.3.0 (the runtime has no host operation that reports fork or VM-clone generations)");
+        match (generation()) {
+            GenerationOutcome.Ok(value) => {
+                return value;
+            },
+            GenerationOutcome.Error(code) => {
+                trap_with_message("process generation failed, host code " .. code.to_string());
+            },
+        }
+        trap_with_message("process generation failed");
     };
 );
