@@ -9,9 +9,9 @@ Import `Std.Crypto.Enclave.CloudKms` to use this module. The [package specificat
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **CloudKms** · [`export let Provider = interface:versioned.VersionedKeyStore<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/cloud-kms.nra#L11)
+- **CloudKms** · [`export let Provider = interface:versioned.VersionedKeyStore<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/cloud-kms.nra#L12)
   An opaque versioned key store for this backend. String handles have meaning only to their provider. Since 0.3.0.
-- **CloudKms** · [`export let open = func(provider_profile: string, endpoint: string) -> Result<Provider>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/cloud-kms.nra#L17)
+- **CloudKms** · [`export let open = func(provider_profile: string, endpoint: string) -> Result<Provider>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/cloud-kms.nra#L18)
   Opens this configured provider. Tagged `#NoDiscard`. Since 0.3.0.
 <!-- END SOURCE API -->
 

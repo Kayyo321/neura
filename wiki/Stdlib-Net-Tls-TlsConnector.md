@@ -36,4 +36,6 @@ The following public declarations are taken from the module source; each links t
 
 ## Detailed contracts
 
-The contract of this module is [section 11.4 `Std.Net`](Stdlib-Design#114-stdnet) of the standard library specification, under its package, together with the module's source comments. This module was added in 0.3.0 and is proposed: it was implemented by autonomous agents and awaits the owner's confirmation. A member marked `@stub` in the source traps as unsupported in 0.3.0. The design note [`docs/design/Net030.md`](https://github.com/Kayyo321/neura/blob/main/docs/design/Net030.md) in the repository records how each item of the networking specification is provided, the tests, and the host service each stub needs. The source and the [language status](Status) identify shipped behavior.
+An OpenSSL-enabled build connects with certificate and hostname or numeric-address verification. An explicit trust bundle or client credential file needs the file capability. The configured version range is always enforced.
+
+See [section 11.4 `Std.Net`](Stdlib-Design#114-stdnet) and the source comments for the complete module contract.

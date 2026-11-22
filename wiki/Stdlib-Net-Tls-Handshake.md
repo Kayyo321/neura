@@ -18,12 +18,14 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Handshake** · [`export let tls13 = func(config: TlsConfig, stream: StreamSocket<SocketAddr>) -> Result<Transport<uint8[list], uint8[list]>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/handshake.nra#L22)
-  Runs a TLS 1.3 handshake in Neura over a connected stream and returns the protected transport. Tagged `#NoDiscard`.
-- **Handshake** · [`export let dtls13 = func(config: TlsConfig, socket: DatagramSocket<SocketAddr>, peer: SocketAddr) -> Result<Transport<uint8[list], uint8[list]>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/handshake.nra#L31)
-  Runs a DTLS 1.3 handshake in Neura with `peer` over a datagram socket and returns the protected transport. Tagged `#NoDiscard`.
+- **Handshake** · [`export let tls13 = func(config: TlsConfig, stream: StreamSocket<SocketAddr>) -> Result<Transport<uint8[list], uint8[list]>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/handshake.nra#L162)
+  Completes a TLS 1.3 handshake over `stream` as the configured client or server. A client verifies the configured server name, or the peer's numeric address when the name is empty. Once the engine starts, this call owns the supplied stream, including closing it on handshake failure. Tagged `#NoDiscard`.
+- **Handshake** · [`export let dtls13 = func(config: TlsConfig, socket: DatagramSocket<SocketAddr>, peer: SocketAddr) -> Result<Transport<uint8[list], uint8[list]>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/handshake.nra#L204)
+  Runs a DTLS 1.3 handshake with `peer` over a datagram socket. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts
 
-The contract of this module is [section 11.4 `Std.Net`](Stdlib-Design#114-stdnet) of the standard library specification, under its package, together with the module's source comments. This module was added in 0.3.0 and is proposed: it was implemented by autonomous agents and awaits the owner's confirmation. A member marked `@stub` in the source traps as unsupported in 0.3.0. The design note [`docs/design/Net030.md`](https://github.com/Kayyo321/neura/blob/main/docs/design/Net030.md) in the repository records how each item of the networking specification is provided, the tests, and the host service each stub needs. The source and the [language status](Status) identify shipped behavior.
+`tls13` wraps a connected `StreamSocket` using the host's TLS 1.3 record engine. It verifies server identity for clients and uses the file capability for explicit credentials. Positive handshake timeouts also use the clock capability. Once the engine starts, the wrapper owns the stream. `dtls13` reports typed `Unsupported` because OpenSSL 3.5 supports DTLS through 1.2.
+
+See [section 11.4 `Std.Net`](Stdlib-Design#114-stdnet) and the source comments for the complete module contract.

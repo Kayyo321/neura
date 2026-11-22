@@ -9,9 +9,9 @@ Import `Std.Crypto.Enclave.Tpm` to use this module. The [package specification](
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Tpm** · [`export let Provider = interface:versioned.VersionedKeyStore<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/tpm.nra#L11)
+- **Tpm** · [`export let Provider = interface:versioned.VersionedKeyStore<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/tpm.nra#L12)
   An opaque versioned key store for this backend. String handles have meaning only to their provider. Since 0.3.0.
-- **Tpm** · [`export let open = func(device_path: string) -> Result<Provider>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/tpm.nra#L17)
+- **Tpm** · [`export let open = func(device_path: string) -> Result<Provider>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/tpm.nra#L18)
   Opens this configured provider. Tagged `#NoDiscard`. Since 0.3.0.
 <!-- END SOURCE API -->
 

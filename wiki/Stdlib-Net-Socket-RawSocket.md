@@ -27,7 +27,7 @@ The following public declarations are taken from the module source; each links t
 - **RawSocket.RawSocket** · [`export let init = func(opened: int64, address_family: AddressFamily, protocol_number: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/raw-socket.nra#L38)
   Use `open`; the ID comes from the library.
 - **RawSocket.RawSocket** · [`export let local_address = func -> Result<ips.IpAddr>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/raw-socket.nra#L46)
-  The local address, from the host; traps in Neura 0.3.0 (no local-address service). Tagged `#NoDiscard`.
+  The local address reported by the host. Tagged `#NoDiscard`.
 - **RawSocket.RawSocket** · [`export let send_to = func(data: uint8[list], target: ips.IpAddr) -> Result<int>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/raw-socket.nra#L58)
   Sends one IP payload to `target`, which must be of the socket's family (else the call traps with "invalid argument: address family"). Tagged `#NoDiscard`.
 - **RawSocket.RawSocket** · [`export let receive_from = func(max: int) -> Result<Datagram<ips.IpAddr>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/raw-socket.nra#L72)
@@ -40,10 +40,10 @@ The following public declarations are taken from the module source; each links t
   Releases the socket. Closing again returns Ok.
 - **RawSocket.RawSocket** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/raw-socket.nra#L101)
   Text such as "RawSocket(Ipv4, protocol 1)".
-- **RawSocket** · [`export let open = func(family: AddressFamily, protocol: int) -> Result<RawSocket>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/raw-socket.nra#L109)
-  A raw socket for `family` (Ipv4 or Ipv6; Unix traps with "invalid argument: address family") and IP protocol number `protocol` (0 through 255, else "invalid argument: protocol"). Traps in Neura 0.3.0 (no raw-socket host service). Tagged `#NoDiscard`.
+- **RawSocket** · [`export let open = func(family: AddressFamily, protocol: int) -> Result<RawSocket>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/raw-socket.nra#L108)
+  A raw socket for `family` (Ipv4 or Ipv6; Unix traps with "invalid argument: address family") and IP protocol number `protocol` (0 through 255, else "invalid argument: protocol"). Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts
 
-The contract of this module is [section 11.4 `Std.Net`](Stdlib-Design#114-stdnet) of the standard library specification, under its package, together with the module's source comments. This module was added in 0.3.0 and is proposed: it was implemented by autonomous agents and awaits the owner's confirmation. A member marked `@stub` in the source traps as unsupported in 0.3.0. The design note [`docs/design/Net030.md`](https://github.com/Kayyo321/neura/blob/main/docs/design/Net030.md) in the repository records how each item of the networking specification is provided, the tests, and the host service each stub needs. The source and the [language status](Status) identify shipped behavior.
+The contract of this module is [section 11.4 `Std.Net`](Stdlib-Design#114-stdnet) of the standard library specification, under its package, together with the module's source comments. The current API and host requirements are recorded above. The historical design note [`docs/design/Net030.md`](https://github.com/Kayyo321/neura/blob/main/docs/design/Net030.md) in the repository records how each item of the networking specification is provided, the tests, and the host service each stub needs. The source and the [language status](Status) identify shipped behavior.

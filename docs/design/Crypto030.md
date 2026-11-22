@@ -156,6 +156,10 @@ The envelope checks that its KEK version remains live and allowed by policy even
 
 Shamir's prime-field encoding is fixed to big-endian integers and 82 coefficient bytes reduced modulo 2^521 − 1. The OS entropy path requests coefficients in chunks within the host limit. Shamir shares do not authenticate a share set. FROST currently uses a trusted dealer and a caller-authenticated roster. One-use client state burns a nonce or blind on a failed protocol attempt as well as a successful one. The RSA blind signer applies its own independent blinding and checks the RSA private operation with the public exponent. FROST validates canonical suite encodings before signing. Imported Edwards points must belong to the prime-order subgroup. The unqualified APIs retain the ristretto255 profile. For OPRF, the suite and mode bind the transcript. The zero-based batch index uses two bytes. Private and public application inputs are shorter than 65,535 bytes under RFC 9497 section 5.1. Key derivation allows up to 65,535 bytes of key info. The `Fips140_3` policy denies the whole OPRF construction. Servers applying RFC 9497 query budgets count every evaluated element, including elements submitted within a batch. Bulletproofs uses the standard Dalek generators and a fork of the caller’s Merlin transcript. Secret scalar multiplication is branch-free in source. The runtime does not guarantee constant time.
 
+## 0.3.1 runtime bindings
+
+`Entropy.fork_generation` uses the entropy-gated `neura.process.generation` service. It observes fork on POSIX, the VMClock generation counter on Linux guests that expose it and the guest generation driver on Windows. `Secret<T>` uses the existing locked-byte provider when the caller supplies a codec. See the [current library reference](../lang/Stdlib.md#21-stdcrypto) for these bindings and the typed unsupported results for device services and FN-DSA. The runtime needs below record the 0.3.0 design.
+
 ## Runtime needs
 
 The following public entries need a runtime service or a binding to a service. The [NVM host service table](../runtime/NVM.md#host-services) specifies the existing service contracts.

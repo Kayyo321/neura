@@ -54,12 +54,14 @@ The following public declarations are taken from the module source; each links t
   A querier collecting responses for `wait`.
 - **Mdns.MdnsQuerier** · [`export let query_all = func(name: names.DnsName, qtype: int) -> Result<messages.Message[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L129)
   Sends a query to the group and returns every response received within the window. Tagged `#NoDiscard`.
-- **Mdns.MdnsQuerier** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L138)
+- **Mdns.MdnsQuerier** · [`export let query_all_on = func(name: names.DnsName, qtype: int, address: Ipv4Addr) -> Result<messages.Message[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L135)
+  Sends a query through the network interface with the given IPv4 address. Tagged `#NoDiscard`.
+- **Mdns.MdnsQuerier** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L148)
   Text such as "MdnsQuerier(1s)".
-- **Mdns** · [`export let responses_in = func(datagrams: uint8[list][list]) -> messages.Message[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L143)
+- **Mdns** · [`export let responses_in = func(datagrams: uint8[list][list]) -> messages.Message[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L153)
   The decodable responses among datagrams; others are dropped. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts
 
-The contract of this module is [section 11.4 `Std.Net`](Stdlib-Design#114-stdnet) of the standard library specification, under its package, together with the module's source comments. This module was added in 0.3.0 and is proposed: it was implemented by autonomous agents and awaits the owner's confirmation. A member marked `@stub` in the source traps as unsupported in 0.3.0. The design note [`docs/design/Net030.md`](https://github.com/Kayyo321/neura/blob/main/docs/design/Net030.md) in the repository records how each item of the networking specification is provided, the tests, and the host service each stub needs. The source and the [language status](Status) identify shipped behavior.
+The contract of this module is [section 11.4 `Std.Net`](Stdlib-Design#114-stdnet) of the standard library specification, under its package, together with the module's source comments. The current API and host requirements are recorded above. The historical design note [`docs/design/Net030.md`](https://github.com/Kayyo321/neura/blob/main/docs/design/Net030.md) in the repository records how each item of the networking specification is provided, the tests, and the host service each stub needs. The source and the [language status](Status) identify shipped behavior.

@@ -18,14 +18,14 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
 - **ChaCha20Drbg** · [`export let ChaCha20Drbg = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/random/cha-cha20-drbg.nra#L37)
-  A ChaCha20 generator. Seeded from caller bytes it is reproducible; `from_entropy` seeds it from the operating system. A fork-safe generator (`fork_safe`) checks Entropy.fork_generation before every output and reseeds from the operating system when it changed; that check is a stub until the runtime reports fork and VM-clone generations, so a fork-safe generator traps on its first use. Tagged `#Final`, `#NotThreadSafe`. Since 0.3.0.
+  A ChaCha20 generator. Seeded from caller bytes it is reproducible; `from_entropy` seeds it from the operating system. A fork-safe generator (`fork_safe`) checks Entropy.fork_generation before every output and reseeds from the operating system when it changes. It traps on a failed observation or reseed before producing output. Tagged `#Final`, `#NotThreadSafe`. Since 0.3.0.
 - **ChaCha20Drbg.ChaCha20Drbg** · [`export let init = func(seed: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/random/cha-cha20-drbg.nra#L45)
   A generator seeded with the bytes; a seed shorter than 32 bytes traps with "invalid argument: seed must be at least 32 bytes".
 - **ChaCha20Drbg.ChaCha20Drbg** · [`export let reseed = func(material: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/random/cha-cha20-drbg.nra#L54)
   Mixes more material into the key.
 - **ChaCha20Drbg.ChaCha20Drbg** · [`export let reseed_from_entropy = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/random/cha-cha20-drbg.nra#L62)
   Mixes 32 bytes from the operating system into the key. Tagged `#NoDiscard`.
-- **ChaCha20Drbg.ChaCha20Drbg** · [`export let enable_fork_checks = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/random/cha-cha20-drbg.nra#L78)
+- **ChaCha20Drbg.ChaCha20Drbg** · [`export let enable_fork_checks = func(initial: uint64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/random/cha-cha20-drbg.nra#L78)
   Turns on fork detection: from now on every output first compares Entropy.fork_generation with the value it saw last and reseeds from the operating system when it changed.
 - **ChaCha20Drbg.ChaCha20Drbg** · [`export let fill = func(count: int) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/random/cha-cha20-drbg.nra#L84)
   `count` random bytes. A negative count traps.
@@ -42,7 +42,7 @@ The following public declarations are taken from the module source; each links t
 - **ChaCha20Drbg** · [`export let from_entropy = func -> Result<ChaCha20Drbg>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/random/cha-cha20-drbg.nra#L142)
   A generator seeded with 32 bytes from the operating system. Fails as Entropy.os_bytes does. Tagged `#NoDiscard`. Since 0.3.0.
 - **ChaCha20Drbg** · [`export let fork_safe = func -> Result<ChaCha20Drbg>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/random/cha-cha20-drbg.nra#L158)
-  A generator seeded from the operating system that checks for fork and VM clones before every output (see the class). Traps while Entropy.fork_generation is a stub. Tagged `#NoDiscard`. Since 0.3.0.
+  A generator seeded from the operating system that checks for fork and VM clones before every output (see the class). Requires the entropy capability throughout use. Tagged `#NoDiscard`. Since 0.3.0.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

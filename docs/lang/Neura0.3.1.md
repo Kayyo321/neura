@@ -135,9 +135,11 @@ Every `Std.Net` and `Std.Crypto` declaration that 0.3.0 left as a stub is implem
 | Exception | Rule in 0.3.1 |
 | --- | --- |
 | PKCS #11 hardware security modules, TPM, cloud key management services, and live collection of enclave evidence | A backend is supported once it passes end-to-end qualification on its device or service. Until then its provider returns a typed `Unsupported`, with no silent software fallback. Coverage that comes from an emulator is labeled as emulator coverage. |
-| FN-DSA | Deferred until the final FIPS 206 and matching conformance vectors are available. The API is kept, and every call fails explicitly while it is unavailable. |
+| FN-DSA | Deferred until the final FIPS 206 and matching conformance vectors are available. Key generation, signing and verification all return a typed `Unsupported` result while the implementation is deferred. |
 
 The software keystore and offline verification of attestation evidence are supported and are not exceptions.
+
+The first networking slice covers `Std.Net.Core`, `Dns`, `Socket` and `Tls`. The remaining HTTP, general QUIC, Realtime, RPC and Mesh work is tracked separately. DTLS 1.3 still requires a provider implementing that version. Windows needs runtime verification for the Winsock and OpenSSL providers and guest-generation polling. Generic secret locking uses the existing locked-buffer contract, which requires dump exclusion as well as page locking. The current provider meets that contract on Linux. Windows needs a provider that can honor both guarantees.
 
 ## Windows native build
 
