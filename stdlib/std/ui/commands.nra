@@ -9,7 +9,7 @@ let ui = import:Std.Ui;
 /// This module is separate from `Std.Ui` because it uses tasks: a program that uses it cannot also
 /// use `Std.DynamicForeign` or a C import (docs/lang/Concurrency.md, C15), while one that uses only
 /// `Std.Ui` can.
-#Since("0.3.0")
+.Since("0.3.0")
 export let Commands = module (
     /// @brief What `Command.run` did: started the work, or started nothing.
     export let RunOutcome = enum (Started, Rejected);
@@ -18,7 +18,7 @@ export let Commands = module (
     export let CommandState = enum<O> (Idle, Running, Succeeded(O), Failed(error.PortableError), Cancelled);
 
     /// One finished run and the generation it was started in.
-    #[Final, Immutable]
+    .[Final, Immutable]
     let Finished = class<O> (
         export last generation: uint64;
         export last state: CommandState<O>;
@@ -65,7 +65,7 @@ export let Commands = module (
     /// raise its generation, and a completion of an older generation changes nothing. `work` learns
     /// of a cancellation through `Std.Concurrent.Cancellation.requested()` or a parked operation that
     /// returns `Cancelled`.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Command = class<I, O> (
         last work: func(I) -> result.Result<O>;
         /// @brief `Idle` until the first run, `Running` while the latest run works, then how it ended.
@@ -141,7 +141,7 @@ export let Commands = module (
         export let runs_in_flight = func -> int32 => in_flight.length as int32;
 
         /// Unmounting the owner: cancel the runs in flight and raise the generation.
-        #Internal
+        .Internal
         export let abandon = func {
             last running = in_flight.length > 0;
             stop_all();
@@ -152,7 +152,7 @@ export let Commands = module (
         };
 
         /// Applies a finished run in the root's turn; false when its generation is old.
-        #Internal
+        .Internal
         export let finish = func(ticket: uint64, outcomes: channels.Receiver<Finished<O>>) -> bool {
             forget(ticket);
             match (outcomes.try_receive()) {

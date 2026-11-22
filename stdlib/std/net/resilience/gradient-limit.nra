@@ -20,10 +20,10 @@ let maths = import:Std.Math.Math;
 /// Netflix's version also re-probes `rtt_noload` after a randomized number of samples; this one re-probes only
 /// when `reset_rtt_noload` is called, so its behavior is deterministic.
 /// @see [Std.Net.Resilience.GradientLimit](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-GradientLimit)
-#Since("0.3.0")
+.Since("0.3.0")
 export let GradientLimit = module (
     /// @brief A gradient adaptive limit.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let GradientLimit = class implements limits.AdaptiveLimit (
         /// @brief The smallest limit.
         last min_limit: int;
@@ -128,11 +128,11 @@ export let GradientLimit = module (
     );
 
     /// @brief Netflix's defaults: initial 50, min 1, max 1000, smoothing 0.2, tolerance 2, backoff 0.9, queue floor 4.
-    #NoDiscard
+    .NoDiscard
     export let create = func -> GradientLimit => new GradientLimit(50, 1, 1000, 0.2, 2.0, 0.9, 4);
 
     /// @brief A limit with Netflix's default tolerance, backoff, and queue floor.
-    #NoDiscard
+    .NoDiscard
     export let of = func(initial: int, min_limit: int, max_limit: int, smoothing: float64) -> GradientLimit =>
         new GradientLimit(initial, min_limit, max_limit, smoothing, 2.0, 0.9, 4);
 );

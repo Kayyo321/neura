@@ -22,18 +22,18 @@ let words = import:Std.Crypto.Internal.Words;
 /// filter covers, and a certificate outside them is `NotCovered`, never `NotRevoked`. Checking that the
 /// certificate was logged before the filter was built (its SCT timestamps) is the caller's part.
 /// @see [Std.Crypto.Pki.CrLite](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-CrLite)
-#Since("0.3.0")
+.Since("0.3.0")
 export let CrLite = module (
     /// @brief The hash of a cascade's layers.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let CascadeHash = enum (MurmurHash3, Sha256Low32, Sha256Counter);
 
     /// @brief The revocation decision for one certificate.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let Decision = enum (Revoked, NotRevoked, NotCovered);
 
     /// @brief One Bloom filter layer.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let BloomLayer = class (
         /// @brief The number of bits.
         export last size: uint32;
@@ -48,7 +48,7 @@ export let CrLite = module (
 
         /// @brief Whether the bit count, hash count and bytes match.
         /// @see [Std.Crypto.Pki.CrLite](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-CrLite)
-        #[NoDiscard, Since("0.3.0")]
+        .[NoDiscard, Since("0.3.0")]
         export let.override equals = func(other: class) -> bool {
             if (other is not that: BloomLayer) {
                 return false;
@@ -58,7 +58,7 @@ export let CrLite = module (
 
         /// @brief A hash of the layer dimensions and bytes.
         /// @see [Std.Crypto.Pki.CrLite](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-CrLite)
-        #[NoDiscard, Since("0.3.0")]
+        .[NoDiscard, Since("0.3.0")]
         export let.override hash_code = func -> uint32 =>
             hashing.combine(hashing.combine(size, hash_count), der.hash_range(bits, 0, bits.length));
 
@@ -66,7 +66,7 @@ export let CrLite = module (
     );
 
     /// @brief A parsed filter cascade. Compared by its encoding.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let FilterCascade = class (
         export last version: int;
         export last inverted: bool;
@@ -128,7 +128,7 @@ export let CrLite = module (
     );
 
     /// @brief The index generator of rust-cascade's CascadeIndexGenerator, one per lookup.
-    #Final
+    .Final
     let IndexState = class (
         last algorithm: CascadeHash;
         last key: uint8[list];
@@ -248,7 +248,7 @@ export let CrLite = module (
     /// @brief Parses a cascade. A version other than 1 or 2, an inverted flag other than 0 or 1, a layer whose bits
     /// run past the input, a layer of 0 bits, irregular layer numbers, mixed hash algorithms, an unknown algorithm,
     /// or no layer at all is a `Parse` error.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse = func(bytes: uint8[list]) -> Result<FilterCascade> {
         if (bytes.length < 2) {
             return fail<FilterCascade>(0, "truncated at version");
@@ -315,7 +315,7 @@ export let CrLite = module (
     };
 
     /// @brief The CRLite key: SHA-256 of the issuer's SubjectPublicKeyInfo, then the serial's content bytes.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let key_of = func(certificate: Certificate, issuer: Certificate) -> uint8[list] {
         let key = sha2.sha256(issuer.public_key.der_bytes);
         words.append_all(key, certificate.serial);
@@ -325,7 +325,7 @@ export let CrLite = module (
     /// @brief The decision for the certificate: `NotCovered` unless SHA-256 of its issuer's SubjectPublicKeyInfo
     /// is in `covered_issuers` (empty means the caller vouches that the filter covers the issuer), else `Revoked`
     /// when the cascade holds its key, else `NotRevoked`. The cascade must hold the revoked certificates.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let check = func(cascade: FilterCascade, certificate: Certificate, issuer: Certificate,
         covered_issuers: uint8[list][list]) -> Decision {
         if (covered_issuers.length > 0) {

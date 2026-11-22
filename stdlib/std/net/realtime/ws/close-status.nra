@@ -13,7 +13,7 @@ let utf8 = import:Std.Encoding.Utf8;
 /// section 7.4.2; 0 to 999, the reserved 1004, 1005, 1006 and 1015, and the other codes of 1000 to 2999 are
 /// rejected. A failure the connection reports carries the status it closes with, as a `ProtocolFailure` detail.
 /// @see [Std.Net.Realtime.Ws.CloseStatus](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-Ws-CloseStatus)
-#Since("0.3.0")
+.Since("0.3.0")
 export let CloseStatus = module (
     /// @brief 1000: the purpose of the connection was fulfilled.
     export const Normal: int = 1000;
@@ -48,7 +48,7 @@ export let CloseStatus = module (
 
     /// @brief Whether an endpoint may put the code in a close frame, and accept it from one (RFC 6455 section
     /// 7.4).
-    #[NoDiscard, Pure]
+    .[NoDiscard, Pure]
     export let is_valid_on_wire = func(code: int) -> bool {
         if (code >= 1000 && code <= 1003) {
             return true;
@@ -58,7 +58,7 @@ export let CloseStatus = module (
     };
 
     /// @brief The status and reason of a close frame. Status 1005 stands for a frame without a body.
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let CloseReason = class (
         /// @brief The status code, or 1005 when the frame had no body.
         export last code: int;
@@ -89,7 +89,7 @@ export let CloseStatus = module (
     );
 
     /// @brief The error detail of a WebSocket failure: the status the connection closes with and a message.
-    #Final
+    .Final
     export let ProtocolFailure = class:errors.ErrorDetail (
         /// @brief The close status this failure maps to, such as 1002 or 1009.
         export last status: int;
@@ -126,13 +126,13 @@ export let CloseStatus = module (
     );
 
     /// @brief A Custom error holding a `ProtocolFailure`.
-    #NoDiscard
+    .NoDiscard
     export let failure = func(status: int, message: string) -> errors.Error =>
         errors.Error.Custom(new ProtocolFailure(status, message));
 
     /// @brief The close status a failure maps to: its `ProtocolFailure` status, otherwise 1011 for any other
     /// error.
-    #NoDiscard
+    .NoDiscard
     export let status_of = func(problem: errors.Error) -> int => match (problem) {
         errors.Error.Custom(detail) => detail is ProtocolFailure ? (detail as ProtocolFailure).status : InternalError,
         _ => InternalError,
@@ -140,7 +140,7 @@ export let CloseStatus = module (
 
     /// @brief The body of a close frame with the status and reason. Fails when the code is not valid on the wire
     /// or the reason is longer than 123 bytes.
-    #NoDiscard
+    .NoDiscard
     export let encode_body = func(code: int, reason: string) -> Result<uint8[list]> {
         if (not is_valid_on_wire(code)) {
             return Result<uint8[list]>.Err(failure(ProtocolError, "close status " .. code.to_string()
@@ -161,7 +161,7 @@ export let CloseStatus = module (
     /// @brief Reads a received close frame body (RFC 6455 section 5.5.1). An empty body gives status 1005; a
     /// one-byte body, a status not valid on the wire, or a reason that is not UTF-8 fails with status 1002
     /// (1007 for the reason).
-    #NoDiscard
+    .NoDiscard
     export let decode_body = func(body: uint8[list]) -> Result<CloseReason> {
         if (body.length == 0) {
             return Result<CloseReason>.Ok(new CloseReason(NoStatusReceived, ""));

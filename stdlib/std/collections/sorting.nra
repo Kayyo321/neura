@@ -6,7 +6,7 @@ let sort_kernels = import:Std.Internal.Kernels.Sort;
 /// list structurally: the list's version is compared after every call and a
 /// change traps with "collection modified during iteration".
 /// @see [Std.Collections.Sorting](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-Sorting)
-#Since("0.1.0")
+.Since("0.1.0")
 export let Sorting = module (
     /// @brief Runs of this length are sorted by binary insertion before merging.
     const BlockSize: int = 16;
@@ -181,7 +181,7 @@ export let Sorting = module (
     /// its bits unchanged). The built-in kernels neura.sort.i64, u64, and f64 sort the list for about one step
     /// per eight element comparisons; an int32 or uint32 list is widened into a new list for the kernel and
     /// written back by index. Element writes leave the list's version unchanged, as in `sort`.
-    #Since("0.2.0")
+    .Since("0.2.0")
     export let sort_ascending = func(items: int64[list]) {
         sort_kernels.i64(items);
     } or func(items: uint64[list]) {

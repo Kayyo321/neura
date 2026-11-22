@@ -13,10 +13,10 @@ let strings = import:Std.Text.Strings;
 /// `format` writes the canonical form `name; a; b=10, other`. Failures are Parse errors of kind Syntax at the
 /// offending byte offset.
 /// @see [Std.Net.Realtime.Ws.Extensions](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-Ws-Extensions)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Extensions = module (
     /// @brief One extension parameter: a name and an optional value.
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let ExtensionParam = class (
         /// @brief The parameter name.
         export last name: string;
@@ -49,7 +49,7 @@ export let Extensions = module (
     );
 
     /// @brief One element of the list: an extension name and its parameters.
-    #Final
+    .Final
     export let Extension = class (
         /// @brief The extension token, such as `permessage-deflate`.
         export last name: string;
@@ -63,7 +63,7 @@ export let Extensions = module (
         };
 
         /// @brief How many parameters are named `param_name`.
-        #NoDiscard
+        .NoDiscard
         export let count = func(param_name: string) -> int {
             let n = 0;
             for (let param in params) {
@@ -108,14 +108,14 @@ export let Extensions = module (
     );
 
     /// @brief Whether `c` is a tchar of RFC 9110 section 5.6.2.
-    #[NoDiscard, Pure]
+    .[NoDiscard, Pure]
     export let is_token_byte = func(c: uint8) -> bool {
         return if ((c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122)) -> true
             else -> c == 33 or 35 or 36 or 37 or 38 or 39 or 42 or 43 or 45 or 46 or 94 or 95 or 96 or 124 or 126;
     };
 
     /// @brief Whether the text is a non-empty token.
-    #[NoDiscard, Pure]
+    .[NoDiscard, Pure]
     export let is_token = func(text: string) -> bool {
         if (text.byte_length == 0) {
             return false;
@@ -128,7 +128,7 @@ export let Extensions = module (
 
     /// @brief Parses a header value into its extensions, in order. Empty list elements (`a, , b`) are skipped,
     /// as RFC 9110 section 5.6.1 allows; a value with no element fails.
-    #NoDiscard
+    .NoDiscard
     export let parse = func(value: string) -> Result<Extension[list]> {
         last list: Extension[list] = new;
         last length = value.byte_length;
@@ -199,7 +199,7 @@ export let Extensions = module (
     };
 
     /// @brief The header value of the extensions, `, `-separated.
-    #NoDiscard
+    .NoDiscard
     export let format = func(list: Extension[list]) -> string {
         let text = "";
         for (let i = 0; i < list.length; i++) {

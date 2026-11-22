@@ -16,10 +16,10 @@ let words = import:Std.Crypto.Internal.Words;
 /// The first 16 bytes of the nonce derive a subkey with HChaCha20; the last 8 form the ChaCha20 nonce. A nonce
 /// of 24 random bytes does not repeat in practice, so random nonces are safe.
 /// @see [Std.Crypto.Symmetric.XChaCha20Poly1305](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Symmetric-XChaCha20Poly1305)
-#Since("0.3.0")
+.Since("0.3.0")
 export let XChaCha20Poly1305 = module (
     /// @brief The AEAD under a 32-byte key.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let XChaCha20Poly1305 = class implements AeadCipher<SymmetricKey<XChaCha20Poly1305>, uint8[list], uint8[list]> (
         let key_bytes: uint8[list] = new;
 

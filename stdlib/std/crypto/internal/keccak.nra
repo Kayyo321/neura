@@ -3,7 +3,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// @brief The Keccak-p[1600] sponge of FIPS 202 with a chosen rate, domain-separation byte and round count
 /// (24 for SHA-3, SHAKE and SP 800-185, 12 for TurboSHAKE). Internal. The round constants and rotation offsets
 /// are printed by scripts/crypto-vectors/constants.py.
-#Since("0.3.0")
+.Since("0.3.0")
 export let Keccak = module (
     /// @brief A new list of the table (a function, so that tasks can use it: arrays are not transferable).
     let round_constants_table = func -> uint64[list] => new([

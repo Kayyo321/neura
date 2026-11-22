@@ -1,7 +1,7 @@
 /// @brief Typed, bounded channels: the default way for tasks to share work (Concurrency.md section 6). A channel
 /// has a sending end, a receiving end, and a closer; each is a handle that can be given to another task.
 /// @see [Std.Concurrent.Channel](https://github.com/Kayyo321/neura/wiki/Stdlib-Concurrent-Channel)
-#Since("0.1.0")
+.Since("0.1.0")
 export let Channel = module (
     /// @brief What a send reports. Closure and cancellation are expected events, not errors.
     export let SendOutcome = enum (Sent, Closed, Cancelled);
@@ -17,7 +17,7 @@ export let Channel = module (
 
     /// @brief The identity the scheduler keeps a channel's buffer and waiters under. The three ends of one
     /// channel share one State; the scheduler releases the channel when the State is collected.
-    #Final
+    .Final
     export let State = class (
         /// @brief Creates an identity that open has yet to register. Use open.
         export let init = func {};
@@ -27,7 +27,7 @@ export let Channel = module (
     );
 
     /// @brief The sending end of a channel of T.
-    #[Final, ThreadSafe]
+    .[Final, ThreadSafe]
     export let Sender = class<T> (
         last state: State;
 
@@ -49,11 +49,11 @@ export let Channel = module (
         };
 
         /// @brief What a select waits on for this end. Used by the select statement.
-        #Hidden
+        .Hidden
         export let select_handle = func -> State => state;
 
         /// @brief The outcome of a send that a select committed. Used by the select statement.
-        #Hidden
+        .Hidden
         export let send_selected = func(code: uint32) -> SendOutcome {
             if (code == 0) {
                 return SendOutcome.Sent;
@@ -66,7 +66,7 @@ export let Channel = module (
     );
 
     /// @brief The receiving end of a channel of T.
-    #[Final, ThreadSafe]
+    .[Final, ThreadSafe]
     export let Receiver = class<T> (
         last state: State;
 
@@ -89,11 +89,11 @@ export let Channel = module (
         };
 
         /// @brief What a select waits on for this end. Used by the select statement.
-        #Hidden
+        .Hidden
         export let select_handle = func -> State => state;
 
         /// @brief The outcome of a receive that a select committed. Used by the select statement.
-        #Hidden
+        .Hidden
         export let receive_selected = func(code: uint32) -> Received<T> {
             if (code == 0) {
                 return Received<T>.Value(take<T>());
@@ -106,7 +106,7 @@ export let Channel = module (
     );
 
     /// @brief Closes a channel. A coordinator keeps the closer, so a task that only sends or receives cannot.
-    #[Final, ThreadSafe]
+    .[Final, ThreadSafe]
     export let Closer = class<T> (
         last state: State;
 
@@ -128,7 +128,7 @@ export let Channel = module (
 
     /// @brief Opens a channel that buffers `capacity` values of the transferable type T. Capacity 0 is a
     /// rendezvous: each send waits for its receive. A negative capacity traps.
-    #NoDiscard
+    .NoDiscard
     export let open = func<T>(capacity: int) -> [Sender<T>, Receiver<T>, Closer<T>] {
         if (capacity < 0) {
             trap_with_message("invalid argument: capacity");

@@ -15,7 +15,7 @@ let.promote _ = import:Std.Core.Result;
 /// `DeflateCodec.compress` and `DeflateCodec.decompress` are stubs, and `Std.Net.Realtime.Ws.WebSocket` never
 /// offers the extension. Failures are Custom errors with the code `ws.handshake`.
 /// @see [Std.Net.Realtime.Ws.PermessageDeflate](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-Ws-PermessageDeflate)
-#Since("0.3.0")
+.Since("0.3.0")
 export let PermessageDeflate = module (
     /// @brief The registered extension name.
     export const ExtensionName: string = "permessage-deflate";
@@ -24,7 +24,7 @@ export let PermessageDeflate = module (
     ///
     /// A window-bits field is 0 when the parameter is absent and 8 to 15 when it has a value;
     /// `client_max_window_bits` is -1 for the valueless form, which only an offer may use.
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let DeflateParams = class (
         /// @brief The server does not reuse its LZ77 window between messages.
         export last server_no_context_takeover: bool;
@@ -52,7 +52,7 @@ export let PermessageDeflate = module (
         };
 
         /// @brief The element, as written in a Sec-WebSocket-Extensions header.
-        #NoDiscard
+        .NoDiscard
         export let to_extension = func -> exts.Extension {
             last params: exts.ExtensionParam[list] = new;
             if (server_no_context_takeover) {
@@ -98,7 +98,7 @@ export let PermessageDeflate = module (
     );
 
     /// @brief What a server is willing to agree to.
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let ServerConfig = class (
         /// @brief Accept offers that limit the server's window (`server_max_window_bits`).
         export last accept_server_window_limit: bool;
@@ -148,12 +148,12 @@ export let PermessageDeflate = module (
     /// @brief Reads a client's offer element (RFC 7692 section 7). Fails for another extension name, an unknown
     /// or repeated parameter, a value on a takeover parameter, or window bits that are not 8 to 15 without
     /// leading zeros (`server_max_window_bits` needs a value; `client_max_window_bits` may have none).
-    #NoDiscard
+    .NoDiscard
     export let parse_offer = func(element: exts.Extension) -> Result<DeflateParams> => read(element, true);
 
     /// @brief Reads a server's response element (RFC 7692 section 7): as `parse_offer`, except that
     /// `client_max_window_bits` needs a value.
-    #NoDiscard
+    .NoDiscard
     export let parse_response = func(element: exts.Extension) -> Result<DeflateParams> => read(element, false);
 
     /// @brief The server's answer to a client's offers: the agreed parameters of the first acceptable
@@ -164,7 +164,7 @@ export let PermessageDeflate = module (
     /// asks for it, the offer's `server_max_window_bits`, `client_no_context_takeover` when the configuration
     /// asks for it, and the configuration's `client_max_window_bits` (capped by the offer's value) only when the
     /// offer included that parameter (section 7.1.2.2).
-    #NoDiscard
+    .NoDiscard
     export let negotiate = func(offers: exts.Extension[list], config: ServerConfig) -> Optional<DeflateParams> {
         for (let element in offers) {
             if (element.name != ExtensionName) {
@@ -197,7 +197,7 @@ export let PermessageDeflate = module (
     /// @brief The client's check of a server's response element against its offers (RFC 7692 sections 5 and
     /// 7.1): the response must parse, and some valid offer must allow it: `client_max_window_bits` only when
     /// that offer had the parameter, and `server_max_window_bits` no larger than that offer's value.
-    #NoDiscard
+    .NoDiscard
     export let validate_response = func(offers: exts.Extension[list], response: exts.Extension) -> Result<DeflateParams> {
         last agreed = parse_response(response)?;
         for (let element in offers) {
@@ -225,7 +225,7 @@ export let PermessageDeflate = module (
 
     /// @brief The compressed payload with the final `00 00 ff ff` removed, as a sender sends it (RFC 7692
     /// section 7.2.1). A payload without that tail is returned unchanged.
-    #NoDiscard
+    .NoDiscard
     export let strip_tail = func(compressed: uint8[list]) -> uint8[list] {
         last n = compressed.length;
         last tail = n >= 4 && compressed[n - 4] == 0 && compressed[n - 3] == 0 && compressed[n - 2] == 255
@@ -240,7 +240,7 @@ export let PermessageDeflate = module (
 
     /// @brief The received payload with `00 00 ff ff` appended, as a receiver inflates it (RFC 7692 section
     /// 7.2.2).
-    #NoDiscard
+    .NoDiscard
     export let append_tail = func(payload: uint8[list]) -> uint8[list] {
         last out: uint8[list] = new;
         for (let b in payload) {
@@ -254,7 +254,7 @@ export let PermessageDeflate = module (
     };
 
     /// @brief The per-connection compressor and decompressor for agreed parameters and a role.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let DeflateCodec = class (
         /// @brief The agreed parameters.
         export last params: DeflateParams;
@@ -269,14 +269,14 @@ export let PermessageDeflate = module (
 
         /// @brief The payload of a compressed message: DEFLATE of the message, tail stripped.
         /// @stub no DEFLATE (RFC 1951) compressor in the standard library
-        #NoDiscard
+        .NoDiscard
         export let compress = func(message: uint8[list]) -> Result<uint8[list]> {
             trap_with_message("unsupported: Std.Net.Realtime.Ws.PermessageDeflate.DeflateCodec.compress is not implemented in Neura 0.3.0 (no DEFLATE (RFC 1951) compressor in the standard library)");
         };
 
         /// @brief The message of a compressed payload: inflate of the payload with the tail restored.
         /// @stub no DEFLATE (RFC 1951) decompressor in the standard library
-        #NoDiscard
+        .NoDiscard
         export let decompress = func(payload: uint8[list]) -> Result<uint8[list]> {
             trap_with_message("unsupported: Std.Net.Realtime.Ws.PermessageDeflate.DeflateCodec.decompress is not implemented in Neura 0.3.0 (no DEFLATE (RFC 1951) decompressor in the standard library)");
         };

@@ -7,10 +7,10 @@ let sorting = import:Std.Collections.Sorting;
 /// @brief Lists with a shallow copy of the supplied elements in read-only storage.
 /// The positions are fixed at construction, so iterators need no modification check.
 /// @see [Std.Collections.ImmutableList](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-ImmutableList)
-#Since("0.1.0")
+.Since("0.1.0")
 export let ImmutableList = module (
     /// @brief A positional collection with its own shallow copy of the supplied list.
-    #[Final, NoDiscard]
+    .[Final, NoDiscard]
     export let ImmutableList = class<T> implements List<T> (
         /// @brief The privately owned shallow copy of the supplied list.
         last storage: T[list];
@@ -53,7 +53,7 @@ export let ImmutableList = module (
         };
 
         /// @brief Returns the first element as `Some`, or `None` when empty.
-        #NoDiscard
+        .NoDiscard
         export let first_or_none = func -> optional.Optional<T> {
             if (storage.length == 0) {
                 return optional.Optional<T>.None;
@@ -62,7 +62,7 @@ export let ImmutableList = module (
         };
 
         /// @brief Returns the last element as `Some`, or `None` when empty.
-        #NoDiscard
+        .NoDiscard
         export let last_or_none = func -> optional.Optional<T> {
             if (storage.length == 0) {
                 return optional.Optional<T>.None;

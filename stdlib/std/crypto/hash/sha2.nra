@@ -11,11 +11,11 @@ let.promote _ = import:Std.Crypto.StreamingDigest;
 /// Neura code. No hardware acceleration (SHA-NI, AVX-512) is used. Each digest checks the current
 /// Std.Crypto.Core.CryptoPolicy when it is created.
 /// @see [Std.Crypto.Hash.Sha2](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Hash-Sha2)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Sha2 = module (
     /// @brief A running SHA-224 digest. `finish` returns 28 bytes; an `update` or `finish` after it
     /// traps with "invalid state: digest finished".
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Sha224 = class implements StreamingDigest<Sha224> (
         /// @brief The compression state.
         last core: sha2_core.Core256 = new([3238371032, 914150663, 812702999, 4144912697, 4290775857, 1750603025, 1694076839, 3204075428], 7);
@@ -49,7 +49,7 @@ export let Sha2 = module (
     );
 
     /// @brief The SHA-224 hash of the bytes.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let sha224 = func(bytes: uint8[list]) -> uint8[list] {
         let digest = new Sha224();
         digest.update(bytes);
@@ -58,7 +58,7 @@ export let Sha2 = module (
 
     /// @brief A running SHA-256 digest. `finish` returns 32 bytes; an `update` or `finish` after it
     /// traps with "invalid state: digest finished".
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Sha256 = class implements StreamingDigest<Sha256> (
         /// @brief The running kernel digest of Std.Digest.Sha256.
         last core: digest_sha256.Sha256 = new;
@@ -92,7 +92,7 @@ export let Sha2 = module (
     );
 
     /// @brief The SHA-256 hash of the bytes.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let sha256 = func(bytes: uint8[list]) -> uint8[list] {
         let digest = new Sha256();
         digest.update(bytes);
@@ -101,7 +101,7 @@ export let Sha2 = module (
 
     /// @brief A running SHA-384 digest. `finish` returns 48 bytes; an `update` or `finish` after it
     /// traps with "invalid state: digest finished".
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Sha384 = class implements StreamingDigest<Sha384> (
         /// @brief The compression state.
         last core: sha2_core.Core512 = new([14680500436340154072, 7105036623409894663, 10473403895298186519, 1526699215303891257, 7436329637833083697, 10282925794625328401, 15784041429090275239, 5167115440072839076], 48);
@@ -135,7 +135,7 @@ export let Sha2 = module (
     );
 
     /// @brief The SHA-384 hash of the bytes.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let sha384 = func(bytes: uint8[list]) -> uint8[list] {
         let digest = new Sha384();
         digest.update(bytes);
@@ -144,7 +144,7 @@ export let Sha2 = module (
 
     /// @brief A running SHA-512 digest. `finish` returns 64 bytes; an `update` or `finish` after it
     /// traps with "invalid state: digest finished".
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Sha512 = class implements StreamingDigest<Sha512> (
         /// @brief The compression state.
         last core: sha2_core.Core512 = new([7640891576956012808, 13503953896175478587, 4354685564936845355, 11912009170470909681, 5840696475078001361, 11170449401992604703, 2270897969802886507, 6620516959819538809], 64);
@@ -178,7 +178,7 @@ export let Sha2 = module (
     );
 
     /// @brief The SHA-512 hash of the bytes.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let sha512 = func(bytes: uint8[list]) -> uint8[list] {
         let digest = new Sha512();
         digest.update(bytes);
@@ -187,7 +187,7 @@ export let Sha2 = module (
 
     /// @brief A running SHA-512/256 digest. `finish` returns 32 bytes; an `update` or `finish` after it
     /// traps with "invalid state: digest finished".
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Sha512_256 = class implements StreamingDigest<Sha512_256> (
         /// @brief The compression state.
         last core: sha2_core.Core512 = new([2463787394917988140, 11481187982095705282, 2563595384472711505, 10824532655140301501, 10819967247969091555, 13717434660681038226, 3098927326965381290, 1060366662362279074], 32);
@@ -221,7 +221,7 @@ export let Sha2 = module (
     );
 
     /// @brief The SHA-512/256 hash of the bytes.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let sha512_256 = func(bytes: uint8[list]) -> uint8[list] {
         let digest = new Sha512_256();
         digest.update(bytes);

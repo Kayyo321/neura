@@ -16,7 +16,7 @@ let.promote _ = import:Std.Core.Result;
 /// with ID 0, opcode 0 and RD clear (section 18). A stub: sending to and listening on the multicast group, which
 /// needs a UDP socket that joins a multicast group (IP_ADD_MEMBERSHIP); no host service offers that.
 /// @see [Std.Net.Dns.Mdns](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-Mdns)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Mdns = module (
     /// @brief The mDNS port (section 1).
     export const Port: int = 5353;
@@ -26,11 +26,11 @@ export let Mdns = module (
     export const CacheFlushBit: int = 32768;
 
     /// @brief The IPv4 group 224.0.0.251.
-    #NoDiscard
+    .NoDiscard
     export let ipv4_group = func -> Ipv4Addr => ipv4.of(224, 0, 0, 251);
 
     /// @brief The IPv6 group ff02::fb.
-    #NoDiscard
+    .NoDiscard
     export let ipv6_group = func -> Ipv6Addr {
         last segments: uint16[list] = new;
         segments.append(65282);
@@ -43,7 +43,7 @@ export let Mdns = module (
 
     /// @brief Whether a name belongs to mDNS: within `local.`, `254.169.in-addr.arpa.`, or the IPv6 link-local
     /// reverse zones `8.e.f.ip6.arpa.` through `b.e.f.ip6.arpa.` (sections 3 and 4).
-    #NoDiscard
+    .NoDiscard
     export let is_local_name = func(name: names.DnsName) -> bool {
         for (let zone in ["local", "254.169.in-addr.arpa", "8.e.f.ip6.arpa", "9.e.f.ip6.arpa", "a.e.f.ip6.arpa",
             "b.e.f.ip6.arpa"]) {
@@ -61,37 +61,37 @@ export let Mdns = module (
     };
 
     /// @brief A question for `name` and `qtype` in class IN, asking for a unicast reply when `unicast` is true.
-    #NoDiscard
+    .NoDiscard
     export let question = func(name: names.DnsName, qtype: int, unicast: bool) -> messages.Question =>
         new messages.Question(name, qtype, messages.ClassIn + (unicast ? UnicastResponseBit : 0));
 
     /// @brief Whether a question asks for a unicast reply.
-    #NoDiscard
+    .NoDiscard
     export let wants_unicast = func(asked: messages.Question) -> bool => asked.qclass >= UnicastResponseBit;
 
     /// @brief A question's class without the unicast-response bit.
-    #NoDiscard
+    .NoDiscard
     export let question_class = func(asked: messages.Question) -> int => asked.qclass % UnicastResponseBit;
 
     /// @brief The record with the cache-flush bit set or cleared.
-    #NoDiscard
+    .NoDiscard
     export let with_cache_flush = func(record: messages.ResourceRecord, flush: bool) -> messages.ResourceRecord =>
         new messages.ResourceRecord(record.name, record.rtype, record.rclass % CacheFlushBit + (flush ? CacheFlushBit : 0),
             record.ttl, record.data);
 
     /// @brief Whether a record has the cache-flush bit set. An OPT record's class is its payload size, so it is
     /// never a cache-flush record.
-    #NoDiscard
+    .NoDiscard
     export let is_cache_flush = func(record: messages.ResourceRecord) -> bool =>
         record.rtype != messages.TypeOpt && record.rclass >= CacheFlushBit;
 
     /// @brief A record's class without the cache-flush bit.
-    #NoDiscard
+    .NoDiscard
     export let record_class = func(record: messages.ResourceRecord) -> int =>
         record.rtype == messages.TypeOpt ? record.rclass : record.rclass % CacheFlushBit;
 
     /// @brief A one-shot multicast query: ID 0, opcode 0, RD clear (section 18), one question.
-    #NoDiscard
+    .NoDiscard
     export let query = func(name: names.DnsName, qtype: int, unicast: bool) -> messages.Message {
         last message = new messages.Message();
         message.questions.append(question(name, qtype, unicast));
@@ -99,7 +99,7 @@ export let Mdns = module (
     };
 
     /// @brief A multicast response carrying `answers`: ID 0, QR and AA set, no questions (section 18).
-    #NoDiscard
+    .NoDiscard
     export let response = func(answers: messages.ResourceRecord[list]) -> messages.Message {
         last message = new messages.Message();
         message.header.is_response = true;
@@ -114,7 +114,7 @@ export let Mdns = module (
     let DatagramsOutcome = enum (Ok(uint8[list][list]), Error(uint32));
 
     /// @brief A querier on the local link.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let MdnsQuerier = class (
         /// @brief How long to collect responses.
         export last window: durations.Duration;
@@ -125,7 +125,7 @@ export let Mdns = module (
         };
 
         /// @brief Sends a query to the group and returns every response received within the window.
-        #NoDiscard
+        .NoDiscard
         export let query_all = func(name: names.DnsName, qtype: int) -> Result<messages.Message[list]> {
             return match (multicast_exchange(messages.encode(query(name, qtype, false))?, window.to_nanos())) {
                 DatagramsOutcome.Ok(datagrams) => Result<messages.Message[list]>.Ok(responses_in(datagrams)),
@@ -139,7 +139,7 @@ export let Mdns = module (
     );
 
     /// @brief The decodable responses among datagrams; others are dropped.
-    #NoDiscard
+    .NoDiscard
     export let responses_in = func(datagrams: uint8[list][list]) -> messages.Message[list] {
         last out: messages.Message[list] = new;
         for (let bytes in datagrams) {

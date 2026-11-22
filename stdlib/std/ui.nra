@@ -11,35 +11,35 @@ let.promote _ = import:Std.Core.Error;
 /// @brief Values produced by native HTML factories.
 export let Ui = module (
     /// @brief One rendered fragment and its evaluated slot values.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let View = class (
-        #Internal
+        .Internal
         export last descriptor: string;
-        #Internal
+        .Internal
         export last fragment: uint32;
         /// The slot evaluated last; each slot's `next` is the one evaluated before it. Walk the slots in
         /// evaluation order with `Std.Ui.Internal.Build.slots_in_order`.
-        #Internal
+        .Internal
         export last last_slot: storage.Slot;
         /// The reconciler that last placed this view in a tree, and in which pass.
-        #Internal
+        .Internal
         export let owner: class = nil;
-        #Internal
+        .Internal
         export let pass: uint64 = 0;
 
-        #Internal
+        .Internal
         export let init = func(descriptor: string, fragment: uint32, last_slot: storage.Slot) => set;
 
         export let.override to_string = func -> string => "View(fragment " .. fragment.to_string() .. ")";
     );
 
     /// @brief A URL checked for use in a template attribute.
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let Url = class (
-        #Internal
+        .Internal
         export last text: string;
 
-        #Internal
+        .Internal
         export let init = func(text: string) => set;
 
         /// @brief Equal when every component is equal.
@@ -64,14 +64,14 @@ export let Ui = module (
     );
 
     /// @brief A numeric CSS custom property value and its unit.
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let CssValue = class (
-        #Internal
+        .Internal
         export last value: float64;
-        #Internal
+        .Internal
         export last unit: string;
 
-        #Internal
+        .Internal
         export let init = func(value: float64, unit: string) => set;
 
         /// @brief Equal when every component is equal.
@@ -102,13 +102,13 @@ export let Ui = module (
     /// @brief A stylesheet that the build wrote beside the image, named by the SHA-256 of its text.
     /// @note The text is not in the image. The bundle links the file from `index.html`; holding the
     /// value keeps nothing alive and registers nothing at run time.
-    #[Final, Immutable]
-    #Since("0.3.0")
+    .[Final, Immutable]
+    .Since("0.3.0")
     export let Stylesheet = class (
         /// @brief The lowercase hexadecimal SHA-256 of the written file.
         export last digest: string;
 
-        #Internal
+        .Internal
         export let init = func(digest: string) => set;
 
         /// @brief The bundle path of the file, `styles/<digest>.css`.
@@ -129,13 +129,13 @@ export let Ui = module (
     /// @brief A CSS module the build wrote beside the image, with its class and keyframes names scoped.
     /// @note Use the constant's `class_name("name")` and `keyframes_name("name")`, which the compiler
     /// replaces with the scoped names; their argument is a string literal naming a declared export.
-    #[Final, Immutable]
-    #Since("0.3.0")
+    .[Final, Immutable]
+    .Since("0.3.0")
     export let StyleModule = class (
         /// @brief The lowercase hexadecimal SHA-256 of the written file.
         export last digest: string;
 
-        #Internal
+        .Internal
         export let init = func(digest: string) => set;
 
         /// @brief The bundle path of the file, `styles/<digest>.css`.
@@ -154,7 +154,7 @@ export let Ui = module (
     );
 
     /// @brief Why a commit was refused before anything changed.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let DiagnosticKind = enum (
         /// A view object appears twice in the committed tree, or is already mounted.
         ViewReused,
@@ -165,8 +165,8 @@ export let Ui = module (
     );
 
     /// @brief A refused commit: what, which slot, and for a keyed item its position and key.
-    #[Final, Immutable]
-    #Since("0.3.0")
+    .[Final, Immutable]
+    .Since("0.3.0")
     export let Diagnostic = class (
         export last kind: DiagnosticKind;
         export last message: string;
@@ -177,7 +177,7 @@ export let Ui = module (
         /// @brief The item's key as text, or empty.
         export last key: string;
 
-        #Internal
+        .Internal
         export let init = func(kind: DiagnosticKind, message: string, slot: uint32, index: int64, key: string) => set;
 
         /// @brief The message, which names the refused rule.
@@ -198,7 +198,7 @@ export let Ui = module (
     );
 
     /// @brief The outcome of a commit that did not fail in the host.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let RenderOutcome = enum (
         /// The view is mounted.
         Committed,
@@ -263,14 +263,14 @@ export let Ui = module (
     /// @brief The device that supplied a pointer event.
     export let PointerKind = enum (Mouse, Pen, Touch, Other);
 
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let Modifiers = class (
         export last alt: bool;
         export last ctrl: bool;
         export last meta: bool;
         export last shift: bool;
 
-        #Internal
+        .Internal
         export let init = func(alt: bool, ctrl: bool, meta: bool, shift: bool) => set;
 
         /// @brief Equal when every component is equal.
@@ -306,7 +306,7 @@ export let Ui = module (
             ")";
     );
 
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let ClickEvent = class (
         export last button: uint8;
         export last x: float64;
@@ -314,7 +314,7 @@ export let Ui = module (
         export last modifiers: Modifiers;
         export last detail: int32;
 
-        #Internal
+        .Internal
         export let init = func(button: uint8, x: float64, y: float64, modifiers: Modifiers, detail: int32) => set;
 
         /// @brief Equal when every component is equal.
@@ -354,13 +354,13 @@ export let Ui = module (
             ")";
     );
 
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let InputEvent = class (
         export last value: string;
         export last checked: bool;
         export last composing: bool;
 
-        #Internal
+        .Internal
         export let init = func(value: string, checked: bool, composing: bool) => set;
 
         /// @brief Equal when every component is equal.
@@ -392,12 +392,12 @@ export let Ui = module (
             ")";
     );
 
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let ChangeEvent = class (
         export last value: string;
         export last checked: bool;
 
-        #Internal
+        .Internal
         export let init = func(value: string, checked: bool) => set;
 
         /// @brief Equal when every component is equal.
@@ -425,11 +425,11 @@ export let Ui = module (
             ")";
     );
 
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let SubmitEvent = class (
         export last submitter: string;
 
-        #Internal
+        .Internal
         export let init = func(submitter: string) => set;
 
         /// @brief Equal when every component is equal.
@@ -453,14 +453,14 @@ export let Ui = module (
             ")";
     );
 
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let KeyEvent = class (
         export last key: string;
         export last code: string;
         export last modifiers: Modifiers;
         export last repeat: bool;
 
-        #Internal
+        .Internal
         export let init = func(key: string, code: string, modifiers: Modifiers, repeat: bool) => set;
 
         /// @brief Equal when every component is equal.
@@ -496,7 +496,7 @@ export let Ui = module (
             ")";
     );
 
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let FocusEvent = class (
         /// @brief Every focus event is equal: it carries no data.
         export let.override equals = func(other: class) -> bool => other is FocusEvent;
@@ -508,7 +508,7 @@ export let Ui = module (
         export let.override to_string = func -> string => "FocusEvent";
     );
 
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let PointerEvent = class (
         export last x: float64;
         export last y: float64;
@@ -516,7 +516,7 @@ export let Ui = module (
         export last kind: PointerKind;
         export last modifiers: Modifiers;
 
-        #Internal
+        .Internal
         export let init = func(x: float64, y: float64, button: uint8, kind: PointerKind, modifiers: Modifiers) => set;
 
         /// @brief Equal when every component is equal.
@@ -556,12 +556,12 @@ export let Ui = module (
             ")";
     );
 
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let ScrollEvent = class (
         export last top: float64;
         export last left: float64;
 
-        #Internal
+        .Internal
         export let init = func(top: float64, left: float64) => set;
 
         /// @brief Equal when every component is equal.
@@ -589,11 +589,11 @@ export let Ui = module (
             ")";
     );
 
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let ToggleEvent = class (
         export last open: bool;
 
-        #Internal
+        .Internal
         export let init = func(open: bool) => set;
 
         /// @brief Equal when every component is equal.
@@ -617,11 +617,11 @@ export let Ui = module (
             ")";
     );
 
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let CloseEvent = class (
         export last return_value: string;
 
-        #Internal
+        .Internal
         export let init = func(return_value: string) => set;
 
         /// @brief Equal when every component is equal.
@@ -648,7 +648,7 @@ export let Ui = module (
     // State, components and roots (docs/apps/Components.md).
 
     /// @brief Stops one subscriber of a `State`. `close()` may be called any number of times.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Subscription = class (
         let open: bool = true;
 
@@ -670,7 +670,7 @@ export let Ui = module (
     );
 
     /// @brief One subscriber of a state and the handle that closes it.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     let Subscriber = class<T> (
         export last handle: Subscription;
         export last listener: func(T) -> void;
@@ -688,7 +688,7 @@ export let Ui = module (
     /// reports the two equal. A `set` made while the state is notifying replaces the value and
     /// queues its notification, which runs when the current round ends; more than 100 rounds in
     /// one notification traps with `state update loop`.
-    #[Final, NotThreadSafe, Frozen]
+    .[Final, NotThreadSafe, Frozen]
     export let State = class<T> (
         let value: T;
         let equal: func(T, T) -> bool;
@@ -758,7 +758,7 @@ export let Ui = module (
         };
 
         /// @brief Suppresses the notification of an update whose value `same` reports equal to the current one. `same` is retained.
-        #Internal
+        .Internal
         export let use_equality = func(same: func(T, T) -> bool) {
             equal = same;
             has_equal = true;
@@ -797,39 +797,39 @@ export let Ui = module (
     /// @brief A state and the function that renders a view of its value, mounted at most once at a time.
     /// Build one with `component`. It renders when it is mounted and after each turn in which its state
     /// notified; unmounting closes its subscription and raises its generation.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Component = class (
         last render_view: func() -> View;
         last attach: func(Component) -> Subscription;
-        #Internal
+        .Internal
         export let subscription: Subscription = nil;
-        #Internal
+        .Internal
         export let children: Component[list] = new;
-        #Internal
+        .Internal
         export let owner: Root = nil;
-        #Internal
+        .Internal
         export let dirty: bool = false;
-        #Internal
+        .Internal
         export let view: View = nil;
         /// What the root's reconciler keeps of the component's mounted nodes, so that a commit in which neither
         /// the component nor a component below it rendered reuses them (`Std.Ui.Internal.Reconcile`).
-        #Internal
+        .Internal
         export let reconciled: class = nil;
         /// The reconciler and pass of the last commit for which the component rendered.
-        #Internal
+        .Internal
         export let rendered_by: class = nil;
-        #Internal
+        .Internal
         export let rendered_pass: uint64 = 0;
         let generation_count: uint64 = 0;
         let render_total: int64 = 0;
         /// Called with the root each time the component is mounted, after it subscribes.
-        #Internal
+        .Internal
         export let mount_actions: (func(Root) -> void)[list] = new;
         /// Called each time the component is unmounted, after its children and before its generation rises.
-        #Internal
+        .Internal
         export let unmount_actions: (func() -> void)[list] = new;
 
-        #Internal
+        .Internal
         export let init = func(render_view: func() -> View, attach: func(Component) -> Subscription) => set;
 
         /// @brief Raised by each unmount; a completion or event that carries an older generation is discarded.
@@ -845,7 +845,7 @@ export let Ui = module (
         export let current_view = func -> View => view;
 
         /// @brief Marks the component for rendering at the end of the turn, when it is mounted.
-        #Internal
+        .Internal
         export let invalidate = func {
             if (owner != nil) {
                 dirty = true;
@@ -853,7 +853,7 @@ export let Ui = module (
             }
         };
 
-        #Internal
+        .Internal
         export let render_now = func -> View {
             last render = render_view;
             last next = render();
@@ -863,7 +863,7 @@ export let Ui = module (
             return next;
         };
 
-        #Internal
+        .Internal
         export let attach_to = func(root: Root) {
             owner = root;
             last subscribe = attach;
@@ -875,7 +875,7 @@ export let Ui = module (
             }
         };
 
-        #Internal
+        .Internal
         export let detach = func {
             for (let i = 0; i < children.length; i++) {
                 children[i].detach();
@@ -928,12 +928,12 @@ export let Ui = module (
     export let RootEvent = enum (InputOverflow(uint32));
 
     /// @brief One component and the view it rendered in a turn.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Rendered = class (
         export last component: Component;
         export last view: View;
 
-        #Internal
+        .Internal
         export let init = func(component: Component, view: View) => set;
 
         /// @brief `Rendered(` the component `)`.
@@ -942,14 +942,14 @@ export let Ui = module (
 
     /// @brief The renders of one turn, parents before children, sent to the host as one request. A host that
     /// reconciles builds the root's tree from `top`: the components that did not render keep their views.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Commit = class (
         export last sequence: uint64;
         export last rendered: Rendered[list];
         /// @brief The component the root was mounted with.
         export last top: Component;
 
-        #Internal
+        .Internal
         export let init = func(sequence: uint64, rendered: Rendered[list], top: Component) => set;
 
         /// @brief `Commit(` the sequence number and the number of renders `)`.
@@ -978,7 +978,7 @@ export let Ui = module (
 
     /// @brief What a host holds for one root (budget B-W9): its nodes (the container excluded), installed
     /// listeners, registered templates and queued events. A host that keeps no document reports zeros.
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let HostStats = class (
         export last nodes: int64;
         export last listeners: int64;
@@ -1007,7 +1007,7 @@ export let Ui = module (
     );
 
     /// @brief One event waiting in a root's queue.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     let QueuedEvent = class (
         export last listener: uint64;
         export last target: Component;
@@ -1032,8 +1032,8 @@ export let Ui = module (
     let navigation_listener: uint64 = 18446744073709551615;
 
     /// Starts one command run; its only use is to give a run's start function a type of its own.
-    #[Final, Immutable]
-    #Internal
+    .[Final, Immutable]
+    .Internal
     export let Launch = class (
         export last ticket: uint64;
 
@@ -1044,8 +1044,8 @@ export let Ui = module (
     );
 
     /// One command run registered with a root.
-    #[Final, NotThreadSafe]
-    #Internal
+    .[Final, NotThreadSafe]
+    .Internal
     export let Ticket = class (
         export last id: uint64;
         export last launch: func(Launch, channels.Sender<uint64>) -> void;
@@ -1070,7 +1070,7 @@ export let Ui = module (
     );
 
     /// What one turn's renders changed in the component tree, so that a refused commit can undo it.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     let Journal = class (
         export last nodes: Component[list] = new;
         export last old_children: (Component[list])[list] = new;
@@ -1116,7 +1116,7 @@ export let Ui = module (
     );
 
     /// @brief Counts that show what a root holds and has done.
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let RootStats = class (
         export last components: int32;
         export last subscriptions: int32;
@@ -1127,7 +1127,7 @@ export let Ui = module (
         export last dropped: uint64;
         export last discarded: uint64;
 
-        #Internal
+        .Internal
         export let init = func(components: int32, subscriptions: int32, queued: int32, turns: uint64, renders: uint64,
             commits: uint64, dropped: uint64, discarded: uint64) => set;
 
@@ -1152,7 +1152,7 @@ export let Ui = module (
     /// @brief A mounted component tree and its event loop. One turn takes the next event, calls its
     /// handler, renders each component whose state notified, once, parents before children, and
     /// commits the renders as one host request.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Root = class (
         last host: Host;
         last handle: uint64;
@@ -1190,7 +1190,7 @@ export let Ui = module (
         let render_before_commit: bool = false;
         let invalidated_while_rendering: bool = false;
 
-        #Internal
+        .Internal
         export let init = func(host: Host, handle: uint64, top: Component) {
             instance.host = host;
             instance.handle = handle;
@@ -1273,7 +1273,7 @@ export let Ui = module (
 
         /// @brief Queues the notice that the host dropped `dropped` events while the root was overloaded. It is
         /// delivered to `on_overflow` before the events posted after it. Called by a host that queues events itself.
-        #Internal
+        .Internal
         export let post_overflow = func(dropped: uint32) {
             if (closed || dropped == 0) {
                 return;
@@ -1344,7 +1344,7 @@ export let Ui = module (
         };
 
         /// Marks the root as running commands; false when it already is.
-        #Internal
+        .Internal
         export let begin_commands = func -> bool {
             if (running_commands) {
                 return false;
@@ -1354,7 +1354,7 @@ export let Ui = module (
         };
 
         /// The next run to start under `Std.Ui.Commands.run`, taken off the list, or nil.
-        #Internal
+        .Internal
         export let next_launch = func -> Ticket {
             if (launches.length == 0) {
                 return nil;
@@ -1365,19 +1365,19 @@ export let Ui = module (
         };
 
         /// Reports whether the loop of `Std.Ui.Commands.run` should stop: the root is closed or faulted.
-        #Internal
+        .Internal
         export let is_stopped = func -> bool => closed || faulted;
 
         /// Reports whether an event is queued.
-        #Internal
+        .Internal
         export let has_queued = func -> bool => queue.length > 0;
 
         /// Waits for host events with `wait`, or with `TaskHost.wait_with` when the host is one.
-        #Internal
+        .Internal
         export let wait_for_events = func -> bool => host.wait(instance);
 
         /// The host as a `TaskHost`, or nil.
-        #Internal
+        .Internal
         export let task_host = func -> TaskHost {
             if (host is TaskHost) {
                 return host as TaskHost;
@@ -1386,7 +1386,7 @@ export let Ui = module (
         };
 
         /// Asks every run in flight to cancel and forgets the runs not started.
-        #Internal
+        .Internal
         export let stop_commands = func {
             for (let i = 0; i < tickets.length; i++) {
                 tickets[i].stop();
@@ -1395,7 +1395,7 @@ export let Ui = module (
         };
 
         /// After every command task has finished: applies what the remaining runs reported, outside any turn.
-        #Internal
+        .Internal
         export let end_commands = func {
             last remaining = tickets;
             tickets = new;
@@ -1459,7 +1459,7 @@ export let Ui = module (
 
         /// @brief Reports whether a listener added with `on_navigation` is still open, so that a host waits for
         /// the document's navigations only for a root that uses them.
-        #Internal
+        .Internal
         export let listens_for_navigation = func -> bool {
             for (let i = 0; i < navigation.length; i++) {
                 if (navigation[i].handle.is_open()) {
@@ -1470,7 +1470,7 @@ export let Ui = module (
         };
 
         /// Called by `Component.invalidate`.
-        #Internal
+        .Internal
         export let invalidated = func {
             if (rendering) {
                 invalidated_while_rendering = true;
@@ -1480,7 +1480,7 @@ export let Ui = module (
         /// @brief Renders every component again, as after a reset. Called during a render, the components render
         /// again before the turn commits, so the page never shows the first renders. The router calls it when it
         /// learns, as it mounts, that links rendered earlier in the turn used another routing form.
-        #Internal
+        .Internal
         export let render_all_again = func {
             invalidate_all(top);
             if (rendering) {
@@ -1494,7 +1494,7 @@ export let Ui = module (
             pending_focus = element_id;
         };
 
-        #Internal
+        .Internal
         export let navigated = func(path: string) {
             last count = navigation.length;
             for (let i = 0; i < count; i++) {
@@ -1515,12 +1515,12 @@ export let Ui = module (
         };
 
         /// @brief Reports whether another command may start: fewer than the limit are in flight.
-        #Internal
+        .Internal
         export let can_launch = func -> bool => tickets.length < command_limit;
 
         /// @brief Registers a command run; `launch` starts its task under `Std.Ui.Commands.run`, `finish`
         /// applies its completion in a turn, and `stop` asks it to cancel.
-        #Internal
+        .Internal
         export let launch = func(start: func(Launch, channels.Sender<uint64>) -> void, finish: func(uint64) -> bool,
             stop: func() -> void) -> uint64 {
             ticket_count += 1;
@@ -1532,7 +1532,7 @@ export let Ui = module (
 
         /// @brief Asks the run `id` to cancel. A run not started yet is dropped, never completes, and
         /// true is returned.
-        #Internal
+        .Internal
         export let stop_ticket = func(id: uint64) -> bool {
             for (let i = 0; i < launches.length; i++) {
                 if (launches[i].id == id) {
@@ -1562,7 +1562,7 @@ export let Ui = module (
         };
 
         /// One turn: the completion of the run `id`.
-        #Internal
+        .Internal
         export let complete = func(id: uint64) {
             last ticket = remove_ticket(id);
             if (ticket == nil || closed || faulted) {
@@ -1606,7 +1606,7 @@ export let Ui = module (
                 dropped_total, discarded_total);
         };
 
-        #Internal
+        .Internal
         export let start = func {
             top.attach_to(instance);
             flush();

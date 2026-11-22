@@ -14,7 +14,7 @@ let rounding = import:Std.Math.Internal.FloatRounding;
 /// intermediate is a uint64 by the limb row of Stdlib.md section 7.2. A magnitude above 2^26 limbs traps with
 /// `invalid argument: magnitude too large`.
 /// @see [Std.Math.BigInteger](https://github.com/Kayyo321/neura/wiki/Stdlib-Math-BigInteger)
-#Since("0.1.0")
+.Since("0.1.0")
 export let BigInteger = module (
     /// @brief The maximum number of limbs in a magnitude.
     const MaxLimbs: int = 67108864;
@@ -26,7 +26,7 @@ export let BigInteger = module (
     const KaratsubaLimbs: int = 48;
 
     /// @brief An immutable signed integer with a normalized little-endian magnitude.
-    #[Final, NoDiscard]
+    .[Final, NoDiscard]
     export let BigInteger = class implements Comparable<BigInteger> (
         /// @brief The normalized sign, which is minus one, zero, or one.
         last signum: int;
@@ -57,15 +57,15 @@ export let BigInteger = module (
         };
 
         /// @brief Returns minus one, zero, or one according to the sign.
-        #Pure
+        .Pure
         export let sign = func -> int => signum;
 
         /// @brief Reports whether this integer is zero.
-        #Pure
+        .Pure
         export let is_zero = func -> bool => signum == 0;
 
         /// @brief Tests divisibility by two, including zero.
-        #Pure
+        .Pure
         export let is_even = func -> bool => signum == 0 || (magnitude[0] & 1) == 0;
 
         /// @brief Returns the value with its sign reversed.
@@ -83,7 +83,7 @@ export let BigInteger = module (
             signed_sum(signum, magnitude, -other.signum, other.magnitude);
 
         /// @brief Schoolbook with uint64 partial products; Karatsuba when both operands have at least 48 limbs.
-        #Pure
+        .Pure
         export let multiply = func(other: BigInteger) -> BigInteger {
             if (signum == 0 || other.signum == 0) {
                 return new(0, new);
@@ -119,7 +119,7 @@ export let BigInteger = module (
         };
 
         /// @brief Square and multiply. pow(0) is 1; a negative exponent traps.
-        #Pure
+        .Pure
         export let pow = func(exponent: int) -> BigInteger {
             if (exponent < 0) {
                 trap_with_message("invalid argument: negative exponent");
@@ -214,7 +214,7 @@ export let BigInteger = module (
         };
 
         /// @brief this * 2^n. A negative n traps.
-        #Pure
+        .Pure
         export let shift_left = func(n: int) -> BigInteger {
             if (n < 0) {
                 trap_with_message("invalid argument: negative shift count");
@@ -223,7 +223,7 @@ export let BigInteger = module (
         };
 
         /// @brief floor(this / 2^n): rounds toward negative infinity. A negative n traps.
-        #Pure
+        .Pure
         export let shift_right = func(n: int) -> BigInteger {
             if (n < 0) {
                 trap_with_message("invalid argument: negative shift count");
@@ -236,7 +236,7 @@ export let BigInteger = module (
         };
 
         /// @brief The number of bits of the magnitude; 0 for zero.
-        #Pure
+        .Pure
         export let bit_length = func -> int {
             if (signum == 0) {
                 return 0;
@@ -246,7 +246,7 @@ export let BigInteger = module (
         };
 
         /// @brief Bit n of the magnitude. A negative n traps.
-        #Pure
+        .Pure
         export let test_bit = func(n: int) -> bool {
             if (n < 0) {
                 trap_with_message("invalid argument: negative bit index");
@@ -256,7 +256,7 @@ export let BigInteger = module (
         };
 
         /// @brief Compares signed values by sign and then magnitude.
-        #Pure
+        .Pure
         export let compare_to = func(other: BigInteger) -> Ordering {
             if (signum != other.signum) {
                 return if (signum < other.signum) -> Ordering.Less else -> Ordering.Greater;
@@ -279,7 +279,7 @@ export let BigInteger = module (
 
         /// @brief Starts at 0, combines each limb from most to least significant, then negates (wrapping) for a
         /// negative value.
-        #Pure
+        .Pure
         export let.override hash_code = func -> uint32 {
             let h: uint32 = 0;
             for (let i = magnitude.length - 1; i >= 0; i--) {
@@ -289,7 +289,7 @@ export let BigInteger = module (
         };
 
         /// @brief Returns Some when the value fits in int64, or None otherwise.
-        #[NoDiscard, Pure]
+        .[NoDiscard, Pure]
         export let to_int64 = func -> Optional<int64> {
             if (magnitude.length > 2) {
                 return Optional<int64>.None;
@@ -317,7 +317,7 @@ export let BigInteger = module (
         };
 
         /// @brief The nearest float64, ties to even; an infinity beyond the range.
-        #Pure
+        .Pure
         export let to_float64 = func -> float64 {
             if (magnitude.length <= 2) {
                 let value: uint64 = 0;
@@ -337,11 +337,11 @@ export let BigInteger = module (
         };
 
         /// @brief Decimal, by repeated division by 10^9 and nine-digit groups.
-        #Pure
+        .Pure
         export let.override to_string = func -> string => magnitude_text(signum, magnitude, 10);
 
         /// @brief Lowercase digits. A radix outside 2 through 36 traps.
-        #Pure
+        .Pure
         export let to_string_radix = func(radix: int) -> string {
             integer_text.check_radix(radix);
             return magnitude_text(signum, magnitude, radix);
@@ -358,7 +358,7 @@ export let BigInteger = module (
     export const Ten: BigInteger = new BigInteger(1, new([10]));
 
     /// @brief Constructs a BigInteger from any int64, including the minimum signed value.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let of_int64 = func(value: int64) -> BigInteger {
         if (value >= 0) {
             return of_uint64(value as uint64);
@@ -369,16 +369,16 @@ export let BigInteger = module (
     };
 
     /// @brief Constructs a nonnegative BigInteger from an unsigned 64-bit value.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let of_uint64 = func(value: uint64) -> BigInteger => new(1, limbs_of(value));
 
     /// @brief Parses base-10 integer text or returns a parse error.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let parse = func(text: string) -> Result<BigInteger> => parse_radix(text, 10);
 
     /// @brief An optional `+` or `-`, then one or more digits of the radix in either case (Stdlib.md section
     /// 7.1), with no range failure. A radix outside 2 through 36 traps.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let parse_radix = func(text: string, radix: int) -> Result<BigInteger> {
         integer_text.check_radix(radix);
         match (integer_text.syntax_error(text, radix)) {

@@ -13,10 +13,10 @@ let ui = import:Std.Ui;
 /// test can make the next commit fail or be refused. By default the host does not interpret views;
 /// after `reconcile_commits()` it reconciles each commit as the browser host does, logs the
 /// operations, and refuses an invalid tree with the reconciler's diagnostic.
-#Since("0.3.0")
+.Since("0.3.0")
 export let ModelHost = module (
     /// @brief One scripted event.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     let Step = class (
         export last listener: uint64;
         export last target: ui.Component;
@@ -33,7 +33,7 @@ export let ModelHost = module (
     );
 
     /// @brief The steps posted by one `wait`.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     let Batch = class (
         export last steps: Step[list] = new;
         /// A barrier: the root waits here for a command to complete instead of taking events.
@@ -44,7 +44,7 @@ export let ModelHost = module (
     );
 
     /// @brief A host whose document is memory and whose events are scripted.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Host = class implements ui.Host, ui.TaskHost, ui.HistoryHost, ui.FocusHost (
         let targets: string[list] = new;
         let open_roots: bool[list] = new;
@@ -213,7 +213,7 @@ export let ModelHost = module (
             scripting.steps.append(step);
         };
 
-        #Internal
+        .Internal
         export let navigate_now = func(root: ui.Root, direction: int, path: string) {
             ensure_history();
             if (direction == 0) {

@@ -13,14 +13,14 @@ let.promote _ = import:Std.Core.Unit;
 /// Every function needs the fs capability. Functions that open files close them on every path before returning,
 /// including after a failure.
 /// @see [Std.Fs.Fs](https://github.com/Kayyo321/neura/wiki/Stdlib-Fs-Fs)
-#Since("0.1.0")
+.Since("0.1.0")
 export let Fs = module (
     /// @brief Distinguishes regular files, directories, and other entries.
     export let FileKind = enum (File, Directory, Other);
 
     /// @brief What metadata reports about an entry. A link is followed; an entry that is neither a file nor a
     /// directory is of kind Other. The fields are read-only.
-    #[Final, Immutable, ThreadSafe]
+    .[Final, Immutable, ThreadSafe]
     export let FileMetadata = class (
         /// @brief The classification reported by the filesystem provider.
         export last kind: FileKind;
@@ -47,13 +47,13 @@ export let Fs = module (
         };
 
         /// @brief Combines the hashes of the kind, size, and modification time.
-        #Pure
+        .Pure
         export let.override hash_code = func -> uint32 =>
             hashing.combine(hashing.combine(kind.hash_code(), size.hash_code()),
                 modified == nil ? 0 : modified.hash_code());
 
         /// @brief Formats the metadata as Kind(size, modified), with nil for an absent timestamp.
-        #Pure
+        .Pure
         export let.override to_string = func -> string =>
             kind.to_string() .. "(" .. size.to_string() .. ", " ..
             (modified == nil ? "nil" : modified.to_string()) .. ")";
@@ -80,7 +80,7 @@ export let Fs = module (
     export const CopyBufferSize: int = 65536;
 
     /// @brief Reads all bytes from the path and closes the file before returning.
-    #NoDiscard
+    .NoDiscard
     export let read_bytes = func(path: Path) -> result.Result<uint8[list]> {
         match (files.open(path, files.OpenMode.Read)) {
             result.Result.Ok(file) => {
@@ -93,7 +93,7 @@ export let Fs = module (
     };
 
     /// @brief The file's text; invalid UTF-8 fails with InvalidData.
-    #NoDiscard
+    .NoDiscard
     export let read_text = func(path: Path) -> result.Result<string> {
         match (read_bytes(path)) {
             result.Result.Ok(data) => {
@@ -108,25 +108,25 @@ export let Fs = module (
     };
 
     /// @brief Creates or truncates the file and writes the bytes.
-    #NoDiscard
+    .NoDiscard
     export let write_bytes = func(path: Path, data: uint8[list]) -> result.Result<Unit> {
         return write_mode(path, data, files.OpenMode.Write);
     };
 
     /// @brief Creates or truncates the file and writes the UTF-8 bytes of the text.
-    #NoDiscard
+    .NoDiscard
     export let write_text = func(path: Path, text: string) -> result.Result<Unit> {
         return write_mode(path, bytes.of_string(text), files.OpenMode.Write);
     };
 
     /// @brief Creates the file if needed and writes the text at its end.
-    #NoDiscard
+    .NoDiscard
     export let append_text = func(path: Path, text: string) -> result.Result<Unit> {
         return write_mode(path, bytes.of_string(text), files.OpenMode.Append);
     };
 
     /// @brief Ok(false) for NotFound; other failures are errors. Follows links.
-    #NoDiscard
+    .NoDiscard
     export let exists = func(path: Path) -> result.Result<bool> {
         return match (stat_path(path.to_string(), true)) {
             StatOutcome.Ok(_) => result.Result<bool>.Ok(true),
@@ -135,7 +135,7 @@ export let Fs = module (
     };
 
     /// @brief The kind, size in bytes, and last modification time of an entry, following links.
-    #NoDiscard
+    .NoDiscard
     export let metadata = func(path: Path) -> result.Result<FileMetadata> {
         return match (stat_path(path.to_string(), true)) {
             StatOutcome.Ok(status) => result.Result<FileMetadata>.Ok(metadata_of(status)),
@@ -144,7 +144,7 @@ export let Fs = module (
     };
 
     /// @brief The directory's entries joined to `path`, sorted by name bytes.
-    #NoDiscard
+    .NoDiscard
     export let list = func(path: Path) -> result.Result<Path[list]> {
         match (list_names(path.to_string())) {
             NamesOutcome.Ok(names) => {
@@ -161,13 +161,13 @@ export let Fs = module (
     };
 
     /// @brief Creates a single directory. Missing parents and an existing entry are reported as errors.
-    #NoDiscard
+    .NoDiscard
     export let create_directory = func(path: Path) -> result.Result<Unit> {
         return done(make_directory(path.to_string()), "create directory failed", path.to_string());
     };
 
     /// @brief Creates the directory and any missing parents; succeeds when the directory already exists.
-    #NoDiscard
+    .NoDiscard
     export let create_directories = func(path: Path) -> result.Result<Unit> {
         last text = path.to_string();
         match (make_directory(text)) {
@@ -198,13 +198,13 @@ export let Fs = module (
 
     /// @brief Removes a file or another entry that is not a directory, such as a link (the link, not its
     /// target).
-    #NoDiscard
+    .NoDiscard
     export let remove_file = func(path: Path) -> result.Result<Unit> {
         return done(remove_path(path.to_string(), false), "remove file failed", path.to_string());
     };
 
     /// @brief Removes an empty directory.
-    #NoDiscard
+    .NoDiscard
     export let remove_directory = func(path: Path) -> result.Result<Unit> {
         return done(remove_path(path.to_string(), true), "remove directory failed", path.to_string());
     };
@@ -213,7 +213,7 @@ export let Fs = module (
     ///
     /// Links and other entries of kind Other are removed without descending into them. Stops at the first
     /// error.
-    #NoDiscard
+    .NoDiscard
     export let remove_tree = func(path: Path) -> result.Result<Unit> {
         last text = path.to_string();
         match (stat_path(text, false)) {
@@ -245,14 +245,14 @@ export let Fs = module (
     };
 
     /// @brief Renames or moves an entry, replacing an existing file at `to`.
-    #NoDiscard
+    .NoDiscard
     export let rename = func(from: Path, to: Path) -> result.Result<Unit> {
         return done(rename_path(from.to_string(), to.to_string()), "rename failed", from.to_string());
     };
 
     /// @brief Copies a file's bytes through a 65,536-byte buffer, replacing an existing target. Both files are
     /// closed on every path.
-    #NoDiscard
+    .NoDiscard
     export let copy_file = func(from: Path, to: Path) -> result.Result<Unit> {
         last source: files.File;
         match (files.open(from, files.OpenMode.Read)) {

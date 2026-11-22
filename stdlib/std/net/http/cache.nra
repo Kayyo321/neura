@@ -25,7 +25,7 @@ let strings = import:Std.Text.Strings;
 /// are not stored; other `Vary` responses are stored with the nominated request fields, and a lookup whose
 /// fields differ is a miss (section 4.1).
 /// @see [Std.Net.Http.Cache](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-Cache)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Cache = module (
     /// @brief The saturation bound of age and lifetime arithmetic, in seconds (RFC 9111 section 1.2.2).
     export const Infinity: int64 = 2147483648;
@@ -35,7 +35,7 @@ export let Cache = module (
 
     /// @brief A response as a cache keeps it: status, header fields, content, and the times of the request and
     /// of the response's arrival (section 4.2.3).
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let StoredResponse = class (
         /// @brief The status code.
         export last status: int;
@@ -97,7 +97,7 @@ export let Cache = module (
     );
 
     /// @brief Every term of the age calculation of RFC 9111 section 4.2.3, in seconds.
-    #[Final, Immutable, ThreadSafe]
+    .[Final, Immutable, ThreadSafe]
     export let AgeTerms = class (
         /// @brief The Age field value, or 0 when absent or invalid.
         export last age_value: int64;
@@ -161,7 +161,7 @@ export let Cache = module (
     export let Lookup = enum (Fresh(StoredResponse), Stale(StoredResponse), Miss);
 
     /// @brief The age terms of section 4.2.3 at `now`.
-    #NoDiscard
+    .NoDiscard
     export let age_terms = func(stored: StoredResponse, now: instant.Instant) -> AgeTerms {
         last response_time = stored.response_time.epoch_seconds;
         last age_value = age_field(stored.fields);
@@ -184,7 +184,7 @@ export let Cache = module (
     /// only), max-age, Expires minus Date, then, when `heuristic` is true and the status is heuristically
     /// cacheable or the response is `public`, 10% of Date minus Last-Modified (section 4.2.2; never negative).
     /// `Unknown` when no rule applies.
-    #NoDiscard
+    .NoDiscard
     export let lifetime = func(stored: StoredResponse, shared: bool, heuristic: bool) -> Lifetime {
         last directives = cc.of_headers(stored.fields);
         if (shared) {
@@ -225,7 +225,7 @@ export let Cache = module (
     };
 
     /// @brief The seconds of a lifetime; 0 for `Unknown`.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let lifetime_seconds = func(value: Lifetime) -> int64 => match (value) {
         Lifetime.SharedMaxAge(seconds) => seconds,
         Lifetime.MaxAge(seconds) => seconds,
@@ -256,7 +256,7 @@ export let Cache = module (
     /// with Authorization and no must-revalidate, public or s-maxage, section 3.5), "vary *", and "no freshness
     /// information" (none of public, private in a private cache, Expires, max-age, s-maxage in a shared cache,
     /// or a heuristically cacheable status).
-    #NoDiscard
+    .NoDiscard
     export let refusal = func(method: string, request_fields: header_map.Headers, status: int,
         response_fields: header_map.Headers, shared: bool) -> string {
         if (method != "GET" && method != "HEAD") {
@@ -294,7 +294,7 @@ export let Cache = module (
     };
 
     /// @brief One stored response with its key, the request fields its Vary names, and its last use.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     let Entry = class (
         /// @brief The request method.
         export last method: string;
@@ -359,7 +359,7 @@ export let Cache = module (
     /// (s-maxage, private, proxy-revalidate, Authorization). Heuristic freshness is on by default. The cache does
     /// not validate, collapse requests or serve `only-if-cached` itself: a Miss for an only-if-cached request is
     /// the caller's 504 (section 5.2.1.7).
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let ResponseCache = class (
         /// @brief Whether the cache is shared (a proxy) rather than private (one user agent).
         export last shared: bool;
@@ -416,7 +416,7 @@ export let Cache = module (
         /// @brief Looks up a stored response for a `method` request for `uri` at `now`, applying the request's
         /// no-cache, max-age, min-fresh and max-stale directives (section 5.2.1) and the response's no-cache,
         /// must-revalidate, proxy-revalidate and s-maxage limits on serving stale responses (section 4.2.4).
-        #NoDiscard
+        .NoDiscard
         export let lookup = func(method: string, uri: string, request_fields: header_map.Headers,
             now: instant.Instant) -> Lookup {
             last at = find(method, uri);
@@ -460,7 +460,7 @@ export let Cache = module (
         };
 
         /// @brief `lookup` at the clock's current time; the clock's error, if any, is returned.
-        #NoDiscard
+        .NoDiscard
         export let lookup_with = func(clock: Clock, method: string, uri: string,
             request_fields: header_map.Headers) -> Result<Lookup> {
             last now = clock.now()?;

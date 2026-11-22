@@ -23,10 +23,10 @@ let maths = import:Std.Math.Math;
 /// Netflix's version also re-probes `rtt_noload` after a random number of samples; this one re-probes only when
 /// `reset_rtt_noload` is called, so its behavior is deterministic.
 /// @see [Std.Net.Resilience.VegasLimit](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-VegasLimit)
-#Since("0.3.0")
+.Since("0.3.0")
 export let VegasLimit = module (
     /// @brief A TCP Vegas style adaptive limit.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let VegasLimit = class implements limits.AdaptiveLimit (
         /// @brief The smallest limit.
         last min_limit: int;
@@ -131,16 +131,16 @@ export let VegasLimit = module (
     );
 
     /// @brief Netflix's defaults: initial 20, min 1, max 1000, smoothing 1, alpha `3 * log(L)`, beta `6 * log(L)`.
-    #NoDiscard
+    .NoDiscard
     export let create = func -> VegasLimit => new VegasLimit(20, 1, 1000, 1.0, 0, 0);
 
     /// @brief A limit with the default alpha and beta.
-    #NoDiscard
+    .NoDiscard
     export let of = func(initial: int, min_limit: int, max_limit: int, smoothing: float64) -> VegasLimit =>
         new VegasLimit(initial, min_limit, max_limit, smoothing, 0, 0);
 
     /// @brief A limit with fixed queue thresholds, as in classic TCP Vegas.
-    #NoDiscard
+    .NoDiscard
     export let with_thresholds = func(initial: int, min_limit: int, max_limit: int, smoothing: float64, alpha: int,
         beta: int) -> VegasLimit => new VegasLimit(initial, min_limit, max_limit, smoothing, alpha, beta);
 );

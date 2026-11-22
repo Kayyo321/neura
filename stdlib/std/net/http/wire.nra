@@ -24,7 +24,7 @@ let strings = import:Std.Text.Strings;
 /// 431 at the field past the limit), Host (400), Transfer-Encoding with HTTP/1.0 or with Content-Length (400),
 /// transfer codings (501, 400), Content-Length (400), Content-Length over the body limit (413).
 /// @see [Std.Net.Http.Wire](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-Wire)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Wire = module (
     /// @brief How the length of a message body is found (RFC 9112 section 6.3).
     export let BodyFraming = enum (
@@ -43,7 +43,7 @@ export let Wire = module (
     /// The defaults are those of the server host: a 16,384-byte head (Apps030 `S-5`), 100 header fields, a
     /// 1,048,576-byte body (`S-6`), a 4,096-byte chunk-size line with its extensions, a 16,384-byte trailer section,
     /// bare LF accepted in heads, and the nine standard methods as the known ones.
-    #[Final, Immutable, ThreadSafe]
+    .[Final, Immutable, ThreadSafe]
     export let Limits = class (
         /// @brief The most bytes of a head, empty line and ignored leading empty lines included.
         export last max_head_bytes: int;
@@ -145,7 +145,7 @@ export let Wire = module (
     );
 
     /// @brief A request's start-line and header fields (RFC 9112 section 3).
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let RequestHead = class (
         /// @brief The method token, exact case.
         export last method: string;
@@ -202,7 +202,7 @@ export let Wire = module (
     );
 
     /// @brief A response's status-line and header fields (RFC 9112 section 4).
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let ResponseHead = class (
         /// @brief The HTTP-version text.
         export last version: string;
@@ -265,7 +265,7 @@ export let Wire = module (
     /// the head and ignored by the parsers. Bytes after the head are kept as the remainder. A head with no end
     /// within `max_head_bytes` fails as soon as the buffer passes that size (431), so an endless head fails at the
     /// limit plus one byte. After a failure every `feed` returns the same error.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let HeadReader = class (
         /// @brief The limits applied.
         last limits: Limits;
@@ -293,7 +293,7 @@ export let Wire = module (
 
         /// @brief Adds received bytes. Ok(true) once a complete head is buffered (later bytes join the remainder);
         /// Ok(false) while more are needed; 431 when the head passes `max_head_bytes`.
-        #NoDiscard
+        .NoDiscard
         export let feed = func(chunk: uint8[list]) -> Result<bool> {
             if (failed) {
                 return too_large<bool>(limits.max_head_bytes);
@@ -339,22 +339,22 @@ export let Wire = module (
 
         /// @brief The head's bytes, empty line included, as a new list. Traps with "invalid state: head is not
         /// complete" before `feed` returned Ok(true).
-        #NoDiscard
+        .NoDiscard
         export let head_bytes = func -> uint8[list] {
             check_complete();
             return copy_range(buffer, 0, head_end);
         };
 
         /// @brief The buffered head parsed as a request head. Traps as `head_bytes` does when incomplete.
-        #NoDiscard
+        .NoDiscard
         export let request_head = func -> Result<RequestHead> => parse_request_head(head_bytes(), limits);
 
         /// @brief The buffered head parsed as a response head. Traps as `head_bytes` does when incomplete.
-        #NoDiscard
+        .NoDiscard
         export let response_head = func -> Result<ResponseHead> => parse_response_head(head_bytes(), limits);
 
         /// @brief The bytes received after the head, as a new list. Traps as `head_bytes` does when incomplete.
-        #NoDiscard
+        .NoDiscard
         export let remainder = func -> uint8[list] {
             check_complete();
             return copy_range(buffer, head_end, buffer.length);
@@ -373,12 +373,12 @@ export let Wire = module (
     );
 
     /// @brief The error a server answers with `status`: a custom error whose code is "http.status.NNN".
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let rejection = func(status: int, message: string) -> errors.Error =>
         errors.custom("http.status." .. status.to_string(), message);
 
     /// @brief The status of an error made by `rejection`, or 0 for any other error.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let rejection_status = func(e: errors.Error) -> int => match (e) {
         errors.Error.Custom(detail) => status_of_code(detail.code()),
         _ => 0,
@@ -400,7 +400,7 @@ export let Wire = module (
     /// chunked (501, RFC 9112 section 6.1); chunked twice, with parameters, or an empty Transfer-Encoding (400,
     /// RFC 9112 section 7.1); a Content-Length that is not digits, or a list of differing values (400, RFC 9112
     /// section 6.3 item 5); a Content-Length over `max_body_bytes` (413).
-    #NoDiscard
+    .NoDiscard
     export let parse_request_head = func(bytes: uint8[list], limits: Limits) -> Result<RequestHead> {
         last lines = head_lines(bytes, limits)?;
         last start = first_line(lines);
@@ -469,7 +469,7 @@ export let Wire = module (
     /// request, an obs-fold is replaced by one space (RFC 9112 section 5.2) and whitespace between a field name and
     /// its colon is removed (RFC 9112 section 5.1); a missing space after the code is accepted. Host, method and
     /// body-size rules do not apply.
-    #NoDiscard
+    .NoDiscard
     export let parse_response_head = func(bytes: uint8[list], limits: Limits) -> Result<ResponseHead> {
         last lines = head_lines(bytes, limits)?;
         last start = first_line(lines);
@@ -525,7 +525,7 @@ export let Wire = module (
     /// that is not a token, whitespace before the colon (removed instead when `lenient`), a value with a control
     /// byte, or a line with leading whitespace (unfolded into the previous value instead when `lenient`, except on
     /// the first line); 431 past `max_header_fields`.
-    #NoDiscard
+    .NoDiscard
     export let parse_field_section = func(text: string, limits: Limits, lenient: bool) -> Result<http_headers.Headers> {
         last lines = split_lines(text, limits.allow_bare_lf)?;
         return fields_from_lines(lines, 0, lines.length, limits, lenient);
@@ -534,7 +534,7 @@ export let Wire = module (
     /// @brief The framing of a request's body (RFC 9112 section 6.3 items 3 to 7): Chunked when
     /// Transfer-Encoding is present (it must be exactly "chunked": another coding is 501, chunked twice or with
     /// parameters is 400), else Length for a valid Content-Length (400 otherwise), else None.
-    #NoDiscard
+    .NoDiscard
     export let request_body_length = func(head: RequestHead) -> Result<BodyFraming> {
         if (head.headers.contains("Transfer-Encoding")) {
             last chunked = chunked_last(head.headers, true)?;
@@ -553,7 +553,7 @@ export let Wire = module (
     /// (item 2); Chunked when chunked is the final transfer coding and UntilClose for other codings (item 4,
     /// Transfer-Encoding overriding Content-Length, item 3); Length for a valid Content-Length, 400 for an invalid
     /// one (items 5, 6); UntilClose otherwise (item 8).
-    #NoDiscard
+    .NoDiscard
     export let response_body_length = func(head: ResponseHead, request_method: string) -> Result<BodyFraming> {
         if (request_method == "HEAD" || http_status.has_no_content(head.status)) {
             return Result<BodyFraming>.Ok(BodyFraming.None);
@@ -574,7 +574,7 @@ export let Wire = module (
 
     /// @brief The value of the Content-Length fields: 1*DIGIT, or a list of equal such values (RFC 9112
     /// section 6.3 item 5). 400 when absent, empty, not digits, differing, or above the int64 range.
-    #NoDiscard
+    .NoDiscard
     export let content_length = func(fields: http_headers.Headers) -> Result<int64> {
         last values = fields.list_elements("Content-Length");
         if (values.length == 0) {
@@ -596,7 +596,7 @@ export let Wire = module (
 
     /// @brief The head as bytes: the request-line, each field as "Name: value", each line ending in CRLF, then
     /// CRLF.
-    #NoDiscard
+    .NoDiscard
     export let write_request_head = func(head: RequestHead) -> uint8[list] {
         last out = builders.create();
         out.append(head.method);
@@ -611,7 +611,7 @@ export let Wire = module (
 
     /// @brief The head as bytes: the status-line, with the reason phrase of `Status.reason_phrase` when the head's
     /// reason is empty, then the fields as `write_request_head` writes them.
-    #NoDiscard
+    .NoDiscard
     export let write_response_head = func(head: ResponseHead) -> uint8[list] {
         last out = builders.create();
         out.append(head.version);
@@ -636,7 +636,7 @@ export let Wire = module (
     };
 
     /// @brief Whether `text` is "HTTP/" DIGIT "." DIGIT.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let is_version = func(text: string) -> bool => version_major(text) >= 0;
 
     /// @brief The nine standard method tokens, each followed by one space.

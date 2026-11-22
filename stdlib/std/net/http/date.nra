@@ -18,7 +18,7 @@ let.promote _ = import:Std.Core.Result;
 /// Every malformed or impossible text is an `Err`, never a trap; a cache treats an invalid Expires value as a
 /// time in the past ("already expired", RFC 9111 section 5.3), see `Std.Net.Http.Cache`.
 /// @see [Std.Net.Http.Date](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-Date)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Date = module (
     /// @brief The first second that IMF-fixdate can write: 0000-01-01T00:00:00Z.
     export const MinEpochSeconds: int64 = -62167219200;
@@ -28,7 +28,7 @@ export let Date = module (
 
     /// @brief `moment` as IMF-fixdate, for example `Sun, 06 Nov 1994 08:49:37 GMT`. A fraction of a second is
     /// dropped (the time is rounded toward the past). Err (OutOfRange) outside years 0000 through 9999.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let format = func(moment: instant.Instant) -> Result<string> {
         last seconds = moment.epoch_seconds;
         if (seconds < MinEpochSeconds || seconds > MaxEpochSeconds) {
@@ -50,18 +50,18 @@ export let Date = module (
     /// Errors are Parse errors at the offending byte: Empty for "", Syntax for text that fits no format,
     /// InvalidCharacter for a bad name, digit or separator, OutOfRange for an impossible date or time or a day
     /// name that is not the date's weekday, UnexpectedEnd for a cut text.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let parse = func(text: string, reference: instant.Instant) -> Result<instant.Instant> =>
         parse_with(text, reference, false);
 
     /// @brief `parse`, but day names, month names and `GMT` match without regard to ASCII case (RFC 9111
     /// section 4.2).
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let parse_ignoring_case = func(text: string, reference: instant.Instant) -> Result<instant.Instant> =>
         parse_with(text, reference, true);
 
     /// @brief Parses only the preferred IMF-fixdate format, matching names exactly; no reference is needed.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let parse_imf_fixdate = func(text: string) -> Result<instant.Instant> {
         if (text.byte_length == 0) {
             return Result<instant.Instant>.Err(failure(ParseErrorKind.Empty, 0, "empty date"));
@@ -80,11 +80,11 @@ export let Date = module (
     const MonthNames: int = 2;
 
     /// @brief The number of names in `table`.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     let table_size = func(table: int) -> int => table == MonthNames ? 12 : 7;
 
     /// @brief Name `index` of `table`.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     let name_of = func(table: int, index: int) -> string {
         if (table == MonthNames) {
             return "JanFebMarAprMayJunJulAugSepOctNovDec".slice(index * 3, index * 3 + 3);
@@ -107,7 +107,7 @@ export let Date = module (
     };
 
     /// @brief A cursor over the bytes of a date text that records the first failure.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     let Reader = class (
         /// @brief The text being read.
         last text: string;

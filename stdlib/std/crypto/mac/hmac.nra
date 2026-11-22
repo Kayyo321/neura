@@ -7,11 +7,11 @@ let words = import:Std.Crypto.Internal.Words;
 
 /// @brief HMAC (FIPS 198-1, RFC 2104) over any StreamingDigest (Stdlib.md section 21.5).
 /// @see [Std.Crypto.Mac.Hmac](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Mac-Hmac)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Hmac = module (
     /// @brief HMAC with the digest H, such as `Hmac<Sha256>`. A key longer than H's block is hashed first; a
     /// shorter one is padded with zeros. The policy is checked for HMAC and for H.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Hmac = class<H: StreamingDigest<H>> implements Authenticator (
         /// @brief The inner digest, already fed the inner pad.
         let inner: H;
@@ -71,7 +71,7 @@ export let Hmac = module (
     );
 
     /// @brief The HMAC tag of the message under the key.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let mac = func<H: StreamingDigest<H>>(key: uint8[list], message: uint8[list]) -> uint8[list] {
         let hmac = new Hmac<H>(key);
         hmac.update(message);
@@ -79,7 +79,7 @@ export let Hmac = module (
     };
 
     /// @brief Whether `tag` is the full HMAC tag of the message, compared in constant time.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let verify = func<H: StreamingDigest<H>>(key: uint8[list], message: uint8[list], tag: uint8[list]) -> bool {
         let hmac = new Hmac<H>(key);
         hmac.update(message);

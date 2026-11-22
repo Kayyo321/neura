@@ -8,10 +8,10 @@ let.promote _ = import:Std.Collections.Queue;
 /// Equal-priority elements have no FIFO guarantee. The comparator must leave the queue structure
 /// unchanged. Structural changes during a comparison trap. Equality and hashing use identity.
 /// @see [Std.Collections.PriorityQueue](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-PriorityQueue)
-#Since("0.1.0")
+.Since("0.1.0")
 export let PriorityQueue = module (
     /// @brief A min-heap that exposes the least element according to its comparator.
-    #NotThreadSafe
+    .NotThreadSafe
     export let PriorityQueue = class<T> implements Queue<T> (
         /// @brief Heap order: the children of index i are at 2i + 1 and 2i + 2.
         let heap: T[list];
@@ -125,7 +125,7 @@ export let PriorityQueue = module (
         };
 
         /// @brief A least element, or None when empty.
-        #NoDiscard
+        .NoDiscard
         export let peek = func -> optional.Optional<T> {
             if (heap.length == 0) {
                 return optional.Optional<T>.None;

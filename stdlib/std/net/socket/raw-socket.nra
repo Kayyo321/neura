@@ -18,10 +18,10 @@ let.promote _ = import:Std.Core.Unit;
 /// The checks are real; opening the socket needs a raw-socket host service that no runtime offers yet, so
 /// `open` traps in Neura 0.3.0. On IPv4 a received payload starts with the IP header, as the kernel delivers it.
 /// @see [Std.Net.Socket.RawSocket](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-RawSocket)
-#Since("0.3.0")
+.Since("0.3.0")
 export let RawSocket = module (
     /// @brief One raw socket of an address family and IP protocol.
-    #[Final, NoDiscard(reason: "a socket must be closed"), NotThreadSafe]
+    .[Final, NoDiscard(reason: "a socket must be closed"), NotThreadSafe]
     export let RawSocket = class implements DatagramSocket<ips.IpAddr> (
         /// @brief The host's socket ID.
         last id: int64;
@@ -42,7 +42,7 @@ export let RawSocket = module (
         };
 
         /// @brief The local address, from the host; traps in Neura 0.3.0 (no local-address service).
-        #NoDiscard
+        .NoDiscard
         export let local_address = func -> Result<ips.IpAddr> {
             return Result<ips.IpAddr>.Err(bytes.closed("socket", to_string())) unless open_now;
             return match (host.local_address(id)) {
@@ -54,7 +54,7 @@ export let RawSocket = module (
 
         /// @brief Sends one IP payload to `target`, which must be of the socket's family (else the call traps
         /// with "invalid argument: address family").
-        #NoDiscard
+        .NoDiscard
         export let send_to = func(data: uint8[list], target: ips.IpAddr) -> Result<int> {
             if (ips.family(target) != family) {
                 trap_with_message("invalid argument: address family");
@@ -68,7 +68,7 @@ export let RawSocket = module (
         };
 
         /// @brief One payload of at most `max` bytes and its sender, waiting up to the read timeout.
-        #NoDiscard
+        .NoDiscard
         export let receive_from = func(max: int) -> Result<Datagram<ips.IpAddr>> {
             bytes.check_maximum(max);
             return Result<Datagram<ips.IpAddr>>.Err(bytes.closed("socket", to_string())) unless open_now;
@@ -105,7 +105,7 @@ export let RawSocket = module (
     /// @brief A raw socket for `family` (Ipv4 or Ipv6; Unix traps with "invalid argument: address family") and
     /// IP protocol number `protocol` (0 through 255, else "invalid argument: protocol"). Traps in Neura 0.3.0 (no
     /// raw-socket host service).
-    #NoDiscard
+    .NoDiscard
     export let open = func(family: AddressFamily, protocol: int) -> Result<RawSocket> {
         if (family == AddressFamily.Unix) {
             trap_with_message("invalid argument: address family");

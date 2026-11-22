@@ -4,11 +4,11 @@ let.promote _ = import:Std.Crypto.CryptographicPrimitive;
 
 /// @brief The contract of authenticated encryption with associated data (Stdlib.md section 21.1).
 /// @see [Std.Crypto.AeadCipher](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-AeadCipher)
-#Since("0.3.0")
+.Since("0.3.0")
 export let AeadCipher = module (
     /// @brief An AEAD bound to one key at construction. `Key` is the key type its constructor takes, `Nonce`
     /// and `Tag` the nonce and tag representations (built-in byte lists for every cipher of Std.Crypto).
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let AeadCipher = interface<Key, Nonce, Tag>:CryptographicPrimitive<Key> (
         /// @brief The nonce length in bytes; `seal` and `open` trap on any other.
         let nonce_length = func -> int;

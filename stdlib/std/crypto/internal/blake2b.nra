@@ -4,7 +4,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// variable-length hash H' of Argon2 (RFC 9106, section 3.3). Internal. The initial value is SHA-512's
 /// (scripts/crypto-vectors/constants.py); the message schedule SIGMA is RFC 7693's, checked by the Argon2
 /// known answers (and, when this table was written, by a Python BLAKE2b compared with hashlib.blake2b).
-#Since("0.3.0")
+.Since("0.3.0")
 export let Blake2b = module (
     /// @brief A new list of the table (a function, so that tasks can use it: arrays are not transferable).
     let iv_table = func -> uint64[list] => new([

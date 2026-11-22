@@ -6,17 +6,17 @@ let strings = import:Std.Text.Strings;
 
 /// @brief Looks up charset names and converts between UTF-8 strings and encoded bytes.
 /// @see [Std.Text.Charsets](https://github.com/Kayyo321/neura/wiki/Stdlib-Text-Charsets)
-#Since("0.1.0")
+.Since("0.1.0")
 export let Charsets = module (
     /// @brief Selects ASCII, Latin-1, UTF-8, or a UTF-16 or UTF-32 byte-order policy.
-    #Since("0.1.0")
+    .Since("0.1.0")
     export let Charset = enum (Ascii, Latin1, Utf8, Utf16, Utf16Be, Utf16Le, Utf32, Utf32Be, Utf32Le);
 
     /// @brief The out-of-range scalar used to signal malformed input.
     const InvalidScalar: uint32 = 1114112;
 
     /// @brief Resolves a supported charset name or alias without regard to ASCII case.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let for_name = func(name: string) -> result.Result<Charset> {
         last key = strings.to_ascii_lower(name);
         if (key == "us-ascii" || key == "ascii" || key == "iso646-us") {
@@ -55,7 +55,7 @@ export let Charsets = module (
         result.expect<uint8[list]>(encode_text(text, charset, false), "encode text");
 
     /// @brief Encodes strictly and returns an Encoding error for the first unrepresentable scalar.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let try_encode = func(text: string, charset: Charset) -> result.Result<uint8[list]> =>
         encode_text(text, charset, true);
 
@@ -64,7 +64,7 @@ export let Charsets = module (
         result.expect<string>(decode_bytes(bytes, charset, false), "decode bytes");
 
     /// @brief Decodes strictly and returns an Encoding error at the first malformed input.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let try_decode = func(bytes: uint8[list], charset: Charset) -> result.Result<string> =>
         decode_bytes(bytes, charset, true);
 

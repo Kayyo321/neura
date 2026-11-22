@@ -6,7 +6,7 @@ let utf8 = import:Std.Encoding.Utf8;
 let words = import:Std.Crypto.Internal.Words;
 
 /// @brief Parses a flattened or general JWE for one explicitly selected recipient. Internal.
-#Since("0.3.0")
+.Since("0.3.0")
 export let JweJson = module (
     const InvalidJwe = "crypto.invalid_jwe";
     const MaxSerializedBytes = 4194304;

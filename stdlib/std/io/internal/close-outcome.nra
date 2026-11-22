@@ -10,7 +10,7 @@ export let CloseOutcome = module (
     /// @brief The outcome when the close succeeded; the close error when it failed after an Ok; and when it
     /// failed after an Err, a Context error whose cause is the outcome's error and whose message is "closing the
     /// resource also failed: " and the close error's message.
-    #NoDiscard
+    .NoDiscard
     export let close_outcome = func<T>(outcome: Result<T>, closing: Result<Unit>) -> Result<T> {
         return match (closing) {
             Result.Ok(_) => outcome,

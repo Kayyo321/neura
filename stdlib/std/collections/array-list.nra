@@ -8,10 +8,10 @@ let sorting = import:Std.Collections.Sorting;
 /// @brief Resizable lists backed by a built-in list. Iterators check the backing list's structural version,
 /// including changes made through `items()` or a wrapped alias.
 /// @see [Std.Collections.ArrayList](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-ArrayList)
-#Since("0.1.0")
+.Since("0.1.0")
 export let ArrayList = module (
     /// @brief A resizable list whose backing storage can be shared with callers.
-    #NotThreadSafe
+    .NotThreadSafe
     export let ArrayList = class<T> implements MutableList<T> (
         /// @brief The list shared with the constructor input and returned by `items()`.
         last storage: T[list];
@@ -57,7 +57,7 @@ export let ArrayList = module (
         };
 
         /// @brief Returns the first element as `Some`, or `None` when empty.
-        #NoDiscard
+        .NoDiscard
         export let first_or_none = func -> optional.Optional<T> {
             if (storage.length == 0) {
                 return optional.Optional<T>.None;
@@ -66,7 +66,7 @@ export let ArrayList = module (
         };
 
         /// @brief Returns the last element as `Some`, or `None` when empty.
-        #NoDiscard
+        .NoDiscard
         export let last_or_none = func -> optional.Optional<T> {
             if (storage.length == 0) {
                 return optional.Optional<T>.None;

@@ -33,39 +33,39 @@ let kinds = import:Std.Reflect.Type.TypeKind;
 /// constructor gave it, and a record with such a component cannot be decoded (`reflect.json.missing`). A reference
 /// cycle traps.
 /// @see [Std.Reflect.Codec.JsonBridge](https://github.com/Kayyo321/neura/wiki/Stdlib-Reflect-Codec-JsonBridge)
-#Since("0.3.0")
+.Since("0.3.0")
 export let JsonBridge = module (
     /// @brief The placeholder written for a `#Sensitive` field.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export const Redacted: string = "<redacted>";
 
     /// @brief The value as a JSON tree. A NaN or infinite float and a reference cycle trap.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let to_json = func(value: model.Variant) -> JsonValue {
         last open: model.Variant[list] = new;
         return encode_value(value, open);
     };
 
     /// @brief The value as JSON text.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let encode = func(value: model.Variant) -> string => json.write(to_json(value));
 
     /// @brief The value of type `type` that a JSON tree describes. A mismatch returns `Error.custom` with the code
     /// `reflect.json.type`, `reflect.json.missing`, `reflect.json.range` or `reflect.json.variant` and a message
     /// that begins with the JSON path.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let from_json = func(value: JsonValue, type: model.TypeDescriptor) -> Result<model.Variant> =>
         decode_value(value, type, "$");
 
     /// @brief `json.parse`, then `from_json`.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let decode = func(text: string, type: model.TypeDescriptor) -> Result<model.Variant> => match (json.parse(text)) {
         Result.Ok(tree) => from_json(tree, type),
         Result.Err(problem) => Result<model.Variant>.Err(problem),
     };
 
     /// @brief `decode` for the type `T`, unpacked: a JSON text that does not describe a `T` traps.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let decode_as = func<T>(text: string) -> T {
         match (decode(text, model.descriptor_for<T>())) {
             Result.Ok(value) => {

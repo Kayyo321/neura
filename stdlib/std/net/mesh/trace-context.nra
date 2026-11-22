@@ -17,7 +17,7 @@ let states = import:Std.Net.Mesh.TraceState;
 /// replace any earlier field of that name and return the request to send; an empty value means "remove the field",
 /// so a stale `tracestate` or an invalid `baggage` the request arrived with is not passed on.
 /// @see [Std.Net.Mesh.TraceContext](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Mesh-TraceContext)
-#Since("0.3.0")
+.Since("0.3.0")
 export let TraceContext = module (
     /// @brief The `traceparent` header name.
     export const TraceParentHeader = "traceparent";
@@ -27,7 +27,7 @@ export let TraceContext = module (
     export const BaggageHeader = "baggage";
 
     /// @brief The propagated context of one request.
-    #Final
+    .Final
     export let TraceContext = class (
         /// @brief The parent span, absent when the request carried no valid `traceparent`.
         export last parent: Optional<parents.TraceParent>;
@@ -45,7 +45,7 @@ export let TraceContext = module (
         };
 
         /// @brief Whether a valid parent was received.
-        #NoDiscard
+        .NoDiscard
         export let has_parent = func -> bool => match (parent) {
             Optional.Some(p) => true,
             Optional.None => false,
@@ -54,7 +54,7 @@ export let TraceContext = module (
         /// @brief The context to send on: with a parent, the same trace with a new random span id as parent id and
         /// the state kept; without one, a new trace (sampled when `sample_new`) with an empty state. The baggage is
         /// kept either way.
-        #NoDiscard
+        .NoDiscard
         export let next_hop = func(random: Random, sample_new: bool) -> TraceContext => match (parent) {
             Optional.Some(p) => new TraceContext(Optional<parents.TraceParent>.Some(
                 p.child(parents.random_id(random, parents.ParentIdBytes))), state, baggage),
@@ -82,12 +82,12 @@ export let TraceContext = module (
     );
 
     /// @brief An empty context: no parent, state or baggage.
-    #NoDiscard
+    .NoDiscard
     export let empty = func -> TraceContext =>
         new TraceContext(Optional<parents.TraceParent>.None, states.empty(), baggages.empty());
 
     /// @brief The context carried by `request`, read through `get_header` as described for the module.
-    #NoDiscard
+    .NoDiscard
     export let extract = func<Req>(request: Req, get_header: func(Req, string) -> Optional<string>) -> TraceContext {
         let parent = Optional<parents.TraceParent>.None;
         let state = states.empty();
@@ -137,7 +137,7 @@ export let TraceContext = module (
     /// @brief `request` with the context's headers written through `with_header`: `traceparent` (removed, by an
     /// empty value, when there is no parent), `tracestate` (removed when the state is empty) and `baggage` (removed
     /// when the baggage is empty).
-    #NoDiscard
+    .NoDiscard
     export let inject = func<Req>(context: TraceContext, request: Req, with_header: func(Req, string, string) -> Req)
         -> Req {
         let out = request;

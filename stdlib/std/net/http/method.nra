@@ -6,13 +6,13 @@ let headers = import:Std.Net.Http.Headers;
 /// Methods are case-sensitive tokens. The nine standard methods (the eight of RFC 9110 and PATCH of RFC 5789)
 /// have variants; any other token is `Extension`, which is neither safe nor idempotent.
 /// @see [Std.Net.Http.Method](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-Method)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Method = module (
     /// @brief A request method.
     export let HttpMethod = enum (Get, Head, Post, Put, Delete, Connect, Options, Trace, Patch, Extension(string));
 
     /// @brief The method named by `text` (exact case), or None when `text` is not a token.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let parse = func(text: string) -> Optional<HttpMethod> {
         return Optional<HttpMethod>.None unless headers.is_token(text);
         last known = standard(text);
@@ -23,7 +23,7 @@ export let Method = module (
     };
 
     /// @brief One of the nine standard methods named by `text`, or None.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let standard = func(text: string) -> Optional<HttpMethod> {
         if (text == "GET") {
             return Optional<HttpMethod>.Some(HttpMethod.Get);
@@ -54,7 +54,7 @@ export let Method = module (
     };
 
     /// @brief The method's token.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let name = func(m: HttpMethod) -> string => match (m) {
         HttpMethod.Get => "GET",
         HttpMethod.Head => "HEAD",
@@ -69,19 +69,19 @@ export let Method = module (
     };
 
     /// @brief Whether the method is safe: GET, HEAD, OPTIONS, TRACE (RFC 9110 section 9.2.1).
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let is_safe = func(m: HttpMethod) -> bool => is_safe_name(name(m));
 
     /// @brief Whether the method is idempotent: the safe methods, PUT and DELETE (RFC 9110 section 9.2.2).
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let is_idempotent = func(m: HttpMethod) -> bool => is_idempotent_name(name(m));
 
     /// @brief `is_safe` for a method token.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let is_safe_name = func(text: string) -> bool =>
         text == "GET" || text == "HEAD" || text == "OPTIONS" || text == "TRACE";
 
     /// @brief `is_idempotent` for a method token.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let is_idempotent_name = func(text: string) -> bool => is_safe_name(text) || text == "PUT" || text == "DELETE";
 );

@@ -21,10 +21,10 @@ let.promote _ = import:Std.Net.Tls.TlsStream;
 /// configuration with a client certificate (mutual TLS) or a version range narrower than TLS 1.2 through 1.3
 /// needs an extended host service that no runtime offers yet.
 /// @see [Std.Net.Tls.TlsConnector](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Tls-TlsConnector)
-#Since("0.3.0")
+.Since("0.3.0")
 export let TlsConnector = module (
     /// @brief Dials `address()` and completes a TLS client handshake for each `connect`.
-    #Final
+    .Final
     export let TlsConnector = class implements Connector<SocketAddr, TlsStream> (
         /// @brief The address dialed.
         last target: SocketAddr;
@@ -45,7 +45,7 @@ export let TlsConnector = module (
         export let address = func -> SocketAddr => target;
 
         /// @brief Opens a TLS stream to `address()`; fails with Unsupported in a build without TLS.
-        #NoDiscard
+        .NoDiscard
         export let connect = func -> Result<TlsStream> {
             last text = target.to_string();
             last nanos = support.timeout_nanos(config.handshake_timeout);
@@ -68,7 +68,7 @@ export let TlsConnector = module (
     );
 
     /// @brief The host's version number: 12 or 13.
-    #Pure
+    .Pure
     export let version_code = func(version: TlsVersion) -> int => version == TlsVersion.Tls12 ? 12 : 13;
 
     /// @brief A stream from the host's [ID, ALPN].

@@ -13,10 +13,10 @@ let sorting = import:Std.Collections.Sorting;
 /// but defers evaluation until elements are requested. A second traversal operation on the same
 /// sequence traps with `invalid state: sequence already used`. Equality and hashing use identity.
 /// @see [Std.Collections.Sequence](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-Sequence)
-#Since("0.1.0")
+.Since("0.1.0")
 export let Sequence = module (
     /// @brief A lazy traversal that can be handed to a downstream operation only once.
-    #[Final, NoDiscard, NotThreadSafe]
+    .[Final, NoDiscard, NotThreadSafe]
     export let Sequence = class<T> implements Iterable<T> (
         /// @brief The availability check for the next output, which may fill a buffer from the upstream source.
         last has_next: func() -> bool;
@@ -460,7 +460,7 @@ export let Sequence = module (
         };
 
         /// @brief Combines elements from left to right, starting with the first. Returns `None` when empty.
-        #NoDiscard
+        .NoDiscard
         export let reduce = func(f: func(T, T) -> T) -> optional.Optional<T> {
             begin();
             return optional.Optional<T>.None unless has_next();
@@ -472,7 +472,7 @@ export let Sequence = module (
         };
 
         /// @brief Returns the first element as `Some`, or `None` when empty. Pulls at most one element.
-        #NoDiscard
+        .NoDiscard
         export let first = func -> optional.Optional<T> {
             begin();
             return optional.Optional<T>.None unless has_next();
@@ -480,7 +480,7 @@ export let Sequence = module (
         };
 
         /// @brief Consumes all elements and returns the last as `Some`, or `None` when empty.
-        #NoDiscard
+        .NoDiscard
         export let last = func -> optional.Optional<T> {
             begin();
             return optional.Optional<T>.None unless has_next();
@@ -492,7 +492,7 @@ export let Sequence = module (
         };
 
         /// @brief Returns the first element accepted by `test` as `Some`, or `None` at exhaustion.
-        #NoDiscard
+        .NoDiscard
         export let find = func(test: func(T) -> bool) -> optional.Optional<T> {
             begin();
             while (has_next()) {
@@ -505,12 +505,12 @@ export let Sequence = module (
         };
 
         /// @brief Returns the first of the least elements according to `c`, or `None` when empty.
-        #NoDiscard
+        .NoDiscard
         export let min = func(c: func(T, T) -> ordering.Ordering) -> optional.Optional<T> =>
             extreme(c, ordering.Ordering.Less);
 
         /// @brief Returns the first of the greatest elements according to `c`, or `None` when empty.
-        #NoDiscard
+        .NoDiscard
         export let max = func(c: func(T, T) -> ordering.Ordering) -> optional.Optional<T> =>
             extreme(c, ordering.Ordering.Greater);
 
@@ -711,7 +711,7 @@ export let Sequence = module (
 
     /// @brief Returns the integers in ascending order from `start` inclusive to `end` exclusive.
     /// The sequence is empty when `end` is at or below `start`.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let range = func(start: int, end: int) -> Sequence<int> {
         last position = cell.of<int>(start);
         let more = new func -> bool => position.value < end;

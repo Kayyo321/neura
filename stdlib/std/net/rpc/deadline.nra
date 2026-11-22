@@ -16,10 +16,10 @@ let timeouts = import:Std.Net.Rpc.Timeout;
 /// outgoing channel then sends each downstream call `min(own timeout, remaining)`. The clock is injected, so a
 /// `Std.Time.FixedClock` makes the behavior deterministic.
 /// @see [Std.Net.Rpc.Deadline](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Rpc-Deadline)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Deadline = module (
     /// @brief A deadline as a monotonic reading of a clock.
-    #Final
+    .Final
     export let Deadline = class (
         /// @brief The monotonic reading at which the deadline passes.
         export last at: Duration;
@@ -30,11 +30,11 @@ export let Deadline = module (
         };
 
         /// @brief The time left on `clock`: zero or negative once passed.
-        #NoDiscard
+        .NoDiscard
         export let remaining = func(clock: Clock) -> Result<Duration> => Result<Duration>.Ok(at.minus(clock.monotonic()?));
 
         /// @brief Whether the deadline has passed on `clock`.
-        #NoDiscard
+        .NoDiscard
         export let is_expired = func(clock: Clock) -> Result<bool> {
             last left = remaining(clock)?;
             return Result<bool>.Ok(left.is_zero() || left.is_negative());
@@ -56,12 +56,12 @@ export let Deadline = module (
     );
 
     /// @brief The deadline `budget` after now on `clock`.
-    #NoDiscard
+    .NoDiscard
     export let after = func(clock: Clock, budget: Duration) -> Result<Deadline> =>
         Result<Deadline>.Ok(new Deadline((clock.monotonic()?).plus(budget)));
 
     /// @brief The deadline of an incoming request: its timeout after now, or `None` without a timeout.
-    #NoDiscard
+    .NoDiscard
     export let of_request = func(clock: Clock, request: calls.RpcRequest) -> Result<optional.Optional<Deadline>> =>
         match (request.timeout) {
             optional.Optional.Some(span) => Result<optional.Optional<Deadline>>.Ok(
@@ -74,7 +74,7 @@ export let Deadline = module (
     /// Before a call: when the deadline has passed it fails with DEADLINE_EXCEEDED without calling the next
     /// service; otherwise the request goes on with timeout `min(request timeout, remaining)`. After a call that
     /// returns once the deadline has passed, the result is replaced by DEADLINE_EXCEEDED.
-    #Final
+    .Final
     export let DeadlineFilter = class implements SimpleFilter<calls.RpcRequest, calls.RpcResponse> (
         /// @brief The clock read for the remaining budget.
         last clock: Clock;

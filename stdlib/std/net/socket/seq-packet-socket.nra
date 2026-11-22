@@ -9,7 +9,7 @@ let.promote _ = import:Std.Net.Transport;
 /// Neura 0.3.0 ships no implementation: no runtime offers a sequenced-packet host
 /// service.
 /// @see [Std.Net.Socket.SeqPacketSocket](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-SeqPacketSocket)
-#Since("0.3.0")
+.Since("0.3.0")
 export let SeqPacketSocket = module (
     /// @brief A connected record-oriented socket between addresses of type `Addr`.
     export let SeqPacketSocket = interface<Addr>:Transport<uint8[list], uint8[list]> (

@@ -14,7 +14,7 @@ let.promote _ = import:Std.Core.Unit;
 /// an `InvalidInput` Io error without reaching the stub. The bytecode is supplied by the program (compiled by an
 /// external toolchain such as clang's BPF target); this module does not compile, verify or interpret eBPF.
 /// @see [Std.Net.Mesh.Ebpf](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Mesh-Ebpf)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Ebpf = module (
     /// @brief The longest program or map name in bytes (the kernel's 16-byte name with its NUL).
     export const MaxNameLength: int = 15;
@@ -42,7 +42,7 @@ export let Ebpf = module (
     );
 
     /// @brief An eBPF socket program: a name, an attach point, its license, and its bytecode.
-    #Final
+    .Final
     export let EbpfProgram = class (
         /// @brief The program name.
         export last name: string;
@@ -65,7 +65,7 @@ export let Ebpf = module (
         };
 
         /// @brief The number of instructions.
-        #NoDiscard
+        .NoDiscard
         export let instruction_count = func -> int => instructions.length / InstructionBytes;
 
         /// @brief Equal when the name, attach point, license and bytecode are.
@@ -100,7 +100,7 @@ export let Ebpf = module (
     );
 
     /// @brief A socket redirect map description.
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let RedirectMap = class (
         /// @brief The map name.
         export last name: string;
@@ -137,7 +137,7 @@ export let Ebpf = module (
     );
 
     /// @brief A program loaded into the kernel, by its host handle.
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let LoadedProgram = class (
         /// @brief The host's handle (a file descriptor on Linux).
         export last handle: int64;
@@ -167,7 +167,7 @@ export let Ebpf = module (
     );
 
     /// @brief A redirect map created in the kernel, by its host handle.
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let LoadedMap = class (
         /// @brief The host's handle.
         export last handle: int64;
@@ -197,7 +197,7 @@ export let Ebpf = module (
 
     /// @brief Checks a program: a name of 1 to 15 bytes of letters, digits, `_` and `.`; a non-empty license
     /// without NUL; 1 to 1000000 whole 8-byte instructions.
-    #NoDiscard
+    .NoDiscard
     export let validate = func(program: EbpfProgram) -> Result<Unit> {
         return invalid("program name must be 1 to 15 letters, digits, '_' or '.'") unless is_valid_name(program.name);
         if (program.license.byte_length == 0 || has_nul(program.license)) {
@@ -212,7 +212,7 @@ export let Ebpf = module (
 
     /// @brief Checks a map: a valid name, at least one entry, and a key of 4 bytes for a SockMap or 1 to 512 bytes
     /// for a SockHash.
-    #NoDiscard
+    .NoDiscard
     export let validate_map = func(map: RedirectMap) -> Result<Unit> {
         return invalid("map name must be 1 to 15 letters, digits, '_' or '.'") unless is_valid_name(map.name);
         if (map.max_entries < 1) {
@@ -227,21 +227,21 @@ export let Ebpf = module (
     };
 
     /// @brief Validates and loads `program`. Needs the host's eBPF service (see the module).
-    #NoDiscard
+    .NoDiscard
     export let load = func(program: EbpfProgram) -> Result<LoadedProgram> {
         validate(program)?;
         return Result<LoadedProgram>.Ok(new LoadedProgram(host_load(program), program.attach_point));
     };
 
     /// @brief Validates and creates `map`. Needs the host's eBPF service.
-    #NoDiscard
+    .NoDiscard
     export let create_map = func(map: RedirectMap) -> Result<LoadedMap> {
         validate_map(map)?;
         return Result<LoadedMap>.Ok(new LoadedMap(host_create_map(map), map));
     };
 
     /// @brief Attaches a SockOps program to the cgroup at `cgroup_path` (cgroup v2). Needs the host's eBPF service.
-    #NoDiscard
+    .NoDiscard
     export let attach_cgroup = func(program: LoadedProgram, cgroup_path: string) -> Result<Unit> {
         expect_point(program, AttachPoint.SockOps)?;
         expect_path(cgroup_path)?;
@@ -250,7 +250,7 @@ export let Ebpf = module (
     };
 
     /// @brief Attaches an SkMsg program to a redirect map. Needs the host's eBPF service.
-    #NoDiscard
+    .NoDiscard
     export let attach_map = func(program: LoadedProgram, map: LoadedMap) -> Result<Unit> {
         expect_point(program, AttachPoint.SkMsg)?;
         host_attach(program.handle, 1, "", map.handle);
@@ -259,7 +259,7 @@ export let Ebpf = module (
 
     /// @brief Attaches an SkLookup program to the network namespace at `netns_path` (such as
     /// "/proc/self/ns/net"). Needs the host's eBPF service.
-    #NoDiscard
+    .NoDiscard
     export let attach_netns = func(program: LoadedProgram, netns_path: string) -> Result<Unit> {
         expect_point(program, AttachPoint.SkLookup)?;
         expect_path(netns_path)?;
@@ -269,7 +269,7 @@ export let Ebpf = module (
 
     /// @brief Stores the socket `socket_handle` under `key` in a redirect map. The key must have the map's key
     /// size. Needs the host's eBPF service.
-    #NoDiscard
+    .NoDiscard
     export let map_update = func(map: LoadedMap, key: uint8[list], socket_handle: int64) -> Result<Unit> {
         if (key.length != map.map.key_size) {
             return invalid("key is " .. key.length.to_string() .. " bytes; the map's keys are "
@@ -280,14 +280,14 @@ export let Ebpf = module (
     };
 
     /// @brief Detaches and unloads a program. Needs the host's eBPF service.
-    #NoDiscard
+    .NoDiscard
     export let detach = func(program: LoadedProgram) -> Result<Unit> {
         host_detach(program.handle);
         return Result<Unit>.Ok(Unit.Value);
     };
 
     /// @brief Whether `name` is 1 to 15 bytes of letters, digits, `_` and `.`.
-    #NoDiscard
+    .NoDiscard
     export let is_valid_name = func(name: string) -> bool {
         if (name.byte_length == 0 || name.byte_length > MaxNameLength) {
             return false;

@@ -9,10 +9,10 @@ let buckets = import:Std.Net.Resilience.TokenBucket;
 /// @brief An in-memory keyed rate limiter with one `TokenBucket` per key, all with the same capacity and refill
 /// rate and created full on a key's first request. Buckets are never evicted: `forget` drops one, `clear` drops all.
 /// @see [Std.Net.Resilience.TokenBucketLimiter](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-TokenBucketLimiter)
-#Since("0.3.0")
+.Since("0.3.0")
 export let TokenBucketLimiter = module (
     /// @brief One token bucket per key.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let TokenBucketLimiter = class implements limiters.RateLimiter (
         /// @brief The capacity of each bucket.
         last capacity: int;

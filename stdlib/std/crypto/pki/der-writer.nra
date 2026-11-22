@@ -11,10 +11,10 @@ let utf8 = import:Std.Encoding.Utf8;
 /// elements are sorted. Values outside a type's rules (a PrintableString character, a time before 1950 for
 /// UTCTime) trap with "invalid argument: ...", because they are programming errors.
 /// @see [Std.Crypto.Pki.DerWriter](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-DerWriter)
-#Since("0.3.0")
+.Since("0.3.0")
 export let DerWriter = module (
     /// @brief The element with the tag class (0 to 3), construction, tag number and content.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let tlv = func(tag_class: int, constructed: bool, number: int, content: uint8[list]) -> uint8[list] {
         if (tag_class < 0 || tag_class > 3 || number < 0 || number >= 2097152) {
             trap_with_message("invalid argument: DER tag");
@@ -68,11 +68,11 @@ export let DerWriter = module (
     };
 
     /// @brief SEQUENCE of the encoded items, in order.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let sequence = func(items: uint8[list][list]) -> uint8[list] => tlv(0, true, 16, joined(items));
 
     /// @brief SET of the encoded items, sorted into DER order.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let set = func(items: uint8[list][list]) -> uint8[list] {
         let sorted: uint8[list][list] = new;
         for (let item in items) {
@@ -102,24 +102,24 @@ export let DerWriter = module (
     };
 
     /// @brief [number] EXPLICIT around an encoded element.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let explicit = func(number: int, inner: uint8[list]) -> uint8[list] => tlv(2, true, number, inner);
 
     /// @brief [number] IMPLICIT with the content (primitive unless `constructed`).
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let implicit = func(number: int, constructed: bool, content: uint8[list]) -> uint8[list] =>
         tlv(2, constructed, number, content);
 
     /// @brief BOOLEAN (0xFF for true).
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let boolean = func(value: bool) -> uint8[list] => tlv(0, false, 1, new([value ? 255 : 0]));
 
     /// @brief NULL.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let null = func -> uint8[list] => tlv(0, false, 5, new);
 
     /// @brief INTEGER with the value.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let integer = func(value: int64) -> uint8[list] {
         let bytes: uint8[list] = new;
         if (value >= 0) {
@@ -156,7 +156,7 @@ export let DerWriter = module (
 
     /// @brief INTEGER with the non-negative big-endian magnitude (leading zeros are removed, and a zero byte is
     /// added before a high bit).
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let unsigned_integer = func(magnitude: uint8[list]) -> uint8[list] {
         let start = 0;
         while (start < magnitude.length - 1 && magnitude[start] == 0) {
@@ -177,11 +177,11 @@ export let DerWriter = module (
     };
 
     /// @brief OBJECT IDENTIFIER.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let oid = func(value: Oid) -> uint8[list] => tlv(0, false, 6, value.content);
 
     /// @brief BIT STRING.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let bit_string = func(value: BitString) -> uint8[list] {
         let content: uint8[list] = new([value.unused_bits as uint8]);
         for (let b in value.bytes) {
@@ -191,19 +191,19 @@ export let DerWriter = module (
     };
 
     /// @brief BIT STRING of whole bytes (no unused bits), as for keys and signatures.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let bit_string_bytes = func(bytes: uint8[list]) -> uint8[list] => bit_string(new BitString(bytes, 0));
 
     /// @brief OCTET STRING.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let octet_string = func(bytes: uint8[list]) -> uint8[list] => tlv(0, false, 4, bytes);
 
     /// @brief UTF8String.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let utf8_string = func(text: string) -> uint8[list] => tlv(0, false, 12, utf8.encode(text));
 
     /// @brief PrintableString; a character outside its set traps.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let printable_string = func(text: string) -> uint8[list] {
         last bytes = utf8.encode(text);
         for (let c in bytes) {
@@ -217,7 +217,7 @@ export let DerWriter = module (
     };
 
     /// @brief IA5String; a byte of 128 or more traps.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let ia5_string = func(text: string) -> uint8[list] {
         last bytes = utf8.encode(text);
         for (let c in bytes) {
@@ -229,7 +229,7 @@ export let DerWriter = module (
     };
 
     /// @brief UTCTime `YYMMDDHHMMSSZ` for an instant in 1950 to 2049 (fractions of a second are dropped).
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let utc_time = func(at: instant.Instant) -> uint8[list] {
         last text = time_digits(at);
         last year = parse_year(text);
@@ -240,12 +240,12 @@ export let DerWriter = module (
     };
 
     /// @brief GeneralizedTime `YYYYMMDDHHMMSSZ` for an instant in years 0 to 9999.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let generalized_time = func(at: instant.Instant) -> uint8[list] =>
         tlv(0, false, 24, utf8.encode(time_digits(at) .. "Z"));
 
     /// @brief The RFC 5280 choice: UTCTime through 2049, GeneralizedTime from 2050.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let time = func(at: instant.Instant) -> uint8[list] {
         last year = parse_year(time_digits(at));
         return year < 2050 && year >= 1950 ? utc_time(at) : generalized_time(at);

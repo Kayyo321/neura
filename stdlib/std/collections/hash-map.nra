@@ -12,13 +12,13 @@ let optional = import:Std.Core.Optional;
 /// Iterators and member callbacks detect structural changes and trap with
 /// `collection modified during iteration`.
 /// @see [Std.Collections.HashMap](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-HashMap)
-#Since("0.1.0")
+.Since("0.1.0")
 export let HashMap = module (
     /// @brief A private token type that restricts construction to module factories.
     let Seal = enum (Token);
 
     /// @brief A mutable hash table that visits entries in insertion order.
-    #NotThreadSafe
+    .NotThreadSafe
     export let HashMap = class<K, V> implements MutableMap<K, V> (
         /// @brief Never replaced, so iterators can read its modification count.
         last core: hash_core.HashCore;
@@ -57,7 +57,7 @@ export let HashMap = module (
         export let contains_key = func(key: K) -> bool => find(key, spread(hash_of(key))) >= 0;
 
         /// @brief Returns the associated value as `Some`, or `None` when the key is absent.
-        #NoDiscard
+        .NoDiscard
         export let get = func(key: K) -> optional.Optional<V> {
             last slot = find(key, spread(hash_of(key)));
             if (slot < 0) {

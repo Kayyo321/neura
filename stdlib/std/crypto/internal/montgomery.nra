@@ -7,7 +7,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// The ladder runs the same steps for every scalar and swaps with masks, as RFC 7748, section 5 describes; it
 /// is branch-free in source, and the runtime does not guarantee constant time. The prime fields come from
 /// scripts/crypto-vectors/gen-asymmetric-constants.py.
-#Since("0.3.0")
+.Since("0.3.0")
 export let Montgomery = module (
     /// @brief The field of curve25519, p = 2^255 - 19.
     export let field25519 = func -> mp.Modulus =>

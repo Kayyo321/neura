@@ -5,7 +5,7 @@
 /// services that `Std.Net.Internal.Sockets` also binds (UDP, Unix-domain sockets, options, TLS streams,
 /// `send_file`), with the same parameters and outcome shapes. The third group names operations that no runtime
 /// offers yet; each traps, and its runtime need is recorded in the design note.
-#Since("0.3.0")
+.Since("0.3.0")
 export let HostCalls = module (
     /// @brief A socket or other ID, or an unsigned host error code.
     export let IdOutcome = enum (Ok(int64), Error(uint32));

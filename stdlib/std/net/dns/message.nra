@@ -22,7 +22,7 @@ let wire = import:Std.Net.Dns.Wire;
 /// unsigned 32-bit value in an `int64`), so mDNS can use the top class bit. Each record's rdata must use exactly
 /// its RDLENGTH; any violation is a `Parse` error with the offset, never a trap.
 /// @see [Std.Net.Dns.Message](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-Message)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Message = module (
     /// @brief Type A, an IPv4 address.
     export const TypeA: int = 1;
@@ -70,7 +70,7 @@ export let Message = module (
     export const HeaderLength: int = 12;
 
     /// @brief One EDNS option: a code and its bytes (RFC 6891 section 6.1.2).
-    #Final
+    .Final
     export let EdnsOption = class (
         /// @brief The option code.
         export last code: int;
@@ -103,7 +103,7 @@ export let Message = module (
     );
 
     /// @brief The EDNS(0) parameters an OPT record carries (RFC 6891 section 6.1.3).
-    #Final
+    .Final
     export let Edns = class (
         /// @brief The requester's UDP payload size (the OPT CLASS field).
         export last udp_payload_size: int;
@@ -131,7 +131,7 @@ export let Message = module (
         };
 
         /// @brief The TTL field of the OPT record.
-        #NoDiscard
+        .NoDiscard
         export let ttl_field = func -> int64 =>
             (extended_rcode as int64) * 16777216 + (version as int64) * 65536 + (dnssec_ok ? 32768 : 0);
 
@@ -166,7 +166,7 @@ export let Message = module (
     );
 
     /// @brief EDNS(0) with a UDP payload size, version 0, no DO bit and no options.
-    #NoDiscard
+    .NoDiscard
     export let edns_of = func(payload_size: int) -> Edns => new Edns(payload_size, 0, 0, false, new);
 
     /// @brief The data of one resource record.
@@ -190,7 +190,7 @@ export let Message = module (
     );
 
     /// @brief One question: a name, a QTYPE and a raw QCLASS (16 bits; mDNS uses the top bit).
-    #Final
+    .Final
     export let Question = class (
         /// @brief The name asked about.
         export last name: names.DnsName;
@@ -227,7 +227,7 @@ export let Message = module (
     );
 
     /// @brief One resource record: owner name, type, raw class, TTL (unsigned 32-bit) and data.
-    #Final
+    .Final
     export let ResourceRecord = class (
         /// @brief The owner name.
         export last name: names.DnsName;
@@ -256,7 +256,7 @@ export let Message = module (
         };
 
         /// @brief The same record with another TTL.
-        #NoDiscard
+        .NoDiscard
         export let with_ttl = func(time_to_live: int64) -> ResourceRecord =>
             new ResourceRecord(name, rtype, rclass, time_to_live, data);
 
@@ -284,7 +284,7 @@ export let Message = module (
 
     /// @brief The header fields (RFC 1035 section 4.1.1). The section counts are filled by `decode` and
     /// recomputed by `encode`.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Header = class (
         /// @brief The 16-bit ID.
         export let id: int = 0;
@@ -322,7 +322,7 @@ export let Message = module (
         };
 
         /// @brief The 16-bit flags word.
-        #NoDiscard
+        .NoDiscard
         export let flags = func -> int {
             if (opcode < 0 || opcode > 15 || rcode < 0 || rcode > 15) {
                 trap_with_message("invalid argument: opcode or rcode");
@@ -353,7 +353,7 @@ export let Message = module (
     );
 
     /// @brief A whole DNS message.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Message = class (
         /// @brief The header.
         export last header: Header = new;
@@ -373,14 +373,14 @@ export let Message = module (
         };
 
         /// @brief The full RCODE: the header's 4 bits plus EDNS's upper 8 bits.
-        #NoDiscard
+        .NoDiscard
         export let rcode = func -> int => match (edns) {
             Optional.Some(extra) => extra.extended_rcode * 16 + header.rcode,
             Optional.None => header.rcode,
         };
 
         /// @brief The first question; traps with "invalid argument: no question" when there is none.
-        #NoDiscard
+        .NoDiscard
         export let question = func -> Question {
             if (questions.length == 0) {
                 trap_with_message("invalid argument: no question");
@@ -395,7 +395,7 @@ export let Message = module (
     );
 
     /// @brief A recursive query for `name` and `qtype` in class IN with `id`.
-    #NoDiscard
+    .NoDiscard
     export let query = func(id: int, name: names.DnsName, qtype: int) -> Message {
         last message = new Message();
         message.header.id = id;
@@ -405,7 +405,7 @@ export let Message = module (
     };
 
     /// @brief A response to `request`: same ID, opcode, RD and questions, QR set, the given RCODE.
-    #NoDiscard
+    .NoDiscard
     export let response_to = func(request: Message, rcode: int) -> Message {
         last message = new Message();
         message.header.id = request.header.id;
@@ -421,7 +421,7 @@ export let Message = module (
 
     /// @brief Encodes a message. Err (Custom `dns.too_large`) when it would exceed 65,535 bytes or a section
     /// exceeds 65,535 entries.
-    #NoDiscard
+    .NoDiscard
     export let encode = func(message: Message) -> Result<uint8[list]> {
         last writer = new wire.WireWriter();
         last header = message.header;
@@ -468,7 +468,7 @@ export let Message = module (
 
     /// @brief Decodes a message. Err (Parse) for a truncated or malformed message, a bad name, rdata that does
     /// not use exactly RDLENGTH, more than one OPT record or trailing bytes.
-    #NoDiscard
+    .NoDiscard
     export let decode = func(bytes: uint8[list]) -> Result<Message> {
         last reader = new wire.WireReader(bytes);
         last message = new Message();
@@ -513,7 +513,7 @@ export let Message = module (
     };
 
     /// @brief The record data as raw bytes, as RFC 3597 section 5 writes it for an unknown type (uncompressed).
-    #NoDiscard
+    .NoDiscard
     export let rdata_bytes = func(data: RecordData) -> Result<uint8[list]> {
         last writer = new wire.WireWriter();
         write_data(writer, data, false)?;
@@ -521,7 +521,7 @@ export let Message = module (
     };
 
     /// @brief The character-strings of TXT data as text (invalid UTF-8 replaced); empty for other data.
-    #NoDiscard
+    .NoDiscard
     export let txt_strings = func(data: RecordData) -> string[list] {
         last texts: string[list] = new;
         match (data) {
@@ -537,7 +537,7 @@ export let Message = module (
     };
 
     /// @brief TXT data of text strings; a string above 255 bytes traps with "invalid argument: character-string".
-    #NoDiscard
+    .NoDiscard
     export let txt_of = func(texts: string[list]) -> RecordData {
         last parts: uint8[list][list] = new;
         for (let text in texts) {
@@ -551,7 +551,7 @@ export let Message = module (
     };
 
     /// @brief The mnemonic of a type ("A", "AAAA", ...), or "TYPEn" (RFC 3597 section 5).
-    #NoDiscard
+    .NoDiscard
     export let type_name = func(rtype: int) -> string {
         if (rtype == TypeA) {
             return "A";
@@ -582,11 +582,11 @@ export let Message = module (
     };
 
     /// @brief "IN" for class 1, otherwise "CLASSn" (RFC 3597 section 5).
-    #NoDiscard
+    .NoDiscard
     export let class_name = func(rclass: int) -> string => rclass == ClassIn ? "IN" : "CLASS" .. rclass.to_string();
 
     /// @brief The master-file-like text of record data; unknown data as `\# length hex` (RFC 3597 section 5).
-    #NoDiscard
+    .NoDiscard
     export let data_text = func(data: RecordData) -> string => match (data) {
         RecordData.A(address) => address.to_string(),
         RecordData.Aaaa(address) => address.to_string(),

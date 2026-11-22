@@ -21,7 +21,7 @@ export let FrostGroup = module (
     );
 
     /// @brief A native curve point held by the matching group backend. The protocol checks suite identity.
-    #Final
+    .Final
     export let Point = class (
         export last inner: class;
         export let init = func(value: class) {
@@ -31,7 +31,7 @@ export let FrostGroup = module (
         export let.override to_string = func -> string => "FrostGroup.Point";
     );
 
-    #Final
+    .Final
     export let Group = class (
         last suite: Suite;
         last backend: Backend;

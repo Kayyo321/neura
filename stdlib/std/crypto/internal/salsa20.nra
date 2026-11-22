@@ -1,7 +1,7 @@
 let words = import:Std.Crypto.Internal.Words;
 
 /// @brief The Salsa20 core shared by scrypt (RFC 7914) and the Macaroons XSalsa20-Poly1305 secret box.
-#Since("0.3.0")
+.Since("0.3.0")
 export let Salsa20 = module (
     let step = func(x: uint32[list], target: int, a: int, b: int, shift: int) {
         last sum = words.add32(x[a], x[b]);

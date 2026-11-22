@@ -25,10 +25,10 @@ let.promote _ = import:Std.Core.Unit;
 /// address is not reported by the host, so its `peer_address` is `None`; its `local_address` is the server's
 /// address when the server is bound to a specific address. After close, `accept` fails with Closed.
 /// @see [Std.Net.Socket.TcpServer](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-TcpServer)
-#Since("0.3.0")
+.Since("0.3.0")
 export let TcpServer = module (
     /// @brief A listening TCP socket that yields `TcpSocket`s.
-    #[Final, NoDiscard(reason: "a server must be closed"), NotThreadSafe]
+    .[Final, NoDiscard(reason: "a server must be closed"), NotThreadSafe]
     export let TcpServer = class implements Listener<SocketAddr, TcpSocket> (
         /// @brief The host's listener ID.
         last id: int64;
@@ -58,7 +58,7 @@ export let TcpServer = module (
 
         /// @brief Waits for the next connection. Fails with Closed after close, and with Cancelled when the
         /// task's scope is cancelled first.
-        #NoDiscard
+        .NoDiscard
         export let accept = func -> Result<TcpSocket> {
             return Result<TcpSocket>.Err(bytes.closed("listener", bound.to_string())) unless open_now;
             return match (host.accept(id)) {
@@ -81,14 +81,14 @@ export let TcpServer = module (
     );
 
     /// @brief Listens on `address` with no options. Port 0 asks the host for a free port.
-    #NoDiscard
+    .NoDiscard
     export let bind = func(address: SocketAddr) -> Result<TcpServer> =>
         bind_with(address, none(SocketKind.TcpListener));
 
     /// @brief Listens on `address` with an option set built for `SocketKind.TcpListener` (another kind traps
     /// with "invalid argument"). A non-empty set or multipath traps in Neura 0.3.0 (see the module
     /// documentation); with multipath, every option is applied after the listener is created.
-    #NoDiscard
+    .NoDiscard
     export let bind_with = func(address: SocketAddr, options: SocketOptions) -> Result<TcpServer> {
         support.check_kind(options, SocketKind.TcpListener);
         last text = address.to_string();

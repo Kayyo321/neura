@@ -15,13 +15,13 @@ let.promote _ = import:Std.Core.Result;
 /// (`::ffff:a.b.c.d`) is an IPv6 address: it is not inside an IPv4 block. A `CidrBlock` is an immutable
 /// class, so each value is one heap object; this runtime does not provide zero-allocation value types.
 /// @see [Std.Net.Core.CidrBlock](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Core-CidrBlock)
-#Since("0.3.0")
+.Since("0.3.0")
 export let CidrBlock = module (
     /// @brief All 64 bits set.
     const AllOnes: uint64 = 18446744073709551615;
 
     /// @brief A network address with its host bits cleared and a prefix length.
-    #[Final, NoDiscard, Immutable, ThreadSafe, Since("0.3.0")]
+    .[Final, NoDiscard, Immutable, ThreadSafe, Since("0.3.0")]
     export let CidrBlock = class (
         /// @brief The network address: the host bits are clear and an IPv6 network has no zone.
         export last network: ips.IpAddr;
@@ -40,7 +40,7 @@ export let CidrBlock = module (
         };
 
         /// @brief Tests whether the address lies in the block; false for the other family.
-        #Pure
+        .Pure
         export let contains = func(ip: ips.IpAddr) -> bool => match (network) {
             ips.IpAddr.V4(net_v4) => match (ip) {
                 ips.IpAddr.V4(a) => (a.bits & mask_v4(prefix_length)) == net_v4.bits,
@@ -54,7 +54,7 @@ export let CidrBlock = module (
         };
 
         /// @brief The family of the network address.
-        #Pure
+        .Pure
         export let family = func -> AddressFamily => ips.family(network);
 
         /// @brief Tests whether another object is a `CidrBlock` with an equal network and prefix length.
@@ -66,19 +66,19 @@ export let CidrBlock = module (
         };
 
         /// @brief Combines the network hash with the prefix length.
-        #Pure
+        .Pure
         export let.override hash_code = func -> uint32 =>
             hashing.combine(ips.hash(network), prefix_length as uint32);
 
         /// @brief `network/prefix`, for example `10.0.0.0/8` or `2001:db8::/32`.
-        #Pure
+        .Pure
         export let.override to_string = func -> string =>
             ips.to_string(network) .. "/" .. prefix_length.to_string();
     );
 
     /// @brief The block of `ip` with the host bits cleared and any zone dropped; traps when the prefix is out
     /// of range for the family.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let of = func(ip: ips.IpAddr, prefix: int) -> CidrBlock {
         if (prefix < 0 || prefix > max_prefix(ip)) {
             trap_with_message("CidrBlock.of: prefix length out of range for the address family");
@@ -96,12 +96,12 @@ export let CidrBlock = module (
     /// at the `%` of a zone; InvalidCharacter at a byte of the prefix that is not a digit or follows a leading
     /// zero; UnexpectedEnd for an empty prefix; OutOfRange at the prefix's start when it is too long for the
     /// family; Syntax at the `/` when host bits are set.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let parse = func(text: string) -> Result<CidrBlock> => parse_with(text, false);
 
     /// @brief Parses like `parse`, but clears host bits (`10.1.2.3/8` gives `10.0.0.0/8`) and drops an IPv6
     /// zone instead of reporting them.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let parse_lenient = func(text: string) -> Result<CidrBlock> => parse_with(text, true);
 
     /// @brief The parser shared by `parse` and `parse_lenient`.

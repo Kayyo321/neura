@@ -15,7 +15,7 @@ let.promote _ = import:Std.Core.Unit;
 /// while Open (calls admitted before it opened) are ignored. Which results count as failures is the caller's
 /// choice (`CircuitBreakerFilter` takes a classifier).
 /// @see [Std.Net.Resilience.CircuitBreaker](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-CircuitBreaker)
-#Since("0.3.0")
+.Since("0.3.0")
 export let CircuitBreaker = module (
     /// @brief The three breaker states.
     export let CircuitState = enum (Closed, Open, HalfOpen);
@@ -25,7 +25,7 @@ export let CircuitBreaker = module (
     export let SlidingWindow = enum (Count(int), Time { buckets: int, span: durations.Duration });
 
     /// @brief A failure-rate circuit breaker over an injected clock.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let CircuitBreaker = class (
         /// @brief The window shape.
         last window: SlidingWindow;
@@ -122,7 +122,7 @@ export let CircuitBreaker = module (
         /// @brief Asks to make a call. Closed admits it; Open rejects it until the open duration has passed and then
         /// moves to HalfOpen; HalfOpen admits up to `half_open_calls` trials. An admitted call must report with
         /// `record_success` or `record_failure`. Err only when the clock fails.
-        #NoDiscard
+        .NoDiscard
         export let try_acquire = func -> Result<bool> {
             if (current == CircuitState.Open) {
                 last now = monotonic_nanos()?;
@@ -150,14 +150,14 @@ export let CircuitBreaker = module (
         export let record_failure = func -> Result<Unit> => record(true);
 
         /// @brief The calls in the closed window, after dropping expired time buckets.
-        #NoDiscard
+        .NoDiscard
         export let window_calls = func -> Result<int> {
             expire()?;
             return Result<int>.Ok(calls_in_window());
         };
 
         /// @brief The failures in the closed window, after dropping expired time buckets.
-        #NoDiscard
+        .NoDiscard
         export let window_failures = func -> Result<int> {
             expire()?;
             return Result<int>.Ok(failures_in_window());
@@ -313,14 +313,14 @@ export let CircuitBreaker = module (
     );
 
     /// @brief A breaker over the last `size` calls.
-    #NoDiscard
+    .NoDiscard
     export let count_based = func(size: int, failure_rate_threshold: int, minimum_calls: int,
         open_duration: durations.Duration, half_open_calls: int, clock: Clock) -> CircuitBreaker =>
             new CircuitBreaker(SlidingWindow.Count(size), failure_rate_threshold, minimum_calls, open_duration,
                 half_open_calls, clock);
 
     /// @brief A breaker over the calls of the last `buckets` buckets of length `span`.
-    #NoDiscard
+    .NoDiscard
     export let time_based = func(buckets: int, span: durations.Duration, failure_rate_threshold: int,
         minimum_calls: int, open_duration: durations.Duration, half_open_calls: int, clock: Clock)
         -> CircuitBreaker =>

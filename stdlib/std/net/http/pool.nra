@@ -23,14 +23,14 @@ let strings = import:Std.Text.Strings;
 /// and one longer than the cap stops the retries. `PooledClient` applies both around a transport, sleeping on an
 /// injected clock. The network part rides on `Std.Net.Http.Client`'s transport, which needs `neura.http.fetch`.
 /// @see [Std.Net.Http.Pool](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-Pool)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Pool = module (
     /// @brief What to do after an attempt: stop with its outcome, or wait and try again.
     export let RetryDecision = enum (Stop, RetryAfter(durations.Duration));
 
     /// @brief The origin key of a URL: lowercase "scheme://host:port", with port 80 or 443 filled in; "" when
     /// the URL is not absolute http or https.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let origin_key = func(url: string) -> string {
         last lower = strings.to_ascii_lower(url);
         let scheme = "";
@@ -68,7 +68,7 @@ export let Pool = module (
     };
 
     /// @brief Per-origin limits on exchanges in flight.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let HostLimits = class (
         /// @brief The limit for origins without their own.
         export last default_limit: int;
@@ -163,7 +163,7 @@ export let Pool = module (
     );
 
     /// @brief When and how long to retry.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let RetryPolicy = class (
         /// @brief The most attempts, the first included.
         export last max_attempts: int;
@@ -211,7 +211,7 @@ export let Pool = module (
 
         /// @brief The decision after attempt `attempt` ended with `outcome`; `now` resolves an HTTP-date
         /// `Retry-After`.
-        #NoDiscard
+        .NoDiscard
         export let decide = func(request: http.ClientRequest, attempt: int, outcome: Result<http.Response>,
             now: clocks.Clock) -> RetryDecision {
             if (attempt >= max_attempts) {
@@ -258,7 +258,7 @@ export let Pool = module (
 
     /// @brief The wait a `Retry-After` field asks for: delay-seconds, or an HTTP-date minus the clock's now (zero
     /// when past); None when absent or invalid (RFC 9110 section 10.2.3).
-    #NoDiscard
+    .NoDiscard
     export let retry_after = func(response: http.Response, now: clocks.Clock) -> Optional<durations.Duration> {
         last field = response.headers.get("Retry-After");
         last text = match (field) {
@@ -302,7 +302,7 @@ export let Pool = module (
 
     /// @brief A client that limits exchanges per origin and retries by a policy, over a transport; a
     /// `Std.Net.Service<ClientRequest, Response>` and itself a `Transport`.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let PooledClient = class implements services.Service<http.ClientRequest, http.Response>, http.Transport (
         /// @brief The transport.
         last transport: http.Transport;
@@ -325,7 +325,7 @@ export let Pool = module (
 
         /// @brief Sends `request`: fails with "http.pool.busy" when its origin is at its limit; otherwise
         /// attempts until the policy stops, sleeping between attempts, and returns the last outcome.
-        #NoDiscard
+        .NoDiscard
         export let send = func(request: http.ClientRequest) -> Result<http.Response> {
             last_attempts = 0;
             if (origin_key(request.url).byte_length == 0) {

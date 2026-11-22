@@ -14,7 +14,7 @@ let.promote _ = import:Std.Core.Result;
 /// any other value being a PROTOCOL_VIOLATION (RFC 9001 section 4.6.1). Failures are Custom errors with the code
 /// `quic.ticket`.
 /// @see [Std.Net.Quic.SessionTicket](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Quic-SessionTicket)
-#Since("0.3.0")
+.Since("0.3.0")
 export let SessionTicket = module (
     /// @brief The longest ticket lifetime in seconds (seven days).
     export const MaxLifetimeSeconds: int64 = 604800;
@@ -22,7 +22,7 @@ export let SessionTicket = module (
     export const QuicEarlyDataSentinel: int64 = 4294967295;
 
     /// @brief A received session ticket.
-    #Final
+    .Final
     export let SessionTicket = class (
         /// @brief The opaque ticket.
         last ticket: uint8[list];
@@ -56,7 +56,7 @@ export let SessionTicket = module (
         };
 
         /// @brief The ticket bytes. A copy.
-        #NoDiscard
+        .NoDiscard
         export let ticket_bytes = func -> uint8[list] {
             let out: uint8[list] = new;
             for (let b in ticket) {
@@ -66,12 +66,12 @@ export let SessionTicket = module (
         };
 
         /// @brief The ticket's age at `now` in milliseconds (negative when `now` is before receipt).
-        #Pure
+        .Pure
         export let age_millis = func(now: instants.Instant) -> int64 => now.duration_since(received).to_millis();
 
         /// @brief True when the ticket may be used at `now`: its age is from 0 up to (not including) the
         /// lifetime.
-        #Pure
+        .Pure
         export let is_usable_at = func(now: instants.Instant) -> bool {
             last age = age_millis(now);
             return age >= 0 && age < lifetime_seconds * 1000;
@@ -79,7 +79,7 @@ export let SessionTicket = module (
 
         /// @brief The `obfuscated_ticket_age` at `now`: (age in milliseconds + ticket_age_add) mod 2^32. A
         /// negative age traps with "invalid argument: ticket age".
-        #Pure
+        .Pure
         export let obfuscated_age = func(now: instants.Instant) -> int64 {
             last age = age_millis(now);
             if (age < 0) {
@@ -111,7 +111,7 @@ export let SessionTicket = module (
     /// ALPN, the receipt time, `ticket_lifetime` (1 through 604,800 seconds; 0 means discard and is an error
     /// here), `ticket_age_add` (0 through 2^32 - 1), and the `max_early_data_size` of its early_data extension
     /// (-1 when absent; present, it must be the QUIC sentinel 0xffffffff).
-    #NoDiscard
+    .NoDiscard
     export let create = func(ticket: uint8[list], server_name: string, alpn: string, received: instants.Instant,
         lifetime_seconds: int64, age_add: int64, max_early_data: int64) -> Result<SessionTicket> {
         if (ticket.length < 1 || ticket.length > 65535) {

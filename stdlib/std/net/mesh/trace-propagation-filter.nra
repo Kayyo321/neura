@@ -18,10 +18,10 @@ let.promote _ = import:Std.Net.Service;
 /// is drawn from the injected `Std.Random.Random`, so tests are deterministic; use `Random.from_entropy()` in
 /// production. The filter records the context it sent last, for the application's own spans and logs.
 /// @see [Std.Net.Mesh.TracePropagationFilter](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Mesh-TracePropagationFilter)
-#Since("0.3.0")
+.Since("0.3.0")
 export let TracePropagationFilter = module (
     /// @brief Propagates the trace context of each request to the next service.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let TracePropagationFilter = class<Req, Resp> implements SimpleFilter<Req, Resp> (
         /// @brief Reads a header value (several fields combined with commas).
         last get_header: func(Req, string) -> Optional<string>;
@@ -61,15 +61,15 @@ export let TracePropagationFilter = module (
         };
 
         /// @brief The context sent with the last request (empty before the first).
-        #NoDiscard
+        .NoDiscard
         export let last_sent = func -> contexts.TraceContext => sent;
 
         /// @brief Requests that continued a received trace so far.
-        #NoDiscard
+        .NoDiscard
         export let continued = func -> int64 => continued_count;
 
         /// @brief Requests that started a new trace so far.
-        #NoDiscard
+        .NoDiscard
         export let started = func -> int64 => started_count;
 
         /// @brief Text such as "TracePropagationFilter(3 continued, 1 started)".
@@ -79,7 +79,7 @@ export let TracePropagationFilter = module (
 
     /// @brief A filter reading headers with `get_header`, writing them with `with_header`, drawing ids from
     /// `random`, and sampling new traces when `sample_new`.
-    #NoDiscard
+    .NoDiscard
     export let of = func<Req, Resp>(get_header: func(Req, string) -> Optional<string>,
         with_header: func(Req, string, string) -> Req, random: Random, sample_new: bool)
         -> TracePropagationFilter<Req, Resp> =>

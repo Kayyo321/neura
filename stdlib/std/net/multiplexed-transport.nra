@@ -9,7 +9,7 @@ let.promote _ = import:Std.Core.Unit;
 /// `Std.Net.Quic.QuicConnection` is the planned implementation. The inherited `receive` and `send` act on the
 /// connection's default stream (for QUIC, unreliable datagrams); the stream members act on one stream.
 /// @see [Std.Net.MultiplexedTransport](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-MultiplexedTransport)
-#Since("0.3.0")
+.Since("0.3.0")
 export let MultiplexedTransport = module (
     /// @brief Independent streams identified by `StreamId`, each exchanging frames of type `Frame`.
     export let MultiplexedTransport = interface<StreamId, Frame>:FramedTransport<Frame> (

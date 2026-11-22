@@ -13,7 +13,7 @@ let strings = import:Std.Text.Strings;
 /// maps a type through functions over `Std.Net.Rpc.ProtoWire`. FlatBuffers and Cap'n Proto codecs are stubs:
 /// this release has no schema compiler or runtime for them.
 /// @see [Std.Net.Rpc.Codec](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Rpc-Codec)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Codec = module (
     /// @brief Encodes messages of type `T` to bytes and decodes them back.
     export let RpcCodec = interface<T> (
@@ -26,11 +26,11 @@ export let Codec = module (
     );
 
     /// @brief The gRPC content type of a codec: `application/grpc+<subtype>`.
-    #NoDiscard
+    .NoDiscard
     export let content_type = func<T>(codec: RpcCodec<T>) -> string => "application/grpc+" .. codec.subtype();
 
     /// @brief Bytes as they are; subtype `proto` by default, since raw gRPC payloads are usually protobuf.
-    #Final
+    .Final
     export let RawCodec = class implements RpcCodec<uint8[list]> (
         /// @brief The subtype reported.
         last name: string;
@@ -54,7 +54,7 @@ export let Codec = module (
     );
 
     /// @brief JSON values as UTF-8 JSON text (RFC 8259), subtype `json`.
-    #Final
+    .Final
     export let JsonCodec = class implements RpcCodec<JsonValue> (
         /// @brief A JSON codec.
         export let init = func {
@@ -80,7 +80,7 @@ export let Codec = module (
     );
 
     /// @brief A type mapped to JSON through two functions, subtype `json`.
-    #Final
+    .Final
     export let MappedJsonCodec = class<T> implements RpcCodec<T> (
         /// @brief Maps a value to JSON.
         last to_json: func(T) -> JsonValue;
@@ -113,7 +113,7 @@ export let Codec = module (
     );
 
     /// @brief A type mapped to protobuf through a writer function and a reader function, subtype `proto`.
-    #Final
+    .Final
     export let ProtoCodec = class<T> implements RpcCodec<T> (
         /// @brief Writes a value's fields.
         last writer: func(T, proto.ProtoWriter) -> void;
@@ -144,7 +144,7 @@ export let Codec = module (
     );
 
     /// @brief A FlatBuffers codec for the table type named `table` (subtype `flatbuffers`).
-    #Final
+    .Final
     export let FlatBuffersCodec = class<T> implements RpcCodec<T> (
         /// @brief The fully qualified table type.
         export last table: string;
@@ -174,7 +174,7 @@ export let Codec = module (
     );
 
     /// @brief A Cap'n Proto codec for the struct type named `struct_name` (subtype `capnp`).
-    #Final
+    .Final
     export let CapnProtoCodec = class<T> implements RpcCodec<T> (
         /// @brief The fully qualified struct type.
         export last struct_name: string;

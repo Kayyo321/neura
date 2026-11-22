@@ -5,10 +5,10 @@ let result = import:Std.Core.Result;
 /// @brief Reads UTF-8 text from a byte source (Stdlib.md section 11.1), requesting up to 8,192 bytes at a time.
 /// Invalid UTF-8 fails with InvalidData.
 /// @see [Std.Io.Utf8Reader](https://github.com/Kayyo321/neura/wiki/Stdlib-Io-Utf8Reader)
-#Since("0.1.0")
+.Since("0.1.0")
 export let Utf8Reader = module (
     /// @brief Decodes UTF-8 from a byte source and retains bytes read ahead.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Utf8Reader = class (
         /// @brief The underlying byte source called when more input is needed.
         last source: func(int) -> result.Result<uint8[list]>;
@@ -26,7 +26,7 @@ export let Utf8Reader = module (
         ///
         /// An invalid or truncated sequence fails with InvalidData; the bytes before the offending byte are
         /// consumed and that byte is not.
-        #NoDiscard
+        .NoDiscard
         export let read_scalar = func -> result.Result<Optional<uint32>> {
             match (fill()) {
                 result.Result.Ok(available) => {
@@ -84,7 +84,7 @@ export let Utf8Reader = module (
 
         /// @brief The next line without its LF or a CR before it; None at the end of the stream. A final line
         /// without an LF is returned. Invalid UTF-8 fails with InvalidData and consumes the line.
-        #NoDiscard
+        .NoDiscard
         export let read_line = func -> result.Result<Optional<string>> {
             last line: uint8[list] = new;
             do {
@@ -113,7 +113,7 @@ export let Utf8Reader = module (
         };
 
         /// @brief The rest of the stream as text.
-        #NoDiscard
+        .NoDiscard
         export let read_to_end = func -> result.Result<string> {
             last all: uint8[list] = new;
             do {
@@ -175,7 +175,7 @@ export let Utf8Reader = module (
     );
 
     /// @brief Creates a UTF-8 reader over the supplied byte source.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let create = func(source: func(int) -> result.Result<uint8[list]>) -> Utf8Reader =>
         new(source);
 );

@@ -18,7 +18,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// after a call cannot recompute that call's output. scripts/crypto-vectors/gen-drbg.py is an independent
 /// Python reference of it.
 /// @see [Std.Crypto.Random.ChaCha20Drbg](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Random-ChaCha20Drbg)
-#Since("0.3.0")
+.Since("0.3.0")
 export let ChaCha20Drbg = module (
     /// @brief The SHA-256 of the label followed by the parts.
     let derive = func(label: string, a: uint8[list], b: uint8[list]) -> uint8[list] {
@@ -33,7 +33,7 @@ export let ChaCha20Drbg = module (
     /// the operating system. A fork-safe generator (`fork_safe`) checks Entropy.fork_generation before every
     /// output and reseeds from the operating system when it changed; that check is a stub until the runtime
     /// reports fork and VM-clone generations, so a fork-safe generator traps on its first use.
-    #[Final, NotThreadSafe, Since("0.3.0")]
+    .[Final, NotThreadSafe, Since("0.3.0")]
     export let ChaCha20Drbg = class (
         let key: uint8[list];
         let check_forks: bool = false;
@@ -58,7 +58,7 @@ export let ChaCha20Drbg = module (
         };
 
         /// @brief Mixes 32 bytes from the operating system into the key.
-        #NoDiscard
+        .NoDiscard
         export let reseed_from_entropy = func -> Result<Unit> {
             match (entropy.os_bytes(32)) {
                 Result.Ok(bytes) => {
@@ -74,7 +74,7 @@ export let ChaCha20Drbg = module (
 
         /// @brief Turns on fork detection: from now on every output first compares Entropy.fork_generation with
         /// the value it saw last and reseeds from the operating system when it changed.
-        #Internal
+        .Internal
         export let enable_fork_checks = func {
             check_forks = true;
             generation = entropy.fork_generation();
@@ -138,7 +138,7 @@ export let ChaCha20Drbg = module (
     );
 
     /// @brief A generator seeded with 32 bytes from the operating system. Fails as Entropy.os_bytes does.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let from_entropy = func -> Result<ChaCha20Drbg> {
         match (entropy.os_bytes(32)) {
             Result.Ok(seed) => {
@@ -154,7 +154,7 @@ export let ChaCha20Drbg = module (
 
     /// @brief A generator seeded from the operating system that checks for fork and VM clones before every
     /// output (see the class). Traps while Entropy.fork_generation is a stub.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let fork_safe = func -> Result<ChaCha20Drbg> {
         match (from_entropy()) {
             Result.Ok(drbg) => {

@@ -35,7 +35,7 @@ export let RegexMachine = module (
     /// @brief A compiled program with the scratch state the machine reuses between searches. `first_bytes`
     /// lists the bytes that can begin a match when `can_skip` holds; `anchored` means a match can only start at
     /// offset 0.
-    #Final
+    .Final
     export let Program = class (
         /// @brief The option bits captured at compile time.
         export let options: int = 0;
@@ -63,7 +63,7 @@ export let RegexMachine = module (
     );
 
     /// @brief Compiles a syntax tree with `groups` capturing groups.
-    #Pure
+    .Pure
     export let compile = func(root: parser.Node, groups: int, ignore_case: bool, multi_line: bool, dot_all: bool) -> Program {
         last compiler = new Compiler(ignore_case, multi_line, dot_all, 2 * groups + 2);
         compiler.emit(Inst.Save(0));
@@ -84,7 +84,7 @@ export let RegexMachine = module (
     };
 
     /// @brief Emits instructions and allocates capture and progress slots for a parsed tree.
-    #Final
+    .Final
     let Compiler = class (
         /// @brief The instructions emitted so far.
         export let insts: Inst[list] = new;

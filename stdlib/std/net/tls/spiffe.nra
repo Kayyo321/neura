@@ -18,7 +18,7 @@ let strings = import:Std.Text.Strings;
 /// Verifying an X.509-SVID or JWT-SVID needs X.509 path validation or JWS verification against a trust bundle,
 /// which Neura 0.3.0 does not provide; those functions trap.
 /// @see [Std.Net.Tls.Spiffe](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Tls-Spiffe)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Spiffe = module (
     /// @brief The longest SPIFFE ID implementations must support, in bytes (section 2.3).
     export const MaxIdLength: int = 2048;
@@ -29,7 +29,7 @@ export let Spiffe = module (
     let Seal = enum (Token);
 
     /// @brief A validated SPIFFE ID.
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let SpiffeId = class (
         /// @brief The trust domain name.
         export last trust_domain: string;
@@ -43,18 +43,18 @@ export let Spiffe = module (
         };
 
         /// @brief True when the ID belongs to `domain`.
-        #Pure
+        .Pure
         export let member_of = func(domain: string) -> bool => trust_domain == domain;
 
         /// @brief The path segments; empty for an ID without a path.
-        #NoDiscard
+        .NoDiscard
         export let segments = func -> string[list] {
             return if (path.byte_length == 0) -> new
                 else -> strings.split(path.slice(1, path.byte_length), "/");
         };
 
         /// @brief The ID of the trust domain itself (`spiffe://<domain>`), as a signing authority uses.
-        #NoDiscard
+        .NoDiscard
         export let trust_domain_id = func -> SpiffeId => new SpiffeId(Seal.Token, trust_domain, "");
 
         /// @brief Equal when the trust domain and path are.
@@ -73,7 +73,7 @@ export let Spiffe = module (
     );
 
     /// @brief Parses a SPIFFE ID (see the module documentation).
-    #NoDiscard
+    .NoDiscard
     export let parse = func(text: string) -> Result<SpiffeId> {
         if (text.byte_length > MaxIdLength) {
             return fail(ParseErrorKind.OutOfRange, MaxIdLength, "a SPIFFE ID is longer than 2048 bytes");
@@ -92,12 +92,12 @@ export let Spiffe = module (
 
     /// @brief A SPIFFE ID from a trust domain and a path (empty, or starting with `/`), checked as by `parse`;
     /// offsets refer to the joined text.
-    #NoDiscard
+    .NoDiscard
     export let of = func(trust_domain: string, path: string) -> Result<SpiffeId> =>
         parse("spiffe://" .. trust_domain .. path);
 
     /// @brief Ok when `domain` is a valid trust domain name (section 2.1).
-    #NoDiscard
+    .NoDiscard
     export let check_trust_domain_name = func(domain: string) -> Result<string> {
         check_trust_domain(domain, 0)?;
         return Result<string>.Ok(domain);
@@ -105,14 +105,14 @@ export let Spiffe = module (
 
     /// @brief Verifies an X.509-SVID chain (PEM) against a trust bundle (PEM) and returns its SPIFFE ID.
     /// @stub needs X.509 certificate path validation, not in Neura 0.3.0
-    #NoDiscard
+    .NoDiscard
     export let verify_x509_svid = func(chain_pem: string, bundle_pem: string) -> Result<SpiffeId> {
         trap_with_message("unsupported: Std.Net.Tls.Spiffe.verify_x509_svid is not implemented in Neura 0.3.0 (needs X.509 certificate path validation, not in Neura 0.3.0)");
     };
 
     /// @brief Verifies a JWT-SVID against a JWK set (JSON) and an audience and returns its SPIFFE ID.
     /// @stub needs JWS signature verification, not in Neura 0.3.0
-    #NoDiscard
+    .NoDiscard
     export let verify_jwt_svid = func(token: string, jwks_json: string, audience: string) -> Result<SpiffeId> {
         trap_with_message("unsupported: Std.Net.Tls.Spiffe.verify_jwt_svid is not implemented in Neura 0.3.0 (needs JWS signature verification, not in Neura 0.3.0)");
     };

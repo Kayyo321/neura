@@ -14,7 +14,7 @@ let rounding = import:Std.Math.Internal.FloatRounding;
 /// compare_to are numeric, so 2.0 equals 2.00; hash_code is computed on the form with trailing zeros stripped.
 /// A scale that leaves the int range traps (reason 1), from checked int arithmetic or conversion.
 /// @see [Std.Math.BigDecimal](https://github.com/Kayyo321/neura/wiki/Stdlib-Math-BigDecimal)
-#Since("0.1.0")
+.Since("0.1.0")
 export let BigDecimal = module (
     /// @brief Java's rounding modes: Up and Down round away from and toward zero, Ceiling and Floor toward
     /// positive and negative infinity, and the Half modes round to the nearest neighbour with ties away from
@@ -22,7 +22,7 @@ export let BigDecimal = module (
     export let RoundingMode = enum (Up, Down, Ceiling, Floor, HalfUp, HalfDown, HalfEven);
 
     /// @brief An immutable decimal represented by an unscaled integer times ten raised to the negative scale.
-    #[Final, NoDiscard]
+    .[Final, NoDiscard]
     export let BigDecimal = class implements Comparable<BigDecimal> (
         /// @brief The integer coefficient, the unscaled value.
         export last unscaled: BigInteger;
@@ -39,7 +39,7 @@ export let BigDecimal = module (
         };
 
         /// @brief Returns minus one, zero, or one according to the coefficient's sign.
-        #Pure
+        .Pure
         export let sign = func -> int => unscaled.sign();
 
         /// @brief Reverses the sign and preserves the scale.
@@ -65,7 +65,7 @@ export let BigDecimal = module (
         export let subtract = func(other: BigDecimal) -> BigDecimal => add(other.negate());
 
         /// @brief Exact; the result's scale is the sum of the scales.
-        #Pure
+        .Pure
         export let multiply = func(other: BigDecimal) -> BigDecimal =>
             new(unscaled.multiply(other.unscaled), scale + other.scale);
 
@@ -148,7 +148,7 @@ export let BigDecimal = module (
 
         /// @brief this^exponent exactly, with scale * exponent. pow(0) is 1 with scale 0; a negative exponent
         /// traps.
-        #Pure
+        .Pure
         export let pow = func(exponent: int) -> BigDecimal {
             if (exponent < 0) {
                 trap_with_message("invalid argument: negative exponent");
@@ -194,7 +194,7 @@ export let BigDecimal = module (
         };
 
         /// @brief Compares numerical values independently of scale without aligning widely separated scales.
-        #Pure
+        .Pure
         export let compare_to = func(other: BigDecimal) -> Ordering {
             last sa = unscaled.sign();
             last sb = other.unscaled.sign();
@@ -256,18 +256,18 @@ export let BigDecimal = module (
     );
 
     /// @brief Constructs an exact decimal from an int64 at scale zero.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let of_int64 = func(value: int64) -> BigDecimal =>
         new(big_integer.of_int64(value), 0);
 
     /// @brief Constructs a decimal from its unscaled integer and scale.
-    #Pure
+    .Pure
     export let of_big_integer = func(value: BigInteger, scale: int) -> BigDecimal =>
         new(value, scale);
 
     /// @brief The exact binary value of v with the smallest scale that holds it: 0.5 has scale 1 and 2.0 has
     /// scale 0. NaN and the infinities trap.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let of_float64 = func(v: float64) -> BigDecimal {
         last bits = v.to_bits();
         last field = ((bits >> 52) & 2047) as int;
@@ -305,7 +305,7 @@ export let BigDecimal = module (
     ///
     /// The scale is the number of fraction digits minus the exponent; one outside the int range fails with
     /// OutOfRange.
-    #NoDiscard
+    .NoDiscard
     export let parse = func(text: string) -> Result<BigDecimal> {
         last length = text.byte_length;
         if (length == 0) {

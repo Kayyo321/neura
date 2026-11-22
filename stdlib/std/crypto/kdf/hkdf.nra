@@ -9,11 +9,11 @@ let words = import:Std.Crypto.Internal.Words;
 /// The `info` argument of `expand` carries the domain-separation label: give each use of a key its own
 /// label, such as the UTF-8 bytes of "myapp v1 file key", so that keys for different purposes never coincide.
 /// @see [Std.Crypto.Kdf.Hkdf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Kdf-Hkdf)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Hkdf = module (
     /// @brief The pseudorandom key HMAC-H(salt, input key material). An empty salt stands for H's output length
     /// of zero bytes, as the RFC says.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let extract = func<H: StreamingDigest<H>>(salt: uint8[list], input_key: uint8[list]) -> uint8[list] {
         crypto_policy.require(Algorithm.Hkdf);
         last key = salt.length == 0 ? words.zeros(H.output_length()) : salt;
@@ -22,7 +22,7 @@ export let Hkdf = module (
 
     /// @brief `length` bytes of output keying material from the pseudorandom key and the info label. A length
     /// above 255 times H's output length traps with "invalid argument: HKDF output too long".
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let expand = func<H: StreamingDigest<H>>(prk: uint8[list], info: uint8[list], length: int) -> uint8[list] {
         crypto_policy.require(Algorithm.Hkdf);
         if (length < 0 || length > 255 * H.output_length()) {
@@ -46,7 +46,7 @@ export let Hkdf = module (
     };
 
     /// @brief `expand(extract(salt, input_key), info, length)`.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let derive = func<H: StreamingDigest<H>>(salt: uint8[list], input_key: uint8[list], info: uint8[list],
         length: int) -> uint8[list] {
         let prk = extract<H>(salt, input_key);
@@ -56,7 +56,7 @@ export let Hkdf = module (
     };
 
     /// @brief `expand` with the UTF-8 bytes of a text label as the info.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let expand_label = func<H: StreamingDigest<H>>(prk: uint8[list], label: string, length: int) -> uint8[list] =>
         expand<H>(prk, words.utf8(label), length);
 );

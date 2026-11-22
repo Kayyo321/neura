@@ -14,10 +14,10 @@ let words = import:Std.Crypto.Internal.Words;
 /// runtime does not guarantee constant time. EMSA-PSS, EME-OAEP and EMSA-PKCS1-v1_5 follow RFC 8017, sections
 /// 9.1, 7.1 and 9.2; the DigestInfo prefixes come from RFC 8017, section 9.2, note 1, and for SHA-3 from
 /// `cryptography` signatures (scripts/crypto-vectors/gen-asymmetric-rsa.py prints them).
-#Since("0.3.0")
+.Since("0.3.0")
 export let RsaCore = module (
     /// @brief The public numbers n and e and their Montgomery context.
-    #Final
+    .Final
     export let PublicCore = class (
         /// @brief The modulus, as big-endian bytes without leading zeros.
         export last n_bytes: uint8[list];
@@ -50,7 +50,7 @@ export let RsaCore = module (
     );
 
     /// @brief The private numbers: the primes, the CRT exponents and the coefficient.
-    #Final
+    .Final
     export let PrivateCore = class (
         /// @brief The public part.
         export last public_core: PublicCore;
@@ -74,7 +74,7 @@ export let RsaCore = module (
         };
 
         /// @brief Traps before a private operation when the owning key was wiped.
-        #Internal
+        .Internal
         export let require_live = func {
             if (wiped) {
                 trap_with_message("invalid state: secret wiped");
@@ -82,7 +82,7 @@ export let RsaCore = module (
         };
 
         /// @brief Disables this core and overwrites its directly accessible CRT buffers.
-        #Internal
+        .Internal
         export let wipe = func {
             if (wiped) {
                 return;

@@ -3,7 +3,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// @brief The SHA-256 and SHA-512 compression functions of FIPS 180-4 with a chosen initial value and output
 /// length, for SHA-224, SHA-384, SHA-512 and SHA-512/256. Internal. (SHA-256 itself runs the kernel of
 /// Std.Digest.Sha256.) The constants are printed by scripts/crypto-vectors/constants.py.
-#Since("0.3.0")
+.Since("0.3.0")
 export let Sha2Core = module (
     /// @brief A new list of the table (a function, so that tasks can use it: arrays are not transferable).
     let k256_table = func -> uint32[list] => new([

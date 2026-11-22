@@ -20,10 +20,10 @@ let.promote _ = import:Std.Core.Unit;
 /// `shutdown`, `local_address` and kernel TLS offload need host services that no runtime offers yet and trap.
 /// After close every operation except close fails with Closed.
 /// @see [Std.Net.Tls.TlsStream](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Tls-TlsStream)
-#Since("0.3.0")
+.Since("0.3.0")
 export let TlsStream = module (
     /// @brief One TLS stream.
-    #[Final, NoDiscard(reason: "a stream must be closed"), NotThreadSafe]
+    .[Final, NoDiscard(reason: "a stream must be closed"), NotThreadSafe]
     export let TlsStream = class implements StreamSocket<SocketAddr> (
         /// @brief The host's TLS stream ID.
         last id: int64;
@@ -48,7 +48,7 @@ export let TlsStream = module (
 
         /// @brief Up to `max` decrypted bytes; an empty list once the peer has closed the stream. A maximum
         /// below 1 traps.
-        #NoDiscard
+        .NoDiscard
         export let read = func(max: int) -> Result<uint8[list]> {
             bytes.check_maximum(max);
             return Result<uint8[list]>.Err(bytes.closed("stream", label)) unless open_now;
@@ -61,7 +61,7 @@ export let TlsStream = module (
         };
 
         /// @brief Encrypts and writes every byte, repeating partial host writes.
-        #NoDiscard
+        .NoDiscard
         export let write = func(data: uint8[list]) -> Result<Unit> {
             return Result<Unit>.Err(bytes.closed("stream", label)) unless open_now;
             let remaining = data;
@@ -85,7 +85,7 @@ export let TlsStream = module (
         };
 
         /// @brief The next decrypted bytes (at most `ReceiveChunk`), or `None` at the end of the peer's data.
-        #NoDiscard
+        .NoDiscard
         export let receive = func -> Result<Optional<uint8[list]>> {
             last chunk = read(ReceiveChunk)?;
             return if (chunk.length == 0) -> Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.None)
@@ -93,7 +93,7 @@ export let TlsStream = module (
         };
 
         /// @brief Sends every byte; the `Std.Net.Transport` form of `write`.
-        #NoDiscard
+        .NoDiscard
         export let send = func(data: uint8[list]) -> Result<Unit> => write(data);
 
         /// @brief The longest a read waits; zero waits without limit.
@@ -108,7 +108,7 @@ export let TlsStream = module (
         export let peer_address = func -> Optional<SocketAddr> => peer;
 
         /// @brief The local address, from the host; traps in Neura 0.3.0 (no local-address service).
-        #NoDiscard
+        .NoDiscard
         export let local_address = func -> Result<SocketAddr> {
             return Result<SocketAddr>.Err(bytes.closed("stream", label)) unless open_now;
             return match (host.local_address(id)) {
@@ -120,7 +120,7 @@ export let TlsStream = module (
 
         /// @brief Ends reading, writing or both of the underlying TCP connection. Traps in Neura 0.3.0: the
         /// runtime has no shutdown service. `close` sends `close_notify`.
-        #NoDiscard
+        .NoDiscard
         export let shutdown = func(how: Shutdown) -> Result<Unit> {
             return Result<Unit>.Err(bytes.closed("stream", label)) unless open_now;
             last code = how == Shutdown.Read ? 0 : how == Shutdown.Write ? 1 : 2;
@@ -132,7 +132,7 @@ export let TlsStream = module (
 
         /// @brief Moves symmetric record encryption into the kernel (kTLS, and the NIC where it supports it).
         /// Traps in Neura 0.3.0: no runtime offers kTLS.
-        #NoDiscard
+        .NoDiscard
         export let enable_kernel_offload = func -> Result<Unit> {
             return Result<Unit>.Err(bytes.closed("stream", label)) unless open_now;
             return match (host.tls_enable_kernel_offload(id)) {

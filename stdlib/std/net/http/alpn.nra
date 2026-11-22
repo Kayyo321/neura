@@ -11,7 +11,7 @@ let.promote _ = import:Std.Core.Result;
 /// handshake ends with the fatal `no_application_protocol` alert (120), which `select` returns as a value.
 /// The TLS handshake that carries these bytes is not part of this module.
 /// @see [Std.Net.Http.Alpn](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-Alpn)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Alpn = module (
     /// @brief The TLS extension type of ALPN, application_layer_protocol_negotiation(16) (section 3.1).
     export const ExtensionType: int = 16;
@@ -35,19 +35,19 @@ export let Alpn = module (
     export let Selection = enum (Selected(uint8[list]), NoApplicationProtocol);
 
     /// @brief The bytes of "http/1.1": 0x68 0x74 0x74 0x70 0x2f 0x31 0x2e 0x31 (RFC 7301 section 6).
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let http11 = func -> uint8[list] => bytes_of(Http11Id);
 
     /// @brief The bytes of "h2": 0x68 0x32 (RFC 9113 section 3).
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let h2 = func -> uint8[list] => bytes_of(H2Id);
 
     /// @brief The bytes of "h3": 0x68 0x33 (RFC 9114 section 11.1).
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let h3 = func -> uint8[list] => bytes_of(H3Id);
 
     /// @brief The bytes of a text protocol name (its UTF-8 encoding).
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let bytes_of = func(name: string) -> uint8[list] {
         last bytes: uint8[list] = new;
         for (let i = 0; i < name.byte_length; i++) {
@@ -58,7 +58,7 @@ export let Alpn = module (
 
     /// @brief The ProtocolNameList holding `names` in order (section 3.1). Err (OutOfRange) for no names, an
     /// empty name or one over 255 bytes (at the index of the name), or a list over 65,535 bytes.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let encode = func(names: uint8[list][list]) -> Result<uint8[list]> {
         if (names.length == 0) {
             return Result<uint8[list]>.Err(failure(ParseErrorKind.Empty, 0, "no protocol names"));
@@ -89,7 +89,7 @@ export let Alpn = module (
     /// @brief The names of a ProtocolNameList (section 3.1). Errors at the offending byte offset: UnexpectedEnd
     /// for fewer than two bytes or a name cut short, Syntax when the length prefix disagrees with the size,
     /// Empty for an empty list, OutOfRange for a zero-length name.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let decode = func(wire: uint8[list]) -> Result<uint8[list][list]> {
         if (wire.length < 2) {
             return Result<uint8[list][list]>.Err(
@@ -125,7 +125,7 @@ export let Alpn = module (
 
     /// @brief The protocol of a ServerHello ALPN extension: a ProtocolNameList with exactly one name (section
     /// 3.1). Errors are those of `decode`, and Syntax when the list holds more than one name.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let decode_server_selection = func(wire: uint8[list]) -> Result<uint8[list]> {
         last names = decode(wire)?;
         if (names.length != 1) {
@@ -137,7 +137,7 @@ export let Alpn = module (
 
     /// @brief Server-side selection (section 3.2): the first of `server_preference` that `client_offer`
     /// contains, or `NoApplicationProtocol`.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let select = func(server_preference: uint8[list][list], client_offer: uint8[list][list]) -> Selection {
         for (let candidate in server_preference) {
             for (let offered in client_offer) {
@@ -150,7 +150,7 @@ export let Alpn = module (
     };
 
     /// @brief Whether two names hold the same bytes.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let same = func(a: uint8[list], b: uint8[list]) -> bool {
         if (a.length != b.length) {
             return false;
@@ -164,7 +164,7 @@ export let Alpn = module (
     };
 
     /// @brief A new list with the bytes of `name`.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     let copy = func(name: uint8[list]) -> uint8[list] {
         last bytes: uint8[list] = new;
         for (let b in name) {
@@ -174,7 +174,7 @@ export let Alpn = module (
     };
 
     /// @brief A Parse error.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     let failure = func(kind: ParseErrorKind, offset: int, message: string) -> Error =>
         Error.Parse { kind: kind, offset: offset, message: message };
 );

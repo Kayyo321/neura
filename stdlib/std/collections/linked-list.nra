@@ -13,7 +13,7 @@ let sorting = import:Std.Collections.Sorting;
 /// are nil. A removed node's links are cleared, so an iterator holding it
 /// does not keep the rest of the chain reachable.
 /// @see [Std.Collections.LinkedList](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-LinkedList)
-#Since("0.1.0")
+.Since("0.1.0")
 export let LinkedList = module (
     /// @brief An element and its links to its immediate neighbors.
     let Node = class<T> (
@@ -34,7 +34,7 @@ export let LinkedList = module (
     );
 
     /// @brief A doubly linked list that also supports queue and deque operations.
-    #NotThreadSafe
+    .NotThreadSafe
     export let LinkedList = class<T> implements MutableList<T>, Deque<T> (
         /// @brief The first node, or `nil` when the list is empty.
         let head: Node<T> = nil;
@@ -157,19 +157,19 @@ export let LinkedList = module (
         };
 
         /// @brief Returns the first element as `Some`, or `None` when empty.
-        #NoDiscard
+        .NoDiscard
         export let first_or_none = func -> optional.Optional<T> {
             return if (head == nil) -> optional.Optional<T>.None else -> optional.Optional<T>.Some(head.value);
         };
 
         /// @brief Returns the last element as `Some`, or `None` when empty.
-        #NoDiscard
+        .NoDiscard
         export let last_or_none = func -> optional.Optional<T> {
             return if (tail == nil) -> optional.Optional<T>.None else -> optional.Optional<T>.Some(tail.value);
         };
 
         /// @brief The first element, or None when empty.
-        #NoDiscard
+        .NoDiscard
         export let peek = func -> optional.Optional<T> => first_or_none();
 
         /// @brief Appends `value` and returns true.

@@ -21,14 +21,14 @@ let.promote _ = import:Std.Time.Duration;
 /// `send` overlaps in a program with tasks: the calling task waits and the others run. Without tasks the
 /// program waits for the answer. A native `neura run` does not serve the service yet, so an image that calls
 /// it runs only in a browser.
-#Since("0.3.0")
+.Since("0.3.0")
 export let Fetch = module (
     /// @brief Whether the browser sends cookies and HTTP authentication with the request.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let Credentials = enum (Omit, SameOrigin, Include);
 
     /// @brief Why a fetch produced no response.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let FetchFailure = enum (
         InvalidInput, TimedOut, Unsupported, CapabilityDenied, Cancelled, TooLarge, Busy, OutcomeUnknown, Other
     );
@@ -46,7 +46,7 @@ export let Fetch = module (
 
     /// @brief An HTTP response: the status, the header pairs the host exposes (in a browser, lowercase names,
     /// and for a cross-origin response only those CORS exposes), and the body bytes.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Response = class (
         /// @brief The HTTP status code.
         export last status: int;
@@ -62,11 +62,11 @@ export let Fetch = module (
         };
 
         /// @brief Whether the status is 200 to 299.
-        #Pure
+        .Pure
         export let ok = func -> bool => status >= 200 && status <= 299;
 
         /// @brief The header pairs in the host's order.
-        #Pure
+        .Pure
         export let headers = func -> [string, string][list] {
             last copy: [string, string][list] = new;
             for (let pair in pairs) {
@@ -76,7 +76,7 @@ export let Fetch = module (
         };
 
         /// @brief The value of the first header with this name, compared without regard to ASCII case.
-        #Pure
+        .Pure
         export let header = func(name: string) -> optional.Optional<string> {
             for (let pair in pairs) {
                 if (strings.equals_ignore_ascii_case(pair[0], name)) {
@@ -87,18 +87,18 @@ export let Fetch = module (
         };
 
         /// @brief The body as UTF-8 text, or an Encoding error.
-        #NoDiscard
+        .NoDiscard
         export let text = func -> result.Result<string> => strings.from_bytes(body);
 
         /// @brief The status and the body's size.
-        #Pure
+        .Pure
         export let.override to_string = func -> string =>
             "Response(" .. status.to_string() .. ", " .. body.length.to_string() .. " bytes)";
     );
 
     /// @brief A request to send: a method, a URL (absolute, or relative to the page in a browser), headers, a
     /// body, a timeout and a credentials mode. Each `with_` member returns a new request.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Request = class (
         /// @brief The method, such as GET or POST.
         export last method: string;
@@ -124,11 +124,11 @@ export let Fetch = module (
         };
 
         /// @brief The header pairs in the order they were added.
-        #Pure
+        .Pure
         export let headers = func -> [string, string][list] => copy_pairs(pairs);
 
         /// @brief The same request with one more header.
-        #Pure
+        .Pure
         export let with_header = func(name: string, value: string) -> Request {
             last more = copy_pairs(pairs);
             more.append([name, value]);
@@ -136,12 +136,12 @@ export let Fetch = module (
         };
 
         /// @brief The same request with this body.
-        #Pure
+        .Pure
         export let with_body = func(bytes: uint8[list]) -> Request =>
             new(method, url, pairs, bytes, timeout, credentials);
 
         /// @brief The same request with a text body and a Content-Type header.
-        #Pure
+        .Pure
         export let with_text = func(content_type: string, text: string) -> Request {
             last more = copy_pairs(pairs);
             more.append(["Content-Type", content_type]);
@@ -149,16 +149,16 @@ export let Fetch = module (
         };
 
         /// @brief The same request with this timeout.
-        #Pure
+        .Pure
         export let with_timeout = func(limit: Duration) -> Request => new(method, url, pairs, body, limit, credentials);
 
         /// @brief The same request with this credentials mode.
-        #Pure
+        .Pure
         export let with_credentials = func(mode: Credentials) -> Request =>
             new(method, url, pairs, body, timeout, mode);
 
         /// @brief Sends the request and waits for the response.
-        #NoDiscard
+        .NoDiscard
         export let send = func -> result.Result<Response> {
             last nanos = timeout.to_nanos();
             return match (fetch(method, url, flatten(pairs), body, nanos < 0 ? 0 : nanos, mode_code(credentials))) {
@@ -169,12 +169,12 @@ export let Fetch = module (
         };
 
         /// @brief The method and URL.
-        #Pure
+        .Pure
         export let.override to_string = func -> string => method .. " " .. url;
     );
 
     /// @brief A request with no headers or body, the default timeout, and same-origin credentials.
-    #Pure
+    .Pure
     export let request = func(method: string, url: string) -> Request {
         last none: [string, string][list] = new;
         last empty: uint8[list] = new;
@@ -182,23 +182,23 @@ export let Fetch = module (
     };
 
     /// @brief Sends a GET request with the defaults of `request`.
-    #NoDiscard
+    .NoDiscard
     export let get = func(url: string) -> result.Result<Response> => request("GET", url).send();
 
     /// @brief Sends a POST request with a text body of the content type, and the defaults of `request`.
-    #NoDiscard
+    .NoDiscard
     export let post_text = func(url: string, content_type: string, text: string) -> result.Result<Response> =>
         request("POST", url).with_text(content_type, text).send();
 
     /// @brief Classifies an error that `send` returned; any other error is Other.
-    #Pure
+    .Pure
     export let failure_of = func(e: Error) -> FetchFailure => match (e) {
         Error.Io { kind, message: _, path: _ } => failure_of_kind(kind),
         Error.Custom(detail) => failure_of_code(detail.code()),
         _ => FetchFailure.Other,
     };
 
-    #Pure
+    .Pure
     let failure_of_kind = func(kind: IoErrorKind) -> FetchFailure => match (kind) {
         IoErrorKind.InvalidInput => FetchFailure.InvalidInput,
         IoErrorKind.TimedOut => FetchFailure.TimedOut,
@@ -208,7 +208,7 @@ export let Fetch = module (
         _ => FetchFailure.Other,
     };
 
-    #Pure
+    .Pure
     let failure_of_code = func(code: string) -> FetchFailure {
         if (code == "http.TooLarge") {
             return FetchFailure.TooLarge;
@@ -221,7 +221,7 @@ export let Fetch = module (
     };
 
     /// @brief The error of a host code: codes 1 to 15 are I/O errors, 16 to 18 the custom errors above.
-    #Pure
+    .Pure
     let error_of = func(code: uint32, what: string) -> Error {
         if (code == 16) {
             return custom("http.TooLarge", what .. ": a body exceeds the host's limit");
@@ -233,7 +233,7 @@ export let Fetch = module (
             else -> host_error.io(code, "fetch failed", what);
     };
 
-    #Pure
+    .Pure
     let mode_code = func(mode: Credentials) -> uint32 => match (mode) {
         Credentials.Omit => 0,
         Credentials.SameOrigin => 1,
@@ -241,7 +241,7 @@ export let Fetch = module (
     };
 
     /// @brief Header pairs as the host takes them: name, value, name, value.
-    #Pure
+    .Pure
     let flatten = func(pairs: [string, string][list]) -> string[list] {
         last flat: string[list] = new;
         for (let pair in pairs) {
@@ -252,7 +252,7 @@ export let Fetch = module (
     };
 
     /// @brief Header pairs from the host's alternating names and values; an odd last name is dropped.
-    #Pure
+    .Pure
     let pair_up = func(flat: string[list]) -> [string, string][list] {
         last pairs: [string, string][list] = new;
         for (let i: int = 0; i + 1 < flat.length; i += 2) {
@@ -261,7 +261,7 @@ export let Fetch = module (
         return pairs;
     };
 
-    #Pure
+    .Pure
     let copy_pairs = func(pairs: [string, string][list]) -> [string, string][list] {
         last copy: [string, string][list] = new;
         for (let pair in pairs) {

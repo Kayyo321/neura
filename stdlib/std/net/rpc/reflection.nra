@@ -15,13 +15,13 @@ let strings = import:Std.Text.Strings;
 /// answers (`file_by_filename`, `file_containing_symbol`) are stubs: without a schema compiler there are no
 /// `FileDescriptorProto`s to send.
 /// @see [Std.Net.Rpc.Reflection](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Rpc-Reflection)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Reflection = module (
     /// @brief The service name of the protocol.
     export const ServiceName: string = "grpc.reflection.v1.ServerReflection";
 
     /// @brief One method of a service: its name, message types and streaming kind.
-    #Final
+    .Final
     export let MethodDescriptor = class (
         /// @brief The method name, such as `Check`.
         export last name: string;
@@ -64,7 +64,7 @@ export let Reflection = module (
     );
 
     /// @brief Registered services and their methods.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let ReflectionRegistry = class (
         /// @brief Service names, parallel to `methods`.
         last services: string[list] = new;
@@ -88,7 +88,7 @@ export let Reflection = module (
         };
 
         /// @brief The registered service names, sorted.
-        #NoDiscard
+        .NoDiscard
         export let list_services = func -> string[list] {
             last out: string[list] = new;
             for (let s in services) {
@@ -99,7 +99,7 @@ export let Reflection = module (
         };
 
         /// @brief The methods of `service`, empty when unknown.
-        #NoDiscard
+        .NoDiscard
         export let methods_of = func(service: string) -> MethodDescriptor[list] {
             for (let i = 0; i < services.length; i++) {
                 if (services[i] == service) {
@@ -110,7 +110,7 @@ export let Reflection = module (
         };
 
         /// @brief The method paths of every registered method.
-        #NoDiscard
+        .NoDiscard
         export let method_paths = func -> calls.MethodPath[list] {
             last out: calls.MethodPath[list] = new;
             for (let i = 0; i < services.length; i++) {
@@ -123,14 +123,14 @@ export let Reflection = module (
 
         /// @brief The serialized `FileDescriptorProto`s of the file named `filename` and its dependencies.
         /// @stub no protobuf file descriptors without a schema compiler
-        #NoDiscard
+        .NoDiscard
         export let file_by_filename = func(filename: string) -> Result<uint8[list][list]> {
             trap_with_message("unsupported: Std.Net.Rpc.Reflection.ReflectionRegistry.file_by_filename is not implemented in Neura 0.3.0 (no protobuf file descriptors without a schema compiler)");
         };
 
         /// @brief The serialized `FileDescriptorProto`s of the file defining `symbol` and its dependencies.
         /// @stub no protobuf file descriptors without a schema compiler
-        #NoDiscard
+        .NoDiscard
         export let file_containing_symbol = func(symbol: string) -> Result<uint8[list][list]> {
             trap_with_message("unsupported: Std.Net.Rpc.Reflection.ReflectionRegistry.file_containing_symbol is not implemented in Neura 0.3.0 (no protobuf file descriptors without a schema compiler)");
         };
@@ -142,7 +142,7 @@ export let Reflection = module (
 
     /// @brief The `ServerReflectionResponse` answering a `list_services` request: field 6 holding a
     /// `ListServiceResponse` with one `ServiceResponse` per name, in the order given.
-    #NoDiscard
+    .NoDiscard
     export let encode_list_services_response = func(names: string[list]) -> uint8[list] {
         last list = proto.writer();
         for (let name in names) {
@@ -157,7 +157,7 @@ export let Reflection = module (
 
     /// @brief The service names of a `ServerReflectionResponse` holding a `ListServiceResponse`; unknown fields
     /// are skipped.
-    #NoDiscard
+    .NoDiscard
     export let decode_list_services_response = func(bytes: uint8[list]) -> Result<string[list]> {
         last names: string[list] = new;
         last r = proto.reader(bytes);

@@ -2,13 +2,13 @@ let.promote _ = import:Std.Crypto.CryptographicPrimitive;
 
 /// @brief The contract of an incremental hash (Stdlib.md section 21.1).
 /// @see [Std.Crypto.StreamingDigest](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-StreamingDigest)
-#Since("0.3.0")
+.Since("0.3.0")
 export let StreamingDigest = module (
     /// @brief A running digest whose type argument `D` is the implementing class itself, as in
     /// `Sha256 implements StreamingDigest<Sha256>`. Neura has no value type parameters, so the specification's
     /// `OutLen` is the static `output_length`. Generic code such as `Hmac<H: StreamingDigest<H>>` makes a fresh
     /// digest with `H.create()`.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let StreamingDigest = interface<D>:CryptographicPrimitive<D> (
         /// @brief A new digest with no bytes added.
         static let create = func() -> D;

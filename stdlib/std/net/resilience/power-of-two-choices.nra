@@ -13,10 +13,10 @@ let.promote _ = import:Std.Core.Unit;
 /// `b >= a`, so the two are distinct and uniform; both draws come from the injected generator. A tie goes to `a`.
 /// One endpoint is picked without drawing.
 /// @see [Std.Net.Resilience.PowerOfTwoChoices](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-PowerOfTwoChoices)
-#Since("0.3.0")
+.Since("0.3.0")
 export let PowerOfTwoChoices = module (
     /// @brief Least pending of two random endpoints.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let PowerOfTwoChoices = class<Endpoint> implements balancers.LoadBalancer<Endpoint> (
         /// @brief The endpoints, copied at construction.
         last endpoints: Endpoint[list] = new;
@@ -75,7 +75,7 @@ export let PowerOfTwoChoices = module (
     );
 
     /// @brief A P2C balancer over a copy of `endpoints`.
-    #NoDiscard
+    .NoDiscard
     export let of = func<Endpoint>(endpoints: Endpoint[list], random: randoms.Random) -> PowerOfTwoChoices<Endpoint> =>
         new PowerOfTwoChoices<Endpoint>(endpoints, random);
 );

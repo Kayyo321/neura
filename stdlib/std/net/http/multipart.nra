@@ -18,7 +18,7 @@ let wire = import:Std.Net.Http.Wire;
 /// never needs to be buffered. Errors use the "http.status.NNN" codes of `Wire.rejection`: 415 for a media type
 /// that is not multipart, 413 past a limit (part count, header bytes, header fields), 400 otherwise.
 /// @see [Std.Net.Http.Multipart](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-Multipart)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Multipart = module (
     /// @brief What the parser found, in order: each part is PartStart, zero or more Data, PartEnd; Done follows the
     /// close delimiter.
@@ -35,7 +35,7 @@ export let Multipart = module (
 
     /// @brief The limits of a multipart parser. The defaults are 1,000 parts, 16,384 bytes of each part's header
     /// section (padding after its delimiter included) and 100 fields per part.
-    #[Final, Immutable, ThreadSafe]
+    .[Final, Immutable, ThreadSafe]
     export let MultipartLimits = class (
         /// @brief The most parts.
         export last max_parts: int;
@@ -88,7 +88,7 @@ export let Multipart = module (
     );
 
     /// @brief One complete part: its header fields and body bytes.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Part = class (
         /// @brief The part's header fields.
         export last headers: http_headers.Headers;
@@ -103,7 +103,7 @@ export let Multipart = module (
 
         /// @brief The disposition type of Content-Disposition in lowercase ("form-data" in a form, RFC 7578
         /// section 4.2), or None when the field is absent.
-        #NoDiscard
+        .NoDiscard
         export let disposition = func -> Optional<string> {
             match (headers.get("Content-Disposition")) {
                 Optional.Some(value) => {
@@ -118,12 +118,12 @@ export let Multipart = module (
 
         /// @brief The "name" parameter of Content-Disposition, quoted-pairs undone (RFC 7578 section 4.2); None when
         /// the field or parameter is absent or the field is malformed.
-        #NoDiscard
+        .NoDiscard
         export let name = func -> Optional<string> => disposition_parameter(headers, "name");
 
         /// @brief The "filename" parameter of Content-Disposition, as `name` reads it. It is not percent-decoded and
         /// not checked as a path (RFC 7578 section 4.2 leaves both to the application).
-        #NoDiscard
+        .NoDiscard
         export let filename = func -> Optional<string> => disposition_parameter(headers, "filename");
 
         /// @brief The Content-Type field, or "text/plain" when absent (RFC 7578 section 4.4, RFC 2046 section
@@ -168,7 +168,7 @@ export let Multipart = module (
     /// Feed the body in pieces split anywhere; each `feed` returns the events its bytes completed. After the close
     /// delimiter, further bytes are the epilogue and are ignored. Call `finish` at the end of the body. After an
     /// error every call returns the same error.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let MultipartParser = class (
         /// @brief The limits applied.
         last limits: MultipartLimits;
@@ -204,7 +204,7 @@ export let Multipart = module (
         };
 
         /// @brief Parses the next bytes of the body; Ok holds the events they completed, possibly none.
-        #NoDiscard
+        .NoDiscard
         export let feed = func(chunk: uint8[list]) -> Result<MultipartEvent[list]> {
             if (failed_status != 0) {
                 return failure();
@@ -310,7 +310,7 @@ export let Multipart = module (
 
         /// @brief Ends the body: Ok with no events after the close delimiter, else 400 (the close delimiter is
         /// missing).
-        #NoDiscard
+        .NoDiscard
         export let finish = func -> Result<MultipartEvent[list]> {
             if (failed_status != 0) {
                 return failure();
@@ -402,7 +402,7 @@ export let Multipart = module (
     /// 415 when the media type is not multipart/<subtype>; 400 when the parameters are malformed (RFC 9110
     /// section 5.6.6: an unquoted value must be a token), the boundary is missing or given twice, or it is not
     /// 1 to 70 bchars without a final space (`is_boundary`).
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let boundary_of = func(content_type: string) -> Result<string> {
         last semicolon = strings.index_of(content_type, ";");
         last media = http_headers.trim_value(semicolon < 0 ? content_type : content_type.slice(0, semicolon));
@@ -432,7 +432,7 @@ export let Multipart = module (
 
     /// @brief Whether `text` is a boundary: 1 to 70 bchars (digits, letters, space and '()+_,-./:=?) not ending in
     /// a space (RFC 2046 section 5.1.1).
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let is_boundary = func(text: string) -> bool {
         last length = text.byte_length;
         if (length < 1 || length > 70 || text.byte_at(length - 1) == 32) {
@@ -452,7 +452,7 @@ export let Multipart = module (
     /// @brief The value of parameter `name` (compared without case) of a field value of the form `type *( ";"
     /// name "=" value )` (RFC 9110 section 5.6.6), where type is a token or token "/" token, quoted-pairs undone.
     /// Ok(None) when absent; 400 when the parameters are malformed.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let parameter = func(value: string, name: string) -> Result<Optional<string>> {
         last names: string[list] = new;
         last values: string[list] = new;
@@ -469,7 +469,7 @@ export let Multipart = module (
     /// @brief The parts of a complete multipart body with `boundary`. 400 for an invalid boundary or a missing close
     /// delimiter; other errors as `MultipartParser.feed`. A part's body is held in memory; use `MultipartParser`
     /// for large parts.
-    #NoDiscard
+    .NoDiscard
     export let parse_all = func(body: uint8[list], boundary: string, limits: MultipartLimits) -> Result<Part[list]> {
         return Result<Part[list]>.Err(wire.rejection(400, "invalid boundary")) unless is_boundary(boundary);
         last parser = new MultipartParser(boundary, limits);

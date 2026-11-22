@@ -12,10 +12,10 @@ let.promote _ = import:Std.Core.Result;
 /// level covers the request, and `reset_after` the time until the bucket is full, both rounded up to whole
 /// nanoseconds. `TokenBucketLimiter` keeps one bucket per key.
 /// @see [Std.Net.Resilience.TokenBucket](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-TokenBucket)
-#Since("0.3.0")
+.Since("0.3.0")
 export let TokenBucket = module (
     /// @brief One token bucket over an injected clock.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let TokenBucket = class (
         /// @brief The most tokens the bucket holds.
         last capacity: int;
@@ -51,7 +51,7 @@ export let TokenBucket = module (
 
         /// @brief Takes `permits` tokens when the bucket holds them. `permits` must be from 1 through the capacity,
         /// else the call traps with "invalid argument: permits". Err only when the clock fails.
-        #NoDiscard
+        .NoDiscard
         export let try_acquire = func(permits: int) -> Result<limiters.RateDecision> {
             if (permits < 1 || permits > capacity) {
                 trap_with_message("invalid argument: permits");
@@ -66,7 +66,7 @@ export let TokenBucket = module (
         };
 
         /// @brief The whole tokens available now. Err only when the clock fails.
-        #NoDiscard
+        .NoDiscard
         export let available = func -> Result<int> {
             refill()?;
             return Result<int>.Ok((level / period) as int);
@@ -105,7 +105,7 @@ export let TokenBucket = module (
     );
 
     /// @brief A full bucket of `capacity` tokens refilled at `tokens` per `period`.
-    #NoDiscard
+    .NoDiscard
     export let create = func(capacity: int, tokens: int, period: durations.Duration, clock: Clock) -> TokenBucket =>
         new TokenBucket(capacity, tokens, period, clock);
 );
