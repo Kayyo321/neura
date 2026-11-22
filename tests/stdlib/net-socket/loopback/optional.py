@@ -48,16 +48,18 @@ def main():
             raise
         print(f"{args.feature} platform precondition unavailable: {error}")
         return 77
-    source = Path(__file__).with_name("optional-tests.nra")
+    source = Path(__file__).resolve().with_name("optional-tests.nra")
+    root = source.parents[4]
     name = TESTS[args.feature]
     command = [str(args.neura.resolve()), "test", "--allow-net"]
     if args.feature == "raw":
         command.append("--allow-raw")
         if args.backend_tests:
-            subprocess.run([str(args.backend_tests.resolve()), "raw_socket", str(source.parents[4])],
+            subprocess.run([str(args.backend_tests.resolve()), "raw_socket", str(root)],
                            timeout=20, check=True)
-    subprocess.run([*command, "--filter", f"{source}::OptionalSocketFeatures.{name}", str(source)],
-                   timeout=90, check=True)
+    relative = source.relative_to(root).as_posix()
+    subprocess.run([*command, "--filter", f"{relative}::OptionalSocketFeatures.{name}", str(source)],
+                   cwd=root, timeout=90, check=True)
     return 0
 
 
