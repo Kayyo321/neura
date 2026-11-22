@@ -1655,7 +1655,12 @@ if(BUILD_TESTING AND NEURA_SDK)
     add_test(NAME lifetime-programs COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/lifetime/programs.py" "$<TARGET_FILE:neura>"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/lifetime/programs")
-    set_tests_properties(lifetime-programs PROPERTIES TIMEOUT 900)
+    # Under the address and undefined-behavior sanitizers the programs run
+    # several times slower in every mode, so that configuration sets a
+    # longer limit, as it does for backend-reference.
+    set(NEURA_LIFETIME_PROGRAMS_TEST_TIMEOUT 900 CACHE STRING
+        "CTest limit, in seconds, for the lifetime-programs test")
+    set_tests_properties(lifetime-programs PROPERTIES TIMEOUT "${NEURA_LIFETIME_PROGRAMS_TEST_TIMEOUT}")
     # E0475 and E0550 when a program is built from a .nir module whose call
     # was retargeted after lowering checked it.
     add_test(NAME lifetime-nir-checks COMMAND "${Python3_EXECUTABLE}"

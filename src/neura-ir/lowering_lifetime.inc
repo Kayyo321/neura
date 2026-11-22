@@ -551,7 +551,8 @@ IrNode Lowering::lower_yield(const Statement& stmt, Context& context) {
     if (found == generator_states_.end())
         throw Diagnostic(stmt.keyword, "'yield' is only a statement in the body of an 'iterator'").with_code("E0222");
     auto& state = found->second;
-    const auto& element = symbol(state.buffer).type;
+    // A copy: lowering the value can add symbols and move the table.
+    const auto element = symbol(state.buffer).type;
     auto value = this->value(stmt.expressions.front(), context, &element);
     auto block = node(IrOp::Block, stmt.span);
     auto store = node(IrOp::Store, stmt.span);
