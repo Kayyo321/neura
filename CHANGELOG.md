@@ -61,6 +61,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - Native HTTP/2 fetch writes each turn's frames in one write, so flow-control updates do not wait for delayed acknowledgements.
 - A desktop target with `http_client` and no `connect` list on it or its `ui` target now gets an empty origin list, so its native child reaches no origin, instead of an unrestricted grant. `neura run` and `neura dev` scope a server bundle's grant by its `http_client_origins` requirement, and refuse an `--allow-http-client` of either form after `--` for a scoped bundle instead of letting it lift or extend the manifest's list.
 - On Linux, a TLS credential file under path prefixes is opened through an `O_PATH` handle resolved with `openat2(RESOLVE_NO_SYMLINKS)` and checked before it is reopened for reading, so a directory swapped for a link between the path check and the open can no longer make the provider open a FIFO, device or file outside the prefixes. Other POSIX systems check the resolved name instead of the given path; their remaining race and the limit of path checks for hard links are documented.
+- On Linux, `neura.net.send_file` to a peer that has closed or reset the connection returns `ConnectionReset` instead of ending `neura run` or a native executable with SIGPIPE: `sendfile(2)` now runs with SIGPIPE blocked on the calling thread, as TLS writes do. An offset past a 32-bit `off_t` returns `InvalidInput` instead of wrapping.
 
 ### Known limitations
 

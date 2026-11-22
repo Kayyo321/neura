@@ -5,6 +5,8 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <poll.h>
+#include <pthread.h>
+#include <signal.h>
 #include <fcntl.h>
 #ifdef __linux__
 #include <sys/sendfile.h>
@@ -599,6 +601,84 @@ void file_transfer_falls_back_to_a_copy() {
     std::cout << "PASS: file transfer copies through its buffer when sendfile refuses the file\n";
 }
 
+// sendfile(2) has no MSG_NOSIGNAL: a transfer to a peer that has gone gets
+// ConnectionReset, and the process survives SIGPIPE's default action. Any
+// SIGPIPE the transfer raised is consumed, and one already pending is kept.
+void file_transfer_to_a_gone_peer_survives_sigpipe() {
+    const auto previous = ::signal(SIGPIPE, SIG_DFL);
+    Fixture f;
+    FILE* file = ::tmpfile();
+    assert(file != nullptr);
+    const int fd = ::fileno(file);
+    const std::string content(4096, 'p');
+    assert(::write(fd, content.data(), content.size()) == static_cast<ssize_t>(content.size()));
+    f.table.files[1] = {fd, true, false};
+    const auto transfer = [&](bool prefix) {
+        const auto& invoke = prefix ? f.invoke_file_prefix : f.invoke_file;
+        return invoke(HostRequest{0, 0, {int64_value(1), int64_value(1), int64_value(0), int64_value(4096)}});
+    };
+    const auto pending_sigpipe = [] {
+        sigset_t pending;
+        assert(::sigpending(&pending) == 0);
+        return sigismember(&pending, SIGPIPE) == 1;
+    };
+    // A local stream whose peer is closed fails every write with EPIPE.
+    {
+        int stream[2] = {-1, -1};
+        assert(::socketpair(AF_UNIX, SOCK_STREAM, 0, stream) == 0);
+        ::close(stream[1]);
+        f.table.sockets[1] = {stream[0]};
+        for (const bool prefix : {false, true}) {
+            const auto sent = transfer(prefix);
+            assert(!sent.success && sent.value.bits == host_error::connection_reset);
+        }
+        assert(!pending_sigpipe());
+        f.table.sockets.erase(1);
+        ::close(stream[0]);
+    }
+    // A TCP peer that resets the connection: the first write may report the
+    // reset itself, every later one EPIPE.
+    {
+        TcpPair pair;
+        linger abort{1, 0};
+        assert(::setsockopt(pair.peer, SOL_SOCKET, SO_LINGER, &abort, sizeof abort) == 0);
+        ::close(pair.peer);
+        pair.peer = ::socket(AF_INET, SOCK_STREAM, 0); // Closed by ~TcpPair.
+        pollfd reset{pair.socket, POLLIN, 0};
+        assert(::poll(&reset, 1, 1000) == 1);
+        f.table.sockets[1] = {pair.socket};
+        for (int attempt = 0; attempt < 3; ++attempt) {
+            const auto sent = transfer(attempt % 2 == 1);
+            assert(!sent.success && sent.value.bits == host_error::connection_reset);
+        }
+        assert(!pending_sigpipe());
+        f.table.sockets.erase(1);
+    }
+    // A SIGPIPE pending before the transfer is still pending after it.
+    {
+        sigset_t blocked, saved;
+        sigemptyset(&blocked);
+        sigaddset(&blocked, SIGPIPE);
+        assert(::pthread_sigmask(SIG_BLOCK, &blocked, &saved) == 0);
+        assert(::raise(SIGPIPE) == 0 && pending_sigpipe());
+        int stream[2] = {-1, -1};
+        assert(::socketpair(AF_UNIX, SOCK_STREAM, 0, stream) == 0);
+        ::close(stream[1]);
+        f.table.sockets[1] = {stream[0]};
+        const auto sent = transfer(false);
+        assert(!sent.success && sent.value.bits == host_error::connection_reset);
+        assert(pending_sigpipe());
+        timespec zero{};
+        assert(::sigtimedwait(&blocked, nullptr, &zero) == SIGPIPE);
+        assert(::pthread_sigmask(SIG_SETMASK, &saved, nullptr) == 0);
+        f.table.sockets.erase(1);
+        ::close(stream[0]);
+    }
+    ::fclose(file);
+    ::signal(SIGPIPE, previous);
+    std::cout << "PASS: a file transfer to a gone peer reports ConnectionReset and survives SIGPIPE\n";
+}
+
 int main() {
     quiet_source_and_backpressure();
     zero_copy_backpressure();
@@ -611,4 +691,5 @@ int main() {
 #ifdef __linux__
     file_transfer_falls_back_to_a_copy();
 #endif
+    file_transfer_to_a_gone_peer_survives_sigpipe();
 }

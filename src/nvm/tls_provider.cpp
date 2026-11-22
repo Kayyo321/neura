@@ -30,15 +30,12 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
-#if !defined(SO_NOSIGPIPE)
-#include <pthread.h>
-#include <signal.h>
-#endif
 #endif
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 #include <openssl/x509v3.h>
 #include "dtls_internal.hpp"
+#include "sigpipe_guard.hpp"
 #include "tls_material.hpp"
 #endif
 
@@ -126,42 +123,8 @@ HostSignature engine_release() {
 
 #ifdef NEURA_NVM_TLS
 
-namespace {
-
-// OpenSSL's socket BIO can raise SIGPIPE on a closed socket. Suppress it only
-// on the host-calling thread, preserving a signal that was already pending.
-class SocketWrites {
-public:
-#if !defined(_WIN32) && !defined(SO_NOSIGPIPE)
-    SocketWrites() {
-        sigemptyset(&blocked_);
-        sigaddset(&blocked_, SIGPIPE);
-        changed_ = pthread_sigmask(SIG_BLOCK, &blocked_, &saved_) == 0;
-        sigset_t pending;
-        pending_ = sigpending(&pending) != 0 || sigismember(&pending, SIGPIPE) == 1;
-    }
-
-    ~SocketWrites() {
-        if (!changed_) return;
-        if (!pending_) {
-            timespec zero{};
-            while (sigtimedwait(&blocked_, nullptr, &zero) < 0 && errno == EINTR) {}
-        }
-        pthread_sigmask(SIG_SETMASK, &saved_, nullptr);
-    }
-
-private:
-    sigset_t blocked_{};
-    sigset_t saved_{};
-    bool changed_ = false;
-    bool pending_ = false;
-#else
-    SocketWrites() = default;
-    ~SocketWrites() = default;
-#endif
-};
-
-} // namespace
+// OpenSSL's socket BIO can raise SIGPIPE on a closed socket: TLS writes run
+// under SocketWrites (sigpipe_guard.hpp).
 
 constexpr std::int64_t default_transfer_timeout = 30'000'000'000LL;
 

@@ -1,6 +1,7 @@
 #include "http_fetch_provider.hpp"
 #include "client_socket.hpp"
 #include "platform/socket.hpp"
+#include "sigpipe_guard.hpp"
 
 #include <algorithm>
 #include <array>
@@ -450,34 +451,8 @@ struct Response {
     std::string body;
 };
 
-// TLS BIO writes may raise SIGPIPE. This mask is local to the fetch worker,
-// and consumes only a signal newly produced by that worker's socket writes.
-class SocketWrites {
-#if !defined(_WIN32) && !defined(SO_NOSIGPIPE)
-    sigset_t blocked_{}, saved_{};
-    bool changed_ = false, pending_ = false;
-
-  public:
-    SocketWrites() {
-        sigemptyset(&blocked_);
-        sigaddset(&blocked_, SIGPIPE);
-        changed_ = pthread_sigmask(SIG_BLOCK, &blocked_, &saved_) == 0;
-        sigset_t pending;
-        pending_ = sigpending(&pending) != 0 || sigismember(&pending, SIGPIPE) == 1;
-    }
-    ~SocketWrites() {
-        if (!changed_) return;
-        if (!pending_) {
-            timespec zero{};
-            while (sigtimedwait(&blocked_, nullptr, &zero) < 0 && errno == EINTR) {}
-        }
-        pthread_sigmask(SIG_SETMASK, &saved_, nullptr);
-    }
-#else
-  public:
-    SocketWrites() = default;
-#endif
-};
+// TLS BIO writes may raise SIGPIPE: the fetch worker writes under
+// SocketWrites (sigpipe_guard.hpp), a mask local to that thread.
 class Connection {
     NativeSocket socket_ = invalid_native_socket;
     Clock::time_point deadline_;
