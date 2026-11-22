@@ -15,8 +15,8 @@ let.promote _ = import:Std.Core.Unit;
 /// bytes are encrypted by the host's TLS provider. Needs the net capability.
 ///
 /// `TlsConnector` and `TlsAcceptor` open streams. The record layer runs in the host's TLS library (OpenSSL 4.1 in
-/// builds configured with `NEURA_ENABLE_SERVER_TLS`): Neura 0.3.0 has no pure-Neura TLS (see
-/// `Std.Net.Tls.Handshake`). Reading, writing and close call the host's `neura.net.tls.*` services. `close` sends `close_notify`.
+/// builds configured with `NEURA_ENABLE_SERVER_TLS`). Reading, writing and close call `neura.net.tls.*`.
+/// `close` sends `close_notify`.
 /// Shutdown sends TLS `close_notify` on the write side. `local_address` reports the underlying socket address.
 /// After close every operation except close fails with Closed.
 /// @see [Std.Net.Tls.TlsStream](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Tls-TlsStream)
@@ -41,13 +41,12 @@ export let TlsStream = module (
         last peer: Optional<SocketAddr>;
         /// @brief The ALPN protocol the handshake selected; empty when none.
         export last alpn: string;
-        /// @brief The read timeout in nanoseconds; zero waits without limit.
+        /// @brief The read timeout in nanoseconds; zero uses the thirty-second provider default.
         let timeout_nanos: int64 = 0;
         /// @brief Writes have a finite default budget of thirty seconds.
         let write_timeout_nanos: int64 = 30000000000;
         /// @brief Tracks whether the stream may still use the host ID.
         let open_now: bool = true;
-        let read_closed: bool = false;
         let write_closed: bool = false;
 
         /// @brief Use `TlsConnector` or `TlsAcceptor`; the handle comes from the library.
@@ -63,7 +62,7 @@ export let TlsStream = module (
         .NoDiscard
         export let read = func(max: int) -> Result<uint8[list]> {
             bytes.check_maximum(max);
-            return Result<uint8[list]>.Err(bytes.closed("stream", label)) unless open_now && not read_closed;
+            return Result<uint8[list]>.Err(bytes.closed("stream", label)) unless open_now;
             return match (host.tls_read(id, max, timeout_nanos)) {
                 host.BytesOutcome.Ok(chunk) => Result<uint8[list]>.Ok(chunk),
                 host.BytesOutcome.Error(code) => Result<uint8[list]>.Err(host_error.io(code, host_error.kind_of(code) == IoErrorKind.Unsupported
@@ -108,7 +107,7 @@ export let TlsStream = module (
         .NoDiscard
         export let send = func(data: uint8[list]) -> Result<Unit> => write(data);
 
-        /// @brief The longest a read waits; zero waits without limit.
+        /// @brief The longest a read waits; zero uses the thirty-second provider default.
         export let read_timeout = func -> Duration => of_nanos(timeout_nanos);
 
         /// @brief Sets the read timeout. A negative timeout traps with "invalid argument: negative timeout".

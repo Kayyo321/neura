@@ -126,6 +126,8 @@ private:
 
 } // namespace
 
+constexpr std::int64_t default_transfer_timeout = 30'000'000'000LL;
+
 struct TlsStream {
     NativeSocket descriptor = invalid_native_socket;
     std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::time_point::max();
@@ -133,7 +135,7 @@ struct TlsStream {
     SSL_CTX* context = nullptr;
     SSL* ssl = nullptr;
     bool write_closed = false;
-    std::int64_t write_timeout = 30000000000LL;
+    std::int64_t write_timeout = default_transfer_timeout;
     ~TlsStream() {
         if (ssl) {
             if (SSL_is_init_finished(ssl) && descriptor != invalid_native_socket) {
@@ -462,7 +464,7 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
             !valid_versions(low, high) || certificate.empty() != key.empty()) return fail(host_error::invalid_input);
         if (const auto error = permitted_paths(*granted, *allowed_paths, {&ca_file, &certificate, &key})) return fail(error);
         if (state->tls.size() >= max_open_ids) return fail(host_error::other);
-        const auto deadline = deadline_of(timeout);
+        const auto deadline = deadline_of(timeout == 0 ? default_transfer_timeout : timeout);
         auto stream = std::make_unique<TlsStream>();
         if (timeout > 0) stream->write_timeout = timeout;
         if (!init_context(*stream, false, low, high, kernel)) return fail(host_error::other);
@@ -737,7 +739,7 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
         if (!stream || stream->descriptor == invalid_native_socket || max < 1 || timeout < 0) return fail(host_error::invalid_input);
         std::string bytes(std::min<std::size_t>(static_cast<std::size_t>(max), max_read_bytes), '\0');
         std::uint32_t error = 0;
-        const auto deadline = std::min(stream->deadline, deadline_of(timeout));
+        const auto deadline = std::min(stream->deadline, deadline_of(timeout == 0 ? default_transfer_timeout : timeout));
         const int got = drive(stream->ssl, stream->descriptor, deadline, error, [&] {
             return SSL_read(stream->ssl, bytes.data(), static_cast<int>(bytes.size()));
         });
