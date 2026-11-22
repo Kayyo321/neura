@@ -25,7 +25,6 @@
 #include "platform/windows.hpp"
 
 #include <mstcpip.h>
-#include <iphlpapi.h>
 
 // Windows 10 2004 winsock constants are missing from older MinGW headers.
 #ifndef UDP_SEND_MSG_SIZE
@@ -1807,34 +1806,39 @@ public:
     std::optional<HostCompletion> load() {
         subnets.clear();
 #ifdef _WIN32
-        // GetAdaptersAddresses/OnLinkPrefixLength and IN_PKTINFO use the same
-        // IPv4 IfIndex. Bound retries if addresses change during enumeration.
-        ULONG needed = 15 * 1024;
-        std::vector<std::max_align_t> storage;
-        for (int attempt = 0; attempt < 3; ++attempt) {
-            if (needed > 1024 * 1024) return fail(host_error::other);
-            storage.resize((needed + sizeof(std::max_align_t) - 1) / sizeof(std::max_align_t));
-            auto* adapters = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(storage.data());
-            const ULONG result = ::GetAdaptersAddresses(AF_INET,
-                GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER,
-                nullptr, adapters, &needed);
-            if (result == ERROR_BUFFER_OVERFLOW) continue;
-            if (result == ERROR_NO_DATA) return std::nullopt;
-            if (result != NO_ERROR) return fail(host_error::from_win32(result));
-            for (const auto* adapter = adapters; adapter; adapter = adapter->Next) {
-                if (adapter->OperStatus != IfOperStatusUp || adapter->IfIndex == 0) continue;
-                for (const auto* entry = adapter->FirstUnicastAddress; entry; entry = entry->Next) {
-                    if (!entry->Address.lpSockaddr || entry->Address.iSockaddrLength < static_cast<int>(sizeof(sockaddr_in)) ||
-                        entry->Address.lpSockaddr->sa_family != AF_INET || entry->OnLinkPrefixLength > 32) continue;
-                    const auto* address = reinterpret_cast<const sockaddr_in*>(entry->Address.lpSockaddr);
-                    const auto prefix = entry->OnLinkPrefixLength;
-                    const auto mask = prefix == 0 ? 0U : 0xffffffffU << (32 - prefix);
-                    subnets.push_back({adapter->IfIndex, address->sin_addr.s_addr, htonl(mask)});
-                }
-            }
-            return std::nullopt;
+        const ScopedSocket probe{new_socket(AF_INET, SOCK_DGRAM)};
+        if (probe.descriptor == invalid_native_socket) return socket_failure();
+        std::vector<INTERFACE_INFO> interfaces(16);
+        DWORD returned = 0;
+        while (::WSAIoctl(probe.descriptor, SIO_GET_INTERFACE_LIST, nullptr, 0, interfaces.data(),
+                          static_cast<DWORD>(interfaces.size() * sizeof(INTERFACE_INFO)), &returned,
+                          nullptr, nullptr) != 0) {
+            const auto code = ::WSAGetLastError();
+            if (code != WSAEFAULT) return fail(host_error::from_wsa(code));
+            if (interfaces.size() >= 8192) return fail(host_error::other);
+            interfaces.resize(interfaces.size() * 2);
         }
-        return fail(host_error::other);
+        if (returned % sizeof(INTERFACE_INFO) != 0 || returned / sizeof(INTERFACE_INFO) > interfaces.size()) {
+            return fail(host_error::other);
+        }
+        interfaces.resize(returned / sizeof(INTERFACE_INFO));
+        for (const auto& entry : interfaces) {
+            const auto& address = entry.iiAddress.AddressIn;
+            const auto& mask = entry.iiNetmask.AddressIn;
+            if ((entry.iiFlags & IFF_UP) == 0 || address.sin_family != AF_INET || mask.sin_family != AF_INET ||
+                (ntohl(address.sin_addr.s_addr) >> 24) == 0) continue;
+            // Winsock sets IP_MULTICAST_IF from an IPv4 address and reads
+            // it back as a host-order index, as reported in IN_PKTINFO.
+            // Match each address's own netmask, including secondary addresses.
+            if (!set_native_option(probe.descriptor, IPPROTO_IP, IP_MULTICAST_IF, address.sin_addr)) continue;
+            DWORD index = 0;
+            int size = sizeof index;
+            if (::getsockopt(probe.descriptor, IPPROTO_IP, IP_MULTICAST_IF,
+                             reinterpret_cast<char*>(&index), &size) != 0 ||
+                size != static_cast<int>(sizeof index) || index == 0) continue;
+            subnets.push_back({index, address.sin_addr.s_addr, mask.sin_addr.s_addr});
+        }
+        return std::nullopt;
 #else
         ifaddrs* addresses = nullptr;
         if (::getifaddrs(&addresses) != 0) return socket_failure();
