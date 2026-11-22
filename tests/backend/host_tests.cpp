@@ -1759,10 +1759,16 @@ NEURA_TEST(host, dtls13_addressed_engine_roundtrip_and_deadline) {
     transfer(sent, to_server);
     bool received = false;
     for (const auto& packet : to_server) {
+        const auto stranger = step(server, s.value, 1, packet, 12346);
+        check_equal(stranger.elements.at(0).bits, std::uint64_t(0), "unexpected sender dropped");
+        const auto truncated = step(server, s.value, 1, packet.substr(0, 3), 12345);
+        check_equal(truncated.elements.at(0).bits, std::uint64_t(0), "truncated record dropped");
         const auto result = step(server, s.value, 1, packet, 12345);
         if (result.elements.at(0).bits == 1) {
             check_equal(result.elements.at(2).bytes, std::string("message"), "DTLS plaintext");
             received = true;
+            const auto replayed = step(server, s.value, 1, packet, 12345);
+            check_equal(replayed.elements.at(0).bits, std::uint64_t(0), "replayed record dropped");
         }
     }
     check(received, "DTLS datagram delivered");
