@@ -1827,6 +1827,125 @@ NEURA_TEST(host, dtls13_addressed_engine_roundtrip_and_deadline) {
     expect_ok(client.call("neura.net.dtls.engine.release", {quiet.value}), "release expired engine");
 }
 
+// A DTLS 1.3 HelloRetryRequest: a plaintext handshake record (type 22) whose
+// ServerHello (type 2) carries the RFC 8446 section 4.1.3 random, with a
+// cookie extension (44). Offsets follow the 13-byte DTLSPlaintext header and
+// the 12-byte DTLS handshake header.
+bool dtls_hello_retry_with_cookie(const std::string& packet) {
+    static const std::string magic = [] {
+        const unsigned char bytes[] = {0xcf, 0x21, 0xad, 0x74, 0xe5, 0x9a, 0x61, 0x11, 0xbe, 0x1d, 0x8c,
+                                       0x02, 0x1e, 0x65, 0xb8, 0x91, 0xc2, 0xa2, 0x11, 0x16, 0x7a, 0xbb,
+                                       0x8c, 0x5e, 0x07, 0x9e, 0x09, 0xe2, 0xc8, 0xa8, 0x33, 0x9c};
+        return std::string(reinterpret_cast<const char*>(bytes), sizeof bytes);
+    }();
+    const auto byte = [&](std::size_t at) { return static_cast<unsigned char>(packet.at(at)); };
+    if (packet.size() < 13 + 12 + 2 + 32 + 1 || byte(0) != 22 || byte(13) != 2) return false;
+    std::size_t at = 13 + 12 + 2;
+    if (packet.compare(at, 32, magic) != 0) return false;
+    at += 32;
+    at += 1 + byte(at); // legacy_session_id_echo
+    at += 2 + 1;        // cipher_suite, legacy_compression_method
+    if (at + 2 > packet.size()) return false;
+    const std::size_t end = std::min(packet.size(), at + 2 + (std::size_t{byte(at)} << 8 | byte(at + 1)));
+    for (at += 2; at + 4 <= end;) {
+        const auto type = std::size_t{byte(at)} << 8 | byte(at + 1);
+        if (type == 44) return true;
+        at += 4 + (std::size_t{byte(at + 2)} << 8 | byte(at + 3));
+    }
+    return false;
+}
+
+// The server answers a cookie-less first flight with a stateless
+// HelloRetryRequest only. The provider admits datagrams only from the
+// configured peer address, so an unvalidated source here is a first flight
+// claiming that address whose sender never sees the cookie.
+NEURA_TEST(host, dtls13_server_validates_the_address_before_its_handshake_flight) {
+    const LoopbackTlsKeys material;
+    Host client(everything()), server(everything());
+    auto opening = [&](bool accepting, std::int32_t local, std::int32_t peer) {
+        return std::vector<HostValue>{boolean(accepting), text("localhost"), tls_names({}),
+            text(accepting ? "" : material.certificate), text(material.certificate), text(material.key),
+            text("127.0.0.1"), i32(local), text("127.0.0.1"), i32(peer), i64(5'000'000'000)};
+    };
+    auto step = [&](Host& host, const HostValue& id, const std::string& inbound, int sender) {
+        const auto result = host.call("neura.net.dtls.engine.exchange", {id, i32(0), bytes(inbound),
+            text("127.0.0.1"), i32(sender), bytes(""), i64(5'000'000'000)});
+        expect_ok(result, "DTLS handshake step");
+        check_equal(result.value.elements.at(4).bits, std::uint64_t(0), "DTLS protocol error");
+        return result.value;
+    };
+    auto packets = [](const HostValue& result) {
+        std::vector<std::string> out;
+        for (const auto& packet : result.elements.at(1).elements) out.push_back(packet.bytes);
+        return out;
+    };
+    const auto c = client.call("neura.net.dtls.engine.open", opening(false, 12345, 54321));
+    const auto s = server.call("neura.net.dtls.engine.open", opening(true, 54321, 12345));
+    expect_ok(c, "DTLS client open"); expect_ok(s, "DTLS server open");
+
+    const auto first_flight = packets(step(client, c.value, "", 54321));
+    check(!first_flight.empty(), "client first flight");
+    std::vector<std::string> answers;
+    for (const auto& packet : first_flight) {
+        const auto answer = packets(step(server, s.value, packet, 12345));
+        answers.insert(answers.end(), answer.begin(), answer.end());
+    }
+    check_equal(answers.size(), std::size_t{1}, "a cookie-less first flight gets one datagram");
+    check(dtls_hello_retry_with_cookie(answers.at(0)), "the datagram is a HelloRetryRequest with a cookie");
+    check(answers.at(0).size() < 400, "the HelloRetryRequest does not amplify the first flight");
+    expect_error(server.call("neura.net.tls.peer_chain", {s.value}), host_error::permission_denied,
+                 "no connection was accepted for the unvalidated flight");
+
+    // Until the cookie returns, the server sends nothing but HelloRetryRequests
+    // for this address: not for a replay of the flight (as a spoofing sender
+    // would send), not over a retransmission interval, and it accepts no
+    // connection. OpenSSL 4.1's listener is not strictly stateless here: it
+    // retransmits the HelloRetryRequest and drops a replayed first flight
+    // from the same address (docs/runtime/NVM.md, DTLS services).
+    std::vector<std::string> unvalidated;
+    for (const auto& packet : first_flight) {
+        const auto answer = packets(step(server, s.value, packet, 12345));
+        unvalidated.insert(unvalidated.end(), answer.begin(), answer.end());
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+    const auto idle = packets(step(server, s.value, "", 0));
+    unvalidated.insert(unvalidated.end(), idle.begin(), idle.end());
+    check(unvalidated.size() <= 2, "at most one answer to the replay and one retransmission");
+    for (const auto& packet : unvalidated) {
+        check(dtls_hello_retry_with_cookie(packet), "an unvalidated address gets only HelloRetryRequests");
+    }
+    expect_error(server.call("neura.net.tls.peer_chain", {s.value}), host_error::permission_denied,
+                 "still no connection for the unvalidated flight");
+
+    // The client returns the cookie; only then does the server answer with
+    // its handshake flight, and the handshake completes.
+    bool client_done = false, server_done = false, validated_flight = false;
+    std::vector<std::string> to_server, to_client{answers.at(0)};
+    for (int turn = 0; turn < 100 && !(client_done && server_done); ++turn) {
+        if (!client_done) {
+            const auto incoming = to_client.empty() ? "" : to_client.front();
+            if (!to_client.empty()) to_client.erase(to_client.begin());
+            const auto result = step(client, c.value, incoming, 54321);
+            for (auto& packet : packets(result)) to_server.push_back(std::move(packet));
+            client_done = as_i32(result.elements.at(0)) == 1;
+        }
+        if (!server_done) {
+            const auto incoming = to_server.empty() ? "" : to_server.front();
+            if (!to_server.empty()) to_server.erase(to_server.begin());
+            const auto result = step(server, s.value, incoming, 12345);
+            for (auto& packet : packets(result)) {
+                validated_flight = validated_flight || !dtls_hello_retry_with_cookie(packet);
+                to_client.push_back(std::move(packet));
+            }
+            server_done = as_i32(result.elements.at(0)) == 1;
+        }
+    }
+    check(validated_flight, "the server sent its handshake flight after the cookie round trip");
+    check(client_done && server_done, "the handshake completes after the cookie round trip");
+    expect_ok(client.call("neura.net.dtls.engine.release", {c.value}), "DTLS client release");
+    expect_ok(server.call("neura.net.dtls.engine.release", {s.value}), "DTLS server release");
+}
+
 // TLS client and server streams (src/nvm/tls_provider.cpp) against each
 // other, with a certificate the openssl command generates.
 NEURA_TEST(host, tls_streams_verify_peers_and_negotiate_alpn) {

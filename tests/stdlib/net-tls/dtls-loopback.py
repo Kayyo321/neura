@@ -20,6 +20,7 @@ See https://openssl-library.org/post/2026-10-23-openssl-41-final-release/.
 import argparse
 import collections
 import contextlib
+import hashlib
 import pathlib
 import queue
 import re
@@ -37,6 +38,30 @@ CASES = ("round-trip", "mutual", "wrong-hostname", "wrong-ca", "missing-client-c
          "idle-read", "receive-error",
          "client-timeout", "server-timeout", "denied-net", "openssl-server", "openssl-client",
          "key-update", "key-update-drop", "key-update-reorder")
+
+
+# RFC 8446 section 4.1.3: the ServerHello random that marks a HelloRetryRequest.
+HELLO_RETRY_RANDOM = hashlib.sha256(b"HelloRetryRequest").digest()
+assert HELLO_RETRY_RANDOM.hex().startswith("cf21ad74e59a6111"), HELLO_RETRY_RANDOM.hex()
+
+
+def hello_retry_with_cookie(data):
+    """A plaintext DTLS 1.3 HelloRetryRequest record carrying a cookie extension."""
+    # 13-byte DTLSPlaintext header (type 22), 12-byte handshake header (ServerHello, 2).
+    if len(data) < 13 + 12 + 2 + 32 + 1 or data[0] != 22 or data[13] != 2:
+        return False
+    at = 13 + 12 + 2
+    if data[at:at + 32] != HELLO_RETRY_RANDOM:
+        return False
+    at += 32
+    at += 1 + data[at] + 2 + 1
+    end = min(len(data), at + 2 + int.from_bytes(data[at:at + 2], "big"))
+    at += 2
+    while at + 4 <= end:
+        if int.from_bytes(data[at:at + 2], "big") == 44:
+            return True
+        at += 4 + int.from_bytes(data[at + 2:at + 4], "big")
+    return False
 
 
 def address(text):
@@ -178,6 +203,9 @@ class Relay:
         # Side zero is the client's ingress, side one the server's ingress.
         self.events[f"packets-{side}"] += 1
         self.packets.append((self.mode, side, len(data)))
+        if side == 1 and hello_retry_with_cookie(data):
+            # The server's address validation: a cookie round trip precedes its flight.
+            self.events["hello-retry"] += 1
         if self.mode == "handshake-drop" and side == 0 and not self.events["handshake-drop"]:
             self.events["handshake-drop"] += 1
             return
@@ -350,7 +378,8 @@ def pair(runner, root, certificates, case, record=False):
                   "handshake-reorder": ["handshake-reorder", "distinct-handshake-reorder"],
                   "duplicate": ["duplicate"], "truncate": ["truncate"],
                   "loss-reorder": ["application-drop", "application-reorder"]}
-        relay.check(*events.get(case, []))
+        # Every pair case reaches the server; each one validates the address first.
+        relay.check("hello-retry", *events.get(case, []))
         recorded = "\n".join(client.output["stdout"]) + "\n"
         replay_command = runner + ["--replay", str(trace)] + client.command[len(runner) + len(options):]
     if record:

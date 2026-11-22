@@ -51,6 +51,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ### Known limitations
 
+- OpenSSL 4.1.0's DTLS 1.3 listener retransmits the HelloRetryRequest to an unvalidated address and drops a replayed first flight from it, so address validation is not strictly stateless. [DTLS services](docs/runtime/NVM.md#host-services)
 - OpenSSL 4.1.0 DTLS can drop outstanding post-handshake retransmissions on KeyUpdate ([#32878](https://github.com/openssl/openssl/issues/32878)), misclassify listener read or write errors ([#33277](https://github.com/openssl/openssl/issues/33277), [#33278](https://github.com/openssl/openssl/issues/33278)), or abort a handshake on an early acknowledgment ([#33242](https://github.com/openssl/openssl/issues/33242)). [DTLS 1.3 limitations](docs/lang/Neura0.3.1.md#dtls-13-limitations)
 - HTTP/3 transport, QPACK and MASQUE operations return typed `Unsupported`. The available QUIC provider carries DNS over QUIC.
 
