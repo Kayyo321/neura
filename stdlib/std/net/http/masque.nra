@@ -7,7 +7,8 @@ let strings = import:Std.Text.Strings;
 let.promote _ = import:Std.Core.Unit;
 
 /// @brief MASQUE proxying over HTTP: the extended CONNECT requests of CONNECT-UDP (RFC 9298) and CONNECT-IP
-/// (RFC 9484), their default URI templates, and the UDP proxying datagram format. Tunnel I/O is a stub.
+/// (RFC 9484), their default URI templates, and the UDP proxying datagram format. Tunnel operations return
+/// `Err(Io(Unsupported))` because the runtime has no HTTP/3 request streams and QUIC DATAGRAM transport.
 ///
 /// A request uses extended CONNECT (RFC 8441 section 4; RFC 9298 section 3.4; RFC 9484 section 4.4): `:method`
 /// CONNECT, `:protocol` `connect-udp` or `connect-ip`, `:scheme` https, the proxy's `:authority`, the `:path` of
@@ -114,29 +115,31 @@ export let Masque = module (
         };
     );
 
-    /// @brief A proxied UDP or IP flow carried by a request stream.
+    /// @brief A proxied UDP or IP flow descriptor whose transport operations return `Io(Unsupported)`.
     .[Final, NotThreadSafe]
     export let Tunnel = class (
-        /// @brief The request that opened the tunnel.
+        /// @brief The request associated with the descriptor.
         export last request: ConnectRequest;
 
-        /// @brief Records the request; only `open` creates tunnels.
+        /// @brief Records a request only; this value owns no native tunnel.
         export let init = func(opening: ConnectRequest) {
             request = opening;
         };
 
-        /// @brief Sends one HTTP Datagram with the payload (for CONNECT-UDP, use `encode_udp_datagram`).
-        /// @stub needs HTTP/3 datagrams over QUIC; tunnel I/O is not implemented
-        export let send_datagram = func(datagram: uint8[list]) -> Result<Unit> => host_send_datagram(datagram);
+        /// @brief Returns `Io(Unsupported)` because MASQUE QUIC DATAGRAM transport is unavailable.
+        .[NoDiscard, Since("0.3.1")]
+        export let send_datagram = func(datagram: uint8[list]) -> Result<Unit> =>
+            Result<Unit>.Err(unavailable("MASQUE datagram transport is unavailable"));
 
-        /// @brief Receives the next HTTP Datagram payload.
-        /// @stub needs HTTP/3 datagrams over QUIC; tunnel I/O is not implemented
-        .NoDiscard
-        export let receive_datagram = func -> Result<uint8[list]> => host_receive_datagram();
+        /// @brief Returns `Io(Unsupported)` because MASQUE QUIC DATAGRAM transport is unavailable.
+        .[NoDiscard, Since("0.3.1")]
+        export let receive_datagram = func -> Result<uint8[list]> =>
+            Result<uint8[list]>.Err(unavailable("MASQUE datagram transport is unavailable"));
 
-        /// @brief Closes the request stream and with it the tunnel.
-        /// @stub needs HTTP/3 datagrams over QUIC; tunnel I/O is not implemented
-        export let close = func -> Result<Unit> => host_close_tunnel();
+        /// @brief Returns `Io(Unsupported)` because this value owns no native MASQUE tunnel to close.
+        .[NoDiscard, Since("0.3.1")]
+        export let close = func -> Result<Unit> =>
+            Result<Unit>.Err(unavailable("MASQUE tunnel close is unavailable"));
 
         /// @brief The protocol and path.
         export let.override to_string = func -> string => "Tunnel{" .. request.protocol .. " " .. request.path .. "}";
@@ -234,31 +237,14 @@ export let Masque = module (
         return Result<uint8[list]>.Ok(payload);
     };
 
-    /// @brief Sends `request` on an HTTP/3 connection to the proxy and, on a 2xx response, returns the tunnel
-    /// (RFC 9298 section 3.5, RFC 9484 section 4.5).
-    /// @stub needs TLS/QUIC transport and HTTP/3 datagrams; connection management is not implemented
-    .NoDiscard
-    export let open = func(request: ConnectRequest) -> Result<Tunnel> => host_open(request);
+    /// @brief Returns `Io(Unsupported)` because MASQUE needs HTTP/3 request streams and QUIC DATAGRAM
+    /// transport. The DNS-over-QUIC provider supplies neither; no proxy connection is opened.
+    .[NoDiscard, Since("0.3.1")]
+    export let open = func(request: ConnectRequest) -> Result<Tunnel> =>
+        Result<Tunnel>.Err(unavailable("MASQUE connection establishment is unavailable"));
 
-    /// @brief Host binding for `open`: an HTTP/3 request stream with datagrams enabled.
-    let host_open = func(request: ConnectRequest) -> Result<Tunnel> {
-        trap_with_message("unsupported: Std.Net.Http.Masque.open is not implemented in Neura 0.3.0 (needs TLS/QUIC transport and HTTP/3 datagrams; connection management is not implemented)");
-    };
-
-    /// @brief Host binding for `Tunnel.send_datagram`: a QUIC DATAGRAM frame on the request stream.
-    let host_send_datagram = func(datagram: uint8[list]) -> Result<Unit> {
-        trap_with_message("unsupported: Std.Net.Http.Masque.Tunnel.send_datagram is not implemented in Neura 0.3.0 (needs HTTP/3 datagrams over QUIC; tunnel I/O is not implemented)");
-    };
-
-    /// @brief Host binding for `Tunnel.receive_datagram`: the next QUIC DATAGRAM frame of the request stream.
-    let host_receive_datagram = func -> Result<uint8[list]> {
-        trap_with_message("unsupported: Std.Net.Http.Masque.Tunnel.receive_datagram is not implemented in Neura 0.3.0 (needs HTTP/3 datagrams over QUIC; tunnel I/O is not implemented)");
-    };
-
-    /// @brief Host binding for `Tunnel.close`: closes the request stream.
-    let host_close_tunnel = func -> Result<Unit> {
-        trap_with_message("unsupported: Std.Net.Http.Masque.Tunnel.close is not implemented in Neura 0.3.0 (needs HTTP/3 datagrams over QUIC; tunnel I/O is not implemented)");
-    };
+    let unavailable = func(message: string) -> Error =>
+        Error.Io { kind: IoErrorKind.Unsupported, message: message, path: "" };
 
     /// @brief Whether `b` is unreserved (RFC 3986 section 2.3).
     .[Pure, ThreadSafe]

@@ -6,14 +6,14 @@ let strings = import:Std.Text.Strings;
 let.promote _ = import:Std.Core.Unit;
 
 /// @brief HTTP/3 (RFC 9114) wire data: QUIC variable-length integers (RFC 9000 section 16), frame and stream
-/// types, settings and error codes, and the frame header and SETTINGS payload codecs. Connections and QPACK
-/// are stubs.
+/// types, settings and error codes, and the frame header and SETTINGS payload codecs. Connection and QPACK
+/// operations return `Err(Io(Unsupported))` because the runtime has no general HTTP/3 transport or QPACK state.
 ///
 /// The codecs are pure and complete: a frame is Type (i), Length (i), Payload (RFC 9114 section 7.1); a
 /// SETTINGS payload is a sequence of Identifier (i), Value (i) pairs (section 7.2.4), where a repeated
 /// identifier and the HTTP/2 identifiers reserved by section 11.2.2 are errors. Opening a connection needs QUIC
-/// transport and TLS 1.3 from the runtime; field-section compression needs QPACK (RFC 9204), which is not
-/// implemented.
+/// transport and TLS 1.3 from the runtime; the DNS-over-QUIC provider cannot carry HTTP/3 request and control
+/// streams. Field-section compression needs QPACK (RFC 9204), which is unavailable in this release.
 /// @see [Std.Net.Http.H3](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-H3)
 .Since("0.3.0")
 export let H3 = module (
@@ -313,65 +313,52 @@ export let H3 = module (
     .[Pure, ThreadSafe]
     export let is_grease = func(value: uint64) -> bool => value >= 33 && (value - 33) % 31 == 0;
 
-    /// @brief An HTTP/3 connection over QUIC.
+    /// @brief An HTTP/3 connection descriptor whose transport operations currently return `Io(Unsupported)`.
     .[Final, NotThreadSafe]
     export let H3Connection = class (
-        /// @brief The authority the connection was opened to.
+        /// @brief The authority recorded by the descriptor.
         export last authority: string;
 
-        /// @brief Records the authority; only `connect` creates connections.
+        /// @brief Records an authority only; this value owns no native connection.
         export let init = func(target: string) {
             authority = target;
         };
 
-        /// @brief Sends one frame on a request stream.
-        /// @stub needs QUIC stream I/O; connection management is not implemented
+        /// @brief Returns `Io(Unsupported)` because general HTTP/3 QUIC stream I/O is unavailable.
+        .[NoDiscard, Since("0.3.1")]
         export let send_frame = func(stream_id: uint64, frame_type: uint64, payload: uint8[list]) -> Result<Unit> =>
-            host_stream_write(stream_id, encode_frame_header(frame_type, payload.length as uint64), payload);
+            Result<Unit>.Err(unavailable("HTTP/3 request streams are unavailable"));
 
-        /// @brief Closes the connection with an HTTP/3 error code (section 8.1).
-        /// @stub needs QUIC connection close; connection management is not implemented
-        export let close = func(error_code: uint64) -> Result<Unit> => host_close(error_code);
+        /// @brief Returns `Io(Unsupported)` because this value owns no native QUIC connection to close.
+        .[NoDiscard, Since("0.3.1")]
+        export let close = func(error_code: uint64) -> Result<Unit> =>
+            Result<Unit>.Err(unavailable("HTTP/3 connection close is unavailable"));
 
         /// @brief The authority.
         export let.override to_string = func -> string => "H3Connection{" .. authority .. "}";
     );
 
-    /// @brief Opens an HTTP/3 connection to `authority` (host:port): QUIC with TLS 1.3 and ALPN "h3", then the
-    /// control stream and SETTINGS (sections 3.2, 6.2.1).
-    /// @stub needs TLS/QUIC transport; connection management is not implemented
-    .NoDiscard
+    /// @brief Returns `Io(Unsupported)` because HTTP/3 connection establishment, control streams and QPACK
+    /// state are unavailable. The DNS-over-QUIC provider is not a general HTTP/3 transport. No connection is
+    /// opened and no request leaves the process.
+    .[NoDiscard, Since("0.3.1")]
     export let connect = func(authority: string, settings: Settings) -> Result<H3Connection> =>
-        host_connect(authority, encode_settings(settings));
+        Result<H3Connection>.Err(unavailable("HTTP/3 connection establishment is unavailable"));
 
-    /// @brief The QPACK encoding of a field section (RFC 9204).
-    /// @stub QPACK (RFC 9204) field compression is not implemented
-    .NoDiscard
-    export let encode_field_section = func(fields: header_map.Headers) -> uint8[list] {
-        trap_with_message("unsupported: Std.Net.Http.H3.encode_field_section is not implemented in Neura 0.3.0 (QPACK (RFC 9204) field compression is not implemented)");
-    };
+    /// @brief Returns `Io(Unsupported)` because QPACK field compression is unavailable.
+    /// Since 0.3.1 this returns `Result<uint8[list]>` so callers can handle unavailable compression without
+    /// trapping; the former unwrapped byte-list result never produced a value.
+    .[NoDiscard, Since("0.3.1")]
+    export let encode_field_section = func(fields: header_map.Headers) -> Result<uint8[list]> =>
+        Result<uint8[list]>.Err(unavailable("QPACK field compression is unavailable"));
 
-    /// @brief The field section of a QPACK-encoded HEADERS payload (RFC 9204).
-    /// @stub QPACK (RFC 9204) field compression is not implemented
-    .NoDiscard
-    export let decode_field_section = func(encoded: uint8[list]) -> Result<header_map.Headers> {
-        trap_with_message("unsupported: Std.Net.Http.H3.decode_field_section is not implemented in Neura 0.3.0 (QPACK (RFC 9204) field compression is not implemented)");
-    };
+    /// @brief Returns `Io(Unsupported)` because QPACK field decompression is unavailable.
+    .[NoDiscard, Since("0.3.1")]
+    export let decode_field_section = func(encoded: uint8[list]) -> Result<header_map.Headers> =>
+        Result<header_map.Headers>.Err(unavailable("QPACK field decompression is unavailable"));
 
-    /// @brief Host binding for `connect`: a QUIC connection with ALPN h3 and the encoded local SETTINGS.
-    let host_connect = func(authority: string, settings_payload: uint8[list]) -> Result<H3Connection> {
-        trap_with_message("unsupported: Std.Net.Http.H3.connect is not implemented in Neura 0.3.0 (needs TLS/QUIC transport; connection management is not implemented)");
-    };
-
-    /// @brief Host binding for `H3Connection.send_frame`: writes a frame header and payload to a QUIC stream.
-    let host_stream_write = func(stream_id: uint64, header: uint8[list], payload: uint8[list]) -> Result<Unit> {
-        trap_with_message("unsupported: Std.Net.Http.H3.H3Connection.send_frame is not implemented in Neura 0.3.0 (needs QUIC stream I/O; connection management is not implemented)");
-    };
-
-    /// @brief Host binding for `H3Connection.close`: closes the QUIC connection with an application error code.
-    let host_close = func(error_code: uint64) -> Result<Unit> {
-        trap_with_message("unsupported: Std.Net.Http.H3.H3Connection.close is not implemented in Neura 0.3.0 (needs QUIC connection close; connection management is not implemented)");
-    };
+    let unavailable = func(message: string) -> Error =>
+        Error.Io { kind: IoErrorKind.Unsupported, message: message, path: "" };
 
     /// @brief A Parse error.
     .[Pure, ThreadSafe]

@@ -1,0 +1,52 @@
+// test-options: --gpu=off --deny-net --max-steps 100000
+let.promote _ = import:Std.Core.Error;
+let h3 = import:Std.Net.Http.H3;
+let header_map = import:Std.Net.Http.Headers;
+let masque = import:Std.Net.Http.Masque;
+let test = import:Std.Test;
+
+// The runtime's DNS-over-QUIC provider is not a general HTTP/3 transport.
+// These calls must finish with a typed error even without network capability.
+let UnavailableTransportTests = module (
+    let assert_unsupported = func(error: Error, expected: string) {
+        match (error) {
+            Error.Io { kind, message, path } => {
+                test.assert(kind == IoErrorKind.Unsupported);
+                test.assert_equal_string(expected, message);
+                test.assert_equal_string("", path);
+            },
+            _ => {
+                test.fail("expected a typed I/O Unsupported error");
+            },
+        }
+    };
+
+    export let test_http3_connection_is_unavailable = func {
+        assert_unsupported(test.assert_err(h3.connect("127.0.0.1:443", new h3.Settings())),
+            "HTTP/3 connection establishment is unavailable");
+        last connection = new h3.H3Connection("127.0.0.1:443");
+        assert_unsupported(test.assert_err(connection.send_frame(0, h3.FrameData, new)),
+            "HTTP/3 request streams are unavailable");
+        assert_unsupported(test.assert_err(connection.close(h3.ErrorNoError)),
+            "HTTP/3 connection close is unavailable");
+    };
+
+    export let test_qpack_is_unavailable = func {
+        last headers = new header_map.Headers();
+        headers.add("content-type", "text/plain");
+        assert_unsupported(test.assert_err(h3.encode_field_section(headers)),
+            "QPACK field compression is unavailable");
+        assert_unsupported(test.assert_err(h3.decode_field_section(new)),
+            "QPACK field decompression is unavailable");
+    };
+
+    export let test_masque_tunnel_is_unavailable = func {
+        last request = test.assert_ok(masque.udp_request("127.0.0.1:443", "127.0.0.1", 53));
+        assert_unsupported(test.assert_err(masque.open(request)),
+            "MASQUE connection establishment is unavailable");
+        last tunnel = new masque.Tunnel(request);
+        assert_unsupported(test.assert_err(tunnel.send_datagram(new)), "MASQUE datagram transport is unavailable");
+        assert_unsupported(test.assert_err(tunnel.receive_datagram()), "MASQUE datagram transport is unavailable");
+        assert_unsupported(test.assert_err(tunnel.close()), "MASQUE tunnel close is unavailable");
+    };
+);
