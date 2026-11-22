@@ -28,6 +28,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - `Std.Net.Http` streams bodies through the assigned server worker. The native `neura.http.fetch` service supports HTTP/1.1 and negotiates HTTP/2 over verified TLS in builds with HTTP/2. Grant it with `--allow-http-client` or the project capability `http_client`. `H2` opens a TLS connection with ALPN `h2`, writes frames and supports HPACK in builds with nghttp2. [Host services](docs/runtime/NVM.md#http-client-services)
 - `Std.Crypto` adds codec-backed generic secret locking and process generation observation for fork-safe random generation.
 - Managed-list runs batch `Lists.filled` and byte appends in `StringBuilder`, `Strings.join`, and internal I/O buffers with element-wise step, heap, and version accounting. Images that use them require NVR 1.10. [Managed list runs](docs/runtime/NVM.md#managed-list-runs)
+- `Handshake.dtls_peer_certificate_chain` returns the verified peer chain of a DTLS 1.3 transport, including a client certificate verified by a DTLS server.
 
 ### Changed
 
@@ -43,8 +44,19 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - Unqualified device and enclave evidence APIs and FN-DSA return typed `Unsupported` results. FN-DSA signing and verification now return `Result`.
 - `TcpSocket.send_file` (`neura.net.send_file`) no longer holds the scheduler. It parks only the calling task and fails with TimedOut when the socket accepts nothing for 30 seconds; the error message reports the bytes already sent. Linux still uses `sendfile(2)`; Windows now copies through a bounded buffer instead of `TransmitFile`. Version 3 of the service sends a prefix per call. [Socket services](docs/runtime/NVM.md#host-services)
 
+### Fixed
+
+- `neura.process.generation` no longer fails on an unknown VMClock version or an unexpected read error; it falls back to the PID and vmgenid detectors and retries a transient VMClock open failure.
+- A TLS write that times out or fails ends the stream with that error for every later operation instead of letting a next write fail with `ConnectionReset` or mix records.
+- `TlsStream.shutdown(Write)` uses the write timeout, `neura.net.tls.shutdown_write` treats zero as the 30-second default, and a TLS accept with timeout zero bounds the handshake after the TCP accept by 30 seconds, so a silent peer no longer holds the caller without limit.
+- A DTLS 1.3 transport survives a receive that times out or fails on the socket: the association stays usable instead of failing every later operation, and a later send no longer returns `InvalidInput`.
+- A DTLS write that OpenSSL keeps asking to retry waits on the socket with backoff instead of spinning.
+- `H2.connect`, `send_frame` and `close` no longer hold the scheduler while TLS waits on a stalled peer; they run as cancellable overlapped operations through new `neura.net.tls.*_overlapped` host services.
+- TLS credential files load without `/proc` when no path prefixes are configured. Paths are checked against the prefixes and for a regular file before they are opened, so a FIFO or device outside the grant is never opened, and Windows refuses UNC and device paths, including link targets, before opening. FreeBSD and NetBSD check prefixes through `F_KINFO` and `F_GETPATH` instead of returning `Unsupported`.
+
 ### Known limitations
 
+- OpenSSL 4.1.0's DTLS 1.3 listener retransmits the HelloRetryRequest to an unvalidated address and briefly ignores further first flights from it, so address validation is not strictly stateless: a first flight spoofed with the peer's address delays the peer's handshake by about one retransmission interval. [DTLS services](docs/runtime/NVM.md#host-services)
 - OpenSSL 4.1.0 DTLS can drop outstanding post-handshake retransmissions on KeyUpdate ([#32878](https://github.com/openssl/openssl/issues/32878)), misclassify listener read or write errors ([#33277](https://github.com/openssl/openssl/issues/33277), [#33278](https://github.com/openssl/openssl/issues/33278)), or abort a handshake on an early acknowledgment ([#33242](https://github.com/openssl/openssl/issues/33242)). [DTLS 1.3 limitations](docs/lang/Neura0.3.1.md#dtls-13-limitations)
 - HTTP/3 transport, QPACK and MASQUE operations return typed `Unsupported`. The available QUIC provider carries DNS over QUIC.
 

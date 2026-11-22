@@ -2192,6 +2192,18 @@ if(BUILD_TESTING AND NEURA_SDK)
     neura_target_defaults(neura_hpack_codec_tests)
     add_test(NAME hpack-codec COMMAND neura_hpack_codec_tests)
     if(NEURA_ENABLE_SERVER_TLS)
+        add_executable(neura_tls_material_test tests/host-standalone/tls-material.cpp)
+        target_link_libraries(neura_tls_material_test PRIVATE neura_nvm)
+        if(WIN32)
+            target_link_libraries(neura_tls_material_test PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+        else()
+            target_link_libraries(neura_tls_material_test PRIVATE neura_openssl)
+        endif()
+        neura_target_defaults(neura_tls_material_test)
+        if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            target_link_options(neura_tls_material_test PRIVATE "LINKER:--wrap=open" "LINKER:--wrap=readlink")
+        endif()
+        add_test(NAME tls-material COMMAND neura_tls_material_test)
         set(h2_loopback_options)
         if(TARGET neura_nghttp2)
             list(APPEND h2_loopback_options --hpack)
@@ -2273,12 +2285,18 @@ if(BUILD_TESTING AND NEURA_SDK)
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         add_library(neura_vmclock_test_shim SHARED tests/backend/host/vmclock-shim.c)
         target_link_libraries(neura_vmclock_test_shim PRIVATE ${CMAKE_DL_LIBS})
-        foreach(mode IN ITEMS denied counter)
+        foreach(mode IN ITEMS denied counter unknown-version read-error)
             add_test(NAME backend-generation-vmclock-${mode} COMMAND ${CMAKE_COMMAND} -E env
                 "LD_PRELOAD=$<TARGET_FILE:neura_vmclock_test_shim>" "VMCLOCK_MODE=${mode}"
                 "$<TARGET_FILE:neura_backend_tests>" host "${CMAKE_CURRENT_SOURCE_DIR}"
                 entropy_comes_from_the_system_generator)
         endforeach()
+        add_executable(neura_vmclock_recovery_test tests/host-standalone/vmclock-recovery.cpp)
+        target_link_libraries(neura_vmclock_recovery_test PRIVATE neura_nvm)
+        neura_target_defaults(neura_vmclock_recovery_test)
+        add_test(NAME backend-generation-vmclock-recovery COMMAND ${CMAKE_COMMAND} -E env
+            "LD_PRELOAD=$<TARGET_FILE:neura_vmclock_test_shim>" "VMCLOCK_MODE=recovery"
+            "$<TARGET_FILE:neura_vmclock_recovery_test>")
         add_test(NAME backend-secret-memory-supported COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/crypto-core/locked-supported.py" --bytes 1048576 --
             "$<TARGET_FILE:neura_backend_tests>" secret_memory "${CMAKE_CURRENT_SOURCE_DIR}")

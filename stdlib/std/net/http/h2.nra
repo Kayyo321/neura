@@ -318,11 +318,18 @@ export let H2 = module (
     let FieldsOutcome = enum (Ok(string[list]), Error(uint32));
     let encode_fields = func(fields: string[list]) -> EncodedOutcome host("neura.http.hpack.encode", 1);
     let decode_fields = func(block: uint8[list]) -> FieldsOutcome host("neura.http.hpack.decode", 1);
+    let connect_tls = func(target: string, port: int, timeout: int64, name: string, protocols: string[list],
+        ca_file: string, minimum: int, maximum: int, certificate: string, key: string, offload: bool) -> host.TlsOutcome
+        host("neura.net.tls.connect_overlapped", 1);
+
     let write_tls = func(stream: int64, data: uint8[list], timeout: int64) -> host.CountOutcome
-        host("neura.net.tls.write", 2);
+        host("neura.net.tls.write_overlapped", 1);
+
+    let read_tls = func(stream: int64, maximum: int, timeout: int64) -> host.BytesOutcome
+        host("neura.net.tls.read_overlapped", 1);
 
     let shutdown_tls = func(stream: int64, timeout: int64) -> host.DoneOutcome
-        host("neura.net.tls.shutdown_write", 1);
+        host("neura.net.tls.shutdown_write_overlapped", 1);
 
     /// @brief A low-level HTTP/2 frame sender over a verified TLS connection. It does not read peer frames,
     /// acknowledge their settings, enforce stream lifecycle, or multiplex requests; `Http.Fetch` owns that driver.
@@ -342,17 +349,15 @@ export let H2 = module (
         };
 
         /// @brief Writes one complete frame within the connection's positive per-operation deadline.
+        /// A write waiting on TLS lets other tasks run.
         /// Length/payload disagreements and fixed-size frame violations return FRAME_SIZE_ERROR; invalid
         /// stream identifiers return PROTOCOL_ERROR. Frames remain limited to 16,384 payload bytes.
         .[Since("0.3.1"), NoDiscard]
         export let send_frame = func(header: FrameHeader, payload: uint8[list]) -> Result<Unit> {
             return Result<Unit>.Err(bytes.closed("HTTP/2 connection", authority)) unless open_now;
             validate_frame(header, payload)?;
-            last wire = encode_frame_header(header);
-            for (let b in payload) {
-                wire.append(b);
-            }
-            match (write_bytes(id, wire, timeout_nanos, authority)) {
+            last start = (system_clock.create().monotonic()?).to_nanos();
+            match (write_bytes(id, frame_bytes(header, payload), start, timeout_nanos, authority)) {
                 Result.Ok(_) => {
                     return bytes.ok();
                 },
@@ -365,7 +370,8 @@ export let H2 = module (
         };
 
         /// @brief Sends GOAWAY with last-stream-id zero, sends close_notify and discards inbound data until
-        /// peer close_notify, within one deadline. Releases TLS on success or failure. Closing again succeeds.
+        /// peer close_notify, within one deadline. TLS waits let other tasks run. Releases TLS on success
+        /// or failure. Closing again succeeds.
         /// A negative `error_code` returns InvalidInput without closing.
         .[Since("0.3.1"), NoDiscard]
         export let close = func(error_code: int) -> Result<Unit> {
@@ -382,15 +388,12 @@ export let H2 = module (
         };
 
         let close_wire = func(error_code: int) -> Result<Unit> {
+            last start = (system_clock.create().monotonic()?).to_nanos();
             last payload: uint8[list] = new([0, 0, 0, 0, (error_code >> 24) as uint8,
                 ((error_code >> 16) & 255) as uint8, ((error_code >> 8) & 255) as uint8, (error_code & 255) as uint8]);
-            last clock = system_clock.create();
-            last start = (clock.monotonic()?).to_nanos();
-            last written = send_frame(new FrameHeader(8, FrameGoaway, 0, 0), payload);
-            return match (written) {
-                Result.Ok(_) => finish_shutdown(id, timeout_nanos - ((clock.monotonic()?).to_nanos() - start), authority),
-                Result.Err(failure) => Result<Unit>.Err(failure),
-            };
+            last wire = frame_bytes(new FrameHeader(8, FrameGoaway, 0, 0), payload);
+            write_bytes(id, wire, start, timeout_nanos, authority)?;
+            return finish_shutdown(id, start, timeout_nanos, authority);
         };
 
         let abort = func -> Result<Unit> {
@@ -406,16 +409,25 @@ export let H2 = module (
         export let.override to_string = func -> string => "H2Connection{" .. authority .. "}";
     );
 
-    let write_bytes = func(id: int64, data: uint8[list], budget: int64, authority: string) -> Result<Unit> {
+    let frame_bytes = func(header: FrameHeader, payload: uint8[list]) -> uint8[list] {
+        last wire = encode_frame_header(header);
+        for (let b in payload) {
+            wire.append(b);
+        }
+        return wire;
+    };
+
+    let write_bytes = func(id: int64, data: uint8[list], start: int64, budget: int64, authority: string)
+        -> Result<Unit> {
         last clock = system_clock.create();
-        last start = (clock.monotonic()?).to_nanos();
         let offset = 0;
         while (offset < data.length) {
+            last remaining_bytes = bytes.copy_range(data, offset, data.length);
             last remaining = budget - ((clock.monotonic()?).to_nanos() - start);
             if (remaining <= 0) {
                 return Result<Unit>.Err(host_error.io(12, "HTTP/2 write timed out", authority));
             }
-            match (write_tls(id, bytes.copy_range(data, offset, data.length), remaining)) {
+            match (write_tls(id, remaining_bytes, remaining)) {
                 host.CountOutcome.Ok(count) => {
                     if (count <= 0 || count > data.length - offset) {
                         return Result<Unit>.Err(host_error.io(11, "invalid TLS write count", authority));
@@ -430,13 +442,13 @@ export let H2 = module (
         return bytes.ok();
     };
 
-    let finish_shutdown = func(id: int64, budget: int64, authority: string) -> Result<Unit> {
-        if (budget <= 0) {
+    let finish_shutdown = func(id: int64, start: int64, budget: int64, authority: string) -> Result<Unit> {
+        last clock = system_clock.create();
+        last shutdown_budget = budget - ((clock.monotonic()?).to_nanos() - start);
+        if (shutdown_budget <= 0) {
             return Result<Unit>.Err(host_error.io(12, "HTTP/2 close timed out", authority));
         }
-        last clock = system_clock.create();
-        last start = (clock.monotonic()?).to_nanos();
-        match (shutdown_tls(id, budget)) {
+        match (shutdown_tls(id, shutdown_budget)) {
             host.DoneOutcome.Error(code) => {
                 return Result<Unit>.Err(host_error.io(code, "HTTP/2 TLS shutdown failed", authority));
             },
@@ -447,7 +459,7 @@ export let H2 = module (
             if (remaining <= 0) {
                 return Result<Unit>.Err(host_error.io(12, "HTTP/2 close timed out", authority));
             }
-            match (host.tls_read(id, 16384, remaining)) {
+            match (read_tls(id, 16384, remaining)) {
                 host.BytesOutcome.Ok(data) => {
                     if (data.length == 0) {
                         return bytes.ok();
@@ -461,7 +473,8 @@ export let H2 = module (
     };
 
     /// @brief Opens verified TLS with ALPN h2 and system trust, then writes the preface and SETTINGS.
-    /// The complete connect operation has a thirty-second deadline. Needs net and clock capabilities.
+    /// The complete connect operation has a thirty-second deadline. Network waits park the calling task
+    /// while other tasks run. Needs net and clock capabilities.
     .[Since("0.3.1"), NoDiscard]
     export let connect = func(authority: string, settings: Settings) -> Result<H2Connection> {
         last builder = tls_config.builder();
@@ -506,7 +519,7 @@ export let H2 = module (
         last name = config.server_name.byte_length == 0 ? target : config.server_name;
         last clock = system_clock.create();
         last start = (clock.monotonic()?).to_nanos();
-        last opened = host.tls_connect_extended(target, port, budget, name, protocols, config.ca_file,
+        last opened = connect_tls(target, port, budget, name, protocols, config.ca_file,
             config.min_version == tls_config.TlsVersion.Tls12 ? 12 : 13,
             config.max_version == tls_config.TlsVersion.Tls12 ? 12 : 13,
             config.certificate_file, config.key_file, config.kernel_offload);
@@ -517,27 +530,23 @@ export let H2 = module (
             host.TlsOutcome.Ok(connection) => {
                 let [id, selected] = connection;
                 if (selected != "h2") {
+                    match (clock.monotonic()) {
+                        Result.Ok(now) => {
+                            last remaining = budget - (now.to_nanos() - start);
+                            if (remaining > 0) {
+                                let _ = shutdown_tls(id, remaining);
+                            }
+                        },
+                        Result.Err(_) => {},
+                    }
                     let _ = host.tls_close(id);
                     return Result<H2Connection>.Err(error.custom("h2.alpn", "peer did not negotiate h2"));
                 }
                 last wire = preface_bytes();
-                for (let b in encode_frame_header(new FrameHeader(payload.length, FrameSettings, 0, 0))) {
+                for (let b in frame_bytes(new FrameHeader(payload.length, FrameSettings, 0, 0), payload)) {
                     wire.append(b);
                 }
-                for (let b in payload) {
-                    wire.append(b);
-                }
-                last remaining: int64;
-                match (clock.monotonic()) {
-                    Result.Ok(now) => {
-                        remaining = budget - (now.to_nanos() - start);
-                    },
-                    Result.Err(failure) => {
-                        let _ = host.tls_close(id);
-                        return Result<H2Connection>.Err(failure);
-                    },
-                }
-                match (write_bytes(id, wire, remaining, authority)) {
+                match (write_bytes(id, wire, start, budget, authority)) {
                     Result.Ok(_) => {
                         return Result<H2Connection>.Ok(new H2Connection(Seal.Value, authority, id, budget));
                     },
