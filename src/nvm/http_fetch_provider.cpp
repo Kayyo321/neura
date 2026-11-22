@@ -20,9 +20,10 @@
 #else
 #include <arpa/inet.h>
 #include <netinet/in.h>
-#include <sys/socket.h>
 #include <pthread.h>
 #include <signal.h>
+#include <sys/socket.h>
+#include <unistd.h>
 #endif
 #ifdef NEURA_NVM_TLS
 #include <openssl/err.h>
