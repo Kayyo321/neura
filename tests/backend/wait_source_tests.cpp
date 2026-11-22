@@ -2,8 +2,10 @@
 #include "nvm/providers.hpp"
 
 #include <array>
+#include <cerrno>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <iostream>
 #include <stdexcept>
@@ -541,13 +543,17 @@ int main() {
 #else
 #ifdef __linux__
         if (backend == IoBackend::IoUring) {
+            // Without io_uring the documented behaviour is the fallback to
+            // poll(2) (docs/runtime/NVM.md), so the same waits must still hold.
             io_uring_params parameters{};
             const auto descriptor = ::syscall(__NR_io_uring_setup, 2, &parameters);
             if (descriptor < 0) {
-                std::cout << "io_uring_setup unavailable on this host\n";
-                return 77;
+                std::cout << "io_uring: fallback path, because io_uring_setup failed on this host ("
+                          << std::strerror(errno) << "); checking the waits through poll(2)\n";
+            } else {
+                std::cout << "io_uring: strict path, because io_uring_setup succeeded\n";
+                ::close(static_cast<int>(descriptor));
             }
-            ::close(static_cast<int>(descriptor));
         }
 #endif
         polled_and_external();
