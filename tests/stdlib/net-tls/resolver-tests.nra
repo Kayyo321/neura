@@ -1,3 +1,4 @@
+let files = import:Std.Fs.File;
 let fs = import:Std.Fs.Fs;
 let path = import:Std.Fs.Path;
 let unit = import:Std.Core.Unit;
@@ -129,8 +130,32 @@ let ResolverTests = module (
             fixed_clock.of(instant.Epoch), duration.of_seconds(1)));
     };
 
+    let reserve_watch_path = func -> path.Path {
+        for (let attempt in 0 .. 1024) {
+            last candidate = path.of("resolver-watch-fixture-" .. attempt.to_string() .. ".pem");
+            match (files.open(candidate, files.OpenMode.CreateNew)) {
+                result.Result.Ok(file) => {
+                    test.assert_ok<unit.Unit>(file.close());
+                    return candidate;
+                },
+                result.Result.Err(problem) => {
+                    match (problem) {
+                        error.Error.Io { kind, message, path } => {
+                            test.assert_with(kind == error.IoErrorKind.AlreadyExists, message);
+                        },
+                        _ => {
+                            test.fail("could not reserve a temporary certificate path");
+                        },
+                    }
+                },
+            }
+        }
+        test.fail("all temporary certificate paths are occupied");
+        return path.of("");
+    };
+
     export let test_file_watch_retries_a_failed_reload = func {
-        last file = path.of("resolver-watch-fixture.pem");
+        last file = reserve_watch_path();
         test.assert_ok<unit.Unit>(fs.write_text(file, "initial"));
         last clock = fixed_clock.of(instant.Epoch);
         last source = new Source();
