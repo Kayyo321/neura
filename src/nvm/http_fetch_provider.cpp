@@ -1206,7 +1206,7 @@ void add_http_fetch_services(const OverlapAdder& add, const Capabilities& capabi
                 const auto left = std::max<std::int64_t>(
                     1, std::chrono::duration_cast<std::chrono::nanoseconds>(state->deadline - Clock::now()).count());
                 pending.deadline = deadline_after(request.now, left);
-                pending.attempt = [owner, detailed](bool cancelled) -> std::optional<HostCompletion> {
+                pending.attempt = [owner](bool cancelled) -> std::optional<HostCompletion> {
                     auto& state = *owner->state;
                     std::lock_guard lock(state.mutex);
                     if (state.answer) return std::move(*state.answer);
