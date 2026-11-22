@@ -657,11 +657,23 @@ def main() -> int:
                 print(f"qualify.py: {value} does not exist", file=sys.stderr)
                 return 2
             setattr(arguments, name, value.resolve())
-    work = Path(tempfile.mkdtemp(prefix="neura-qualify-"))
+    work = work_directory()
     try:
         return Qualification(arguments, work).run_all()
     finally:
         shutil.rmtree(work, ignore_errors=True)
+
+
+def work_directory() -> Path:
+    """The directory that holds the temporary profiles: at the root of the
+    system drive, so that a profile is about as deep as C:\\Users\\<name>. Below
+    the runner's %TEMP% the service's AF_UNIX socket path (W29), which must
+    fit 107 bytes, did not fit even in the fallback under the profile's TEMP
+    (check 11). Where the root cannot be written, %TEMP% is used."""
+    try:
+        return Path(tempfile.mkdtemp(prefix="nq-", dir=os.environ.get("SystemDrive", "C:") + "\\"))
+    except OSError:
+        return Path(tempfile.mkdtemp(prefix="neura-qualify-"))
 
 
 if __name__ == "__main__":
