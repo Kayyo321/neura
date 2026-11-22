@@ -1,6 +1,7 @@
 #include "provider_internal.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <chrono>
 #include <climits>
@@ -863,6 +864,8 @@ int new_socket(int family) {
     return descriptor;
 }
 
+void drain_zerocopy_notices(int descriptor);
+
 // Waits for `events` on `descriptor`. Returns 1 when ready, 0 on timeout,
 // and -1 with errno on failure. A deadline of zero waits without limit.
 int wait_for(int descriptor, short events, std::chrono::steady_clock::time_point deadline, bool limited) {
@@ -877,6 +880,16 @@ int wait_for(int descriptor, short events, std::chrono::steady_clock::time_point
         }
         pollfd entry{descriptor, events, 0};
         const int ready = ::poll(&entry, 1, milliseconds);
+        if (ready > 0 && (entry.revents & POLLERR) != 0) {
+            drain_zerocopy_notices(descriptor);
+            entry.revents = 0;
+            const int checked = ::poll(&entry, 1, 0);
+            if (checked > 0) return checked;
+            if (checked < 0 && errno != EINTR) return checked;
+            // A completion notification alone is not stream data. Wait
+            // again under the original deadline rather than blocking recv.
+            continue;
+        }
         if (ready >= 0 || errno != EINTR) return ready;
     }
 }
@@ -945,13 +958,48 @@ OwnedDescriptor duplicate(int descriptor) {
     return copy < 0 ? nullptr : std::make_shared<Descriptor>(copy);
 }
 
+// SO_ZEROCOPY completion records make poll report POLLERR even when no
+// payload is readable. Consume them at the readiness check, including when
+// the application never sends again. These sockets do not enable IP_RECVERR
+// or timestamp queues: the error queue here belongs to SO_ZEROCOPY. Real
+// socket failures remain available through SO_ERROR and the next I/O call.
+void drain_zerocopy_notices(int descriptor) {
+#if defined(__linux__) && defined(SO_ZEROCOPY)
+    int enabled = 0;
+    socklen_t length = sizeof enabled;
+    if (::getsockopt(descriptor, SOL_SOCKET, SO_ZEROCOPY, &enabled, &length) != 0 || !enabled) return;
+    alignas(cmsghdr) std::array<char, 512> control{};
+    msghdr notice{};
+    notice.msg_control = control.data();
+    // Bound one scheduling check even if another sender keeps producing
+    // completions. Remaining records trigger another readiness check.
+    for (int count = 0; count < 64; ++count) {
+        notice.msg_controllen = control.size();
+        notice.msg_flags = 0;
+        if (::recvmsg(descriptor, &notice, MSG_ERRQUEUE | MSG_DONTWAIT) < 0) break;
+    }
+#else
+    (void)descriptor;
+#endif
+}
+
 // Whether `events` are ready on `descriptor`, without waiting. Hang-up and
 // error count as ready: the next call reports them.
 bool ready_now(int descriptor, short events) {
     pollfd entry{descriptor, events, 0};
     for (;;) {
         const int ready = ::poll(&entry, 1, 0);
-        if (ready >= 0) return ready > 0;
+        if (ready >= 0) {
+            if ((entry.revents & POLLERR) != 0) {
+                drain_zerocopy_notices(descriptor);
+                // Recheck after draining: a completion alone must not keep
+                // a pending read runnable. HUP and real errors remain ready.
+                entry.revents = 0;
+                const int checked = ::poll(&entry, 1, 0);
+                return checked < 0 || entry.revents != 0;
+            }
+            return ready > 0;
+        }
         if (errno != EINTR) return true;
     }
 }
