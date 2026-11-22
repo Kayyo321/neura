@@ -18,19 +18,19 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **TlsConnector** · [`export let TlsConnector = class implements Connector<SocketAddr, TlsStream>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-connector.nra#L28)
+- **TlsConnector** · [`export let TlsConnector = class implements Connector<SocketAddr, TlsStream>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-connector.nra#L27)
   Dials `address()` and completes a TLS client handshake for each `connect`. Tagged `#Final`.
-- **TlsConnector.TlsConnector** · [`export last config: TlsConfig`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-connector.nra#L32)
+- **TlsConnector.TlsConnector** · [`export last config: TlsConfig`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-connector.nra#L31)
   The client configuration.
-- **TlsConnector.TlsConnector** · [`export let init = func(address: SocketAddr, client: TlsConfig)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-connector.nra#L36)
+- **TlsConnector.TlsConnector** · [`export let init = func(address: SocketAddr, client: TlsConfig)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-connector.nra#L35)
   A connector for `address`. A server configuration traps with "invalid argument: a TLS connector needs a client configuration".
-- **TlsConnector.TlsConnector** · [`export let address = func -> SocketAddr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-connector.nra#L45)
+- **TlsConnector.TlsConnector** · [`export let address = func -> SocketAddr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-connector.nra#L44)
   The address this connector dials.
-- **TlsConnector.TlsConnector** · [`export let connect = func -> Result<TlsStream>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-connector.nra#L49)
+- **TlsConnector.TlsConnector** · [`export let connect = func -> Result<TlsStream>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-connector.nra#L48)
   Opens a TLS stream to `address()`; fails with Unsupported in a build without TLS. Tagged `#NoDiscard`.
-- **TlsConnector.TlsConnector** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-connector.nra#L67)
+- **TlsConnector.TlsConnector** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-connector.nra#L66)
   Text such as "TlsConnector(192.0.2.1:443)".
-- **TlsConnector** · [`export let version_code = func(version: TlsVersion) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-connector.nra#L72)
+- **TlsConnector** · [`export let version_code = func(version: TlsVersion) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-connector.nra#L71)
   The host's version number: 12 or 13. Tagged `#Pure`.
 <!-- END SOURCE API -->
 

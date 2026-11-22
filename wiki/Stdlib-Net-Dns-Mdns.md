@@ -18,47 +18,47 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Mdns** · [`export const Port: int = 5353`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L22)
+- **Mdns** · [`export const Port: int = 5353`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L23)
   The mDNS port (section 1).
-- **Mdns** · [`export const UnicastResponseBit: int = 32768`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L24)
+- **Mdns** · [`export const UnicastResponseBit: int = 32768`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L25)
   The unicast-response bit in a question's class (section 5.4).
-- **Mdns** · [`export const CacheFlushBit: int = 32768`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L26)
+- **Mdns** · [`export const CacheFlushBit: int = 32768`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L27)
   The cache-flush bit in a record's class (section 10.2).
-- **Mdns** · [`export let ipv4_group = func -> Ipv4Addr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L30)
+- **Mdns** · [`export let ipv4_group = func -> Ipv4Addr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L31)
   The IPv4 group 224.0.0.251. Tagged `#NoDiscard`.
-- **Mdns** · [`export let ipv6_group = func -> Ipv6Addr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L34)
+- **Mdns** · [`export let ipv6_group = func -> Ipv6Addr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L35)
   The IPv6 group ff02::fb. Tagged `#NoDiscard`.
-- **Mdns** · [`export let is_local_name = func(name: names.DnsName) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L47)
+- **Mdns** · [`export let is_local_name = func(name: names.DnsName) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L48)
   Whether a name belongs to mDNS: within `local.`, `254.169.in-addr.arpa.`, or the IPv6 link-local reverse zones `8.e.f.ip6.arpa.` through `b.e.f.ip6.arpa.` (sections 3 and 4). Tagged `#NoDiscard`.
-- **Mdns** · [`export let question = func(name: names.DnsName, qtype: int, unicast: bool) -> messages.Question`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L65)
+- **Mdns** · [`export let question = func(name: names.DnsName, qtype: int, unicast: bool) -> messages.Question`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L66)
   A question for `name` and `qtype` in class IN, asking for a unicast reply when `unicast` is true. Tagged `#NoDiscard`.
-- **Mdns** · [`export let wants_unicast = func(asked: messages.Question) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L70)
+- **Mdns** · [`export let wants_unicast = func(asked: messages.Question) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L71)
   Whether a question asks for a unicast reply. Tagged `#NoDiscard`.
-- **Mdns** · [`export let question_class = func(asked: messages.Question) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L74)
+- **Mdns** · [`export let question_class = func(asked: messages.Question) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L75)
   A question's class without the unicast-response bit. Tagged `#NoDiscard`.
-- **Mdns** · [`export let with_cache_flush = func(record: messages.ResourceRecord, flush: bool) -> messages.ResourceRecord`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L78)
+- **Mdns** · [`export let with_cache_flush = func(record: messages.ResourceRecord, flush: bool) -> messages.ResourceRecord`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L79)
   The record with the cache-flush bit set or cleared. Tagged `#NoDiscard`.
-- **Mdns** · [`export let is_cache_flush = func(record: messages.ResourceRecord) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L85)
+- **Mdns** · [`export let is_cache_flush = func(record: messages.ResourceRecord) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L86)
   Whether a record has the cache-flush bit set. An OPT record's class is its payload size, so it is never a cache-flush record. Tagged `#NoDiscard`.
-- **Mdns** · [`export let record_class = func(record: messages.ResourceRecord) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L90)
+- **Mdns** · [`export let record_class = func(record: messages.ResourceRecord) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L91)
   A record's class without the cache-flush bit. Tagged `#NoDiscard`.
-- **Mdns** · [`export let query = func(name: names.DnsName, qtype: int, unicast: bool) -> messages.Message`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L95)
+- **Mdns** · [`export let query = func(name: names.DnsName, qtype: int, unicast: bool) -> messages.Message`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L96)
   A one-shot multicast query: ID 0, opcode 0, RD clear (section 18), one question. Tagged `#NoDiscard`.
-- **Mdns** · [`export let response = func(answers: messages.ResourceRecord[list]) -> messages.Message`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L103)
+- **Mdns** · [`export let response = func(answers: messages.ResourceRecord[list]) -> messages.Message`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L104)
   A multicast response carrying `answers`: ID 0, QR and AA set, no questions (section 18). Tagged `#NoDiscard`.
-- **Mdns** · [`export let MdnsQuerier = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L118)
+- **Mdns** · [`export let MdnsQuerier = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L119)
   A querier on the local link. Tagged `#Final`, `#NotThreadSafe`.
-- **Mdns.MdnsQuerier** · [`export last window: durations.Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L120)
-  How long to collect responses.
-- **Mdns.MdnsQuerier** · [`export let init = func(wait: durations.Duration)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L123)
+- **Mdns.MdnsQuerier** · [`export last window: durations.Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L121)
+  How long to collect responses: positive and at most five seconds.
+- **Mdns.MdnsQuerier** · [`export let init = func(wait: durations.Duration)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L124)
   A querier collecting responses for `wait`.
-- **Mdns.MdnsQuerier** · [`export let query_all = func(name: names.DnsName, qtype: int) -> Result<messages.Message[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L129)
+- **Mdns.MdnsQuerier** · [`export let query_all = func(name: names.DnsName, qtype: int) -> Result<messages.Message[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L130)
   Sends a query to the group and returns every response received within the window. Tagged `#NoDiscard`.
-- **Mdns.MdnsQuerier** · [`export let query_all_on = func(name: names.DnsName, qtype: int, address: Ipv4Addr) -> Result<messages.Message[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L135)
-  Sends a query through the network interface with the given IPv4 address. Tagged `#NoDiscard`.
-- **Mdns.MdnsQuerier** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L148)
+- **Mdns.MdnsQuerier** · [`export let query_all_on = func(name: names.DnsName, qtype: int, address: Ipv4Addr) -> Result<messages.Message[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L137)
+  Sends a query through the network interface with the given IPv4 address. Tagged `#NoDiscard`. Since 0.3.1.
+- **Mdns.MdnsQuerier** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L150)
   Text such as "MdnsQuerier(1s)".
-- **Mdns** · [`export let responses_in = func(datagrams: uint8[list][list]) -> messages.Message[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L153)
+- **Mdns** · [`export let responses_in = func(datagrams: uint8[list][list]) -> messages.Message[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/mdns.nra#L155)
   The decodable responses among datagrams; others are dropped. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

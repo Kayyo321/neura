@@ -24,7 +24,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - Class and interface references can be tested directly in conditions and with `!` or `not`. The tests use normal nil comparisons and preserve reference reads and runtime safety checks.
 - Tags accept dot or hash sigils in the same positions. CLI and editor formatting preserve the spelling by default and can explicitly convert only tag sigils.
 - `Std.Net` adds Unicode UTS 46 mapping, more socket provider operations, multicast DNS, DNS over QUIC, and TLS 1.3 over a caller-supplied stream. TLS builds support mutual TLS and narrower client and server version ranges.
-- `Std.Net.Tls` adds ACME client operations and SPIFFE SVID verification.
+- `Std.Net.Tls` adds ACME client operations and SPIFFE SVID verification. `Handshake.dtls13` uses a bound UDP socket, verifies peer identity and uses server-side cookies. `TlsStream` exposes the verified DER certificate chain.
 - `Std.Crypto` adds codec-backed generic secret locking and process generation observation for fork-safe random generation.
 
 ### Changed
@@ -32,7 +32,14 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - Empty tag groups (`#[]` and `.[]`) are now rejected with `E0910`.
 - `E0105` now reads "unknown numeric suffix".
 - The condition diagnostic now reads "expected bool or a class or interface reference".
+- The single TLS provider is pinned to OpenSSL 4.1.0. Builds with TLS enabled use it for server HTTPS, `Std.Net.Tls`, DNS over QUIC and the PostgreSQL provider.
+- `EventLoop.select` returns `Ok(Poll)` on Windows. Successful event-loop installs apply to the native driver and debugger. Replays use the recorded result.
+- Raw IP sockets require the explicit `raw` capability and network access. SPIFFE SVID verification requires a nonempty trust domain.
 - Unqualified device and enclave evidence APIs and FN-DSA return typed `Unsupported` results. FN-DSA signing and verification now return `Result`.
+
+### Known limitations
+
+- OpenSSL 4.1.0 DTLS can drop outstanding post-handshake retransmissions on KeyUpdate ([#32878](https://github.com/openssl/openssl/issues/32878)), misclassify listener read or write errors ([#33277](https://github.com/openssl/openssl/issues/33277), [#33278](https://github.com/openssl/openssl/issues/33278)), or abort a handshake on an early acknowledgment ([#33242](https://github.com/openssl/openssl/issues/33242)). [DTLS 1.3 limitations](docs/lang/Neura0.3.1.md#dtls-13-limitations)
 
 ## [0.3.0] - 2026-11-20
 

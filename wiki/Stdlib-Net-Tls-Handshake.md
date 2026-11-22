@@ -18,10 +18,10 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Handshake** · [`export let tls13 = func(config: TlsConfig, stream: StreamSocket<SocketAddr>) -> Result<Transport<uint8[list], uint8[list]>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/handshake.nra#L162)
+- **Handshake** · [`export let tls13 = func(config: TlsConfig, stream: StreamSocket<SocketAddr>) -> Result<Transport<uint8[list], uint8[list]>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/handshake.nra#L172)
   Completes a TLS 1.3 handshake over `stream` as the configured client or server. A client verifies the configured server name, or the peer's numeric address when the name is empty. Once the engine starts, this call owns the supplied stream, including closing it on handshake failure. Tagged `#NoDiscard`.
-- **Handshake** · [`export let dtls13 = func(config: TlsConfig, socket: DatagramSocket<SocketAddr>, peer: SocketAddr) -> Result<Transport<uint8[list], uint8[list]>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/handshake.nra#L204)
-  Runs a DTLS 1.3 handshake with `peer` over a datagram socket. Tagged `#NoDiscard`.
+- **Handshake** · [`export let dtls13 = func(config: TlsConfig, socket: DatagramSocket<SocketAddr>, peer: SocketAddr) -> Result<Transport<uint8[list], uint8[list]>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/handshake.nra#L354)
+  Runs DTLS 1.3 with a fixed numeric peer over a bound datagram socket. A client verifies `server_name`, or the peer IP when empty; a server validates address cookies before accepting. Takes ownership of the socket after the engine opens, including closing it on handshake failure. Messages are at most 1,024 bytes and retain their boundaries. Unexpected senders are dropped. Every operation has one absolute deadline: the configured handshake timeout, the socket's read timeout for receive, or 30 seconds for send/close; a zero timeout uses 30 seconds. Timers drive retransmissions. Requires net; explicit credential files also require fs. DTLS never uses kernel TLS offload. Tagged `#NoDiscard`. Since 0.3.1.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

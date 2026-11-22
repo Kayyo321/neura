@@ -130,7 +130,7 @@ Whatever is an error with `#` is the same error with `.`: a dot tag before a sta
 
 ## Standard library completion and its exceptions
 
-Every `Std.Net` and `Std.Crypto` declaration that 0.3.0 left as a stub is implemented in 0.3.1, with the exceptions below. Each exception is also listed in the release notes.
+Neura 0.3.1 completes the first networking slice in `Std.Net.Core`, `Dns`, `Socket` and `Tls`. The release notes list the deferred cryptography providers below.
 
 | Exception | Rule in 0.3.1 |
 | --- | --- |
@@ -139,7 +139,19 @@ Every `Std.Net` and `Std.Crypto` declaration that 0.3.0 left as a stub is implem
 
 The software keystore and offline verification of attestation evidence are supported and are not exceptions.
 
-The first networking slice covers `Std.Net.Core`, `Dns`, `Socket` and `Tls`. The remaining HTTP, general QUIC, Realtime, RPC and Mesh work is tracked separately. DTLS 1.3 still requires a provider implementing that version. Windows needs runtime verification for the Winsock and OpenSSL providers and guest-generation polling. Generic secret locking uses the existing locked-buffer contract, which requires dump exclusion as well as page locking. The current provider meets that contract on Linux. Windows needs a provider that can honor both guarantees.
+`Std.Net.Http`, general QUIC, RPC, Realtime and Mesh are in progress for 0.3.1. Direct TLS uses OpenSSL 4.1.0. Windows needs runtime verification for Winsock TLS, guest-generation polling and the locked-memory provider. Generic secret locking protects the retained encoded representation with Linux page locking and dump exclusion or Windows `VirtualLock` with Windows Error Reporting memory exclusion. The original value and its aliases use ordinary program storage.
+
+### DTLS 1.3 limitations
+
+`Handshake.dtls13` uses the OpenSSL 4.1.0 DTLS listener with address cookies, peer certificate validation and an absolute deadline. The adapter moves datagrams through the caller's bound UDP socket. The upstream release lists these limitations:
+
+- [#32878](https://github.com/openssl/openssl/issues/32878). An incoming KeyUpdate can clear other unacknowledged post-handshake records from the retransmission queue. Neura disables session tickets on this transport and exposes no session resumption API.
+- [#33277](https://github.com/openssl/openssl/issues/33277). A permanent listener receive error can appear as a request for more input. Neura handles UDP socket errors in the datagram adapter, preserves failures on the OpenSSL error stack and bounds engine waits by the operation deadline.
+- [#33278](https://github.com/openssl/openssl/issues/33278). A retryable listener write can be reported as a syscall error. Neura drains a full datagram BIO and retries when OpenSSL and the BIO both request a write retry and the error stack is empty.
+- [#33242](https://github.com/openssl/openssl/issues/33242). A server can abort a handshake after receiving an early acknowledgment of its first flight. The application receives a handshake error.
+
+[OpenSSL 4.1 release notes](https://openssl-library.org/post/2026-10-23-openssl-41-final-release/)
+
 
 ## Windows native build
 

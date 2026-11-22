@@ -37,9 +37,9 @@ The following public declarations are taken from the module source; each links t
 - **UnixStream.UnixStream** · [`export let peer_address = func -> Optional<UnixAddr>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L80)
   The dialed peer, or `None` for an accepted socket.
 - **UnixStream.UnixStream** · [`export let local_address = func -> Result<UnixAddr>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L85)
-  The listener's address for an accepted socket; otherwise it asks the host, which traps in Neura 0.3.0 (no local-address service). Tagged `#NoDiscard`.
+  The listener's address for an accepted socket; otherwise it asks the host, which traps in For accepted streams the host reports the bound address. Tagged `#NoDiscard`.
 - **UnixStream.UnixStream** · [`export let shutdown = func(how: Shutdown) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L99)
-  Ends reading, writing or both. Traps in Neura 0.3.0: the runtime has no shutdown service. Tagged `#NoDiscard`.
+  Ends reading, writing or both on the connected Unix stream. Tagged `#NoDiscard`.
 - **UnixStream.UnixStream** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L109)
   Releases the connection. Closing again returns Ok.
 - **UnixStream.UnixStream** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L115)

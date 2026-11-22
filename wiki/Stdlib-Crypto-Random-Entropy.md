@@ -24,9 +24,9 @@ The following public declarations are taken from the module source; each links t
 - **Entropy** · [`export let fused_seed = func -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/random/entropy.nra#L77)
   SHA-512("Neura entropy fusion" || os_bytes(64) || hardware_bytes(64)). Both sources must be allowed by policy. Returns either provider's error without a fallback. Tagged `#NoDiscard`. Since 0.3.0.
 - **Entropy** · [`export let try_fork_generation = func -> Result<uint64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/random/entropy.nra#L94)
-  Observes the host generation, returning its typed error if the observation fails. Tagged `#NoDiscard`.
-- **Entropy** · [`export let fork_generation = func -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/random/entropy.nra#L106)
-  The current host generation token. On POSIX it changes in a forked child. Linux checks the VMClock generation counter. Windows polls the guest generation driver. A machine without a recognized guest driver cannot report VM restores. Requires entropy capability and traps with the provider's error if the observation fails. Tagged `#NoDiscard`. Since 0.3.0.
+  Observes the host generation, returning its typed error if the observation fails. Tagged `#NoDiscard`. Since 0.3.1.
+- **Entropy** · [`export let fork_generation = func -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/random/entropy.nra#L107)
+  The current host generation token. On POSIX it changes in a forked child. Linux checks VMClock and vmgenid notifications on drivers that emit them. Windows polls the guest generation driver. Missing or inaccessible optional drivers leave the remaining detectors active. A machine without a usable recognized guest driver cannot report VM restores. Requires entropy capability and traps with the provider's error if the observation fails. Tagged `#NoDiscard`. Since 0.3.0.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

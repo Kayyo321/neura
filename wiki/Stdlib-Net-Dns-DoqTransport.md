@@ -28,15 +28,15 @@ The following public declarations are taken from the module source; each links t
   The server.
 - **DoqTransport.DoqTransport** · [`export last server_name: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doq-transport.nra#L32)
   The TLS server name.
-- **DoqTransport.DoqTransport** · [`export let init = func(address: SocketAddr, name: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doq-transport.nra#L35)
-  A transport to `address`, verifying `name`.
-- **DoqTransport.DoqTransport** · [`export let is_stream = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doq-transport.nra#L41)
+- **DoqTransport.DoqTransport** · [`export let init = func(address: SocketAddr, name: string, ca_bundle: string = "")`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doq-transport.nra#L38)
+  A transport to `address`, verifying `name`, using system trust unless `ca_bundle` is supplied.
+- **DoqTransport.DoqTransport** · [`export let is_stream = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doq-transport.nra#L45)
   A stream transport.
-- **DoqTransport.DoqTransport** · [`export let exchange = func(query: messages.Message) -> Result<messages.Message>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doq-transport.nra#L44)
+- **DoqTransport.DoqTransport** · [`export let exchange = func(query: messages.Message) -> Result<messages.Message>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doq-transport.nra#L48)
   One exchange on a new QUIC stream.
-- **DoqTransport.DoqTransport** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doq-transport.nra#L54)
+- **DoqTransport.DoqTransport** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doq-transport.nra#L58)
   Text such as "DoqTransport(192.0.2.53:853)".
-- **DoqTransport** · [`export let stream_payload = func(query: messages.Message) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doq-transport.nra#L70)
+- **DoqTransport** · [`export let stream_payload = func(query: messages.Message) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/doq-transport.nra#L74)
   What a DoQ client writes on its stream: the query with ID 0 (RFC 9250 section 4.2.1, "DNS Message IDs") behind its two-byte length (section 4.2). Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

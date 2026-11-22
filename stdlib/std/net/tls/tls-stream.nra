@@ -27,6 +27,7 @@ export let TlsStream = module (
 
     let tls_write_bounded = func(stream: int64, data: uint8[list], timeout: int64) -> host.CountOutcome
         host("neura.net.tls.write", 2);
+
     let ChainOutcome = enum (Ok(uint8[list][list]), Error(uint32));
     let tls_peer_chain = func(stream: int64) -> ChainOutcome host("neura.net.tls.peer_chain", 1);
 

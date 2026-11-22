@@ -2,7 +2,7 @@
 
 `neura-server-host` serves a Neura server image over HTTP/1.1, HTTPS and, in builds with it, HTTP/2 ([below](#http2)). It owns the listeners, TLS and the HTTP wire, and runs no application code: each request is executed by a fresh worker process that loads the image, runs the whole program once for that one request, and exits. Nothing a program holds survives between requests; data that must outlive a request belongs in a file or a database the program reaches through its host services. The contract is [the backend design note](../design/Backend030.md); this page describes what the 0.3.0 host does.
 
-The host is built on POSIX systems and Windows. The Linux and macOS [release archives](#release-archives) have HTTPS, HTTP/2 and the PostgreSQL provider. A POSIX source build needs `-DNEURA_ENABLE_SERVER_TLS=ON` and the static OpenSSL 3.5 archives from the [server component lock](../../packaging/server-components.lock.toml) for HTTPS. HTTP/2 also needs `-DNEURA_ENABLE_SERVER_HTTP2=ON` and `-DNEURA_NGHTTP2_ROOT=<prefix>` for the pinned static nghttp2. Windows 0.3.0 serves HTTP/1.1 and refuses TLS listeners, `--h2c` and PostgreSQL pools.
+The host is built on POSIX systems and Windows. The Linux and macOS [release archives](#release-archives) have HTTPS, HTTP/2 and the PostgreSQL provider. A POSIX source build needs `-DNEURA_ENABLE_SERVER_TLS=ON` and the static OpenSSL 4.1 archives from the [server component lock](../../packaging/server-components.lock.toml) for HTTPS. HTTP/2 also needs `-DNEURA_ENABLE_SERVER_HTTP2=ON` and `-DNEURA_NGHTTP2_ROOT=<prefix>` for the pinned static nghttp2. Windows 0.3.0 serves HTTP/1.1 and refuses TLS listeners, `--h2c` and PostgreSQL pools.
 
 ## A server image
 
@@ -180,7 +180,7 @@ A build without the option speaks HTTP/1.1 only: TLS listeners select `http/1.1`
 
 ## Release archives
 
-The Linux and macOS release archives on x86-64 and arm64 link the three server components statically. They use OpenSSL 3.5.9 for TLS, nghttp2 1.71.0 for HTTP/2, and libpq 18.7 for the [PostgreSQL provider](Sql.md#building). [`packaging/build-server-components.sh`](../../packaging/build-server-components.sh) builds them from the sources the server component lock pins, after checking each archive and licence text against the lock's SHA-256. The POSIX release workflow and Linux Tier 1 build use these configure options:
+The Linux and macOS release archives on x86-64 and arm64 link the three server components statically. They use OpenSSL 4.1.0 for TLS, nghttp2 1.71.0 for HTTP/2, and libpq 18.7 for the [PostgreSQL provider](Sql.md#building). [`packaging/build-server-components.sh`](../../packaging/build-server-components.sh) builds them from the sources the server component lock pins, after checking each archive and licence text against the lock's SHA-256. The POSIX release workflow and Linux Tier 1 build use these configure options:
 
 ```text
 sh packaging/build-server-components.sh <prefix>

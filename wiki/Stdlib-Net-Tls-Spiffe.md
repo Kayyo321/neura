@@ -48,9 +48,9 @@ The following public declarations are taken from the module source; each links t
   A SPIFFE ID from a trust domain and a path (empty, or starting with `/`), checked as by `parse`; offsets refer to the joined text. Tagged `#NoDiscard`.
 - **Spiffe** · [`export let check_trust_domain_name = func(domain: string) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/spiffe.nra#L117)
   Ok when `domain` is a valid trust domain name (section 2.1). Tagged `#NoDiscard`.
-- **Spiffe** · [`export let verify_x509_svid = func(chain_pem: string, bundle_pem: string, trust_domain: string = "", clock: Clock = nil) -> Result<SpiffeId>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/spiffe.nra#L125)
+- **Spiffe** · [`export let verify_x509_svid = func(chain_pem: string, bundle_pem: string, trust_domain: string, clock: Clock = nil) -> Result<SpiffeId>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/spiffe.nra#L125)
   Verifies a leaf-first X.509-SVID chain with a PEM trust bundle. Requires one URI SAN and an end-entity certificate. The supplied bundle is authoritative for the requested trust domain. Tagged `#NoDiscard`.
-- **Spiffe** · [`export let verify_jwt_svid = func(token: string, jwks_json: string, audience: string, trust_domain: string = "", clock: Clock = nil) -> Result<SpiffeId>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/spiffe.nra#L201)
+- **Spiffe** · [`export let verify_jwt_svid = func(token: string, jwks_json: string, audience: string, trust_domain: string, clock: Clock = nil) -> Result<SpiffeId>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/spiffe.nra#L204)
   Verifies a compact JWT-SVID against a SPIFFE JWK bundle and the expected audience. Requires an asymmetric signature, the `jwt-svid` key use, and `sub`, `aud` and `exp`. A `kid` selects one key; without it, the supported signatures are checked against at most 16 bundle keys. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 
