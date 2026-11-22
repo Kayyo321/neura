@@ -5,10 +5,10 @@ let console = import:Std.Io.Console;
 let program = import:Std.Program;
 
 /// The settings of one download.
-#Since("0.2.0")
+.Since("0.2.0")
 let Download = class (
     /// Where the download comes from.
-    #Note("set once by the constructor")
+    .Note("set once by the constructor")
     export last url: string;
 
     /// How many times to try; at least 1.
@@ -23,10 +23,10 @@ let Download = class (
 
     /// The old name of attempts. The class itself still uses it without a
     /// warning; a use from outside warns and suggests attempts.
-    #Deprecated(as_of: "0.2.0", use_instead: attempts)
+    .Deprecated(as_of: "0.2.0", use_instead: attempts)
     export let tries: int = 3;
 
-    #Unit("ms")
+    .Unit("ms")
     export let timeout: int = 500;
         | get: timeout;
 
@@ -44,7 +44,7 @@ let Example = module:program.Entry (
         let download = new Download("https://example.com/data");
         download.attempts = 5;
 
-        #Unit("bytes")
+        .Unit("bytes")
         last limit: int = 1024;
 
         // Fields only: the same class wherever these fields are written.
@@ -57,7 +57,7 @@ let Example = module:program.Entry (
 
         // A tagged member makes this body a class of its own.
         let backoff: class (
-            #Unit("ms")
+            .Unit("ms")
             export let delay: int = 250;
                 | get: delay;
         ) = new;

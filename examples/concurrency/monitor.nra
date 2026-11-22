@@ -8,7 +8,7 @@ let program = import:Std.Program;
 
 /// A reading taken by one sensor. Nothing in it changes after construction,
 /// so tasks may share it.
-#Immutable
+.Immutable
 let Reading = class (
     export last sensor: string;
     export last celsius: int64;
@@ -21,12 +21,12 @@ let Reading = class (
 
 /// Fahrenheit, rounded down. Pure: it depends only on its argument, so the
 /// optimizer may reuse a result, and the compiler checks the promise.
-#Pure
+.Pure
 let fahrenheit = func(celsius: int64) -> int64 => celsius * 9 / 5 + 32;
 
 /// The statistics of every reading, shared by the tasks that record them.
 /// Every exported method runs under the instance's guard.
-#Synchronized
+.Synchronized
 let Statistics = class (
     let count: int64 = 0;
     let total: int64 = 0;
@@ -62,7 +62,7 @@ let Statistics = class (
 );
 
 /// Task-safe: it touches no module state, which the compiler checks.
-#ThreadSafe
+.ThreadSafe
 let measure = func(statistics: Statistics, sensor: string, base: int64) -> int64 =>
     statistics.record_all(new Reading(sensor, base), new Reading(sensor, base + 2));
 
