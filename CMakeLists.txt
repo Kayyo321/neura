@@ -604,14 +604,14 @@ elseif(WIN32)
     neura_windows_hook(server_libraries)
 endif()
 
-option(NEURA_ENABLE_SERVER_TLS "Build the OpenSSL 3.5 TLS transports" OFF)
+option(NEURA_ENABLE_SERVER_TLS "Build the OpenSSL 4.1 TLS transports" OFF)
 if(NEURA_ENABLE_SERVER_TLS AND WIN32)
     # Std.Net.Tls and DoQ use the Winsock provider; the separate HTTP
     # listener has its own platform feature gate.
     set(OPENSSL_USE_STATIC_LIBS TRUE)
-    find_package(OpenSSL 3.5 REQUIRED COMPONENTS SSL Crypto)
-    if(NOT OPENSSL_VERSION MATCHES "^3\\.5\\.")
-        message(FATAL_ERROR "The Neura TLS provider requires OpenSSL 3.5")
+    find_package(OpenSSL 4.1 REQUIRED COMPONENTS SSL Crypto)
+    if(NOT OPENSSL_VERSION MATCHES "^4\\.1\\.")
+        message(FATAL_ERROR "The Neura TLS provider requires OpenSSL 4.1")
     endif()
     target_compile_definitions(neura_nvm PRIVATE NEURA_NVM_TLS)
     target_link_libraries(neura_nvm PRIVATE OpenSSL::SSL OpenSSL::Crypto)
@@ -622,10 +622,10 @@ elseif(NEURA_ENABLE_SERVER_TLS)
 
     function(neura_configure_server_tls)
         set(OPENSSL_USE_STATIC_LIBS TRUE)
-        find_package(OpenSSL 3.5 REQUIRED COMPONENTS SSL Crypto)
-        if(NOT OPENSSL_VERSION MATCHES "^3\\.5\\." OR NOT OPENSSL_SSL_LIBRARY MATCHES "\\.a$"
+        find_package(OpenSSL 4.1 REQUIRED COMPONENTS SSL Crypto)
+        if(NOT OPENSSL_VERSION MATCHES "^4\\.1\\." OR NOT OPENSSL_SSL_LIBRARY MATCHES "\\.a$"
            OR NOT OPENSSL_CRYPTO_LIBRARY MATCHES "\\.a$")
-            message(FATAL_ERROR "The Neura server TLS transport requires OpenSSL 3.5 static archives")
+            message(FATAL_ERROR "The Neura server TLS transport requires OpenSSL 4.1 static archives")
         endif()
         # The OpenSSL found above, with its headers as an ordinary include
         # directory (-I): the imported OpenSSL::SSL would give -isystem, which
@@ -663,7 +663,7 @@ endif()
 # packaging/server-components.lock.toml pins: from NEURA_SQLITE_AMALGAMATION
 # when it names the archive, otherwise downloaded at configure time; either
 # way its SHA-256 must match the lock. PostgreSQL needs a static libpq 18.7
-# and the static OpenSSL 3.5 of the TLS build.
+# and the static OpenSSL from the TLS build.
 option(NEURA_ENABLE_SQL "Build the SQL providers of Std.Data.Sql (SQLite)" ON)
 set(NEURA_SQLITE_AMALGAMATION "" CACHE FILEPATH
     "sqlite-amalgamation-3540100.zip; when empty it is downloaded from the URL of the component lock")
@@ -715,7 +715,7 @@ if(NEURA_ENABLE_SQL AND NOT EMSCRIPTEN)
         neura_windows_required_hook(postgres server-components.cmake)
     elseif(NEURA_ENABLE_POSTGRES)
         if(NOT NEURA_ENABLE_SERVER_TLS)
-            message(FATAL_ERROR "NEURA_ENABLE_POSTGRES needs NEURA_ENABLE_SERVER_TLS for the static OpenSSL 3.5")
+            message(FATAL_ERROR "NEURA_ENABLE_POSTGRES needs NEURA_ENABLE_SERVER_TLS for static OpenSSL")
         endif()
         if(NOT EXISTS "${NEURA_LIBPQ_SOURCE}/src/interfaces/libpq/libpq-fe.h"
            OR NOT EXISTS "${NEURA_LIBPQ_BUILD}/src/interfaces/libpq/libpq.a")

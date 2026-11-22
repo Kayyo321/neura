@@ -147,7 +147,7 @@ nghttp2_archive=$(fetch nghttp2)
 postgresql_archive=$(fetch postgresql)
 
 # OpenSSL: static libraries and the command-line tool (the TLS tests make
-# their certificates with it), no loadable modules or engines, no tests or
+# their certificates with it), no loadable modules, no tests or
 # documentation. The prefix is fixed so no build path is compiled in; the
 # files are installed under PREFIX/openssl through DESTDIR.
 printf 'openssl: building %s\n' "$openssl_version" >&2
@@ -155,7 +155,7 @@ tar -xzf "$openssl_archive" -C "$work"
 (
     cd "$work/openssl-$openssl_version"
     CC=$cc ./Configure --prefix=/opt/neura-openssl --libdir=lib --openssldir=/etc/ssl \
-        no-shared no-module no-engine no-tests no-docs $openssl_ktls $openssl_flags > "$work/openssl-configure.log" 2>&1 ||
+        no-shared no-module no-tests no-docs $openssl_ktls $openssl_flags > "$work/openssl-configure.log" 2>&1 ||
         { tail -n 40 "$work/openssl-configure.log" >&2; exit 1; }
     make -j "$jobs" > "$work/openssl-build.log" 2>&1 || { tail -n 60 "$work/openssl-build.log" >&2; exit 1; }
     make install_sw DESTDIR="$work/openssl-root" > "$work/openssl-install.log" 2>&1 ||

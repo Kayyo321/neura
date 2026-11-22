@@ -13,8 +13,8 @@
 #include <unistd.h>
 #include <utility>
 
-#if OPENSSL_VERSION_MAJOR != 3 || OPENSSL_VERSION_MINOR != 5
-#error The Neura server TLS adapter requires OpenSSL 3.5.
+#if OPENSSL_VERSION_MAJOR != 4 || OPENSSL_VERSION_MINOR != 1
+#error The Neura server TLS adapter requires OpenSSL 4.1.
 #endif
 
 namespace neura::server::http {

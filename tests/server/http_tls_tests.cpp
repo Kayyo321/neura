@@ -73,10 +73,11 @@ KeyPair make_key_pair(const fs::path& directory, string_view name, long serial) 
           X509_gmtime_adj(X509_getm_notBefore(cert.get()), -60) &&
           X509_gmtime_adj(X509_getm_notAfter(cert.get()), 3600) &&
           X509_set_pubkey(cert.get(), key.get()) == 1, "could not create test certificate");
-    auto* subject = X509_get_subject_name(cert.get());
+    const std::unique_ptr<X509_NAME, decltype(&X509_NAME_free)> subject(X509_NAME_new(), X509_NAME_free);
     constexpr unsigned char host[] = "localhost";
-    check(subject && X509_NAME_add_entry_by_txt(subject, "CN", MBSTRING_ASC, host, -1, -1, 0) == 1 &&
-          X509_set_issuer_name(cert.get(), subject) == 1, "could not set test certificate names");
+    check(subject && X509_NAME_add_entry_by_txt(subject.get(), "CN", MBSTRING_ASC, host, -1, -1, 0) == 1 &&
+          X509_set_subject_name(cert.get(), subject.get()) == 1 && X509_set_issuer_name(cert.get(), subject.get()) == 1,
+          "could not set test certificate names");
     Extension san(X509V3_EXT_conf_nid(nullptr, nullptr, NID_subject_alt_name, "DNS:localhost"), X509_EXTENSION_free);
     check(san && X509_add_ext(cert.get(), san.get(), -1) == 1 && X509_sign(cert.get(), key.get(), EVP_sha256()) > 0,
           "could not sign test certificate");
@@ -154,7 +155,7 @@ public:
         if (version == TLS1_1_VERSION) SSL_CTX_set_security_level(context_.get(), 0);
         ssl_.reset(SSL_new(context_.get()));
         constexpr unsigned char protocols[] = {2, 'h', '2', 8, 'h', 't', 't', 'p', '/', '1', '.', '1'};
-        check(ssl_ && SSL_set_fd(ssl_.get(), socket) == 1 && SSL_set1_host(ssl_.get(), "localhost") == 1 &&
+        check(ssl_ && SSL_set_fd(ssl_.get(), socket) == 1 && SSL_set1_dnsname(ssl_.get(), "localhost") == 1 &&
               SSL_set_tlsext_host_name(ssl_.get(), "localhost") == 1 &&
               SSL_set_alpn_protos(ssl_.get(), protocols, sizeof protocols) == 0, "could not configure TLS client");
     }

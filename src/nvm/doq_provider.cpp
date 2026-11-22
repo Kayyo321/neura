@@ -63,7 +63,7 @@ bool verify_identity(SSL* ssl, const std::string& name) {
     X509_VERIFY_PARAM_set_hostflags(parameters, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
     auto address = peer_address(name, 0);
     if (address) return X509_VERIFY_PARAM_set1_ip_asc(parameters, name.c_str()) == 1;
-    return SSL_set_tlsext_host_name(ssl, name.c_str()) == 1 && SSL_set1_host(ssl, name.c_str()) == 1;
+    return SSL_set_tlsext_host_name(ssl, name.c_str()) == 1 && SSL_set1_dnsname(ssl, name.c_str()) == 1;
 }
 
 std::size_t framed_size(const std::string& payload) {

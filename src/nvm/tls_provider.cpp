@@ -1,6 +1,6 @@
 // TLS streams for the standard library (docs/runtime/NVM.md, "TLS services"):
 // a client stream that verifies its peer, and a server stream accepted from
-// a TCP listener, both with ALPN. Built with OpenSSL 3.5 when the build has
+// a TCP listener, both with ALPN. Built with OpenSSL 4.1 when the build has
 // NEURA_ENABLE_SERVER_TLS (NEURA_NVM_TLS); otherwise each call with the net
 // capability answers Unsupported (13). None of these services overlaps.
 
@@ -360,7 +360,7 @@ bool load_identity(SSL_CTX* context, const std::string& certificate, const std::
 bool set_identity_check(SSL* ssl, const std::string& name) {
     X509_VERIFY_PARAM_set_hostflags(SSL_get0_param(ssl), X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
     return numeric_host(name) ? X509_VERIFY_PARAM_set1_ip_asc(SSL_get0_param(ssl), name.c_str()) == 1
-                             : SSL_set_tlsext_host_name(ssl, name.c_str()) == 1 && SSL_set1_host(ssl, name.c_str()) == 1;
+                             : SSL_set_tlsext_host_name(ssl, name.c_str()) == 1 && SSL_set1_dnsname(ssl, name.c_str()) == 1;
 }
 
 bool attach_socket(TlsStream& stream) {

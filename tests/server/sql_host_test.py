@@ -441,12 +441,12 @@ def free_port():
         return sock.getsockname()[1]
 
 
-def make_certificates(openssl, directory):
+def make_certificates(openssl, directory, ca_name="neura-sql-test-ca"):
     """A CA and a server certificate for localhost and 127.0.0.1, signed by it."""
     directory.mkdir(parents=True, exist_ok=True)
     run = lambda *command: subprocess.run([openssl, *command], cwd=directory, capture_output=True, check=True)
     run("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", "ca.key", "-out", "ca.crt", "-days", "2",
-        "-subj", "/CN=neura-sql-test-ca")
+        "-subj", f"/CN={ca_name}")
     run("req", "-newkey", "rsa:2048", "-nodes", "-keyout", "server.key", "-out", "server.csr",
         "-subj", "/CN=localhost")
     (directory / "server.ext").write_text("subjectAltName=DNS:localhost,IP:127.0.0.1\n")
@@ -564,7 +564,9 @@ def test_postgres(args):
         make_certificates(args.openssl, certificates)
         other = Path(args.work) / "pg-other-ca"
         shutil.rmtree(other, ignore_errors=True)
-        make_certificates(args.openssl, other)
+        # A distinct CA name tests a missing trust path. Reusing the issuer's
+        # name can instead make OpenSSL try the wrong key and report an RSA error.
+        make_certificates(args.openssl, other, "neura-sql-unrelated-ca")
         server = Postgres(version, image, certificates)
         try:
             for host_name, ca, expected in (("localhost", certificates, True), ("127.0.0.1", certificates, True),
