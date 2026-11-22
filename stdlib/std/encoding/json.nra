@@ -1364,14 +1364,16 @@ export let Json = module (
             if (p == count || text.byte_at(p) != 34) {
                 return -1;
             }
-            if (escaped_string == nil) {
-                escaped_string = new Parser();
+            let decoder = escaped_string;
+            if (not decoder) {
+                decoder = new Parser();
+                escaped_string = decoder;
             }
-            escaped_string.document(text.slice(start, p + 1));
-            if (escaped_string.failed) {
+            decoder.document(text.slice(start, p + 1));
+            if (decoder.failed) {
                 return -1;
             }
-            match (escaped_string.value) {
+            match (decoder.value) {
                 JsonValue.Text(decoded) => {
                     string_value = decoded;
                 },

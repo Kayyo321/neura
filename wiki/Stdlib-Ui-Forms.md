@@ -82,21 +82,21 @@ The following public declarations are taken from the module source; each links t
   The component whose root moves the focus. `Std.Ui.Controls.form` binds it.
 - **Forms.Form** · [`export let submit = func(action: func() -> void) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L214)
   Validates every field. When all are valid it records a submit and calls `action`; otherwise it records the first invalid field and asks for the focus to move there. Returns whether the form was valid.
-- **Forms.Form** · [`export let on_submit = func(action: func() -> void) -> func(ui.SubmitEvent) -> void`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L236)
+- **Forms.Form** · [`export let on_submit = func(action: func() -> void) -> func(ui.SubmitEvent) -> void`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L238)
   A handler for the form element's `submit` event, bound with `on:submit.prevent_default`. `action` is retained and runs when the form is valid.
-- **Forms.Form** · [`export let reset = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L244)
+- **Forms.Form** · [`export let reset = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L246)
   Resets every field and the counts.
-- **Forms.Form** · [`export let field_count = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L252)
+- **Forms.Form** · [`export let field_count = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L254)
   The number of fields.
-- **Forms.Form** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L255)
+- **Forms.Form** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L257)
   `Form(` the number of fields and the state `)`.
-- **Forms** · [`export let any_text = func -> func(string) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L260)
+- **Forms** · [`export let any_text = func -> func(string) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L262)
   A parser that accepts any text as it is.
-- **Forms** · [`export let required_text = func(message: string) -> func(string) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L264)
+- **Forms** · [`export let required_text = func(message: string) -> func(string) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L266)
   A parser that accepts text with something other than spaces, trimmed; otherwise `message`.
-- **Forms** · [`export let integer = func(min: int64, max: int64, message: string) -> func(string) -> result.Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L275)
+- **Forms** · [`export let integer = func(min: int64, max: int64, message: string) -> func(string) -> result.Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L277)
   A parser of a whole decimal number from `min` to `max`, with optional spaces around it; otherwise `message`.
-- **Forms** · [`export let email = func(message: string) -> func(string) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L315)
+- **Forms** · [`export let email = func(message: string) -> func(string) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L317)
   A parser of an e-mail address by its shape only: one `@` with text before it, a domain after it with a dot inside, and no spaces; trimmed. Otherwise `message`. Whether the address exists is for the server to find out.
 <!-- END SOURCE API -->
 

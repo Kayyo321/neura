@@ -26,7 +26,8 @@ export let ModelHost = module (
         export let special: func(ui.Root) -> void = new func(root: ui.Root) {};
         export let is_special: bool = false;
 
-        export let init = func(listener: uint64, target: ui.Component, coalesce: bool, deliver: func() -> void) => set;
+        export let init = func(listener: uint64, coalesce: bool, deliver: func() -> void,
+            target: ui.Component = nil) => set;
 
         /// @brief `Step(listener N)`.
         export let.override to_string = func -> string => "Step(listener " .. listener.to_string() .. ")";
@@ -83,61 +84,61 @@ export let ModelHost = module (
         /// @brief Adds a click on `target`'s listener `listener` to the batch being scripted.
         export let click = func(listener: uint64, target: ui.Component, handler: func(ui.ClickEvent) -> void) {
             last event = new ui.ClickEvent(0, 1.0, 2.0, new ui.Modifiers(false, false, false, false), 1);
-            scripting.steps.append(new Step(listener, target, false, new func() {
+            scripting.steps.append(new Step(listener, false, new func() {
                 handler(event);
-            }));
+            }, target));
         };
 
         /// @brief Adds a pointer move, which a root coalesces per listener, to the batch being scripted.
         export let pointer_move = func(listener: uint64, target: ui.Component, handler: func(ui.PointerEvent) -> void,
             x: float64, y: float64) {
             last event = new ui.PointerEvent(x, y, 0, ui.PointerKind.Mouse, new ui.Modifiers(false, false, false, false));
-            scripting.steps.append(new Step(listener, target, true, new func() {
+            scripting.steps.append(new Step(listener, true, new func() {
                 handler(event);
-            }));
+            }, target));
         };
 
         /// @brief Adds an input event with `value` to the batch being scripted.
         export let input = func(listener: uint64, target: ui.Component, handler: func(ui.InputEvent) -> void,
             value: string) {
             last event = new ui.InputEvent(value, false, false);
-            scripting.steps.append(new Step(listener, target, false, new func() {
+            scripting.steps.append(new Step(listener, false, new func() {
                 handler(event);
-            }));
+            }, target));
         };
 
         /// @brief Adds a change event with `value` and `checked` to the batch being scripted.
         export let change = func(listener: uint64, target: ui.Component, handler: func(ui.ChangeEvent) -> void,
             value: string, checked: bool) {
             last event = new ui.ChangeEvent(value, checked);
-            scripting.steps.append(new Step(listener, target, false, new func() {
+            scripting.steps.append(new Step(listener, false, new func() {
                 handler(event);
-            }));
+            }, target));
         };
 
         /// @brief Adds a submit event to the batch being scripted.
         export let submit = func(listener: uint64, target: ui.Component, handler: func(ui.SubmitEvent) -> void) {
             last event = new ui.SubmitEvent("");
-            scripting.steps.append(new Step(listener, target, false, new func() {
+            scripting.steps.append(new Step(listener, false, new func() {
                 handler(event);
-            }));
+            }, target));
         };
 
         /// @brief Adds a blur event to the batch being scripted.
         export let blur = func(listener: uint64, target: ui.Component, handler: func(ui.FocusEvent) -> void) {
             last event = new ui.FocusEvent();
-            scripting.steps.append(new Step(listener, target, false, new func() {
+            scripting.steps.append(new Step(listener, false, new func() {
                 handler(event);
-            }));
+            }, target));
         };
 
         /// @brief Adds an input event that the host posts when a root resynchronizes after an overflow.
         export let input_on_resynchronize = func(listener: uint64, target: ui.Component,
             handler: func(ui.InputEvent) -> void, value: string) {
             last event = new ui.InputEvent(value, false, false);
-            resync.steps.append(new Step(listener, target, false, new func() {
+            resync.steps.append(new Step(listener, false, new func() {
                 handler(event);
-            }));
+            }, target));
         };
 
         /// @brief Ends the batch being scripted; the next `wait` of a root posts it.
@@ -205,7 +206,7 @@ export let ModelHost = module (
 
         let add_navigation = func(direction: int, path: string) {
             last self = instance;
-            last step = new Step(0, nil, false, new func() {});
+            last step = new Step(0, false, new func() {});
             step.special = new func(root: ui.Root) {
                 self.navigate_now(root, direction, path);
             };
@@ -373,9 +374,9 @@ export let ModelHost = module (
             if (reconciling && (root as int) <= reconcilers.length) {
                 last reconciler = reconcilers[(root as int) - 1];
                 last plan = reconciler.prepare_turn(batch.top, batch.rendered);
-                if (plan.diagnostic != nil) {
-                    log.append(line .. ", invalid: " .. plan.diagnostic.message);
-                    return result.Result<ui.RenderOutcome>.Ok(ui.RenderOutcome.Invalid(plan.diagnostic));
+                if (let diagnostic = plan.diagnostic; diagnostic) {
+                    log.append(line .. ", invalid: " .. diagnostic.message);
+                    return result.Result<ui.RenderOutcome>.Ok(ui.RenderOutcome.Invalid(diagnostic));
                 }
                 log.append(line .. ", " .. plan.operations.length.to_string() .. " operations");
                 for (let operation in plan.operations) {

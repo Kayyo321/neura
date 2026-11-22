@@ -72,6 +72,10 @@ export let Scope = module (
         if (shared == nil) {
             shared = new(true);
         }
-        return shared;
+        last scope = shared;
+        if (not scope) {
+            trap_with_message("invalid state: the global scope was not initialized");
+        }
+        return scope;
     };
 );

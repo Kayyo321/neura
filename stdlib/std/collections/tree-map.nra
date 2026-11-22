@@ -31,7 +31,7 @@ export let TreeMap = module (
         export let height: int = 1;
 
         /// @brief Creates a leaf holding the supplied entry and parent link.
-        export let init = func(item_key: K, item_value: V, above: Node<K, V>) {
+        export let init = func(item_key: K, item_value: V, above: Node<K, V> = nil) {
             key = item_key;
             value = item_value;
             parent = above;
@@ -176,11 +176,11 @@ export let TreeMap = module (
 
         /// @brief Returns a fail-fast iterator over `[key, value]` tuples in ascending key order.
         export let iterator = func -> iterators.Iterator<[K, V]> =>
-            new TreeMapIterator<K, V>(leftmost(root), changes);
+            new TreeMapIterator<K, V>(changes, leftmost(root));
 
         /// @brief Returns a fail-fast iterator over keys in ascending order.
         export let key_iterator = func -> iterators.Iterator<K> =>
-            new TreeKeyIterator<K, V>(leftmost(root), changes);
+            new TreeKeyIterator<K, V>(changes, leftmost(root));
 
         /// @brief Sets each entry of `other` in its ascending order.
         export let put_all = func(other: TreeMap<K, V>) {
@@ -228,7 +228,11 @@ export let TreeMap = module (
             last total = chosen.length;
             let i = 0;
             while (i < total) {
-                unlink(find_node(chosen[i]));
+                last selected = find_node(chosen[i]);
+                if (selected == nil) {
+                    trap_with_message("invalid state: tree key vanished");
+                }
+                unlink(selected);
                 i += 1;
             }
             return total;
@@ -312,20 +316,22 @@ export let TreeMap = module (
 
         /// @brief Returns the entry with the least key. Traps with `no such element` when empty.
         export let first = func -> [K, V] {
-            if (root == nil) {
+            last start = root;
+            if (start == nil) {
                 trap_with_message("no such element");
             }
-            last node = leftmost(root);
+            last node = leftmost_present<K, V>(start);
             last item: [K, V] = [node.key, node.value];
             return item;
         };
 
         /// @brief Returns the entry with the greatest key. Traps with `no such element` when empty.
         export let last = func -> [K, V] {
-            if (root == nil) {
+            last start = root;
+            if (start == nil) {
                 trap_with_message("no such element");
             }
-            last node = rightmost(root);
+            last node = rightmost_present(start);
             last item: [K, V] = [node.key, node.value];
             return item;
         };
@@ -333,10 +339,11 @@ export let TreeMap = module (
         /// @brief Removes and returns the entry with the least key. Traps with "no
         /// such element" when empty.
         export let remove_first = func -> [K, V] {
-            if (root == nil) {
+            last start = root;
+            if (start == nil) {
                 trap_with_message("no such element");
             }
-            last node = leftmost(root);
+            last node = leftmost_present<K, V>(start);
             last item: [K, V] = [node.key, node.value];
             unlink(node);
             return item;
@@ -345,10 +352,11 @@ export let TreeMap = module (
         /// @brief Removes and returns the entry with the greatest key. Traps with "no
         /// such element" when empty.
         export let remove_last = func -> [K, V] {
-            if (root == nil) {
+            last start = root;
+            if (start == nil) {
                 trap_with_message("no such element");
             }
-            last node = rightmost(root);
+            last node = rightmost_present(start);
             last item: [K, V] = [node.key, node.value];
             unlink(node);
             return item;
@@ -439,7 +447,7 @@ export let TreeMap = module (
         /// balance, stored heights, ascending key order, reciprocal parent
         /// links, a nil parent at the root, and the count.
         export let validate = func {
-            if (root != nil && root.parent != nil) {
+            if (let start = root; start != nil && start.parent != nil) {
                 trap_with_message("invalid state: tree root parent");
             }
             let visited = 0;
@@ -458,10 +466,10 @@ export let TreeMap = module (
                 if (left_height > right_height + 1 || right_height > left_height + 1) {
                     trap_with_message("invalid state: tree balance");
                 }
-                if (node.left != nil && node.left.parent != node) {
+                if (let child = node.left; child != nil && child.parent != node) {
                     trap_with_message("invalid state: tree parent link");
                 }
-                if (node.right != nil && node.right.parent != node) {
+                if (let child = node.right; child != nil && child.parent != node) {
                     trap_with_message("invalid state: tree parent link");
                 }
                 last above = node.parent;
@@ -556,27 +564,29 @@ export let TreeMap = module (
         /// @brief Returns the node that already holds the key, unchanged, or nil
         /// after attaching a new node and rebalancing.
         let insert = func(key: K, value: V) -> Node<K, V> {
-            if (root == nil) {
-                root = new Node<K, V>(key, value, nil);
+            let node = root;
+            if (node == nil) {
+                root = new Node<K, V>(key, value);
                 count = 1;
                 changes.value = changes.value + 1;
                 return nil;
             }
-            let node = root;
             do {
                 last order = compare(key, node.key);
                 if (order == ordering.Ordering.Less) {
-                    if (node.left == nil) {
+                    last next = node.left;
+                    if (next == nil) {
                         node.left = new Node<K, V>(key, value, node);
                         break;
                     }
-                    node = node.left;
+                    node = next;
                 } else if (order == ordering.Ordering.Greater) {
-                    if (node.right == nil) {
+                    last next = node.right;
+                    if (next == nil) {
                         node.right = new Node<K, V>(key, value, node);
                         break;
                     }
-                    node = node.right;
+                    node = next;
                 } else {
                     return node;
                 }
@@ -591,8 +601,8 @@ export let TreeMap = module (
         /// of its in-order successor, which is unlinked instead.
         let unlink = func(node: Node<K, V>) {
             let target = node;
-            if (node.left != nil && node.right != nil) {
-                target = leftmost(node.right);
+            if (let right = node.right; node.left != nil && right != nil) {
+                target = leftmost_present<K, V>(right);
                 node.key = target.key;
                 node.value = target.value;
             }
@@ -604,7 +614,7 @@ export let TreeMap = module (
             if (child != nil) {
                 child.parent = above;
             }
-            replace_child(above, target, child);
+            replace_child(target, above, child);
             target.left = nil;
             target.right = nil;
             target.parent = nil;
@@ -616,23 +626,29 @@ export let TreeMap = module (
         /// @brief Walks up from `start`, recomputing heights and rotating where the
         /// children's heights differ by 2, until a subtree's height is
         /// unchanged.
-        let rebalance_from = func(start: Node<K, V>) {
+        let rebalance_from = func(start: Node<K, V> = nil) {
             let node = start;
             while (node != nil) {
                 last previous = node.height;
-                last left_height = height_of(node.left);
-                last right_height = height_of(node.right);
+                last left = node.left;
+                last right = node.right;
+                last left_height = height_of(left);
+                last right_height = height_of(right);
                 let top = node;
                 if (left_height > right_height + 1) {
-                    last child = node.left;
-                    if (height_of(child.left) < height_of(child.right)) {
-                        rotate_left(child);
+                    if (left == nil) {
+                        trap_with_message("invalid state: tree missing left child");
+                    }
+                    if (height_of(left.left) < height_of(left.right)) {
+                        rotate_left(left);
                     }
                     top = rotate_right(node);
                 } else if (right_height > left_height + 1) {
-                    last child = node.right;
-                    if (height_of(child.right) < height_of(child.left)) {
-                        rotate_right(child);
+                    if (right == nil) {
+                        trap_with_message("invalid state: tree missing right child");
+                    }
+                    if (height_of(right.right) < height_of(right.left)) {
+                        rotate_right(right);
                     }
                     top = rotate_left(node);
                 } else {
@@ -649,6 +665,9 @@ export let TreeMap = module (
         /// top.
         let rotate_left = func(node: Node<K, V>) -> Node<K, V> {
             last lifted = node.right;
+            if (lifted == nil) {
+                trap_with_message("invalid state: tree missing right child");
+            }
             last inner = lifted.left;
             node.right = inner;
             if (inner != nil) {
@@ -656,7 +675,7 @@ export let TreeMap = module (
             }
             last above = node.parent;
             lifted.parent = above;
-            replace_child(above, node, lifted);
+            replace_child(node, above, lifted);
             lifted.left = node;
             node.parent = lifted;
             node.height = larger(height_of(node.left), height_of(inner)) + 1;
@@ -668,6 +687,9 @@ export let TreeMap = module (
         /// top.
         let rotate_right = func(node: Node<K, V>) -> Node<K, V> {
             last lifted = node.left;
+            if (lifted == nil) {
+                trap_with_message("invalid state: tree missing left child");
+            }
             last inner = lifted.right;
             node.left = inner;
             if (inner != nil) {
@@ -675,7 +697,7 @@ export let TreeMap = module (
             }
             last above = node.parent;
             lifted.parent = above;
-            replace_child(above, node, lifted);
+            replace_child(node, above, lifted);
             lifted.right = node;
             node.parent = lifted;
             node.height = larger(height_of(inner), height_of(node.right)) + 1;
@@ -685,7 +707,7 @@ export let TreeMap = module (
 
         /// @brief Points the link that held `old` at `replacement`: the parent's
         /// child link, or root when there is no parent.
-        let replace_child = func(above: Node<K, V>, old: Node<K, V>, replacement: Node<K, V>) {
+        let replace_child = func(old: Node<K, V>, above: Node<K, V> = nil, replacement: Node<K, V> = nil) {
             if (above == nil) {
                 root = replacement;
             } else if (above.left == old) {
@@ -734,12 +756,12 @@ export let TreeMap = module (
         };
 
         /// @brief Returns the node's key as `Some`, or `None` for `nil`.
-        let key_of = func(node: Node<K, V>) -> optional.Optional<K> {
+        let key_of = func(node: Node<K, V> = nil) -> optional.Optional<K> {
             return if (node == nil) -> optional.Optional<K>.None else -> optional.Optional<K>.Some(node.key);
         };
 
         /// @brief Returns the node's entry as `Some`, or `None` for `nil`.
-        let entry_of = func(node: Node<K, V>) -> optional.Optional<[K, V]> {
+        let entry_of = func(node: Node<K, V> = nil) -> optional.Optional<[K, V]> {
             if (node == nil) {
                 return optional.Optional<[K, V]>.None;
             }
@@ -748,23 +770,31 @@ export let TreeMap = module (
         };
 
         /// @brief Returns the cached subtree height, or zero for `nil`.
-        let height_of = func(node: Node<K, V>) -> int {
+        let height_of = func(node: Node<K, V> = nil) -> int {
             return if (node == nil) -> 0 else -> node.height;
         };
 
         /// @brief Returns the least-key node in the subtree, or `nil` for an empty subtree.
-        let leftmost = func(start: Node<K, V>) -> Node<K, V> => leftmost_node<K, V>(start);
+        let leftmost = func(start: Node<K, V> = nil) -> Node<K, V> => leftmost_node<K, V>(start);
 
         /// @brief Returns the greatest-key node in the subtree, or `nil` for an empty subtree.
-        let rightmost = func(start: Node<K, V>) -> Node<K, V> {
+        let rightmost = func(start: Node<K, V> = nil) -> Node<K, V> {
             if (start == nil) {
                 return nil;
             }
+            return rightmost_present(start);
+        };
+
+        /// @brief Returns the greatest-key node in a nonempty subtree.
+        let rightmost_present = func(start: Node<K, V>) -> Node<K, V> {
             let node = start;
-            while (node.right != nil) {
-                node = node.right;
+            while (true) {
+                last next = node.right;
+                if (next == nil) {
+                    return node;
+                }
+                node = next;
             }
-            return node;
         };
 
         /// @brief Returns the next node in key order, or `nil` after the greatest key.
@@ -772,8 +802,8 @@ export let TreeMap = module (
 
         /// @brief The in-order predecessor, through `left` and `parent`.
         let predecessor = func(node: Node<K, V>) -> Node<K, V> {
-            if (node.left != nil) {
-                return rightmost(node.left);
+            if (let left = node.left; left) {
+                return rightmost_present(left);
             }
             let child = node;
             let above = node.parent;
@@ -795,7 +825,7 @@ export let TreeMap = module (
         last expected: uint64;
 
         /// @brief Captures the starting node and current modification count.
-        export let init = func(start: Node<K, V>, counter: cell.Cell<uint64>) {
+        export let init = func(counter: cell.Cell<uint64>, start: Node<K, V> = nil) {
             upcoming = start;
             changes = counter;
             expected = counter.value;
@@ -835,7 +865,7 @@ export let TreeMap = module (
         last expected: uint64;
 
         /// @brief Captures the starting node and current modification count.
-        export let init = func(start: Node<K, V>, counter: cell.Cell<uint64>) {
+        export let init = func(counter: cell.Cell<uint64>, start: Node<K, V> = nil) {
             upcoming = start;
             changes = counter;
             expected = counter.value;
@@ -869,21 +899,29 @@ export let TreeMap = module (
         new TreeMap<K, V>(Seal.Token, comparator);
 
     /// @brief Walks left links to the least-key node, or returns `nil` for an empty subtree.
-    let leftmost_node = func<K, V>(start: Node<K, V>) -> Node<K, V> {
+    let leftmost_node = func<K, V>(start: Node<K, V> = nil) -> Node<K, V> {
         if (start == nil) {
             return nil;
         }
+        return leftmost_present<K, V>(start);
+    };
+
+    /// @brief Returns the least-key node in a nonempty subtree.
+    let leftmost_present = func<K, V>(start: Node<K, V>) -> Node<K, V> {
         let node = start;
-        while (node.left != nil) {
-            node = node.left;
+        while (true) {
+            last next = node.left;
+            if (next == nil) {
+                return node;
+            }
+            node = next;
         }
-        return node;
     };
 
     /// @brief The in-order successor, through `right` and `parent`.
     let successor_node = func<K, V>(node: Node<K, V>) -> Node<K, V> {
-        if (node.right != nil) {
-            return leftmost_node<K, V>(node.right);
+        if (let right = node.right; right) {
+            return leftmost_present<K, V>(right);
         }
         let child = node;
         let above = node.parent;

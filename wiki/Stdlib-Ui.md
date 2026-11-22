@@ -20,11 +20,11 @@ The following public declarations are taken from the module source; each links t
 - **Ui.View** · [`export last descriptor: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L17)
 - **Ui.View** · [`export last fragment: uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L19)
 - **Ui.View** · [`export last last_slot: storage.Slot`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L23)
-  The slot evaluated last; each slot's `next` is the one evaluated before it. Walk the slots in evaluation order with `Std.Ui.Internal.Build.slots_in_order`.
+  The slot evaluated last; each slot's `next` is the one evaluated before it. Walk the slots in evaluation order with `Std.Ui.Internal.Build.slots_in_order`. Nil when there are no slots.
 - **Ui.View** · [`export let owner: class = nil`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L26)
   The reconciler that last placed this view in a tree, and in which pass.
 - **Ui.View** · [`export let pass: uint64 = 0`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L28)
-- **Ui.View** · [`export let init = func(descriptor: string, fragment: uint32, last_slot: storage.Slot)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L31)
+- **Ui.View** · [`export let init = func(descriptor: string, fragment: uint32, last_slot: storage.Slot = nil)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L31)
 - **Ui.View** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L33)
 - **Ui** · [`export let Url = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L38)
   A URL checked for use in a template attribute. Tagged `#Final`, `#Immutable`.

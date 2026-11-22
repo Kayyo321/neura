@@ -187,3 +187,18 @@ The geometric mean of the ratios is 45. Where a program's steps run in regions o
 - Both timings are of whole processes. Neither includes warm-up runs, so the Java figures include the time its JIT compiler takes to reach steady state.
 - Peak resident memory is that of the whole process, including the runtime: the JVM sizes its heap from the machine's memory, so its figure depends on the machine more than Neura's does.
 - Build times are of one build each, including starting `neura` or `javac`, and do not depend on the size.
+
+## Neura 0.3.1 collection nil checks
+
+The TreeMap and LinkedList nil-warning cleanup was measured on an AMD Ryzen 7 9800X3D running Debian 13. The original and updated libraries used the same compiler and runner, with both processes pinned to the same physical core. Each long case used seven paired runs in alternating order with the tier 2 interpreter, GPU off, and the runtime service off. Every pair matched its expected output.
+
+| Workload | Steps before | Steps after | Wall time before | Wall time after | Change |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| TreeMap, 50,000 items | 34,589,390 | 33,798,400 | 606.211 ms | 599.851 ms | −1.05% |
+| TreeMap, 200,000 items | 151,932,227 | 148,359,286 | 2,909.684 ms | 2,856.653 ms | −1.82% |
+| LinkedList, 10,000 reclamation rounds | 18,383,435 | 18,380,103 | 529.561 ms | 439.860 ms | −16.94% |
+| LinkedList, 25,000 reclamation rounds | 45,958,435 | 45,950,103 | 973.408 ms | 975.807 ms | +0.25% |
+
+The process CPU median for the 10,000-round LinkedList case was 386.307 ms before and 386.935 ms after. The wall-time difference in that case reflects variability outside the measured CPU work.
+
+Initial runs under load showed wall increases from 19.852 to 22.299 ms for TreeMap at 1,000 items and from 31.044 to 34.897 ms for LinkedList at 400 rounds. On a dedicated core, 15 alternating pairs measured 17.221 to 17.083 ms and 17.474 to 17.503 ms with default tiering. Tier 0 execution measured 35.5 to 35.3 ms and 152.9 to 152.6 ms. The default runner reported proving and searching at 3.7 to 3.7 ms and 7.8 to 7.9 ms. It reports native compilation together with tier 1 execution, so that bucket also includes setup work and does not isolate a compiler-only cost.

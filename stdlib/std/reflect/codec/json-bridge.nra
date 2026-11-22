@@ -55,7 +55,7 @@ export let JsonBridge = module (
     /// that begins with the JSON path.
     .Since("0.3.0")
     export let from_json = func(value: JsonValue, type: model.TypeDescriptor) -> Result<model.Variant> =>
-        decode_value(value, type, "$");
+        decode_value(value, "$", type);
 
     /// @brief `json.parse`, then `from_json`.
     .Since("0.3.0")
@@ -163,7 +163,7 @@ export let JsonBridge = module (
     let failure = func(code: string, path: string, text: string) -> Result<model.Variant> =>
         Result<model.Variant>.Err(errors.custom(code, path .. ": " .. text));
 
-    let decode_value = func(value: JsonValue, type: model.TypeDescriptor, path: string) -> Result<model.Variant> {
+    let decode_value = func(value: JsonValue, path: string, type: model.TypeDescriptor = nil) -> Result<model.Variant> {
         if (type == nil) {
             return failure("reflect.json.type", path, "a value of type any cannot be decoded");
         }
@@ -179,7 +179,7 @@ export let JsonBridge = module (
             }
             last inner = type.variants[1].payloads[0];
             last arguments: model.Variant[list] = new;
-            match (decode_value(value, declared(inner.type_ordinal), path)) {
+            match (decode_value(value, path, declared(inner.type_ordinal))) {
                 Result.Ok(item) => {
                     arguments.append(item);
                 },
@@ -287,7 +287,7 @@ export let JsonBridge = module (
         last values: model.Variant[list] = new;
         for (let i in 0 .. items.length) {
             last element_type = types.length == 1 ? types[0] : types[i];
-            match (decode_value(items[i], declared(element_type), path .. "[" .. i.to_string() .. "]")) {
+            match (decode_value(items[i], path .. "[" .. i.to_string() .. "]", declared(element_type))) {
                 Result.Ok(item) => {
                     values.append(item);
                 },
@@ -393,6 +393,10 @@ export let JsonBridge = module (
             last values: model.Variant[list] = new;
             for (let parameter in constructor.parameters) {
                 last field = type.field(parameter.name);
+                if (not field) {
+                    trap_with_message("reflection: no field named '" .. parameter.name .. "' for a constructor of " ..
+                        type.name);
+                }
                 last at = path .. "." .. attributes.serial_name(field);
                 if (not readable(field)) {
                     // Encoding left the value out or wrote a placeholder, so nothing can rebuild it.
@@ -401,7 +405,7 @@ export let JsonBridge = module (
                 }
                 match (wire_member(members, field)) {
                     Optional.Some(item) => {
-                        match (decode_value(item, declared(field.type_ordinal), at)) {
+                        match (decode_value(item, at, declared(field.type_ordinal))) {
                             Result.Ok(decoded) => {
                                 values.append(decoded);
                             },
@@ -433,7 +437,7 @@ export let JsonBridge = module (
                 last at = path .. "." .. attributes.serial_name(field);
                 match (wire_member(members, field)) {
                     Optional.Some(item) => {
-                        match (decode_value(item, declared(field.type_ordinal), at)) {
+                        match (decode_value(item, at, declared(field.type_ordinal))) {
                             Result.Ok(decoded) => {
                                 made.set_field(field.index, decoded);
                             },

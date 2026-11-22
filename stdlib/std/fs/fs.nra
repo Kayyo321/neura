@@ -30,7 +30,7 @@ export let Fs = module (
         export last modified: instant.Instant;
 
         /// @brief Stores the entry's kind, size, and modification time.
-        export let init = func(entry_kind: FileKind, byte_size: int64, modified_at: instant.Instant) {
+        export let init = func(entry_kind: FileKind, byte_size: int64, modified_at: instant.Instant = nil) {
             kind = entry_kind;
             size = byte_size;
             modified = modified_at;

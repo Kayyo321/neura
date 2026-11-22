@@ -115,6 +115,10 @@ export let Linker = module (
         if (shared == nil) {
             shared = new;
         }
-        return shared;
+        last linker = shared;
+        if (not linker) {
+            trap_with_message("invalid state: the native linker was not initialized");
+        }
+        return linker;
     };
 );

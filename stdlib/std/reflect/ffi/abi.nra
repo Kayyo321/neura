@@ -33,12 +33,21 @@ export let Abi = module (
         export last nested: CStruct;
         export last count: int;
 
+        /// @brief A nested member repeated `repeat` times. The nested layout `inner` must not be nil.
         export let init = func(label: string, type: CType, inner: CStruct, repeat: int) {
             name = label;
             scalar = type;
             nested = inner;
             count = repeat;
-        };
+        }
+            /// @brief A scalar or an array of scalar members.
+            /// @note Available since 0.3.1.
+            or func(label: string, type: CType, repeat: int) {
+                name = label;
+                scalar = type;
+                nested = nil;
+                count = repeat;
+            };
 
         export let.override to_string = func -> string {
             last base = nested == nil ? scalar.to_string() : nested.to_string();
@@ -69,7 +78,7 @@ export let Abi = module (
 
         /// @brief Adds a scalar member and returns this struct.
         export let scalar = func(label: string, type: CType) -> CStruct {
-            members.append(new CMember(label, type, nil, 1));
+            members.append(new CMember(label, type, 1));
             return instance;
         };
 
@@ -78,7 +87,7 @@ export let Abi = module (
             if (count < 1) {
                 trap_with_message("invalid argument: an array member needs at least one element");
             }
-            members.append(new CMember(label, type, nil, count));
+            members.append(new CMember(label, type, count));
             return instance;
         };
 

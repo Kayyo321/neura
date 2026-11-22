@@ -164,19 +164,23 @@ export let Routing = module (
         /// @brief The router's component, made on the first call. It embeds the component of the
         /// current route.
         export let component = func -> ui.Component {
-            if (outlet != nil) {
-                return outlet;
+            if (let cached = outlet; cached) {
+                return cached;
             }
             last self = instance;
-            outlet = ui.component<Location>(location, new func(at: Location) -> ui.View =>
+            last created = ui.component<Location>(location, new func(at: Location) -> ui.View =>
                 outlet_view(ui.slot(self.page_for(at))));
-            outlet.mount_actions.append(new func(root: ui.Root) {
+            if (not created) {
+                trap_with_message("the router did not create an outlet component");
+            }
+            outlet = created;
+            created.mount_actions.append(new func(root: ui.Root) {
                 self.attach(root);
             });
-            outlet.unmount_actions.append(new func() {
+            created.unmount_actions.append(new func() {
                 self.detach();
             });
-            return outlet;
+            return created;
         };
 
         /// @brief Goes to `path`: adds a history entry when the router is mounted on a host that keeps
@@ -185,8 +189,8 @@ export let Routing = module (
         export let navigate = func(path: string) {
             check_path(path);
             let current = path;
-            if (history != nil) {
-                current = history.push_location(path);
+            if (let host = history; host) {
+                current = host.push_location(path);
             }
             location.set(resolve(current));
         };
@@ -195,8 +199,8 @@ export let Routing = module (
         export let replace = func(path: string) {
             check_path(path);
             let current = path;
-            if (history != nil) {
-                current = history.replace_location(path);
+            if (let host = history; host) {
+                current = host.replace_location(path);
             }
             location.set(resolve(current));
         };
@@ -208,8 +212,8 @@ export let Routing = module (
         /// @brief The text of `link(path)`.
         export let href = func(path: string) -> string {
             check_path(path);
-            if (history != nil) {
-                return history.link(path);
+            if (let host = history; host) {
+                return host.link(path);
             }
             early_links = true;
             return "#" .. path;
@@ -275,32 +279,43 @@ export let Routing = module (
         export let page_for = func(at: Location) -> ui.Component {
             last key = at.route .. " " .. at.to_string();
             if (page_made && key == page_key) {
-                return page;
+                last cached = page;
+                if (not cached) {
+                    trap_with_message("the router did not cache a page component");
+                }
+                return cached;
             }
+            let next: ui.Component = nil;
             if (at.matched()) {
                 for (let i = 0; i < routes.length; i++) {
                     if (routes[i].pattern == at.route) {
                         last make = routes[i].make;
-                        page = make(at.params);
+                        next = make(at.params);
+                        break;
                     }
                 }
             } else {
                 last make = fallback;
-                page = make(at.path);
+                next = make(at.path);
             }
+            if (not next) {
+                trap_with_message("the router did not create a page component for " .. at.path);
+            }
+            page = next;
             page_key = key;
             page_made = true;
-            return page;
+            return next;
         };
 
         .Internal
         export let attach = func(root: ui.Root) {
-            history = root.history();
-            if (history != nil) {
-                location.set(resolve(history.location()));
+            last host = root.history();
+            history = host;
+            if (host) {
+                location.set(resolve(host.location()));
                 // A parent that rendered its links before this router mounted wrote them in the hash form; under
                 // another routing form, the turn renders them again.
-                if (early_links && history.link("/") != "#/") {
+                if (early_links && host.link("/") != "#/") {
                     root.render_all_again();
                 }
             }
@@ -313,8 +328,8 @@ export let Routing = module (
 
         .Internal
         export let detach = func {
-            if (listening != nil) {
-                listening.close();
+            if (let handle = listening; handle) {
+                handle.close();
                 listening = nil;
             }
             history = nil;

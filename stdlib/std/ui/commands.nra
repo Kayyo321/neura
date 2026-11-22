@@ -99,10 +99,14 @@ export let Commands = module (
         /// has its limit of commands in flight (U-10, 32 by default). The task starts when the root's
         /// `Commands.run` next takes a turn.
         export let run = func(input: I) -> RunOutcome {
-            if (owner == nil || not owner.is_mounted() || not owner.owner.can_launch()) {
+            last component = owner;
+            if (not component) {
                 return RunOutcome.Rejected;
             }
-            last root = owner.owner;
+            last root = component.owner;
+            if (root == nil || not root.can_launch()) {
+                return RunOutcome.Rejected;
+            }
             generation_count += 1;
             last generation = generation_count;
             const [results, outcomes, _] = channels.open<Finished<O>>(1);
@@ -172,7 +176,7 @@ export let Commands = module (
         let stop_all = func {
             let i = 0;
             while (i < in_flight.length) {
-                if (running_root == nil || running_root.stop_ticket(in_flight[i])) {
+                if (let root = running_root; root == nil || root.stop_ticket(in_flight[i])) {
                     in_flight.remove_at(i);
                 } else {
                     i += 1;

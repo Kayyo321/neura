@@ -419,9 +419,12 @@ export let Reconcile = module (
         /// @brief The operations in the commit encoding, version 1 (docs/runtime/Providers.md).
         export let encode = func -> uint8[list] => encode_commit(operations);
 
-        export let.override to_string = func -> string =>
-            (diagnostic == nil) ? "Plan(" .. operations.length.to_string() .. " operations)"
-            : "Plan(invalid: " .. diagnostic.message .. ")";
+        export let.override to_string = func -> string {
+            if (let problem = diagnostic; problem) {
+                return "Plan(invalid: " .. problem.message .. ")";
+            }
+            return "Plan(" .. operations.length.to_string() .. " operations)";
+        };
     );
 
     // Thrown out of an expansion when the view is refused.
@@ -826,15 +829,21 @@ export let Reconcile = module (
             passes = pass;
             plan.pass = pass;
             state.claimed_pass = pass;
-            if (not state.whole) {
-                for (let entry in state.rendered) {
-                    entry.component.rendered_by = instance;
-                    entry.component.rendered_pass = pass;
+            if (not state.whole || state.reuse) {
+                last component = state.component;
+                if (not component) {
+                    trap_with_message("a reconciliation turn requires a root component");
                 }
-                state.fresh = was_rendered(state, state.component);
-            }
-            if (state.reuse) {
-                mark_touched(state.component, pass, state);
+                if (not state.whole) {
+                    for (let entry in state.rendered) {
+                        entry.component.rendered_by = instance;
+                        entry.component.rendered_pass = pass;
+                    }
+                    state.fresh = was_rendered(state, component);
+                }
+                if (state.reuse) {
+                    mark_touched(component, pass, state);
+                }
             }
             expand_view(view, "", pass, state, plan.tree);
             if (state.refusal != nil) {

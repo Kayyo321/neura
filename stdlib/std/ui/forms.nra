@@ -221,8 +221,10 @@ export let Forms = module (
             last before = state.get();
             if (first != "") {
                 state.set(new FormState(before.attempts + 1, before.submitted, first));
-                if (owner != nil && owner.is_mounted()) {
-                    owner.owner.request_focus(first);
+                if (let component = owner; component) {
+                    if (let root = component.owner; root) {
+                        root.request_focus(first);
+                    }
                 }
                 return false;
             }

@@ -34,7 +34,10 @@ export let SymbolLookup = module (
             owner.check_alive();
             last address = native.find_symbol(library, name);
             if (address == 0) {
-                return (fallback == nil) ? Optional<MemorySegment>.None : fallback.find(name);
+                if (let next_lookup = fallback; next_lookup) {
+                    return next_lookup.find(name);
+                }
+                return Optional<MemorySegment>.None;
             }
             return Optional<MemorySegment>.Some(new MemorySegment(address, 0, owner));
         };
@@ -56,7 +59,11 @@ export let SymbolLookup = module (
         .Pure
         export let or_else = func(other: SymbolLookup) -> SymbolLookup {
             last chained: SymbolLookup = new(library, owner);
-            chained.fallback = (fallback == nil) ? other : fallback.or_else(other);
+            if (let next_lookup = fallback; next_lookup) {
+                chained.fallback = next_lookup.or_else(other);
+            } else {
+                chained.fallback = other;
+            }
             return chained;
         };
 

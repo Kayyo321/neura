@@ -61,30 +61,37 @@ export let LinkedList = module (
             if (index < count / 2) {
                 let node = head;
                 let i = 0;
-                while (i < index) {
+                while (i < index && node != nil) {
                     node = node.next;
                     i += 1;
+                }
+                if (node == nil) {
+                    trap_with_message("invalid state: linked list missing node");
                 }
                 return node;
             }
             let node = tail;
             let i = count - 1;
-            while (i > index) {
+            while (i > index && node != nil) {
                 node = node.previous;
                 i -= 1;
+            }
+            if (node == nil) {
+                trap_with_message("invalid state: linked list missing node");
             }
             return node;
         };
 
         /// @brief Links a new node before `successor`, or at the end for nil.
-        let link_before = func(successor: Node<T>, value: T) {
+        let link_before = func(value: T, successor: Node<T> = nil) {
             last node = new Node<T>(value);
             if (successor == nil) {
-                node.previous = tail;
-                if (tail == nil) {
+                last previous = tail;
+                node.previous = previous;
+                if (previous == nil) {
                     head = node;
                 } else {
-                    tail.next = node;
+                    previous.next = node;
                 }
                 tail = node;
             } else {
@@ -142,30 +149,34 @@ export let LinkedList = module (
 
         /// @brief Returns the first element. Traps with `no such element` when empty.
         export let first = func -> T {
-            if (head == nil) {
+            last node = head;
+            if (node == nil) {
                 trap_with_message("no such element");
             }
-            return head.value;
+            return node.value;
         };
 
         /// @brief Returns the last element. Traps with `no such element` when empty.
         export let last = func -> T {
-            if (tail == nil) {
+            last node = tail;
+            if (node == nil) {
                 trap_with_message("no such element");
             }
-            return tail.value;
+            return node.value;
         };
 
         /// @brief Returns the first element as `Some`, or `None` when empty.
         .NoDiscard
         export let first_or_none = func -> optional.Optional<T> {
-            return if (head == nil) -> optional.Optional<T>.None else -> optional.Optional<T>.Some(head.value);
+            last node = head;
+            return if (node == nil) -> optional.Optional<T>.None else -> optional.Optional<T>.Some(node.value);
         };
 
         /// @brief Returns the last element as `Some`, or `None` when empty.
         .NoDiscard
         export let last_or_none = func -> optional.Optional<T> {
-            return if (tail == nil) -> optional.Optional<T>.None else -> optional.Optional<T>.Some(tail.value);
+            last node = tail;
+            return if (node == nil) -> optional.Optional<T>.None else -> optional.Optional<T>.Some(node.value);
         };
 
         /// @brief The first element, or None when empty.
@@ -174,33 +185,35 @@ export let LinkedList = module (
 
         /// @brief Appends `value` and returns true.
         export let add = func(value: T) -> bool {
-            link_before(nil, value);
+            link_before(value);
             return true;
         };
 
         /// @brief Appends `value` at the back.
         export let add_last = func(value: T) {
-            link_before(nil, value);
+            link_before(value);
         };
 
         /// @brief Appends `value` at the back.
         export let enqueue = func(value: T) {
-            link_before(nil, value);
+            link_before(value);
         };
 
         /// @brief Inserts `value` at the front.
         export let add_first = func(value: T) {
-            link_before(head, value);
+            last successor = head;
+            link_before(value, successor);
         };
 
         /// @brief Inserts before `index` or appends if the index equals the size. Traps
         /// with "invalid argument: index out of range" otherwise.
         export let add_at = func(index: int, value: T) {
             if (index == count) {
-                link_before(nil, value);
+                link_before(value);
                 return;
             }
-            link_before(node_at(index), value);
+            last successor = node_at(index);
+            link_before(value, successor);
         };
 
         /// @brief Appends each element in order, reading by position up to the
@@ -209,7 +222,7 @@ export let LinkedList = module (
             last total = items.length;
             let i = 0;
             while (i < total) {
-                link_before(nil, items[i]);
+                link_before(items[i]);
                 i += 1;
             }
         };
@@ -219,18 +232,20 @@ export let LinkedList = module (
 
         /// @brief Removes and returns the first element. Traps with `no such element` when empty.
         export let remove_first = func -> T {
-            if (head == nil) {
+            last node = head;
+            if (node == nil) {
                 trap_with_message("no such element");
             }
-            return unlink(head);
+            return unlink(node);
         };
 
         /// @brief Removes and returns the last element. Traps with `no such element` when empty.
         export let remove_last = func -> T {
-            if (tail == nil) {
+            last node = tail;
+            if (node == nil) {
                 trap_with_message("no such element");
             }
-            return unlink(tail);
+            return unlink(node);
         };
 
         /// @brief Removes and returns the first element. Traps with `no such element` when empty.
@@ -238,10 +253,11 @@ export let LinkedList = module (
 
         /// @brief Removes the first element and returns it as `Some`, or returns `None` when empty.
         export let try_dequeue = func -> optional.Optional<T> {
-            if (head == nil) {
+            last node = head;
+            if (node == nil) {
                 return optional.Optional<T>.None;
             }
-            return optional.Optional<T>.Some(unlink(head));
+            return optional.Optional<T>.Some(unlink(node));
         };
 
         /// @brief Exchanges the values in two nodes without invalidating iterators.
@@ -260,6 +276,9 @@ export let LinkedList = module (
             let right = tail;
             let steps = count / 2;
             while (steps > 0) {
+                if (left == nil || right == nil) {
+                    trap_with_message("invalid state: linked list missing node");
+                }
                 let value = left.value;
                 left.value = right.value;
                 right.value = value;
@@ -289,7 +308,11 @@ export let LinkedList = module (
                 trap_with_message("invalid argument: size above current size");
             }
             while (count > size) {
-                unlink(tail);
+                last node = tail;
+                if (node == nil) {
+                    trap_with_message("invalid state: linked list missing node");
+                }
+                unlink(node);
             }
         };
 
@@ -323,6 +346,9 @@ export let LinkedList = module (
             let node = node_at(start);
             let i = start;
             while (i < end) {
+                if (node == nil) {
+                    trap_with_message("invalid state: linked list missing node");
+                }
                 result.add_last(node.value);
                 node = node.next;
                 i += 1;
@@ -342,7 +368,7 @@ export let LinkedList = module (
         };
 
         /// @brief Returns a fail-fast iterator from the first node to the last.
-        export let iterator = func -> iterators.Iterator<T> => new LinkedListIterator<T>(head, modifications);
+        export let iterator = func -> iterators.Iterator<T> => new LinkedListIterator<T>(modifications, head);
 
         /// @brief A lazy pipeline over this list's fail-fast iterator (Stdlib.md
         /// section 9.12): a structural change while it runs traps.
@@ -495,10 +521,13 @@ export let LinkedList = module (
         /// @brief Traps with "invalid state: ..." on a broken endpoint, reciprocal
         /// link, or count.
         export let validate = func {
-            if ((head == nil) != (tail == nil)) {
+            last first_node = head;
+            last last_node = tail;
+            if ((first_node == nil) != (last_node == nil)) {
                 trap_with_message("invalid state: linked list endpoints");
             }
-            if (head != nil && (head.previous != nil || tail.next != nil)) {
+            if ((first_node != nil && first_node.previous != nil) ||
+                (last_node != nil && last_node.next != nil)) {
                 trap_with_message("invalid state: linked list endpoints");
             }
             let walked = 0;
@@ -573,7 +602,7 @@ export let LinkedList = module (
         last expected: uint64;
 
         /// @brief Captures the starting node and current modification count.
-        export let init = func(start: Node<T>, counter: cell.Cell<uint64>) {
+        export let init = func(counter: cell.Cell<uint64>, start: Node<T> = nil) {
             current = start;
             modifications = counter;
             expected = counter.value;

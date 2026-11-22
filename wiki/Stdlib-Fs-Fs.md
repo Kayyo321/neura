@@ -27,7 +27,7 @@ The following public declarations are taken from the module source; each links t
   The reported size in bytes.
 - **Fs.FileMetadata** · [`export last modified: instant.Instant`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L30)
   The last modification instant, or nil when unavailable.
-- **Fs.FileMetadata** · [`export let init = func(entry_kind: FileKind, byte_size: int64, modified_at: instant.Instant)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L33)
+- **Fs.FileMetadata** · [`export let init = func(entry_kind: FileKind, byte_size: int64, modified_at: instant.Instant = nil)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L33)
   Stores the entry's kind, size, and modification time.
 - **Fs.FileMetadata** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L41)
   Tests equality of the kind, size, and modification time. Reading the argument can run its class hook.

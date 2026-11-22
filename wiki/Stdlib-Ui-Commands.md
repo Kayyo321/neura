@@ -30,19 +30,19 @@ The following public declarations are taken from the module source; each links t
   Makes `component` the command's owner: the command runs on the owner's root, and unmounting the owner cancels the command and raises its generation. A command is bound once.
 - **Commands.Command** · [`export let run = func(input: I) -> RunOutcome`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/commands.nra#L101)
   Starts `work(input)` on the owner's root and sets the state to `Running`. `Rejected`, with nothing started, when the command is not bound to a mounted component or the root already has its limit of commands in flight (U-10, 32 by default). The task starts when the root's `Commands.run` next takes a turn.
-- **Commands.Command** · [`export let cancel = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/commands.nra#L128)
+- **Commands.Command** · [`export let cancel = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/commands.nra#L132)
   Cancels the runs in flight, raises the generation and sets the state to `Cancelled`. A command with no run in flight is left as it is.
-- **Commands.Command** · [`export let generation = func -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/commands.nra#L138)
+- **Commands.Command** · [`export let generation = func -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/commands.nra#L142)
   Raised by each run, each cancel of a running command and each unmount of the owner.
-- **Commands.Command** · [`export let runs_in_flight = func -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/commands.nra#L141)
+- **Commands.Command** · [`export let runs_in_flight = func -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/commands.nra#L145)
   The number of this command's runs that have not finished.
-- **Commands.Command** · [`export let abandon = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/commands.nra#L145)
+- **Commands.Command** · [`export let abandon = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/commands.nra#L149)
   Unmounting the owner: cancel the runs in flight and raise the generation.
-- **Commands.Command** · [`export let finish = func(ticket: uint64, outcomes: channels.Receiver<Finished<O>>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/commands.nra#L156)
+- **Commands.Command** · [`export let finish = func(ticket: uint64, outcomes: channels.Receiver<Finished<O>>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/commands.nra#L160)
   Applies a finished run in the root's turn; false when its generation is old.
-- **Commands.Command** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/commands.nra#L193)
+- **Commands.Command** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/commands.nra#L197)
   `Command(generation N, M in flight)`.
-- **Commands** · [`export let run = func(root: ui.Root)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/commands.nra#L203)
+- **Commands** · [`export let run = func(root: ui.Root)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/commands.nra#L207)
   Runs `root`'s turns, as `root.run()` does, inside a scope that owns every command task the root starts. Each turn is either the next event or the completion of a command. With commands in flight and no event queued, the root waits for both together when its host is a `ui.TaskHost`, and otherwise for the next completion first. It returns when the root is closed or faulted, or when the host has no more events and no command is in flight; it cancels the commands still running and returns after their tasks have finished.
 <!-- END SOURCE API -->
 

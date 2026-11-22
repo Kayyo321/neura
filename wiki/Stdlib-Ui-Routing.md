@@ -58,26 +58,26 @@ The following public declarations are taken from the module source; each links t
   Sets the component shown when no route matches; it receives the path. The default shows an empty, hidden element. `make` is retained.
 - **Routing.Router** · [`export let component = func -> ui.Component`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/routing.nra#L166)
   The router's component, made on the first call. It embeds the component of the current route.
-- **Routing.Router** · [`export let navigate = func(path: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/routing.nra#L185)
+- **Routing.Router** · [`export let navigate = func(path: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/routing.nra#L189)
   Goes to `path`: adds a history entry when the router is mounted on a host that keeps history, and sets the location. `path` is absolute and may end with a query; an invalid path traps.
-- **Routing.Router** · [`export let replace = func(path: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/routing.nra#L195)
+- **Routing.Router** · [`export let replace = func(path: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/routing.nra#L199)
   As `navigate`, but replaces the current history entry.
-- **Routing.Router** · [`export let link = func(path: string) -> ui.Url`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/routing.nra#L206)
+- **Routing.Router** · [`export let link = func(path: string) -> ui.Url`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/routing.nra#L210)
   The `href` of a link to `path`: the host's form when mounted on a host that keeps history (`#/parts/7` for hash routing), and the hash form otherwise.
-- **Routing.Router** · [`export let href = func(path: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/routing.nra#L209)
+- **Routing.Router** · [`export let href = func(path: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/routing.nra#L213)
   The text of `link(path)`.
-- **Routing.Router** · [`export let on_link = func(path: string) -> func(ui.ClickEvent) -> void`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/routing.nra#L220)
+- **Routing.Router** · [`export let on_link = func(path: string) -> func(ui.ClickEvent) -> void`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/routing.nra#L224)
   A click handler that navigates to `path`; bind it with `on:click.prevent_default` on the link whose `href` is `link(path)`.
-- **Routing.Router** · [`export let resolve = func(path: string) -> Location`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/routing.nra#L230)
+- **Routing.Router** · [`export let resolve = func(path: string) -> Location`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/routing.nra#L234)
   The location `path` resolves to with the current routes: the route that matches it, a literal segment winning over a parameter, and its parameters.
-- **Routing.Router** · [`export let route_count = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/routing.nra#L269)
+- **Routing.Router** · [`export let route_count = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/routing.nra#L273)
   The number of routes.
-- **Routing.Router** · [`export let current_page = func -> ui.Component`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/routing.nra#L272)
+- **Routing.Router** · [`export let current_page = func -> ui.Component`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/routing.nra#L276)
   The component of the current route as last rendered, or nil before the first render.
-- **Routing.Router** · [`export let page_for = func(at: Location) -> ui.Component`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/routing.nra#L275)
-- **Routing.Router** · [`export let attach = func(root: ui.Root)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/routing.nra#L297)
-- **Routing.Router** · [`export let detach = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/routing.nra#L315)
-- **Routing.Router** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/routing.nra#L324)
+- **Routing.Router** · [`export let page_for = func(at: Location) -> ui.Component`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/routing.nra#L279)
+- **Routing.Router** · [`export let attach = func(root: ui.Root)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/routing.nra#L311)
+- **Routing.Router** · [`export let detach = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/routing.nra#L330)
+- **Routing.Router** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/routing.nra#L339)
   `Router(` the number of routes `, at ` the location `)`.
 <!-- END SOURCE API -->
 

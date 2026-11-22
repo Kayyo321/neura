@@ -27,7 +27,7 @@ export let Logger = module (
         export let level: LogLevel;
 
         /// @brief Configures the logger's name, destination, threshold, and optional time source.
-        export let init = func(name: string, target: func(string) -> void, level: LogLevel, time_source: Clock) {
+        export let init = func(name: string, target: func(string) -> void, level: LogLevel, time_source: Clock = nil) {
             logger_name = name;
             sink = target;
             instance.level = level;
@@ -73,8 +73,9 @@ export let Logger = module (
         /// @brief Formats and sends one already-enabled record to the sink.
         let emit = func(level: LogLevel, message: string) {
             let line = level_name(level) .. " " .. logger_name .. ": " .. message;
-            if (source != nil) {
-                line = timestamp(source) .. " " .. line;
+            last clock = source;
+            if (clock != nil) {
+                line = timestamp(clock) .. " " .. line;
             }
             last write = sink;
             write(line);
@@ -87,7 +88,7 @@ export let Logger = module (
     /// @brief A logger without timestamps.
     .[Pure, ThreadSafe]
     export let create = func(name: string, sink: func(string) -> void, level: LogLevel) -> Logger =>
-        new(name, sink, level, nil);
+        new(name, sink, level);
 
     /// @brief A logger whose records start with the clock's instant.
     .[Pure, ThreadSafe]
