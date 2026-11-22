@@ -143,10 +143,13 @@ export let TcpSocket = module (
             return support.apply(id, options, label);
         };
 
-        /// @brief Sends up to `count` bytes of the file at `path`, from byte `offset`, straight from the file to
-        /// the socket (`sendfile(2)` on Linux); the count sent, which is short at the end of the file. Opening
-        /// the file needs the fs capability. The transfer needs the host's send-file service, which traps in
-        /// Neura 0.3.0. A negative offset or count traps with "invalid argument".
+        /// @brief Sends up to `count` bytes of the file at `path`, from byte `offset`, and returns the count sent,
+        /// which is short only at the end of the file. Linux moves the bytes in the kernel (`sendfile(2)`); other
+        /// hosts copy through a bounded buffer. The transfer parks only the calling task, and fails with TimedOut
+        /// when the socket accepts nothing for 30 seconds; a transfer that keeps making progress has no time
+        /// limit. On a timeout, cancellation or other failure the I/O error's message reports the bytes already
+        /// sent. Opening the file needs the fs capability. A negative offset or count traps with
+        /// "invalid argument".
         .NoDiscard
         export let send_file = func(path: string, offset: int64, count: int64) -> Result<int64> {
             if (offset < 0 || count < 0) {
@@ -162,12 +165,26 @@ export let TcpSocket = module (
                     return Result<int64>.Err(host_error.io(code, "file open failed", path));
                 },
             }
-            last sent = host.send_file(id, file, offset, count);
+            // Each host call returns once it has sent something and the socket would block, so its
+            // 30-second deadline only runs while no byte is accepted.
+            let total: int64 = 0;
+            while (total < count) {
+                match (host.send_file(id, file, offset + total, count - total)) {
+                    host.LongOutcome.Ok(sent) => {
+                        if (sent <= 0) {
+                            break; // The end of the file.
+                        }
+                        total = total + sent;
+                    },
+                    host.LongOutcome.Error(code) => {
+                        close_file(file);
+                        return Result<int64>.Err(host_error.io(code,
+                            "send file failed after " .. total.to_string() .. " bytes", label));
+                    },
+                }
+            }
             close_file(file);
-            return match (sent) {
-                host.LongOutcome.Ok(total) => Result<int64>.Ok(total),
-                host.LongOutcome.Error(code) => Result<int64>.Err(host_error.io(code, "send file failed", label)),
-            };
+            return Result<int64>.Ok(total);
         };
 
         /// @brief Moves up to `count` bytes from this socket to `target` and returns the count moved.

@@ -1,9 +1,10 @@
 /// @brief Zero-copy and kernel-offload support: the pure segmentation rules of UDP Generic Segmentation Offload
 /// (`UDP_SEGMENT`) and Generic Receive Offload (`UDP_GRO`), and where each offload lives.
 ///
-/// The transfers themselves are methods of the sockets: `TcpSocket.send_file` (`sendfile(2)`),
-/// `TcpSocket.splice_to` (`splice(2)`), `TcpSocket.send_zerocopy` (`MSG_ZEROCOPY`), `UdpSocket.send_segmented`
-/// (GSO) and `UdpSocket.receive_coalesced` (GRO). Each transfer uses the network provider.
+/// `TcpSocket.send_file` (`sendfile(2)` on Linux, a bounded copy elsewhere), `TcpSocket.send_zerocopy`
+/// (`MSG_ZEROCOPY`), `UdpSocket.send_segmented` (GSO) and `UdpSocket.receive_coalesced` (GRO) use supported
+/// offloads through the network provider. `TcpSocket.splice_to` uses a bounded buffer. All of them overlap in
+/// task images.
 /// With GSO the kernel cuts one buffer into datagrams of the segment size with a
 /// shorter last one, and with GRO it hands back datagrams of one segment size joined end to end, which `split`
 /// takes apart the same way. The NVM copies host values at the boundary, so "zero-copy" here means the kernel

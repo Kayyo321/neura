@@ -41,6 +41,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - `H2Connection.init(target: string)` is now `init(seal: Seal, target: string, stream: int64, timeout: int64)`. Create connections through `H2.connect` or `H2.connect_with`.
 - SPIFFE X.509-SVID and JWT-SVID verification require callers to pass a nonempty `trust_domain` argument.
 - Unqualified device and enclave evidence APIs and FN-DSA return typed `Unsupported` results. FN-DSA signing and verification now return `Result`.
+- `TcpSocket.send_file` (`neura.net.send_file`) no longer holds the scheduler. It parks only the calling task and fails with TimedOut when the socket accepts nothing for 30 seconds; the error message reports the bytes already sent. Linux still uses `sendfile(2)`; Windows now copies through a bounded buffer instead of `TransmitFile`. Version 3 of the service sends a prefix per call. [Socket services](docs/runtime/NVM.md#host-services)
 
 ### Known limitations
 

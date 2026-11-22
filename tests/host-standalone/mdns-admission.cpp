@@ -5,6 +5,7 @@
 #undef NDEBUG
 #endif
 #include <cassert>
+#include <cstring>
 #include <iostream>
 #include <thread>
 
@@ -44,7 +45,8 @@ void subnet_policy() {
     std::cout << "PASS: ingress subnet policy, overlay aliases, wrong interface, off-link and invalid sources\n";
 }
 
-void exchange_and_window() {
+// Returns false when the host cannot provide loopback multicast on 5353.
+bool exchange_and_window() {
     const ScopedSocket responder{::socket(AF_INET, SOCK_DGRAM, 0)};
     const ScopedSocket noise{::socket(AF_INET, SOCK_DGRAM, 0)};
     assert(responder.descriptor >= 0 && noise.descriptor >= 0);
@@ -57,9 +59,14 @@ void exchange_and_window() {
     group.sin_family = AF_INET;
     group.sin_port = htons(5353);
     group.sin_addr = address_of("224.0.0.251");
-    assert(::bind(responder.descriptor, reinterpret_cast<sockaddr*>(&group), sizeof group) == 0);
     const ip_mreq membership{group.sin_addr, address_of("127.0.0.1")};
-    assert(set_native_option(responder.descriptor, IPPROTO_IP, IP_ADD_MEMBERSHIP, membership));
+    // The port can be held exclusively by a system responder, and some
+    // sandboxes have no loopback multicast: report SKIP, never a pass.
+    if (::bind(responder.descriptor, reinterpret_cast<sockaddr*>(&group), sizeof group) != 0 ||
+        !set_native_option(responder.descriptor, IPPROTO_IP, IP_ADD_MEMBERSHIP, membership)) {
+        std::cout << "SKIP: loopback multicast on 224.0.0.251:5353 is unavailable: " << std::strerror(errno) << "\n";
+        return false;
+    }
     assert(set_native_option(responder.descriptor, IPPROTO_IP, IP_MULTICAST_IF, membership.imr_interface));
     assert(set_native_option(noise.descriptor, IPPROTO_IP, IP_MULTICAST_IF, membership.imr_interface));
     const std::string query("\0\0\0\0\0\1\0\0\0\0\0\0\x04h4md\x05local\0\0\1\0\1", 28);
@@ -109,9 +116,10 @@ void exchange_and_window() {
         assert(!result.success && result.value.bits == host_error::invalid_input);
     }
     std::cout << "PASS: real loopback reply content, wrong port/destination rejection, zero/negative/>5s window rejection\n";
+    return true;
 }
 
 int main() {
     subnet_policy();
-    exchange_and_window();
+    if (!exchange_and_window()) return 77;
 }

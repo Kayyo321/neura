@@ -89,7 +89,7 @@ The runtime side of the `Std.Net` and `Std.Crypto` stubs. Every service is in [N
 | Unix-domain streams and datagrams, `neura.net.unix.*`, with the Linux abstract namespace | implemented; not on Windows | `backend-host` |
 | Socket options, `neura.net.option.*`: `SO_REUSEADDR`, `SO_REUSEPORT`, `TCP_NODELAY`, `TCP_FASTOPEN`, `TCP_USER_TIMEOUT`, keepalive and its timers, buffers, broadcast | implemented; an option the platform lacks answers 13 | `backend-host` |
 | TLS client streams with verification, SNI and ALPN, and server streams outside the host, `neura.net.tls.*` | implemented in builds with `NEURA_ENABLE_SERVER_TLS`; 13 otherwise | `backend-host` (TLS builds) |
-| `sendfile`, `neura.net.send_file` | implemented: `sendfile(2)` on Linux, a copy elsewhere | `backend-host` |
+| `sendfile`, `neura.net.send_file` | implemented: `sendfile(2)` on Linux, a bounded copy elsewhere (since 0.3.1 also on Windows, which used `TransmitFile` in 0.3.0); overlaps in task images | `backend-host`, `host-socket-transfers` |
 | `splice` with pipe handles, `neura.net.pipe` and `neura.net.splice` | implemented on Linux (`splice(2)`, the bytes never reach the NVM); 13 elsewhere | `backend-host` |
 | System name resolution, `neura.net.resolve` | implemented with `getaddrinfo`; blocks every task while it waits | `backend-host` |
 | HTTP/2 over TLS through ALPN `h2` (on by default, `--no-http2`), and h2c with prior knowledge (`--h2c`) | implemented in builds with `NEURA_ENABLE_SERVER_HTTP2` (the pinned nghttp2 1.71.0), which every release archive is, by the owner's amendment of decision 9; see "HTTP/2 and decision 9" below | `server-host` (`test_http2_curl`, `test_http2_streams`, `test_http2_reload`), `server-host-h2c` |
