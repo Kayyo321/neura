@@ -79,7 +79,10 @@ let Main = module:program.Entry (
         host.click(1, site, router.on_link("/contact"));
         host.end_batch();
         root.run();
-        let contact = router.current_page();
+        last contact = router.current_page();
+        if (not contact) {
+            trap_with_message("the mounted router has no contact page");
+        }
         host.submit(2, contact, form.on_submit(send));
         host.end_batch();
         host.input(3, contact, name.on_input(), "Ada");
