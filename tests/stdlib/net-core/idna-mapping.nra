@@ -1,0 +1,29 @@
+let idna = import:Std.Net.Core.Idna;
+let test = import:Std.Test;
+
+let MappingCases = module (
+    export let test_case_width_and_dots = func {
+        test.assert_equal_string("bücher.example.", idna.map_uts46("ＢÜＣＨＥＲ。ＥＸＡＭＰＬＥ｡"));
+        test.assert_equal_string("xn--bcher-kva.example.", test.assert_ok(idna.to_ascii(
+            idna.map_uts46("ＢÜＣＨＥＲ。ＥＸＡＭＰＬＥ｡"))));
+    };
+
+    export let test_nontransitional_and_ignored = func {
+        test.assert_equal_string("faß.example", idna.map_uts46("FAẞ.examp­Le"));
+        test.assert_equal_string("a‌b", idna.map_uts46("a‌b"));
+        test.assert_equal_string("", idna.map_uts46("­"));
+    };
+
+    export let test_canonical_order_and_hangul = func {
+        test.assert_equal_string("à̕.각", idna.map_uts46("À̕.각"));
+        test.assert_equal_string("déjà", idna.map_uts46("déjà"));
+        test.assert_equal_string("̈́", idna.map_uts46("̈́"));
+    };
+
+    export let test_mapping_leaves_label_rejection_to_conversion = func {
+        test.assert_equal_string("a..b", idna.map_uts46("Ａ。．Ｂ"));
+        let _ = test.assert_err(idna.to_ascii(idna.map_uts46("Ａ。．Ｂ")));
+        test.assert_equal_string("a�b", idna.map_uts46("Ａ�Ｂ"));
+        let _ = test.assert_err(idna.to_ascii(idna.map_uts46("Ａ�Ｂ")));
+    };
+);

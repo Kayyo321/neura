@@ -1,0 +1,158 @@
+let data = import:Std.Net.Core.Internal.IdnaData;
+let strings = import:Std.Text.Strings;
+
+/// @brief Internal Unicode 17.0.0 nontransitional mapping and canonical composition.
+export let IdnaMapping = module (
+    const SBase: uint32 = 44032;
+    const LBase: uint32 = 4352;
+    const VBase: uint32 = 4449;
+    const TBase: uint32 = 4519;
+    const LCount: uint32 = 19;
+    const VCount: uint32 = 21;
+    const TCount: uint32 = 28;
+    const NCount: uint32 = VCount * TCount;
+    const SCount: uint32 = LCount * NCount;
+
+    /// @brief Runs Map and Normalize, without validating the resulting domain.
+    export let map_name = func(domain: string) -> string {
+        last ordered: uint32[list] = new;
+        for (let scalar in strings.scalars(domain)) {
+            last mapping = data.Mapping;
+            last row = lower_row(mapping, 16, scalar);
+            if (row >= 0 && scalar <= field(mapping, row + 4)) {
+                last offset = field(mapping, row + 8) as int;
+                last length = field(mapping, row + 12) as int;
+                for (let i = 0; i < length; i++) {
+                    decompose(field(data.Sequences, (offset + i) * 4), ordered);
+                }
+            } else {
+                decompose(scalar, ordered);
+            }
+        }
+        return strings.from_scalars(compose(ordered));
+    };
+
+    let digit = func(value: uint8) -> uint32 {
+        return if (value >= 97) -> (value as uint32) - 61
+            else if (value >= 65 && value <= 90) -> (value as uint32) - 55
+            else if (value >= 48 && value <= 57) -> (value as uint32) - 48
+            else if (value == 45) -> 62
+            else -> 63;
+    };
+
+    let field = func(table: string, index: int) -> uint32 =>
+        (digit(table.byte_at(index)) << 18) | (digit(table.byte_at(index + 1)) << 12)
+        | (digit(table.byte_at(index + 2)) << 6) | digit(table.byte_at(index + 3));
+
+    // Return the last record whose first field is no greater than scalar.
+    let lower_row = func(table: string, width: int, scalar: uint32) -> int {
+        let first = 0;
+        let past = table.byte_length / width;
+        while (first < past) {
+            last middle = first + (past - first) / 2;
+            if (field(table, middle * width) <= scalar) {
+                first = middle + 1;
+            } else {
+                past = middle;
+            }
+        }
+        return (first - 1) * width;
+    };
+
+    let combining_class = func(scalar: uint32) -> uint32 {
+        last table = data.Combining;
+        last row = lower_row(table, 8, scalar);
+        return if (row >= 0 && field(table, row) == scalar) -> field(table, row + 4)
+            else -> 0;
+    };
+
+    // Canonical ordering is stable for marks with equal combining classes.
+    let append_ordered = func(output: uint32[list], scalar: uint32) {
+        last combining = combining_class(scalar);
+        output.append(scalar);
+        if (combining == 0) {
+            return;
+        }
+        let index = output.length - 1;
+        while (index > 0 && combining_class(output[index - 1]) > combining) {
+            output[index] = output[index - 1];
+            index--;
+        }
+        output[index] = scalar;
+    };
+
+    let decompose = func(scalar: uint32, output: uint32[list]) {
+        if (scalar >= SBase && scalar < SBase + SCount) {
+            last offset = scalar - SBase;
+            append_ordered(output, LBase + offset / NCount);
+            append_ordered(output, VBase + (offset % NCount) / TCount);
+            if (offset % TCount != 0) {
+                append_ordered(output, TBase + offset % TCount);
+            }
+            return;
+        }
+        last table = data.Decomposition;
+        last row = lower_row(table, 12, scalar);
+        if (row < 0 || field(table, row) != scalar) {
+            append_ordered(output, scalar);
+            return;
+        }
+        last offset = field(table, row + 4) as int;
+        last length = field(table, row + 8) as int;
+        for (let i = 0; i < length; i++) {
+            decompose(field(data.Sequences, (offset + i) * 4), output);
+        }
+    };
+
+    // The two Hangul compositions are algorithmic. The other canonical
+    // pairs are sorted lexicographically and omit composition exclusions.
+    let pair = func(left: uint32, right: uint32) -> uint32 {
+        if (left >= LBase && left < LBase + LCount && right >= VBase && right < VBase + VCount) {
+            return SBase + ((left - LBase) * VCount + right - VBase) * TCount;
+        }
+        if (left >= SBase && left < SBase + SCount && (left - SBase) % TCount == 0
+            && right > TBase && right < TBase + TCount) {
+            return left + right - TBase;
+        }
+        last table = data.Composition;
+        let first = 0;
+        let past = table.byte_length / 12;
+        while (first < past) {
+            last middle = first + (past - first) / 2;
+            last row = middle * 12;
+            last lead = field(table, row);
+            last trail = field(table, row + 4);
+            if (lead == left && trail == right) {
+                return field(table, row + 8);
+            }
+            if (lead < left || (lead == left && trail < right)) {
+                first = middle + 1;
+            } else {
+                past = middle;
+            }
+        }
+        return 0;
+    };
+
+    let compose = func(input: uint32[list]) -> uint32[list] {
+        last result: uint32[list] = new;
+        let starter_index = -1;
+        let previous_class: uint32 = 0;
+        for (let scalar in input) {
+            last combining = combining_class(scalar);
+            if (starter_index >= 0 && (previous_class == 0 || previous_class < combining)) {
+                last composed = pair(result[starter_index], scalar);
+                if (composed != 0) {
+                    result[starter_index] = composed;
+                    continue;
+                }
+            }
+            if (combining == 0) {
+                starter_index = result.length;
+            }
+            result.append(scalar);
+            previous_class = combining;
+        }
+        return result;
+    };
+);

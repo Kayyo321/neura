@@ -1,10 +1,11 @@
 let.promote _ = import:Std.Core.Error;
+let mapping = import:Std.Net.Core.Internal.IdnaMapping;
 let punycode = import:Std.Net.Core.Punycode;
 let.promote _ = import:Std.Core.Result;
 let strings = import:Std.Text.Strings;
 
 /// @brief Internationalized domain names: conversion between Unicode labels and their ASCII `xn--` form
-/// (RFC 5890 and RFC 5891, processing in the manner of UTS 46 section 4 without its mapping table).
+/// (RFC 5890 and RFC 5891, and the mapping and normalization steps of UTS 46).
 ///
 /// Labels are separated by `.` or one of the IDNA dot variants U+3002, U+FF0E, U+FF61; the output always uses
 /// `.`. ASCII letters are lowercased. A label with a non-ASCII scalar is checked and Punycode-encoded with the
@@ -13,11 +14,9 @@ let strings = import:Std.Text.Strings;
 /// `--` in its third and fourth positions. Lengths are measured on the ASCII form: 1 to 63 bytes per label and
 /// at most 253 bytes for the name without a final root `.`, which is kept.
 ///
-/// Limitation: the UTS 46 mapping step (the IdnaMappingTable, case folding beyond ASCII, NFC) needs Unicode
-/// data tables that this library does not carry, so `to_ascii` requires input that is already mapped:
-/// lowercase and in NFC. It rejects the scalars it can identify as needing that mapping or as disallowed
-/// (controls, uppercase Latin-1, Greek and Cyrillic letters, the halfwidth and fullwidth forms block,
-/// noncharacters, U+FFFD), but it cannot detect every unmapped or disallowed scalar. `map_uts46` is a stub.
+/// Call map_uts46 to map and normalize a name before to_ascii. This module's label conversion applies
+/// the documented hyphen, ASCII, and length checks. Full UTS 46 label validation also requires
+/// contextual joiner and bidirectional checks.
 /// @see [Std.Net.Core.Idna](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Core-Idna)
 .Since("0.3.0")
 export let Idna = module (
@@ -75,12 +74,11 @@ export let Idna = module (
         return Result<string>.Ok(text);
     };
 
-    /// @brief The UTS 46 mapping step (IdnaMappingTable lookup, case folding, NFC) of a domain name.
-    /// @stub needs the Unicode IdnaMappingTable and NFC data tables, which the library does not carry
+    /// @brief Maps a name with the Unicode 17.0.0 UTS 46 nontransitional profile and normalizes it to NFC.
+    /// Retains deviation and disallowed scalars for subsequent label validation. This call does not
+    /// decode A-labels or validate the mapped name.
     .[NoDiscard, Pure, ThreadSafe]
-    export let map_uts46 = func(domain: string) -> string {
-        trap_with_message("unsupported: Std.Net.Core.Idna.map_uts46 is not implemented in Neura 0.3.0 (needs the Unicode IdnaMappingTable and NFC data tables, which the library does not carry)");
-    };
+    export let map_uts46 = func(domain: string) -> string => mapping.map_name(domain);
 
     /// @brief Tests whether a scalar is `.` or one of the IDNA dot variants U+3002, U+FF0E, U+FF61.
     .[Pure, ThreadSafe]

@@ -1,0 +1,3 @@
+let idna = import:Std.Net.Core.Idna;
+
+export let wrong_type = func -> string => idna.map_uts46(42);

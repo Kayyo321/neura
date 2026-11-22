@@ -1,0 +1,11 @@
+error[E0403]: expected string, got int32
+  --> $DIR/idna-mapping-type.nra:3:58
+   |
+ 3 | export let wrong_type = func -> string => idna.map_uts46(42);
+   |                                                          ^^ expected string, found int32
+  ::: $ROOT/stdlib/std/net/core/idna.nra:81:33
+   |
+81 |     export let map_uts46 = func(domain: string) -> string => mapping.map_name(domain);
+   |                                 ------ parameter 'domain' is declared here
+
+For more information about this error, try `neura explain E0403`.
