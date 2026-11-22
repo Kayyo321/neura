@@ -47,10 +47,11 @@ using Clock = std::chrono::steady_clock;
 constexpr std::size_t body_limit = 8 * 1024 * 1024;
 constexpr std::size_t head_limit = 16384;
 constexpr std::uint32_t too_large = 16, busy = 17, unknown = 18;
-// Fetch codes after the shared table in providers.hpp, whose 19 to 22 are
-// the SQL provider's (docs/runtime/NVM.md, "HTTP client services").
-constexpr std::uint32_t redirect_downgrade = 23, redirect_body = 24;
-[[maybe_unused]] constexpr std::uint32_t not_processed = 25;
+// Codes 23 to 25 are the fetch services' own, in the shared table of
+// providers.hpp after the SQL provider's 19 to 22.
+using host_error::not_processed;
+using host_error::redirect_body;
+using host_error::redirect_downgrade;
 constexpr std::int64_t default_timeout = 30000000000LL;
 struct Failure {
     std::uint32_t code;
