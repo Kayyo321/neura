@@ -1866,6 +1866,46 @@ NEURA_TEST(host, doq_loopback_checks_identity_and_exact_stream_framing) {
 }
 #endif
 
+#ifdef __linux__
+NEURA_TEST(ktls, both_directions_transfer_over_kernel_records) {
+    const LoopbackTlsKeys material;
+    constexpr auto wait = 2'000'000'000LL;
+    Host server(everything());
+    Host client(everything());
+    const auto listener = server.call("neura.net.listen", {text("127.0.0.1"), i32(0)});
+    expect_ok(listener, "listen");
+    const auto port = server.call("neura.net.local_port", {listener.value});
+    expect_ok(port, "port");
+    HostCompletion accepted;
+    std::jthread acceptor([&] {
+        accepted = server.call("neura.net.tls.accept", {listener.value, text(material.certificate), text(material.key),
+            tls_names({}), i64(wait), i32(13), i32(13), text(material.certificate), boolean(true)}, 2);
+    });
+    const auto connected = client.call("neura.net.tls.connect", {text("127.0.0.1"), port.value, i64(wait),
+        text("localhost"), tls_names({}), text(material.certificate), i32(13), i32(13),
+        text(material.certificate), text(material.key), boolean(true)}, 2);
+    acceptor.join();
+    expect_ok(connected, "connected kTLS client");
+    expect_ok(accepted, "accepted kTLS peer");
+    const auto from = connected.value.elements.at(0);
+    const auto to = accepted.value.elements.at(0);
+    expect_ok(client.call("neura.net.tls.kernel_offload", {from}), "client offload in both directions");
+    expect_ok(server.call("neura.net.tls.kernel_offload", {to}), "server offload in both directions");
+    expect_ok(client.call("neura.net.tls.write", {from, bytes("ping")}), "client kTLS write");
+    check_equal(server.call("neura.net.tls.read", {to, i32(64), i64(wait)}).value.bytes,
+                std::string("ping"), "server kTLS read");
+    expect_ok(server.call("neura.net.tls.write", {to, bytes("pong")}), "server kTLS write");
+    check_equal(client.call("neura.net.tls.read", {from, i32(64), i64(wait)}).value.bytes,
+                std::string("pong"), "client kTLS read");
+    expect_ok(client.call("neura.net.tls.shutdown_write", {from, i64(wait)}), "kTLS close_notify");
+    const auto end = server.call("neura.net.tls.read", {to, i32(64), i64(wait)});
+    expect_ok(end, "orderly end of kTLS stream");
+    check(end.value.bytes.empty(), "close_notify is an orderly end");
+    expect_ok(client.call("neura.net.tls.close", {from}), "close client kTLS stream");
+    expect_ok(server.call("neura.net.tls.close", {to}), "close server kTLS stream");
+}
+#endif
+
 NEURA_TEST(host, tls_v2_requires_exact_versions_and_mutual_identity) {
     const LoopbackTlsKeys material;
     constexpr auto wait = 2'000'000'000LL;

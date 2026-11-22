@@ -1976,6 +1976,12 @@ if(BUILD_TESTING AND NEURA_SDK)
             --neura "$<TARGET_FILE:neura>" --feature "${feature}" ${socket_feature_arguments})
         set_tests_properties(stdlib-net-socket-${feature} PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 120)
     endforeach()
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NEURA_ENABLE_SERVER_TLS)
+        add_test(NAME stdlib-net-tls-ktls COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/net-tls/ktls.py" "$<TARGET_FILE:neura_backend_tests>"
+            "${CMAKE_CURRENT_SOURCE_DIR}" "${NEURA_SERVER_TEST_OPENSSL}")
+        set_tests_properties(stdlib-net-tls-ktls PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 45)
+    endif()
 
     # Standard library tests under the reference evaluator and NVM.
     add_test(NAME backend-reference COMMAND neura_backend_tests reference "${CMAKE_CURRENT_SOURCE_DIR}")
