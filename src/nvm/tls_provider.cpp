@@ -699,6 +699,11 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
             (operation != 2 && !message.empty())) return fail(host_error::invalid_input);
         auto& stream = *found->second;
         if (stream.terminal_error) return fail(stream.terminal_error);
+        // DTLS application records are not fragmented like handshake messages.
+        // Reject an oversized message before changing the pending operation.
+        if (operation == 2 && (!stream.ssl || !SSL_is_init_finished(stream.ssl) ||
+                              message.empty() || message.size() > DTLS_get_data_mtu(stream.ssl)))
+            return fail(host_error::invalid_input);
         if (stream.pending_operation == -1) {
             stream.pending_operation = operation;
             stream.deadline = deadline_of(timeout ? timeout : dtls_default_timeout);
@@ -727,6 +732,8 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
                 SSL_set_blocking_mode(stream.ssl, 0);
                 SSL_set_options(stream.ssl, SSL_OP_NO_QUERY_MTU);
                 SSL_set_mtu(stream.ssl, 1200);
+            // A listener has no SSL_CONNECTION for SSL_get_error to inspect;
+            // empty nonblocking accept is NULL without an error queue entry.
             } else if (ERR_peek_error() != 0) {
                 failure = host_error::connection_reset;
             }

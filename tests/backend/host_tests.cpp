@@ -1752,6 +1752,9 @@ NEURA_TEST(host, dtls13_addressed_engine_roundtrip_and_deadline) {
         }
     }
     check(client_done && server_done, "DTLS 1.3 handshake with address cookie");
+    expect_error(client.call("neura.net.dtls.engine.exchange", {c.value, i32(2), bytes(""), text(""), i32(0),
+        bytes(std::string(16384, 'x')), i64(5'000'000'000)}), host_error::invalid_input,
+        "application messages above the negotiated data MTU fail without poisoning the engine");
     const auto sent = step(client, c.value, 2, "", 54321, "message");
     transfer(sent, to_server);
     bool received = false;
