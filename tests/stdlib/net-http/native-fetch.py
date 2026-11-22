@@ -158,6 +158,10 @@ class Peer:
         elif self.case == "chunked":
             connection.sendall(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
                                b"2\r\nhe\r\n3\r\nllo\r\n0\r\nX-End: yes\r\n\r\n")
+        elif self.case == "many-chunks":
+            chunk = b"64\r\n" + b"x" * 100 + b"\r\n"
+            connection.sendall(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n" +
+                               chunk * 3000 + b"0\r\nX-End: yes\r\n\r\n")
         elif self.case == "redirect" and head.startswith(b"GET /start "):
             connection.sendall(b"HTTP/1.1 302 Found\r\nLocation: /fixed\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
         elif self.case == "redirect-loop":
@@ -370,6 +374,7 @@ def native_cases(args, root, cert, key, other_cert, other_key):
                         *policy, *extra, "--", api, url, mode], env=env)
 
     cases = [("fixed", "Ok:200:hello", "get"), ("chunked", "Ok:200:hello", "get"),
+             ("many-chunks", "Ok:200:300000:120:120", "body-size"),
              ("redirect", "Ok:200:hello", "get"), ("not-found", "Ok:404:missing", "get"),
              ("echo", "Ok:200:ping", "post"), ("closed", "Custom:http.OutcomeUnknown", "get"),
              ("truncated", "Custom:http.OutcomeUnknown", "get"), ("bad-chunk", "Custom:http.OutcomeUnknown", "get"),

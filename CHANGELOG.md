@@ -39,6 +39,10 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - Raw IP sockets require the explicit `raw` capability and network access. SPIFFE SVID verification requires a nonempty trust domain.
 - Unqualified device and enclave evidence APIs and FN-DSA return typed `Unsupported` results. FN-DSA signing and verification now return `Result`.
 
+### Fixed
+
+- Native fetch accepts a chunked response of any number of chunks: each chunk-size line and the trailer section have their own 16 KiB bound, instead of one budget for all chunk metadata.
+
 ### Known limitations
 
 - OpenSSL 4.1.0 DTLS can drop outstanding post-handshake retransmissions on KeyUpdate ([#32878](https://github.com/openssl/openssl/issues/32878)), misclassify listener read or write errors ([#33277](https://github.com/openssl/openssl/issues/33277), [#33278](https://github.com/openssl/openssl/issues/33278)), or abort a handshake on an early acknowledgment ([#33242](https://github.com/openssl/openssl/issues/33242)). [DTLS 1.3 limitations](docs/lang/Neura0.3.1.md#dtls-13-limitations)

@@ -102,6 +102,9 @@ let NativeFetch = module:program.Entry (
                 request = request.with_header("Content-Length", "0").with_header("Transfer-Encoding", "chunked");
             }
             last response = request.send()?;
+            if (mode == "body-size") {
+                return result.Result<string>.Ok(body_summary(response.status, response.body));
+            }
             last text = response.text()?;
             return result.Result<string>.Ok(response.status.to_string() .. ":" .. text);
         }
@@ -116,6 +119,13 @@ let NativeFetch = module:program.Entry (
             request.headers.add("Transfer-Encoding", "chunked");
         }
         last response = new http.Client().send(request)?;
+        if (mode == "body-size") {
+            return result.Result<string>.Ok(body_summary(response.status, response.body()));
+        }
         return result.Result<string>.Ok(response.status.to_string() .. ":" .. response.body_text());
     };
+
+    let body_summary = func(status: int, body: uint8[list]) -> string =>
+        status.to_string() .. ":" .. body.length.to_string() .. ":" .. body[0].to_string() .. ":" ..
+            body[body.length - 1].to_string();
 );

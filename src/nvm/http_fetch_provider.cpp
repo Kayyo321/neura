@@ -617,9 +617,9 @@ Response http1(Connection& connection, const Url& url, const Request& request) {
     }
     if (request.method == "HEAD" || response.status == 204 || response.status == 304) return response;
     if (chunked) {
-        std::size_t metadata_budget = head_limit;
         for (;;) {
-            const auto line = input.line(metadata_budget);
+            std::size_t line_budget = head_limit;
+            const auto line = input.line(line_budget);
             const auto semi = line.find(';');
             auto digits = std::string_view(line).substr(0, semi);
             if (semi != std::string::npos)
@@ -628,10 +628,13 @@ Response http1(Connection& connection, const Url& url, const Request& request) {
             if (semi != std::string::npos) chunk_extensions(std::string_view(line).substr(semi));
             if (count == 0) break;
             input.take(count, response.body);
-            if (!input.line(metadata_budget).empty()) reject(unknown);
+            std::string ending;
+            input.take(2, ending);
+            if (ending != "\r\n") reject(unknown);
         }
+        std::size_t trailer_budget = head_limit;
         for (std::size_t fields = 0;; ++fields) {
-            const auto line = input.line(metadata_budget);
+            const auto line = input.line(trailer_budget);
             if (line.empty()) break;
             const auto colon = line.find(':');
             if (fields >= 100 || colon == std::string::npos || !token(std::string_view(line).substr(0, colon)) ||
