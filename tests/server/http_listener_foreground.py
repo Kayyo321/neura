@@ -176,7 +176,7 @@ def connection_limit(fixture):
                 with connect(second) as recovered:
                     request(recovered, close=True)
                 break
-            except (EOFError, ConnectionResetError, BrokenPipeError):
+            except (EOFError, ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
                 if time.monotonic() >= deadline:
                     raise
                 time.sleep(0.02)
