@@ -408,7 +408,7 @@ def test_limits(args, image):
     # has been reaped, so a request that follows a response at once waits
     # for it instead of being refused.
     host = Host(args, image, "--max-workers", "1", "--max-queue", "1", "--ready-workers", "0",
-                "--request-timeout", "2", "--max-response-bytes", "2000", "--max-body-bytes", "1024")
+                "--request-timeout", "4", "--max-response-bytes", "2000", "--max-body-bytes", "1024")
     try:
         port = host.port
         status, _, body = request(port, "GET", "/big?2000")
@@ -428,10 +428,14 @@ def test_limits(args, image):
         def queued():
             results["queued"] = request(port, "GET", "/hello")[0]
 
+        # S-8 runs from the end of a request's head, queueing included: the
+        # queued request is sent 2 s before the slow one's deadline frees the
+        # slot, so 2 s of its own remain to start a worker (with no ready
+        # worker) and answer; a Windows exec worker did not fit in 0.5 s.
         started = time.time()
         thread = threading.Thread(target=slow)
         thread.start()
-        time.sleep(0.5)
+        time.sleep(2.0)
         waiting = threading.Thread(target=queued)
         waiting.start()
         time.sleep(0.3)
@@ -441,7 +445,7 @@ def test_limits(args, image):
         waiting.join()
         check(results.get("queued") in (200, 503), f"queued behind the slow request: {results}")
         elapsed = time.time() - started
-        check(results.get("slow") == 504 and elapsed < 6, f"deadline: {results} after {elapsed:.1f} s")
+        check(results.get("slow") == 504 and elapsed < 8, f"deadline: {results} after {elapsed:.1f} s")
         time.sleep(0.5)
         status, _, _ = request(port, "GET", "/hello")
         check(status == 200, f"after the deadline: {status}")
