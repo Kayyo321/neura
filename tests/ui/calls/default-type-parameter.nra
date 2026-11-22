@@ -1,2 +1,2 @@
-// A parameter whose type mentions a type parameter takes no default (edge case 24).
+// A bare type parameter does not take a default.
 let keep = func<T>(a: T = 1) -> T => a;

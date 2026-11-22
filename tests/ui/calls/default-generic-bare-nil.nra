@@ -1,0 +1,1 @@
+let invalid = func<T>(value: T = nil) -> bool => true;

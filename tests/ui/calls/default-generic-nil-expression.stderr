@@ -1,0 +1,7 @@
+error[E0226]: parameter 'cell' takes no default
+ --> $DIR/default-generic-nil-expression.nra:3:37
+  |
+3 | let invalid = func<T>(cell: Cell<T> = true ? nil : nil) -> bool => true;
+  |                                     ^^^^^^^^^^^^^^^^^^ only a class or interface reference can take a literal nil default when its type mentions a type parameter
+
+For more information about this error, try `neura explain E0226`.

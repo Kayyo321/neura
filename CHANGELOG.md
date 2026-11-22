@@ -21,6 +21,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 - The `nil-access` and `nil-argument` warnings report dereferences and transfers that may encounter a nil reference. A guard can prove a binding non-nil, and function result summaries survive separate compilation. [Nil warnings](docs/lang/CoreLanguage.md#nil-access-and-nil-argument-warnings)
 - Numeric literals accept apostrophe digit separators and fixed-width integer and floating-point suffixes.
+- Parameters with a generic class or interface reference type such as `Node<T>` can use the literal `nil` as their default.
 - `if (let binding = value; condition)` evaluates one binding or destructuring before the condition, with its names scoped to the condition and branches. `else if` may have its own initializer.
 - Class and interface references can be tested directly in conditions and with `!` or `not`. The tests use normal nil comparisons and preserve reference reads and runtime safety checks.
 - NeuraIR 1.16 records which reference reads a nil condition proves non-nil. `neura emit-ir` shows those use spans and runtime nil checks remain in place.

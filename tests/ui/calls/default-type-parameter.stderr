@@ -2,6 +2,6 @@ error[E0226]: parameter 'a' takes no default
  --> $DIR/default-type-parameter.nra:2:25
   |
 2 | let keep = func<T>(a: T = 1) -> T => a;
-  |                         ^^^ its type mentions a type parameter
+  |                         ^^^ only a class or interface reference can take a literal nil default when its type mentions a type parameter
 
 For more information about this error, try `neura explain E0226`.

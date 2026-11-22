@@ -1,0 +1,7 @@
+error[E0226]: parameter 'value' takes no default
+ --> $DIR/default-generic-bare-nil.nra:1:32
+  |
+1 | let invalid = func<T>(value: T = nil) -> bool => true;
+  |                                ^^^^^ only a class or interface reference can take a literal nil default when its type mentions a type parameter
+
+For more information about this error, try `neura explain E0226`.

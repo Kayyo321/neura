@@ -108,6 +108,10 @@ if (val) {
 
 `val` is `nil`, so `!val` is true, the first body prints `nil`, and the second body does not run. After `val` is assigned an instance, `if (val)` runs and `if (!val)` does not. A comparison such as `val == nil` remains an ordinary `bool`. A number, a string, an enum, and a `bool` keep the condition rules they already have.
 
+### Nil defaults on generic references
+
+A parameter of an applied class or interface type such as `Node<T>` may default to the literal `nil`. A bare type parameter such as `T` still takes no default. Other defaults on types that depend on a type parameter are `E0226`. See [Default values](CoreLanguage.md#default-values).
+
 ## Dot tags
 
 A tag may be introduced with `.` instead of `#`. The two spellings mean the same thing in every position a tag is allowed ([Tags](Tags.md#syntax)): before a declaration, before an enum variant's name, and before a parameter's name.

@@ -1,0 +1,3 @@
+let Cell = class<T> ();
+
+let invalid = func<T>(cell: Cell<T> = true ? nil : nil) -> bool => true;

@@ -320,8 +320,12 @@ void Lowering::record_defaults(SymbolId function, const Declaration& decl, Conte
         if (decl.host_binding || decl.kernel_binding || decl.scheduler_binding || decl.host_callback)
             reject("a host, kernel, scheduler or callback binding takes no default");
         if (is_primitive_reference(type)) reject("a primitive reference parameter is bound to a caller's place");
-        if (mentions_type_parameter(type)) reject("its type mentions a type parameter");
         const auto& written = *parameter.default_value;
+        // Nil is the same value for every instantiation of a class or
+        // interface application. A bare type parameter may be instantiated
+        // by a type without nil, so it is still ineligible for a default.
+        if (mentions_type_parameter(type) && !(type.kind == TypeKind::Object && written.kind == ExprKind::Nil))
+            reject("only a class or interface reference can take a literal nil default when its type mentions a type parameter");
         const auto not_constant = [&] {
             return Diagnostic(written.span, "a default is a literal, nil, or a variant without payload")
                 .with_code("E0485")

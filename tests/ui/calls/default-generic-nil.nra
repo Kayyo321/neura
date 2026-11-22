@@ -1,0 +1,10 @@
+let Cell = class<T> ();
+let View = interface<T> ();
+
+let class_default = func<T>(witness: T, cell: Cell<T> = nil) -> bool => cell == nil;
+let interface_default = func<T>(witness: T, view: View<T> = nil) -> bool => view == nil;
+
+let class_omitted = class_default<int32>(1);
+let interface_omitted = interface_default<bool>(true);
+let class_written = class_default<int32>(1, nil);
+let interface_written = interface_default<bool>(true, nil);
