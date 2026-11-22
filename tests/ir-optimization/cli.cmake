@@ -44,10 +44,8 @@ function(symbol_section output listing)
 endfunction()
 
 # Emits `ARGN` twice with and twice without optimization. Each mode must be
-# reproducible. Optimization must not change the symbol table; the default
-# listing is also specialized, which appends generic instances and retypes
-# uses of generic types. It also replaces structural closures with concrete
-# receiver layouts. Check for the corresponding output in those programs.
+# reproducible. The executable symbol table stays the same after proof erasure,
+# apart from optimization and specialization changes checked below.
 function(check_both_modes label)
     run_success(optimized emit-ir ${ARGN})
     run_success(optimized_again emit-ir ${ARGN})
@@ -64,6 +62,33 @@ function(check_both_modes label)
     endif()
     symbol_section(optimized_symbols "${optimized}")
     symbol_section(unoptimized_symbols "${unoptimized}")
+    if(optimized_symbols MATCHES "\n  %[0-9]+ law ")
+        message(FATAL_ERROR "${label}: optimized emission kept a proof-only declaration")
+    endif()
+    list(FIND ARGN "${SOURCE_DIR}/examples/laws/boolean.nra" boolean_law)
+    if(NOT boolean_law EQUAL -1)
+        if(NOT unoptimized_symbols MATCHES
+           "\n  %([0-9]+) law \"DoubleInversion\"[^\n]* parameters=\\[%([0-9]+)\\]")
+            message(FATAL_ERROR "${label}: unoptimized emission lost the Boolean law or its binder")
+        endif()
+        set(law_id "${CMAKE_MATCH_1}")
+        set(binder_id "${CMAKE_MATCH_2}")
+        if(NOT unoptimized_symbols MATCHES "\n  %${binder_id} parameter \"flag\" : bool owner=%${law_id} ")
+            message(FATAL_ERROR "${label}: the Boolean law's binder lacks its declaration")
+        endif()
+    endif()
+    if(unoptimized_symbols MATCHES "\n  %[0-9]+ law ")
+        file(WRITE "${TEST_DIR}/unoptimized-symbols.ir" "${unoptimized_symbols}")
+        file(WRITE "${TEST_DIR}/optimized-symbols.ir" "${optimized_symbols}")
+        execute_process(
+            COMMAND "${PYTHON}" "${SOURCE_DIR}/tests/ir-optimization/erase-law-symbols.py"
+                "${TEST_DIR}/unoptimized-symbols.ir" "${TEST_DIR}/optimized-symbols.ir"
+            RESULT_VARIABLE status OUTPUT_VARIABLE executable_symbols ERROR_VARIABLE stderr)
+        if(NOT status STREQUAL "0")
+            message(FATAL_ERROR "${label}: proof erasure check failed\n${stderr}")
+        endif()
+        set(unoptimized_symbols "${executable_symbols}")
+    endif()
     # Inlining appends a local to the caller for each inlined parameter and
     # local; every other symbol keeps its number and listing.
     string(REGEX REPLACE "\n  %[0-9]+ local \"[$]inline[.][^\n]*" "" optimized_symbols "${optimized_symbols}")

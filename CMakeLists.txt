@@ -2349,6 +2349,7 @@ if(BUILD_TESTING AND NEURA_SDK)
 
     add_test(NAME ir-optimization-cli COMMAND ${CMAKE_COMMAND}
         "-DNEURA=$<TARGET_FILE:neura>"
+        "-DPYTHON=${Python3_EXECUTABLE}"
         "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
         "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/ir-optimization-tests"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/ir-optimization/cli.cmake"
