@@ -480,9 +480,12 @@ public:
     const nvr::Function& converted(std::uint32_t index) const { return image_.functions.at(index); }
     const nvr::Type& type_at(std::uint32_t index) const { return image_.types.at(index); }
     const nvr::Global& global_at(std::uint32_t index) const { return image_.globals.at(index); }
+    bool constant_graph(const nvr::Block& block) const {
+        return block.inputs.empty() && image_.graphs[block.graph].nodes.empty();
+    }
     bool jump_only(const nvr::Block& block) const {
         // Polling changes scheduler state, so keep a block that polls.
-        return block.inputs.empty() && image_.graphs[block.graph].nodes.empty() && block.exits.size() == 1 &&
+        return constant_graph(block) && block.exits.size() == 1 &&
                block.exits.front().kind == nvr::ExitKind::Continue && block.exits.front().assignments.empty() &&
                !block.exits.front().poll;
     }
@@ -2799,6 +2802,7 @@ void FunctionCompiler::batch_list_run(const IrNode& node, std::uint32_t head, st
         body = field->resume;
     }
     nvr::Exit* run = nullptr;
+    std::uint32_t append_block = nvr::absent;
     for (std::size_t i = 0; i < group; ++i) {
         if (!repeat) {
             const auto* read = state_exit(body, nvr::StateOp::ReadElement);
@@ -2806,6 +2810,7 @@ void FunctionCompiler::batch_list_run(const IrNode& node, std::uint32_t head, st
             body = read->resume;
         }
         if (function_.blocks[body].exits.size() != 1) return;
+        append_block = body;
         run = state_exit(body, nvr::StateOp::AppendElement);
         if (!run) return;
         body = run->resume;
@@ -2824,6 +2829,7 @@ void FunctionCompiler::batch_list_run(const IrNode& node, std::uint32_t head, st
 
     const nvr::Value index{nvr::ValueKind::Slot, i32, cursor_slot};
     const nvr::Value limit{nvr::ValueKind::Slot, i32, end_slot};
+    const auto original = *run;
     run->arguments.insert(run->arguments.begin() + 1, {index, limit});
     if (!repeat) {
         const auto source_slot = slots_.at(source);
@@ -2835,6 +2841,49 @@ void FunctionCompiler::batch_list_run(const IrNode& node, std::uint32_t head, st
     run->operation = nvr::StateOp::AppendRun;
     run->immediate = static_cast<std::uint32_t>(kind);
     run->result_slot = cursor_slot;
+
+    // For common short byte appends, keep the existing inline native
+    // operation. Select it in the append block, without charging an extra
+    // block or moving the original checked read after the selection.
+    auto& block = function_.blocks[append_block];
+    if (repeat || !c_.constant_graph(block) ||
+        std::ranges::any_of(original.arguments, [](const auto& v) { return v.kind != nvr::ValueKind::Slot; })) return;
+
+    const auto frame_operand = [](const nvr::Value& value) {
+        Operand operand;
+        operand.kind = Operand::Kind::Slot;
+        operand.type = value.type;
+        operand.index = value.index;
+        return operand;
+    };
+    BlockSynthesizer synth(c_);
+    const auto end = synth.lanes(frame_operand(limit));
+    const auto start = synth.lanes(frame_operand(index));
+    constexpr std::uint32_t minimum_run = 16;
+    const auto remaining = subtract(synth.circuit(), end, start, true).value;
+    const auto small = less(synth.circuit(), remaining, constant_word(minimum_run, 32), true);
+    const auto exit_for = [&](const nvr::Exit& exit, Signal selected) {
+        ExitSpec spec;
+        spec.kind = exit.kind;
+        spec.operation = exit.operation;
+        spec.immediate = exit.immediate;
+        spec.result_slot = exit.result_slot;
+        spec.resume = exit.resume;
+        spec.when = selected;
+        for (const auto& argument : exit.arguments) spec.arguments.push_back(frame_operand(argument));
+        return spec;
+    };
+    block = synth.close({exit_for(*run, Circuit::logical_not(small)), exit_for(original, small)});
+    if (c_.lift_hints()) {
+        const auto boolean = c_.scalar(nvr::TypeKind::Bool);
+        auto difference = lift::binary("-~", i32, lift::input(i32, 0), lift::input(i32, 1));
+        lift::LiftedForm form;
+        form.shared = true;
+        form.exit_when_true = 0;
+        form.condition = lift::binary(">=", boolean, std::move(difference), lift::immediate(i32, minimum_run));
+        form.schedule.push_back(form.condition);
+        c_.add_hint(index_, append_block, std::move(form));
+    }
 }
 
 void FunctionCompiler::destroy(const IrNode& node) {
