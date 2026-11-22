@@ -141,7 +141,10 @@ endif()
 # A program without tasks: the methods stay plain, so the run takes the same
 # steps and cells with and without the tag, and the image has no guard.
 file(READ "${programs}/plain.nra" plain_source)
-string(REPLACE "#Synchronized\n" "// untagged\n" untagged_source "${plain_source}")
+string(REPLACE ".Synchronized\n" "// untagged\n" untagged_source "${plain_source}")
+if(untagged_source STREQUAL plain_source)
+    message(FATAL_ERROR "plain: no .Synchronized tag to remove")
+endif()
 file(WRITE "${TEST_DIR}/untagged.nra" "${untagged_source}")
 must("plain" build "${programs}/plain.nra" -o plain.nvr)
 must("plain" build untagged.nra -o untagged.nvr)
@@ -238,10 +241,10 @@ reject("library" "untagged-app.nra:5:1: error\\[E0917\\]: #Pure function 'quadru
 # the class from being shared; a state access through another instance does
 # too.
 file(READ "${programs}/counter.nra" counter_source)
-string(REPLACE "    export let total = func -> int64 => count;" "    export let total = func -> int64 => count;\n\n    #Synchronized\n    export let peek = func -> int64 => count;" with_peek "${counter_source}")
-string(REPLACE "#Synchronized\nlet Tally" "let Tally" unsynchronized "${with_peek}")
-string(REPLACE "    export let add = func" "    #Synchronized\n    export let add = func" unsynchronized "${unsynchronized}")
-string(REPLACE "    #Synchronized\n    export let peek" "    export let peek" unsynchronized "${unsynchronized}")
+string(REPLACE "    export let total = func -> int64 => count;" "    export let total = func -> int64 => count;\n\n    .Synchronized\n    export let peek = func -> int64 => count;" with_peek "${counter_source}")
+string(REPLACE ".Synchronized\nlet Tally" "let Tally" unsynchronized "${with_peek}")
+string(REPLACE "    export let add = func" "    .Synchronized\n    export let add = func" unsynchronized "${unsynchronized}")
+string(REPLACE "    .Synchronized\n    export let peek" "    export let peek" unsynchronized "${unsynchronized}")
 file(WRITE "${TEST_DIR}/unsynchronized.nra" "${unsynchronized}")
 reject("unsynchronized" "unsynchronized.nra:[0-9]+:[0-9]+: error\\[E0602\\]: a value of type Tally is not transferable" unsynchronized.nra)
 neura(rendered check unsynchronized.nra)

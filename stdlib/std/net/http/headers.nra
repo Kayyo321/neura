@@ -11,10 +11,10 @@ let strings = import:Std.Text.Strings;
 /// header value"), so a map never holds a field that cannot be written to the wire. Leading and trailing spaces
 /// and tabs of a value are removed (RFC 9110 section 5.5).
 /// @see [Std.Net.Http.Headers](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-Headers)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Headers = module (
     /// @brief Header fields in insertion order, looked up without regard to ASCII case.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Headers = class (
         /// @brief Field names as added.
         last names: string[list] = new;
@@ -64,7 +64,7 @@ export let Headers = module (
         };
 
         /// @brief The first value of `name`.
-        #NoDiscard
+        .NoDiscard
         export let get = func(name: string) -> Optional<string> {
             last at = index_of(strings.to_ascii_lower(name));
             return if (at < 0) -> Optional<string>.None
@@ -72,7 +72,7 @@ export let Headers = module (
         };
 
         /// @brief Every value of `name` in order, as a new list.
-        #NoDiscard
+        .NoDiscard
         export let get_all = func(name: string) -> string[list] {
             last key = strings.to_ascii_lower(name);
             last found: string[list] = new;
@@ -85,7 +85,7 @@ export let Headers = module (
         };
 
         /// @brief Every value of `name` joined with ", " (RFC 9110 section 5.3), or None when absent.
-        #NoDiscard
+        .NoDiscard
         export let joined = func(name: string) -> Optional<string> {
             last all = get_all(name);
             return if (all.length == 0) -> Optional<string>.None
@@ -94,7 +94,7 @@ export let Headers = module (
 
         /// @brief The comma-separated elements of every value of `name` (RFC 9110 section 5.6.1), each trimmed,
         /// empty elements dropped. Quoted strings are not split.
-        #NoDiscard
+        .NoDiscard
         export let list_elements = func(name: string) -> string[list] {
             last elements: string[list] = new;
             for (let value in get_all(name)) {
@@ -128,7 +128,7 @@ export let Headers = module (
         export let value_at = func(index: int) -> string => values[index];
 
         /// @brief The distinct lowercase names in order of first appearance.
-        #NoDiscard
+        .NoDiscard
         export let lower_names = func -> string[list] {
             last seen: string[list] = new;
             for (let key in keys) {
@@ -147,7 +147,7 @@ export let Headers = module (
         };
 
         /// @brief An independent copy.
-        #NoDiscard
+        .NoDiscard
         export let copy = func -> Headers {
             last other = new Headers();
             for (let i = 0; i < names.length; i++) {
@@ -223,7 +223,7 @@ export let Headers = module (
     );
 
     /// @brief A map holding the given names and values in order. The lists must have the same length.
-    #NoDiscard
+    .NoDiscard
     export let of = func(field_names: string[list], field_values: string[list]) -> Headers {
         if (field_names.length != field_values.length) {
             trap_with_message("invalid argument: header names and values differ in length");
@@ -236,7 +236,7 @@ export let Headers = module (
     };
 
     /// @brief Whether `name` is a non-empty token (RFC 9110 section 5.6.2).
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let is_token = func(name: string) -> bool {
         if (name.byte_length == 0) {
             return false;
@@ -248,7 +248,7 @@ export let Headers = module (
     };
 
     /// @brief Whether byte `b` is a tchar (RFC 9110 section 5.6.2).
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let is_tchar = func(b: uint8) -> bool {
         return if ((b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122)) -> true
             else -> b == 33 or 35 or 36 or 37 or 38 or 39 or 42 or 43 or 45 or 46 or 94 or 95 or 96 or 124 or 126;
@@ -256,7 +256,7 @@ export let Headers = module (
 
     /// @brief Whether `value` can be a field value: no CR, LF or NUL, and no other control byte except tab
     /// (RFC 9110 section 5.5).
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let is_valid_value = func(value: string) -> bool {
         for (let i = 0; i < value.byte_length; i++) {
             last b = value.byte_at(i);
@@ -268,7 +268,7 @@ export let Headers = module (
     };
 
     /// @brief `value` without leading and trailing spaces and tabs.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let trim_value = func(value: string) -> string {
         let start = 0;
         let end = value.byte_length;
@@ -283,7 +283,7 @@ export let Headers = module (
 
     /// @brief The comma-separated elements of one field value, trimmed, empty ones dropped; commas inside
     /// quoted strings do not separate.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let split_list = func(value: string) -> string[list] {
         last parts: string[list] = new;
         let start = 0;

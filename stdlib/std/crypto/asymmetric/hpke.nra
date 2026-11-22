@@ -33,27 +33,27 @@ let words = import:Std.Crypto.Internal.Words;
 /// seals or opens messages in order: each success advances the sequence number, a failed `open` does not. The
 /// sequence number is a 64-bit count, far below the RFC's limit of 2^96 - 1, so the limit is never reached.
 /// @see [Std.Crypto.Asymmetric.Hpke](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-Hpke)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Hpke = module (
     /// @brief The KEMs of RFC 9180, section 7.1.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let Kem = enum (
         DhKemP256HkdfSha256, DhKemP384HkdfSha384, DhKemP521HkdfSha512, DhKemX25519HkdfSha256,
         DhKemX448HkdfSha512
     );
 
     /// @brief The KDFs of RFC 9180, section 7.2.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let Kdf = enum (HkdfSha256, HkdfSha384, HkdfSha512);
     /// @brief The AEADs of RFC 9180, section 7.3.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let Aead = enum (Aes128Gcm, Aes256Gcm, ChaCha20Poly1305, ExportOnly);
     /// @brief The modes of RFC 9180, section 5.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let Mode = enum (Base, Psk, Auth, AuthPsk);
 
     /// @brief The KEM's identifier: 0x0010, 0x0011, 0x0012, 0x0020 or 0x0021.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let kem_id = func(kem: Kem) -> int => match (kem) {
         Kem.DhKemP256HkdfSha256 => 16,
         Kem.DhKemP384HkdfSha384 => 17,
@@ -63,7 +63,7 @@ export let Hpke = module (
     };
 
     /// @brief The KDF's identifier: 1, 2 or 3.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let kdf_id = func(kdf: Kdf) -> int => match (kdf) {
         Kdf.HkdfSha256 => 1,
         Kdf.HkdfSha384 => 2,
@@ -71,7 +71,7 @@ export let Hpke = module (
     };
 
     /// @brief The AEAD's identifier: 1, 2, 3 or 0xFFFF.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let aead_id = func(aead: Aead) -> int => match (aead) {
         Aead.Aes128Gcm => 1,
         Aead.Aes256Gcm => 2,
@@ -106,7 +106,7 @@ export let Hpke = module (
     };
 
     /// @brief Npk (and Nenc).
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let public_key_length = func(kem: Kem) -> int => match (kem) {
         Kem.DhKemP256HkdfSha256 => 65,
         Kem.DhKemP384HkdfSha384 => 97,
@@ -116,7 +116,7 @@ export let Hpke = module (
     };
 
     /// @brief Nsk.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let private_key_length = func(kem: Kem) -> int => match (kem) {
         Kem.DhKemP256HkdfSha256 => 32,
         Kem.DhKemP384HkdfSha384 => 48,
@@ -192,7 +192,7 @@ export let Hpke = module (
 
     /// @brief An HPKE public key: SerializePublicKey of RFC 9180, section 7.1.1 (an uncompressed SEC1 point,
     /// or the X25519 or X448 bytes). Equal keys have equal KEMs and bytes.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let HpkePublicKey = class (
         /// @brief The KEM.
         export last kem: Kem;
@@ -211,7 +211,7 @@ export let Hpke = module (
         };
 
         /// @brief A copy of the encoding.
-        #NoDiscard
+        .NoDiscard
         export let to_bytes = func -> uint8[list] => words.copy(encoded);
 
         export let.override equals = func(other: class) -> bool {
@@ -250,7 +250,7 @@ export let Hpke = module (
 
     /// @brief An HPKE private key (Nsk bytes in secret memory) with its public key. `to_string` never prints
     /// it.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let HpkePrivateKey = class implements PrivateKey<DhKem> (
         /// @brief The KEM.
         export last kem: Kem;
@@ -278,7 +278,7 @@ export let Hpke = module (
         export let public_key_bytes = func -> uint8[list] => words.copy(public_encoded);
 
         /// @brief The matching public key.
-        #NoDiscard
+        .NoDiscard
         export let public_key = func -> HpkePublicKey => new(kem, public_encoded);
 
         /// @brief A fixed placeholder, never the key.
@@ -337,7 +337,7 @@ export let Hpke = module (
     /// @brief DeriveKeyPair of RFC 9180, section 7.1.3, from input keying material (at least Nsk bytes are
     /// recommended). A P-curve derivation that finds no scalar in 256 candidates, which has negligible
     /// probability, traps.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let derive_key_pair = func(kem: Kem, ikm: uint8[list]) -> HpkePrivateKey {
         last kdf = kem_kdf(kem);
         last suite_id = kem_suite(kem);
@@ -365,7 +365,7 @@ export let Hpke = module (
 
     /// @brief A new key pair from Nsk bytes of `Entropy.os_bytes`, or of the given generator, through
     /// DeriveKeyPair. Fails when the entropy source fails.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let generate_key_pair = func(kem: Kem) -> Result<HpkePrivateKey> {
         match (entropy.os_bytes(private_key_length(kem))) {
             Result.Ok(ikm) => {
@@ -386,7 +386,7 @@ export let Hpke = module (
 
     /// @brief A public key from outside the program. A wrong length or a P-curve encoding that is not an
     /// uncompressed point of the curve is `Custom` code `crypto.invalid_key`.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_public_key = func(kem: Kem, bytes: uint8[list]) -> Result<HpkePublicKey> {
         if (not public_key_ok(kem, bytes)) {
             return invalid<HpkePublicKey>("crypto.invalid_key", "not a " .. name(kem) .. " public key");
@@ -396,7 +396,7 @@ export let Hpke = module (
 
     /// @brief A private key from outside the program. A wrong length or a P-curve scalar outside 1 to n - 1 is
     /// `Custom` code `crypto.invalid_key`.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_private_key = func(kem: Kem, bytes: uint8[list]) -> Result<HpkePrivateKey> {
         if (public_of(kem, bytes).length == 0) {
             return invalid<HpkePrivateKey>("crypto.invalid_key", "not a " .. name(kem) .. " private key");
@@ -406,7 +406,7 @@ export let Hpke = module (
 
     /// @brief A DHKEM of RFC 9180, section 4.1, as a `KeyEncapsulation`: the ciphertext is `enc`, the
     /// serialized ephemeral public key, and the shared secret has Nsecret bytes.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let DhKem = class implements KeyEncapsulation<HpkePublicKey, HpkePrivateKey, SecretBytes, uint8[list]> (
         /// @brief The KEM.
         export last kem: Kem;
@@ -433,7 +433,7 @@ export let Hpke = module (
         export let algorithm = func -> Algorithm => Algorithm.Hpke;
 
         /// @brief A fresh ephemeral key pair.
-        #NoDiscard
+        .NoDiscard
         export let ephemeral_key = func -> Result<HpkePrivateKey> {
             if (has_generator) {
                 return generate_key_pair(kem, generator);
@@ -443,7 +443,7 @@ export let Hpke = module (
 
         /// @brief Encap(pkR) with the given ephemeral key. An X25519 or X448 key that gives an all-zero secret
         /// is `Custom` code `crypto.key_agreement`. Keys of another KEM trap.
-        #NoDiscard
+        .NoDiscard
         export let encapsulate_with = func(public_key: HpkePublicKey, ephemeral: HpkePrivateKey)
             -> Result<Encapsulation<SecretBytes, uint8[list]>> {
             check_kem(public_key.kem, ephemeral.kem);
@@ -457,7 +457,7 @@ export let Hpke = module (
         };
 
         /// @brief AuthEncap(pkR, skS) with the given ephemeral key.
-        #NoDiscard
+        .NoDiscard
         export let auth_encapsulate_with = func(public_key: HpkePublicKey, sender: HpkePrivateKey,
             ephemeral: HpkePrivateKey) -> Result<Encapsulation<SecretBytes, uint8[list]>> {
             check_kem(public_key.kem, ephemeral.kem);
@@ -474,7 +474,7 @@ export let Hpke = module (
         };
 
         /// @brief Encap(pkR) with a fresh ephemeral key. Fails on an entropy failure or a bad X25519/X448 key.
-        #NoDiscard
+        .NoDiscard
         export let try_encapsulate = func(public_key: HpkePublicKey) -> Result<Encapsulation<SecretBytes, uint8[list]>> {
             match (ephemeral_key()) {
                 Result.Ok(ephemeral) => {
@@ -487,7 +487,7 @@ export let Hpke = module (
         };
 
         /// @brief AuthEncap(pkR, skS) with a fresh ephemeral key.
-        #NoDiscard
+        .NoDiscard
         export let try_auth_encapsulate = func(public_key: HpkePublicKey, sender: HpkePrivateKey)
             -> Result<Encapsulation<SecretBytes, uint8[list]>> {
             match (ephemeral_key()) {
@@ -528,7 +528,7 @@ export let Hpke = module (
         };
 
         /// @brief AuthDecap(enc, skR, pkS).
-        #NoDiscard
+        .NoDiscard
         export let auth_decapsulate = func(private_key: HpkePrivateKey, ciphertext: uint8[list], sender: HpkePublicKey)
             -> Result<SecretBytes> {
             check_kem(private_key.kem, kem);
@@ -564,7 +564,7 @@ export let Hpke = module (
 
     /// @brief The keys of a context: the AEAD key, the base nonce and the exporter secret (RFC 9180, section
     /// 5.1).
-    #Final
+    .Final
     let Schedule = class (
         export last suite_id: uint8[list];
         export last kdf: Kdf;
@@ -620,7 +620,7 @@ export let Hpke = module (
     );
 
     /// @brief The sender's context: `enc` for the recipient, `seal` in order, and `export_secret`.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let SenderContext = class (
         /// @brief The encapsulated key to send with the messages.
         export last enc: uint8[list];
@@ -635,7 +635,7 @@ export let Hpke = module (
         };
 
         /// @brief The ciphertext of the next message. An export-only context traps.
-        #NoDiscard
+        .NoDiscard
         export let seal = func(aad: uint8[list], plaintext: uint8[list]) -> uint8[list] {
             last out = schedule.seal(sequence, aad, plaintext);
             sequence = sequence + 1;
@@ -643,7 +643,7 @@ export let Hpke = module (
         };
 
         /// @brief `length` bytes of exported secret for the context string (at most 255 Nh bytes).
-        #NoDiscard
+        .NoDiscard
         export let export_secret = func(exporter_context: uint8[list], length: int) -> uint8[list] =>
             schedule.export_secret(exporter_context, length);
 
@@ -651,7 +651,7 @@ export let Hpke = module (
     );
 
     /// @brief The recipient's context: `open` in order, and `export_secret`.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let ReceiverContext = class (
         last schedule: Schedule;
         /// @brief The number of messages opened so far.
@@ -664,7 +664,7 @@ export let Hpke = module (
 
         /// @brief The plaintext of the next message, or `Custom` code `crypto.authentication`; a failure does not
         /// advance the sequence number. An export-only context traps.
-        #NoDiscard
+        .NoDiscard
         export let open = func(aad: uint8[list], ciphertext: uint8[list]) -> Result<uint8[list]> {
             last outcome = schedule.open(sequence, aad, ciphertext);
             match (outcome) {
@@ -678,7 +678,7 @@ export let Hpke = module (
         };
 
         /// @brief `length` bytes of exported secret for the context string (at most 255 Nh bytes).
-        #NoDiscard
+        .NoDiscard
         export let export_secret = func(exporter_context: uint8[list], length: int) -> uint8[list] =>
             schedule.export_secret(exporter_context, length);
 
@@ -686,7 +686,7 @@ export let Hpke = module (
     );
 
     /// @brief The output of the single-shot `seal`: `enc` and the ciphertext.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let SealedMessage = class (
         export last enc: uint8[list];
         export last ciphertext: uint8[list];
@@ -698,7 +698,7 @@ export let Hpke = module (
 
         /// @brief Whether both the encapsulation and ciphertext bytes match.
         /// @see [Std.Crypto.Asymmetric.Hpke](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-Hpke)
-        #[NoDiscard, Since("0.3.0")]
+        .[NoDiscard, Since("0.3.0")]
         export let.override equals = func(other: class) -> bool {
             if (other is not that: SealedMessage) {
                 return false;
@@ -708,7 +708,7 @@ export let Hpke = module (
 
         /// @brief A hash of both byte sequences, including their lengths.
         /// @see [Std.Crypto.Asymmetric.Hpke](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-Hpke)
-        #[NoDiscard, Since("0.3.0")]
+        .[NoDiscard, Since("0.3.0")]
         export let.override hash_code = func -> uint32 {
             let hash = hashing.combine(enc.length as uint32, ciphertext.length as uint32);
             for (let byte in enc) {
@@ -725,7 +725,7 @@ export let Hpke = module (
     );
 
     /// @brief An HPKE ciphersuite (KEM, KDF, AEAD).
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Suite = class (
         export last kem: Kem;
         export last kdf: Kdf;
@@ -764,7 +764,7 @@ export let Hpke = module (
         };
 
         /// @brief The DHKEM of the suite.
-        #NoDiscard
+        .NoDiscard
         export let key_encapsulation = func -> DhKem => dhkem;
 
         /// @brief "HPKE" || kem_id || kdf_id || aead_id.
@@ -802,7 +802,7 @@ export let Hpke = module (
 
         /// @brief SetupS of any mode with the given ephemeral key: `psk` and `psk_id` are empty in the base and
         /// auth modes, and `sender` holds the sender's key in the auth modes (and is empty otherwise).
-        #NoDiscard
+        .NoDiscard
         export let setup_sender_with = func(mode: Mode, public_key: HpkePublicKey, info: uint8[list], psk: uint8[list],
             psk_id: uint8[list], sender: HpkePrivateKey[list], ephemeral: HpkePrivateKey) -> Result<SenderContext> {
             last auth = mode == Mode.Auth || mode == Mode.AuthPsk;
@@ -823,7 +823,7 @@ export let Hpke = module (
         };
 
         /// @brief SetupS of any mode with a fresh ephemeral key (see `setup_sender_with`).
-        #NoDiscard
+        .NoDiscard
         export let setup_sender = func(mode: Mode, public_key: HpkePublicKey, info: uint8[list], psk: uint8[list],
             psk_id: uint8[list], sender: HpkePrivateKey[list]) -> Result<SenderContext> {
             match (dhkem.ephemeral_key()) {
@@ -837,29 +837,29 @@ export let Hpke = module (
         };
 
         /// @brief SetupBaseS.
-        #NoDiscard
+        .NoDiscard
         export let setup_base_sender = func(public_key: HpkePublicKey, info: uint8[list]) -> Result<SenderContext> =>
             setup_sender(Mode.Base, public_key, info, new, new, new);
 
         /// @brief SetupPSKS.
-        #NoDiscard
+        .NoDiscard
         export let setup_psk_sender = func(public_key: HpkePublicKey, info: uint8[list], psk: uint8[list],
             psk_id: uint8[list]) -> Result<SenderContext> => setup_sender(Mode.Psk, public_key, info, psk, psk_id, new);
 
         /// @brief SetupAuthS.
-        #NoDiscard
+        .NoDiscard
         export let setup_auth_sender = func(public_key: HpkePublicKey, info: uint8[list], sender: HpkePrivateKey)
             -> Result<SenderContext> => setup_sender(Mode.Auth, public_key, info, new, new, new([sender]));
 
         /// @brief SetupAuthPSKS.
-        #NoDiscard
+        .NoDiscard
         export let setup_auth_psk_sender = func(public_key: HpkePublicKey, info: uint8[list], psk: uint8[list],
             psk_id: uint8[list], sender: HpkePrivateKey) -> Result<SenderContext> =>
                 setup_sender(Mode.AuthPsk, public_key, info, psk, psk_id, new([sender]));
 
         /// @brief SetupR of any mode: `sender` holds the sender's public key in the auth modes (and is empty
         /// otherwise). A malformed `enc` or a failed Diffie-Hellman is `Custom` code `crypto.invalid_ciphertext`.
-        #NoDiscard
+        .NoDiscard
         export let setup_receiver = func(mode: Mode, enc: uint8[list], private_key: HpkePrivateKey, info: uint8[list],
             psk: uint8[list], psk_id: uint8[list], sender: HpkePublicKey[list]) -> Result<ReceiverContext> {
             last auth = mode == Mode.Auth || mode == Mode.AuthPsk;
@@ -878,30 +878,30 @@ export let Hpke = module (
         };
 
         /// @brief SetupBaseR.
-        #NoDiscard
+        .NoDiscard
         export let setup_base_receiver = func(enc: uint8[list], private_key: HpkePrivateKey, info: uint8[list])
             -> Result<ReceiverContext> => setup_receiver(Mode.Base, enc, private_key, info, new, new, new);
 
         /// @brief SetupPSKR.
-        #NoDiscard
+        .NoDiscard
         export let setup_psk_receiver = func(enc: uint8[list], private_key: HpkePrivateKey, info: uint8[list],
             psk: uint8[list], psk_id: uint8[list]) -> Result<ReceiverContext> =>
                 setup_receiver(Mode.Psk, enc, private_key, info, psk, psk_id, new);
 
         /// @brief SetupAuthR.
-        #NoDiscard
+        .NoDiscard
         export let setup_auth_receiver = func(enc: uint8[list], private_key: HpkePrivateKey, info: uint8[list],
             sender: HpkePublicKey) -> Result<ReceiverContext> =>
                 setup_receiver(Mode.Auth, enc, private_key, info, new, new, new([sender]));
 
         /// @brief SetupAuthPSKR.
-        #NoDiscard
+        .NoDiscard
         export let setup_auth_psk_receiver = func(enc: uint8[list], private_key: HpkePrivateKey, info: uint8[list],
             psk: uint8[list], psk_id: uint8[list], sender: HpkePublicKey) -> Result<ReceiverContext> =>
                 setup_receiver(Mode.AuthPsk, enc, private_key, info, psk, psk_id, new([sender]));
 
         /// @brief Single-shot base-mode encryption (RFC 9180, section 6.1).
-        #NoDiscard
+        .NoDiscard
         export let seal = func(public_key: HpkePublicKey, info: uint8[list], aad: uint8[list], plaintext: uint8[list])
             -> Result<SealedMessage> {
             match (setup_base_sender(public_key, info)) {
@@ -915,7 +915,7 @@ export let Hpke = module (
         };
 
         /// @brief Single-shot base-mode decryption (RFC 9180, section 6.1).
-        #NoDiscard
+        .NoDiscard
         export let open = func(enc: uint8[list], private_key: HpkePrivateKey, info: uint8[list], aad: uint8[list],
             ciphertext: uint8[list]) -> Result<uint8[list]> {
             match (setup_base_receiver(enc, private_key, info)) {

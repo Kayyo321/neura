@@ -86,6 +86,7 @@ struct EditorDocument {
     bool open{}, library{};
     std::vector<Token> tokens;
     ParsedFile syntax;
+    std::vector<std::size_t> tag_sigils;
     std::vector<Diagnostic> syntax_diagnostics;
     // Coordinates belong to this text snapshot, never to its buffer address.
     std::vector<std::size_t> line_starts;

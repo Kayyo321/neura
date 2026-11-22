@@ -6,7 +6,7 @@
 /// byte first: the CRC of 32 zero bytes is printed `aa 36 91 8a`, which is the value 0x8A9136AA here. The loop is
 /// bitwise (eight steps a byte, no table), which is enough for headers of a few hundred bytes.
 /// @see [Std.Net.Mesh.Crc32c](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Mesh-Crc32c)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Crc32c = module (
     /// @brief The reflected polynomial 0x82F63B78 (`python3 -I -c "print(0x82F63B78)"` prints 2197175160).
     export const Polynomial: uint32 = 2197175160;
@@ -15,12 +15,12 @@ export let Crc32c = module (
     const AllOnes: uint32 = 4294967295;
 
     /// @brief The CRC32C of every byte of `bytes`.
-    #NoDiscard
+    .NoDiscard
     export let of = func(bytes: uint8[list]) -> uint32 => of_range(bytes, 0, bytes.length);
 
     /// @brief The CRC32C of `bytes[start]` up to but not including `bytes[end]`. Traps with "invalid argument:
     /// range" unless 0 <= start <= end <= length.
-    #NoDiscard
+    .NoDiscard
     export let of_range = func(bytes: uint8[list], start: int, end: int) -> uint32 {
         if (start < 0 || end < start || end > bytes.length) {
             trap_with_message("invalid argument: range");

@@ -12,7 +12,7 @@ let words = import:Std.Crypto.Internal.Words;
 let x25519 = import:Std.Crypto.Asymmetric.X25519;
 
 /// @brief Shared ML-KEM-768 and X25519 operations for the two distinct hybrid KEMs.
-#Since("0.3.0")
+.Since("0.3.0")
 export let HybridKem768 = module (
     const MlKeyLength = 1184;
     const MlCiphertextLength = 1088;

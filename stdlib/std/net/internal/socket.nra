@@ -5,7 +5,7 @@ let strings = import:Std.Text.Strings;
 /// ID never leaves the library.
 export let Socket = module (
     /// @brief Pairs a provider socket identifier with its address text.
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let Handle = class (
         /// @brief The provider's socket identifier.
         export last id: int64;
@@ -27,17 +27,17 @@ export let Socket = module (
         };
 
         /// @brief Combines the identifier and the address text, consistent with equals.
-        #Pure
+        .Pure
         export let.override hash_code = func -> uint32 =>
             hashing.combine(hashing.of_int64(id), strings.hash(address));
 
         /// @brief `Handle(address)`; the provider identifier is not shown, as it never leaves the library.
-        #Pure
+        .Pure
         export let.override to_string = func -> string => "Handle(" .. address .. ")";
     );
 
     /// @brief A port outside 0 through 65,535 traps.
-    #Pure
+    .Pure
     export let check_port = func(port: int) {
         if (port < 0 || port > 65535) {
             trap_with_message("invalid argument: port");
@@ -45,6 +45,6 @@ export let Socket = module (
     };
 
     /// @brief Formats the host and decimal port for diagnostic context.
-    #Pure
+    .Pure
     export let address_of = func(host: string, port: int) -> string => host .. ":" .. port.to_string();
 );

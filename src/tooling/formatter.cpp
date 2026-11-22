@@ -1,5 +1,6 @@
 #include "formatter.hpp"
 
+#include "lexer/island.hpp"
 #include "lexer/lexer.hpp"
 #include "parser/html_template.hpp"
 #include "parser/syntax.hpp"
@@ -80,6 +81,7 @@ std::vector<Item> with_trivia(std::string_view source, const std::vector<Token>&
 }
 
 struct Hints {
+    std::set<std::size_t> tag_sigils;
     std::set<std::size_t> bodies;
     // The word `unless` of a return guard (docs/design/Expressions030.md),
     // which stays on the line of a '}' before it.
@@ -137,8 +139,11 @@ struct Hints {
 
 class SyntaxHints {
 public:
-    SyntaxHints(const std::vector<Token>& tokens, std::string_view source)
-        : tokens_(tokens), source_(source) {}
+    SyntaxHints(const std::vector<Token>& tokens, std::string_view source,
+                const std::vector<std::size_t>& tag_sigils)
+        : tokens_(tokens), source_(source) {
+        hints_.tag_sigils.insert(tag_sigils.begin(), tag_sigils.end());
+    }
 
     Hints collect(const ParsedFile& file) {
         for (const auto& item : file.statements) statement(item);
@@ -347,12 +352,12 @@ private:
         std::size_t result = value.span.offset;
         for (const auto& tag : value.tags) result = std::min(result, tag.span.offset);
         // A tag's span starts at its name: the declaration starts at the
-        // '#' before it, or at the '#[' of its group.
+        // sigil before it, or at the sigil of its group.
         auto index = index_at(result);
-        if (index > 0 && index <= tokens_.size() && tokens_[index - 1].text == "[" && index > 1 &&
-            tokens_[index - 2].text == "#")
+        if (index > 1 && tokens_[index - 1].text == "[" &&
+            hints_.tag_sigils.contains(tokens_[index - 2].span.offset))
             index -= 2;
-        else if (index > 0 && index <= tokens_.size() && tokens_[index - 1].text == "#")
+        else if (index > 0 && hints_.tag_sigils.contains(tokens_[index - 1].span.offset))
             index -= 1;
         if (index < tokens_.size()) result = std::min(result, tokens_[index].span.offset);
         if (value.documentation) result = std::min(result, value.documentation->span.offset);
@@ -469,15 +474,13 @@ private:
             if (accessor.expression) expression(*accessor.expression);
             for (const auto& body : accessor.body) statement(body);
         }
-        // Standalone declaration tags stay on their own lines. Parameter
-        // and enum-variant tags are deliberately left inline.
+        // Standalone declaration tags stay on their own lines. Tags in
+        // parameter lists, enum variants, records and if headers stay inline.
         if (!inline_tags) {
             const auto start = first_offset(value);
-            for (const auto& token : tokens_) {
-                if (token.span.offset < start) continue;
-                if (token.span.offset >= value.span.offset) break;
-                if (token.text == "#") hints_.before.insert(token.span.offset);
-            }
+            for (auto sigil = hints_.tag_sigils.lower_bound(start);
+                 sigil != hints_.tag_sigils.end() && *sigil < value.span.offset; ++sigil)
+                hints_.before.insert(*sigil);
             if (!value.tags.empty()) hints_.before.insert(value.span.offset);
         }
     }
@@ -495,7 +498,7 @@ private:
         for (const auto& element : value.elements) pattern(element);
     }
 
-    void statement(const Statement& value) {
+    void statement(const Statement& value, bool inline_tags = false) {
         if (value.kind == Statement::Kind::Yield && !value.expressions.empty())
             hints_.keyword_operands.insert(value.expressions.front().span.offset);
         if (value.kind == Statement::Kind::Defer && !value.expressions.empty())
@@ -522,12 +525,12 @@ private:
             if (close) hints_.do_closes.insert(close->span.offset);
         }
         if (value.kind == Statement::Kind::If && value.keyword.length != 0) hints_.guards.insert(value.keyword.offset);
-        if (value.declaration) declaration(*value.declaration);
+        if (value.declaration) declaration(*value.declaration, inline_tags);
         if (value.binding_type) type(*value.binding_type);
         for (const auto& item : value.expressions) expression(item);
         for (const auto& item : value.body) statement(item);
         for (const auto& item : value.alternative) statement(item);
-        for (const auto& item : value.initializer) statement(item);
+        for (const auto& item : value.initializer) statement(item, value.kind == Statement::Kind::If);
         for (const auto& item : value.step) statement(item);
         for (const auto& arm : value.arms) {
             if (arm.named) {
@@ -593,7 +596,9 @@ std::size_t skip_neura(std::string_view text, std::size_t at, char close, Ranges
     int depth = 0;
     while (at < text.size()) {
         const char c = text[at];
-        if (c == '"' || c == '\'') {
+        if (const auto end = island::skip_neura_word(text, at); end != at) {
+            at = end;
+        } else if (c == '"' || c == '\'') {
             const auto start = at++;
             int braces = 0; // holes of an interpolated string
             while (at < text.size() && (text[at] != c || braces > 0)) {
@@ -975,13 +980,16 @@ std::string render(std::string_view source, const std::vector<Token>& tokens, co
                 if (blank_before.contains(item.offset)) out.line(2);
                 else out.line(item.lines_before > 1 ? 2 : 1);
                 comment_continues = inside;
-                // A comment above an `or` alternative is indented with it.
                 std::size_t following = i + 1;
                 while (following < items.size() && items[following].comment) ++following;
+                // Comments among standalone tags share the declaration's depth.
+                if (following < items.size() && hints.before.contains(items[following].offset))
+                    comment_continues = false;
+                // A comment above an `or` alternative is indented with it.
                 const bool before_alternative = inside && following < items.size() && items[following].text == "or" &&
                                                 items[following].kind == TokenKind::Keyword;
                 if (before_alternative && out.at_line_start()) out.text(text, statement_indent + 1, false);
-                else emit(text, inside, false);
+                else emit(text, comment_continues, false);
             }
             out.line();
             previous = &item;
@@ -1027,18 +1035,20 @@ std::string render(std::string_view source, const std::vector<Token>& tokens, co
                    (!joins || ((text == "}" || text == ")") && !delimiters.empty() && delimiters.back().multiline))) {
             // A blank line before a block's closing delimiter is kept.
             out.line(2);
-        } else if (previous && previous->comment && inside) {
+        } else if (previous && previous->comment && inside && !structural) {
             continuation = true;
         }
         // Whether the next item starts a new source line after this opening
         // delimiter, so that its closing delimiter may keep a line of its own.
         const bool breaks_after = i + 1 < items.size() && (items[i + 1].lines_before > 0 || items[i + 1].comment);
 
+        const bool tag_sigil = hints.tag_sigils.contains(item.offset);
+        const bool after_tag_sigil = previous && hints.tag_sigils.contains(previous->offset);
         bool space = previous && !previous->comment;
-        if (text == ")" || text == "]" || text == "," || text == ";" || text == "." || text == "?." ||
+        if (text == ")" || text == "]" || text == "," || text == ";" || (text == "." && !tag_sigil) || text == "?." ||
             (text == ":" && !hints.spaced_colons.contains(item.offset)))
             space = false;
-        if (before == "(" || before == "[" || before == "." || before == "?." || before == "#") space = false;
+        if (before == "(" || before == "[" || before == "." || before == "?." || after_tag_sigil) space = false;
         if (previous && before == "{" && hints.tight_braces.contains(previous->offset)) space = false;
         // A variadic parameter's type follows its `...` directly: `items: ...T`.
         if (before == "...") space = false;
@@ -1104,7 +1114,7 @@ std::string render(std::string_view source, const std::vector<Token>& tokens, co
             if (multiline) out.line();
         } else if (text == "[") {
             emit(text, continuation, space, anchor);
-            delimiters.push_back({text, false, false, false, out.line_indent(), before == "#", breaks_after});
+            delimiters.push_back({text, false, false, false, out.line_indent(), after_tag_sigil, breaks_after});
         } else if (text == ")" || text == "]" || text == "}") {
             bool multiline = false;
             bool tight = false;
@@ -1129,7 +1139,8 @@ std::string render(std::string_view source, const std::vector<Token>& tokens, co
                 emit(text, continuation, text == "}" && before != "{" && !tight);
             }
             const bool do_close = text == "}" && hints.do_closes.contains(item.offset);
-            if (text == "}" && next != ";" && next != "," && next != ")" && next != "]" && next != "." &&
+            const bool next_is_member = next == "." && !hints.tag_sigils.contains(items[i + 1].offset);
+            if (text == "}" && next != ";" && next != "," && next != ")" && next != "]" && !next_is_member &&
                 next != "(" && next != "}" && next != "else" && !(next == "while" && do_close) && next != "or" && next != "callback" &&
                 next != "=>" && next != "+" && next != "-" && next != "*" && next != "/" && next != "==" && next != "?" && next != ":" &&
                 !(i + 1 < items.size() && hints.guards.contains(items[i + 1].offset))) out.line();
@@ -1210,11 +1221,26 @@ void write(const fs::path& file, const std::string& original, const std::string&
 
 } // namespace
 
+std::optional<TagStyle> parse_tag_style(std::string_view value) {
+    if (value == "keep") return TagStyle::Keep;
+    if (value == "dot") return TagStyle::Dot;
+    if (value == "hash") return TagStyle::Hash;
+    return std::nullopt;
+}
+
 std::string format_source(std::string_view source, const std::string& file, FormatOptions options) {
     if (options.tab_size == 0 || options.tab_size > 16) throw std::invalid_argument("format tab size must be between 1 and 16");
     const auto tokens = lex(source, file);
-    const auto syntax = parse(tokens);
-    const auto hints = SyntaxHints(tokens, source).collect(syntax);
+    std::vector<std::size_t> tag_sigils;
+    const auto syntax = parse(tokens, &tag_sigils);
+    if (options.tag_style != TagStyle::Keep) {
+        std::string converted(source);
+        const char sigil = options.tag_style == TagStyle::Dot ? '.' : '#';
+        for (const auto offset : tag_sigils) converted[offset] = sigil;
+        (void)parse(lex(converted, file));
+        return converted;
+    }
+    const auto hints = SyntaxHints(tokens, source, tag_sigils).collect(syntax);
     auto formatted = render(source, tokens, hints, options);
     const auto result = lex(formatted, file);
     // The only token the formatter adds is the trailing ',' of a multiline
@@ -1259,15 +1285,20 @@ int run_formatter(const std::vector<std::string>& arguments) {
         else if (argument == "--stdin") stdin_source = true;
         else if (argument == "--stdin-filepath") { stdin_path = value(); stdin_source = true; }
         else if (argument == "--use-tabs") options.insert_spaces = false;
-        else if (argument == "--tab-size") {
+        else if (argument.starts_with("--tag-style=")) {
+            const auto style = parse_tag_style(std::string_view(argument).substr(std::string_view("--tag-style=").size()));
+            if (!style) throw std::invalid_argument("--tag-style expects dot, hash, or keep");
+            options.tag_style = *style;
+        } else if (argument == "--tab-size") {
             const auto& number = value();
             const auto [end, error] = std::from_chars(number.data(), number.data() + number.size(), options.tab_size);
             if (error != std::errc{} || end != number.data() + number.size() || options.tab_size == 0 || options.tab_size > 16)
                 throw std::invalid_argument("--tab-size expects an integer between 1 and 16");
         } else if (argument == "--help" || argument == "-h") {
-            std::cout << "usage: neura fmt [--check | --write] [--tab-size N] [--use-tabs] <file.nra>...\n"
-                         "       neura fmt [--check] --stdin [--stdin-filepath <file.nra>]\n"
-                         "Without --write or --check, print one formatted source. No files means stdin.\n";
+            std::cout << "usage: neura fmt [--check | --write] [--tag-style=dot|hash|keep] [--tab-size N] [--use-tabs] <file.nra>...\n"
+                         "       neura fmt [--check] [--tag-style=dot|hash|keep] --stdin [--stdin-filepath <file.nra>]\n"
+                         "Without --write or --check, print one formatted source. No files means stdin.\n"
+                         "Tag style defaults to keep. Dot and hash change only tag sigils.\n";
             return 0;
         } else if (!argument.empty() && argument.front() == '-') throw std::invalid_argument("unknown fmt option: " + argument);
         else files.emplace_back(argument);
@@ -1285,12 +1316,15 @@ int run_formatter(const std::vector<std::string>& arguments) {
     } else {
         for (const auto& file : files) sources.push_back({file, read(file), {}});
     }
-    // Validate the whole batch before changing the first file. The source is
-    // formatted as the compiler reads it, with CR LF normalized to LF, and
-    // written with LF; a file that differs only in its line endings is
-    // already formatted (W08).
-    for (auto& source : sources)
-        source.formatted = format_source(util::normalize_crlf(source.original), source.file.string(), options);
+    // Validate the whole batch before changing the first file. Formatting
+    // normalizes CR LF (W08). Explicit tag conversions preserve every byte
+    // except the selected sigils, including the original line endings.
+    const bool convert_tags = options.tag_style != TagStyle::Keep;
+    for (auto& source : sources) {
+        const auto file = source.file.string();
+        source.formatted = convert_tags ? format_source(source.original, file, options)
+                                       : format_source(util::normalize_crlf(source.original), file, options);
+    }
     bool changed = false;
     for (const auto& source : sources) {
         const bool different =

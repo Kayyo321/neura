@@ -6,10 +6,10 @@
 /// balance is below 100. Over a long run at most `percent` retries per 100 requests are allowed, plus the initial
 /// reserve, which lets a quiet client retry its first failures. `unlimited` never refuses.
 /// @see [Std.Net.Resilience.RetryBudget](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-RetryBudget)
-#Since("0.3.0")
+.Since("0.3.0")
 export let RetryBudget = module (
     /// @brief A ratio budget of retries to requests.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let RetryBudget = class (
         /// @brief Hundredths of a retry earned per request.
         last percent: int;
@@ -70,11 +70,11 @@ export let RetryBudget = module (
     );
 
     /// @brief A budget of `percent` retries per 100 requests, starting with `initial` and holding at most `maximum`.
-    #NoDiscard
+    .NoDiscard
     export let of = func(percent: int, initial: int, maximum: int) -> RetryBudget =>
         new RetryBudget(percent, initial, maximum, false);
 
     /// @brief A budget that always allows a retry.
-    #NoDiscard
+    .NoDiscard
     export let unlimited = func -> RetryBudget => new RetryBudget(0, 0, 0, true);
 );

@@ -15,17 +15,17 @@ let strings = import:Std.Text.Strings;
 ///
 /// There is one linker, for the runner's platform C ABI. Needs the native capability.
 /// @see [Std.DynamicForeign.Linker](https://github.com/Kayyo321/neura/wiki/Stdlib-DynamicForeign-Linker)
-#Since("0.1.0")
+.Since("0.1.0")
 export let Linker = module (
     /// @brief The platform's C calling convention.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Linker = class (
         /// @brief Use native_linker.
         export let init = func {};
 
         /// @brief A handle that calls the function at `symbol` with the C signature `descriptor` (Java's
         /// Linker.downcallHandle).
-        #Pure
+        .Pure
         export let downcall_handle = func(symbol: MemorySegment, descriptor: FunctionDescriptor) -> MethodHandle =>
             new(symbol, descriptor, -1)
             /// @brief A handle for a variadic C function such as printf. The descriptor lists every argument of the

@@ -1,7 +1,7 @@
 error[E0601]: the spawned call is not task-safe: it reaches 'render', which is marked #NotThreadSafe
   --> $DIR/not-thread-safe-spawn.nra:13:9
    |
- 4 | #NotThreadSafe
+ 4 | .NotThreadSafe
    | -------------- is marked #NotThreadSafe here
 ...
  9 | let work = func(value: int32) -> int32 => render(value);

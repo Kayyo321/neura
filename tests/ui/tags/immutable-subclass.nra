@@ -1,5 +1,5 @@
 // A subclass of an #Immutable class that is not #Immutable itself (E0920).
-#Immutable
+.Immutable
 let Shape = class (
     export const sides: int32 = 0;
 );

@@ -13,10 +13,10 @@ let.promote _ = import:Std.Net.Service;
 /// reports a violation at the program's call into the filter (E0601, E0602), with a label at the offending capture.
 /// A request type of its own for the hedged call keeps the rule local to that call.
 /// @see [Std.Net.Resilience.SpawnableService](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-SpawnableService)
-#Since("0.3.0")
+.Since("0.3.0")
 export let SpawnableService = module (
     /// @brief A service that runs a spawnable function.
-    #Final
+    .Final
     export let SpawnableService = class<Req, Resp> implements Service<Req, Resp> (
         /// @brief The function each call runs.
         last body: func(Req) -> Result<Resp>;
@@ -37,7 +37,7 @@ export let SpawnableService = module (
     );
 
     /// @brief A spawnable service running `handler`.
-    #NoDiscard
+    .NoDiscard
     export let of = func<Req, Resp>(handler: func(Req) -> Result<Resp>) -> SpawnableService<Req, Resp> =>
         new SpawnableService<Req, Resp>(handler);
 );

@@ -9,7 +9,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// 7-round compression) in Neura code. The SIMD and multi-threaded tree evaluation of the specification is not
 /// provided: the result is the same, computed one chunk at a time.
 /// @see [Std.Crypto.Hash.Blake3](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Hash-Blake3)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Blake3 = module (
     /// @brief The initial value: the SHA-256 initial words.
     /// @brief A new list of the table (a function, so that tasks can use it: arrays are not transferable).
@@ -157,7 +157,7 @@ export let Blake3 = module (
 
     /// @brief A running BLAKE3 hash in one of its three modes. `finish` returns 32 bytes; `squeeze` and `read`
     /// continue the output stream.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Blake3 = class implements ExtendableOutput<Blake3> (
         let key: uint32[list] = new;
         let flags: int = 0;
@@ -183,7 +183,7 @@ export let Blake3 = module (
         };
 
         /// @brief A hasher with the key words and mode flags: the start of every mode.
-        #Internal
+        .Internal
         export let start = func(key_value: uint32[list], mode: int) {
             crypto_policy.require(Algorithm.Blake3);
             key = key_value;
@@ -284,7 +284,7 @@ export let Blake3 = module (
     );
 
     /// @brief The first `length` bytes of the BLAKE3 hash of the bytes.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let hash = func(bytes: uint8[list], length: int) -> uint8[list] {
         let hasher = new Blake3();
         hasher.update(bytes);
@@ -292,7 +292,7 @@ export let Blake3 = module (
     };
 
     /// @brief The first `length` bytes of the keyed hash under a 32-byte key.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let keyed_hash = func(key: uint8[list], bytes: uint8[list], length: int) -> uint8[list] {
         let hasher = new Blake3(key);
         hasher.update(bytes);
@@ -301,7 +301,7 @@ export let Blake3 = module (
 
     /// @brief `length` bytes of key material derived from `material` under the context string, which should be
     /// a hardcoded, globally unique, application-specific text.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let derive_key = func(context: string, material: uint8[list], length: int) -> uint8[list] {
         let context_hasher = new Blake3();
         context_hasher.start(iv_words(), DeriveKeyContext);

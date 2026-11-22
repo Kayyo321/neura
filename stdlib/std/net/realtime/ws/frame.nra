@@ -13,7 +13,7 @@ let.promote _ = import:Std.Core.Result;
 /// `CloseStatus.ProtocolFailure` errors: 1002 for a malformed or forbidden frame and 1009 for a frame above the
 /// size limit.
 /// @see [Std.Net.Realtime.Ws.Frame](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-Ws-Frame)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Frame = module (
     /// @brief Opcode 0: a continuation frame.
     export const Continuation: int = 0;
@@ -35,7 +35,7 @@ export let Frame = module (
     export let Role = enum (Client, Server);
 
     /// @brief One WebSocket frame with its payload unmasked.
-    #Final
+    .Final
     export let Frame = class (
         /// @brief The final fragment of a message.
         export last fin: bool;
@@ -66,7 +66,7 @@ export let Frame = module (
         };
 
         /// @brief Whether the opcode is a control opcode (8 to 15).
-        #NoDiscard
+        .NoDiscard
         export let is_control = func -> bool => opcode >= 8;
 
         /// @brief Equal when every field and every payload byte are.
@@ -114,7 +114,7 @@ export let Frame = module (
     );
 
     /// @brief A final frame with no reserved bits.
-    #NoDiscard
+    .NoDiscard
     export let of = func(opcode: int, payload: uint8[list]) -> Frame =>
         new Frame(true, false, false, false, opcode, payload);
 
@@ -123,7 +123,7 @@ export let Frame = module (
     /// Fails with status 1002 when the frame breaks a rule a sender must keep: a control frame longer than 125
     /// bytes or not final, or a reserved opcode (3 to 7, 11 to 15). A mask that is not 4 bytes traps with
     /// "invalid argument: mask".
-    #NoDiscard
+    .NoDiscard
     export let encode = func(frame: Frame, mask: Optional<uint8[list]>) -> Result<uint8[list]> {
         last code = frame.opcode;
         if ((code >= 3 && code <= 7) || code >= 11) {
@@ -189,7 +189,7 @@ export let Frame = module (
 
     /// @brief Encodes a frame as `role` must send it: a client masks with 4 fresh bytes from `random`, a server
     /// does not mask.
-    #NoDiscard
+    .NoDiscard
     export let encode_as = func(role: Role, frame: Frame, random: Random) -> Result<uint8[list]> => match (role) {
         Role.Client => encode(frame, Optional<uint8[list]>.Some(random.fill_bytes(4))),
         Role.Server => encode(frame, Optional<uint8[list]>.None),
@@ -203,7 +203,7 @@ export let Frame = module (
     /// is a bit set of the reserved bits an extension negotiated (4 for RSV1, 2 for RSV2, 1 for RSV3); any other
     /// reserved bit fails. After a failure the decoder stays failed. The buffered bytes are read through an
     /// offset and compacted once the consumed prefix is at least half the buffer.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let FrameDecoder = class (
         /// @brief The role of the reading endpoint.
         last receiver: Role;
@@ -230,7 +230,7 @@ export let Frame = module (
         };
 
         /// @brief The number of received bytes not yet decoded.
-        #NoDiscard
+        .NoDiscard
         export let buffered = func -> int => buffer.length - offset;
 
         /// @brief Adds received bytes.
@@ -241,7 +241,7 @@ export let Frame = module (
         };
 
         /// @brief The next whole frame, `None` when more bytes are needed, or the failure of a malformed frame.
-        #NoDiscard
+        .NoDiscard
         export let next = func -> Result<Optional<Frame>> {
             if (failed) {
                 return fail("the decoder already failed", close_status.ProtocolError);

@@ -2,11 +2,11 @@ let.promote _ = import:Std.Crypto.CryptographicPrimitive;
 
 /// @brief The contract of a signing key (Stdlib.md section 21.1).
 /// @see [Std.Crypto.Signer](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Signer)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Signer = module (
     /// @brief Signs with a private key of type `PrivKey`, producing a `Sig`. The primitive is named by `Sig`, so
     /// one class can implement the Signer and the Verifier of a scheme.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let Signer = interface<PrivKey, Sig>:CryptographicPrimitive<Sig> (
         /// @brief The signature of the message.
         let sign = func(message: uint8[list]) -> Sig;

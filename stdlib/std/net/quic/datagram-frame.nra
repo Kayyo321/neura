@@ -10,7 +10,7 @@ let varint = import:Std.Net.Quic.VarInt;
 /// `fits` checks a frame against it. The encodings are real. Sending and receiving them needs a QUIC
 /// transport, which Neura 0.3.0 does not have (see `QuicConnection`).
 /// @see [Std.Net.Quic.DatagramFrame](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Quic-DatagramFrame)
-#Since("0.3.0")
+.Since("0.3.0")
 export let DatagramFrame = module (
     /// @brief The frame type without a Length field.
     export const TypeWithoutLength: uint64 = 48;
@@ -21,7 +21,7 @@ export let DatagramFrame = module (
 
     /// @brief The frame carrying `data`, with a Length field when `with_length` (required unless the frame is
     /// the last in its packet).
-    #NoDiscard
+    .NoDiscard
     export let encode = func(data: uint8[list], with_length: bool) -> uint8[list] {
         let out: uint8[list] = new;
         varint.append(out, with_length ? TypeWithLength : TypeWithoutLength);
@@ -35,20 +35,20 @@ export let DatagramFrame = module (
     };
 
     /// @brief The size of the encoded frame.
-    #Pure
+    .Pure
     export let encoded_size = func(data_length: int, with_length: bool) -> int =>
         1 + (with_length ? varint.encoded_length(data_length as uint64) : 0) + data_length;
 
     /// @brief True when a frame of this datagram stays within the peer's `max_datagram_frame_size` (zero means
     /// the peer does not accept DATAGRAM frames).
-    #Pure
+    .Pure
     export let fits = func(data_length: int, with_length: bool, max_frame_size: uint64) -> bool =>
         max_frame_size > 0 && (encoded_size(data_length, with_length) as uint64) <= max_frame_size;
 
     /// @brief Decodes the DATAGRAM frame at `offset` of a packet payload that ends at `bytes.length`: the data
     /// and the offset after the frame. A Parse error when the type is not 0x30 or 0x31 (Syntax) or the bytes
     /// end early (UnexpectedEnd).
-    #NoDiscard
+    .NoDiscard
     export let decode = func(bytes: uint8[list], offset: int) -> Result<[uint8[list], int]> {
         let [kind, type_size] = varint.decode(bytes, offset)?;
         if (kind != TypeWithoutLength && kind != TypeWithLength) {

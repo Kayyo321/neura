@@ -18,16 +18,20 @@ STDLIB = ROOT / "stdlib" / "std"
 WIKI = ROOT / "wiki"
 BEGIN = "<!-- BEGIN SOURCE API -->"
 END = "<!-- END SOURCE API -->"
+TAG_OPEN = re.compile(r"[#.][ \t]*(?=[A-Za-z_\[])")
 
 
-def split_tags(text):
+def split_tags(text, sigils=None):
     """Split the tags written at the start of a line (docs/lang/Tags.md) from
     the rest of it: (["Deprecated(as_of: \"0.2.0\")", "Since(\"0.1.0\")"], rest).
-    A group `#[A, B]` gives one entry per tag."""
+    Either sigil can open a group, which gives one entry per tag."""
     tags = []
     rest = text.lstrip()
-    while rest.startswith("#"):
-        depth, quote, index = 0, False, 1
+    while (opening := TAG_OPEN.match(rest)) is not None:
+        if sigils is not None:
+            sigils.append(len(text) - len(rest))
+        start = opening.end()
+        depth, quote, index = 0, False, start
         while index < len(rest):
             char = rest[index]
             if quote:
@@ -41,10 +45,10 @@ def split_tags(text):
                 depth += 1
             elif char in ")]":
                 depth -= 1
-            elif depth == 0 and (char.isspace() or char == "#"):
+            elif depth == 0 and (char.isspace() or char in "#.;/"):
                 break
             index += 1
-        body = rest[1:index]
+        body = rest[start:index]
         if body.startswith("[") and body.endswith("]"):
             depth, quote, start = 0, False, 1
             for position in range(1, len(body) - 1):
@@ -79,8 +83,9 @@ def tags_above(lines, start):
     tags = split_tags(lines[start])[0]
     for index in range(start - 1, -1, -1):
         text = lines[index].strip()
-        if text.startswith("#"):
-            tags = split_tags(text)[0] + tags
+        found, rest = split_tags(text)
+        if found and (not rest or rest.startswith("//")):
+            tags = found + tags
         elif not text.startswith("//"):
             break
     return tags
@@ -123,7 +128,8 @@ def comment_notes(lines, start):
     """Read adjacent prose without exposing Doxygen markup in the wiki."""
     comments = []
     for index in range(start - 1, -1, -1):
-        if lines[index].strip().startswith("#"):
+        tags, rest = split_tags(lines[index])
+        if tags and (not rest or rest.startswith("//")):
             # A tag line between the comment and the declaration.
             continue
         match = re.match(r"^\s*(///|//)\s?(.*)$", lines[index])
@@ -157,6 +163,7 @@ def declaration(lines, start):
 
     paren = bracket = 0
     in_string = escaped = False
+    tag_position = False
     out = []
     for number, line in enumerate(lines[start:]):
         chunk = (split_tags(line)[1] if number == 0 else line).strip()
@@ -176,6 +183,18 @@ def declaration(lines, start):
                 continue
             if pair == "//":
                 break
+            if tag_position and not char.isspace():
+                if char in "#.":
+                    # Parameter and record-component tags that remain in
+                    # signatures are printed with the canonical sigil.
+                    sigils = []
+                    split_tags(chunk[index:], sigils)
+                    letters = list(chunk)
+                    for sigil in sigils:
+                        letters[index + sigil] = "#"
+                    chunk = "".join(letters)
+                    char = chunk[index]
+                tag_position = False
             if char == '"':
                 in_string = True
                 out.append(char)
@@ -183,6 +202,8 @@ def declaration(lines, start):
                 continue
             if paren == 0 and bracket == 0 and (pair == "=>" or char in "{;"):
                 return "".join(out).strip()
+            if char in "(,":
+                tag_position = True
             if char == "(":
                 paren += 1
             elif char == ")":
@@ -293,8 +314,8 @@ def main():
         if "internal" in source.relative_to(STDLIB).parts:
             continue
         lines = source.read_text(encoding="utf-8").splitlines()
-        match = next((re.match(r"^export\s+let\s+(\w+)\s*=\s*module\b", line) for line in lines
-                      if re.match(r"^export\s+let\s+(\w+)\s*=\s*module\b", line)), None)
+        match = next((found for line in lines if not line[:1].isspace()
+                      if (found := re.match(r"^export\s+let\s+(\w+)\s*=\s*module\b", split_tags(line)[1]))), None)
         if match is None:
             errors.append(f"No public module declaration: {source.relative_to(ROOT)}")
             continue

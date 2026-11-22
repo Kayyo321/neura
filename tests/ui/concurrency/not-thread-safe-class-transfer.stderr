@@ -1,7 +1,7 @@
 error[E0602]: a value of type LineCursor is not transferable, so it cannot be given to a spawned task
   --> $DIR/not-thread-safe-class-transfer.nra:18:23
    |
- 4 | #NotThreadSafe
+ 4 | .NotThreadSafe
    | -------------- 'Cursor' is marked #NotThreadSafe here
 ...
 18 |         spawn advance(cursor);

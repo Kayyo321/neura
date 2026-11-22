@@ -1,0 +1,3 @@
+// The symbol spelling uses the same operand error.
+let count = 3;
+let negated = !count;

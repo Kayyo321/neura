@@ -18,13 +18,13 @@ let words = import:Std.Crypto.Internal.Words;
 /// and should differ by context (for example the table and column). FF1 is deterministic: equal plaintexts
 /// under one key and tweak give equal ciphertexts. Numeral strings are converted with Std.Math.BigInteger.
 /// @see [Std.Crypto.Symmetric.Ff1](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Symmetric-Ff1)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Ff1 = module (
     /// @brief The alphabet of the text forms: the first `radix` characters, for radix 2 to 36.
     let Alphabet = "0123456789abcdefghijklmnopqrstuvwxyz";
 
     /// @brief FF1 under an AES key (16, 24 or 32 bytes) for one radix.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Ff1 = class implements CryptographicPrimitive<Ff1> (
         let cipher: aes.Cipher;
         /// @brief The radix, from 2 to 65536.
@@ -54,21 +54,21 @@ export let Ff1 = module (
 
         /// @brief FF1.Encrypt of the numerals (each below the radix) under the tweak. A numeral out of range or a
         /// string shorter than `min_length` traps.
-        #NoDiscard
+        .NoDiscard
         export let encrypt = func(numerals: int[list], tweak: uint8[list]) -> int[list] => run(numerals, tweak, true);
 
         /// @brief FF1.Decrypt, the inverse of `encrypt`.
-        #NoDiscard
+        .NoDiscard
         export let decrypt = func(numerals: int[list], tweak: uint8[list]) -> int[list] => run(numerals, tweak, false);
 
         /// @brief `encrypt` over text in the alphabet 0-9a-z cut to the radix (radix 36 at most). A character
         /// outside it fails with an Encoding error at its offset; uppercase letters are accepted and the result
         /// is lowercase.
-        #NoDiscard
+        .NoDiscard
         export let encrypt_text = func(text: string, tweak: uint8[list]) -> Result<string> => run_text(text, tweak, true);
 
         /// @brief `decrypt` over text, the inverse of `encrypt_text`.
-        #NoDiscard
+        .NoDiscard
         export let decrypt_text = func(text: string, tweak: uint8[list]) -> Result<string> => run_text(text, tweak, false);
 
         let run_text = func(text: string, tweak: uint8[list], forward: bool) -> Result<string> {

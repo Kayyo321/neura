@@ -1,7 +1,7 @@
 error[E0921]: #Synchronized method 'init' is a constructor
  --> $DIR/synchronized-constructor.nra:6:5
   |
-6 |     #Synchronized
+6 |     .Synchronized
   |     ^^^^^^^^^^^^^ #Synchronized given here
 7 |     export let init = func(start: int64) {
   |                ---- declared here

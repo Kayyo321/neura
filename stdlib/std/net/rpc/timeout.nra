@@ -11,7 +11,7 @@ let.promote _ = import:Std.Core.Result;
 /// duration. `format` picks the finest unit whose value fits 8 digits and rounds up, so a peer never sees a
 /// shorter budget than the sender has; a zero or negative duration formats as `0n`.
 /// @see [Std.Net.Rpc.Timeout](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Rpc-Timeout)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Timeout = module (
     /// @brief The header name.
     export const Header: string = "grpc-timeout";
@@ -25,7 +25,7 @@ export let Timeout = module (
 
     /// @brief Parses a `grpc-timeout` value. Fails with a Parse error for an empty value, more than 8 digits, a
     /// non-digit, or a missing or unknown unit.
-    #NoDiscard
+    .NoDiscard
     export let parse = func(text: string) -> Result<Duration> {
         last length = text.byte_length;
         if (length < 2 || length > MaxDigits + 1) {
@@ -48,7 +48,7 @@ export let Timeout = module (
     };
 
     /// @brief Formats a duration in the finest unit whose value fits 8 digits, rounding up.
-    #NoDiscard
+    .NoDiscard
     export let format = func(span: Duration) -> string {
         last nanos = span.to_nanos();
         if (nanos <= 0) {

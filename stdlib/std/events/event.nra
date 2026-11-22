@@ -2,11 +2,11 @@
 /// registration order (docs/design/Lifetime030.md, Events). An owner keeps the Event and exports its view, which
 /// can only subscribe. A subscription is removed with its token.
 /// @see [Std.Events.Event](https://github.com/Kayyo321/neura/wiki/Stdlib-Events-Event)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Event = module (
     /// @brief The token of one registration. Unsubscribing removes that registration; doing it again does
     /// nothing. Two subscriptions are equal only when they are the same object.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Subscription = class (
         let detach: func(Subscription) -> void;
         let attached: bool = true;
@@ -35,7 +35,7 @@ export let Event = module (
     );
 
     /// @brief One handler and its token.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     let Registration = class<T> (
         last token: Subscription;
         last handler: func(T) -> void;
@@ -56,7 +56,7 @@ export let Event = module (
     /// @brief The owner's side of an event with payloads of type T. The registrations are an immutable list
     /// that subscribe and unsubscribe replace, so an emission delivers to the registrations that existed when
     /// it started and copies nothing.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Event = class<T> (
         let registrations: Registration<T>[list] = new;
 
@@ -108,7 +108,7 @@ export let Event = module (
     );
 
     /// @brief What an owner exports: subscribe only. It cannot emit and gives no access to the Event.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let EventView = class<T> (
         let source: Event<T>;
 

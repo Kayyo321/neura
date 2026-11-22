@@ -10,7 +10,7 @@ let.promote _ = import:Std.Core.Variadic;
 /// services.
 export let Formatting = module (
     /// @brief Holds the resolved formatting options for one replacement field.
-    #Final
+    .Final
     let Spec = class (
         /// @brief The single Unicode scalar used to fill unused width.
         export let fill: string = " ";
@@ -35,7 +35,7 @@ export let Formatting = module (
     );
 
     /// @brief Parses a UTF-8 pattern and tracks argument indexing and the first error.
-    #Final
+    .Final
     let Cursor = class (
         /// @brief The UTF-8 format pattern.
         last pattern: string;
@@ -445,11 +445,11 @@ export let Formatting = module (
     };
 
     /// @brief Recognizes an ASCII decimal digit.
-    #Inline
+    .Inline
     let is_digit = func(b: uint8) -> bool => b >= 48 && b <= 57;
 
     /// @brief Recognizes the left, right, and center alignment markers.
-    #Inline
+    .Inline
     let is_align = func(b: uint8) -> bool => b == 60 || b == 62 || b == 94;
 
     /// @brief Recognizes radix-based integer presentation markers.

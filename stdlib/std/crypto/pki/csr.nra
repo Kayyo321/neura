@@ -26,10 +26,10 @@ let writer = import:Std.Crypto.Pki.DerWriter;
 /// `challenge_password`; every attribute also stays in `attributes`. Call `verify_signature` to check
 /// a parsed request against its own public key.
 /// @see [Std.Crypto.Pki.Csr](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Csr)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Csr = module (
     /// @brief One Attribute: a type and the DER of each of its values.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Attribute = class (
         export last type: Oid;
         export last values: uint8[list][list];
@@ -61,7 +61,7 @@ export let Csr = module (
     );
 
     /// @brief A parsed certification request. Equal requests have equal DER.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let CertificationRequest = class (
         export last der_bytes: uint8[list];
         /// @brief The DER of CertificationRequestInfo, which the signature covers.
@@ -92,7 +92,7 @@ export let Csr = module (
         /// @brief Checks the request's signature under its public key. A supplied verifier overrides
         /// the library's AlgorithmVerifier.
         /// @see [Std.Crypto.Pki.Csr](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Csr)
-        #[NoDiscard, Since("0.3.0")]
+        .[NoDiscard, Since("0.3.0")]
         export let verify_signature = func -> SignatureCheck {
             return verify_signature(new algorithm_verifier.AlgorithmVerifier());
         } or func(verifier: SignatureVerifier) -> SignatureCheck {
@@ -100,7 +100,7 @@ export let Csr = module (
         };
 
         /// @brief The requested subjectAltName entries, if the extensionRequest has them.
-        #NoDiscard
+        .NoDiscard
         export let subject_alt_names = func -> Result<Optional<GeneralName[list]>> {
             for (let e in extensions) {
                 if (e.oid.matches(oids.SubjectAltName)) {
@@ -139,7 +139,7 @@ export let Csr = module (
         Result<T>.Err(Error.Parse { kind: ParseErrorKind.Syntax, offset: offset, message: message });
 
     /// @brief Parses a DER certification request (version v1 only).
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse = func(bytes: uint8[list]) -> Result<CertificationRequest> {
         last top = der.parse(bytes)?;
         if (not top.is_universal(der.TagSequence)) {
@@ -200,13 +200,13 @@ export let Csr = module (
     };
 
     /// @brief The only CERTIFICATE REQUEST block of PEM text, parsed.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_pem = func(text: string) -> Result<CertificationRequest> =>
         parse(pem.decode(text, "CERTIFICATE REQUEST")?);
 
     /// @brief Checks the request's signature under its public key using the library verifier or a supplied verifier.
     /// @see [Std.Crypto.Pki.Csr](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Csr)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let verify_signature = func(request: CertificationRequest) -> SignatureCheck {
         return request.verify_signature();
     } or func(request: CertificationRequest, verifier: SignatureVerifier) -> SignatureCheck {
@@ -214,7 +214,7 @@ export let Csr = module (
     };
 
     /// @brief The extensionRequest attribute carrying the extensions.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let extension_request = func(items: Extension[list]) -> Attribute {
         let encoded: uint8[list][list] = new;
         for (let e in items) {
@@ -225,7 +225,7 @@ export let Csr = module (
 
     /// @brief The challengePassword attribute (a PrintableString when every character allows it, else
     /// UTF8String).
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let challenge_password = func(password: string) -> Attribute {
         let printable = true;
         for (let i = 0; i < password.byte_length; i++) {
@@ -244,7 +244,7 @@ export let Csr = module (
     /// attributes) signed by `sign`, which receives the DER of CertificationRequestInfo and returns the
     /// signature bytes for `algorithm`. The function is the caller's signer (a private key never enters this
     /// module).
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let build = func(subject: Name, public_key: SubjectPublicKeyInfo, attributes: Attribute[list],
         algorithm: AlgorithmIdentifier, sign: func(uint8[list]) -> uint8[list]) -> uint8[list] {
         let encoded: uint8[list][list] = new;

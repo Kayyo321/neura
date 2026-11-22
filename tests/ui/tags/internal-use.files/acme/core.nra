@@ -1,5 +1,5 @@
 let Core = module (
-    #Internal
+    .Internal
     export let raw_total = func() -> int32 {
         return 1;
     };

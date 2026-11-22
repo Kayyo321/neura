@@ -1,7 +1,7 @@
 error[E0919]: field 'steps' of #Immutable class 'Path' has the mutable type int32[list]
  --> $DIR/immutable-field-type.nra:6:17
   |
-3 | #Immutable
+3 | .Immutable
   | ---------- 'Path' is marked #Immutable here
 ...
 6 |     export last steps: int32[list];

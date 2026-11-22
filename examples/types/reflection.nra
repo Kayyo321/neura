@@ -9,7 +9,7 @@ let Reflection = module (
 
     export let Account = class (
         export let owner: string = "";
-        #Sensitive
+        .Sensitive
         export let pin: string = "0000";
         export let init = func {};
     );

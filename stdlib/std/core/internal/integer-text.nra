@@ -7,7 +7,7 @@ let.promote _ = import:Std.Core.Optional;
 /// The value accumulation stays in each type's module.
 export let IntegerText = module (
     /// @brief Traps unless the radix is between 2 and 36 inclusive.
-    #Pure
+    .Pure
     export let check_radix = func(radix: int) {
         if (radix < 2 || radix > 36) {
             trap_with_message("invalid argument: radix outside 2 through 36");
@@ -15,14 +15,14 @@ export let IntegerText = module (
     };
 
     /// @brief The lowercase ASCII digit for a value from 0 through 35.
-    #Pure
+    .Pure
     export let digit_byte = func(value: int) -> uint8 {
         return if (value < 10) -> (value + 48) as uint8 else -> (value + 87) as uint8;
     };
 
     /// @brief The value of an ASCII digit byte, letters in either case, or 36 when the byte is not a digit of
     /// any radix.
-    #Pure
+    .Pure
     export let digit_value = func(b: uint8) -> int {
         if (b >= 48 && b <= 57) {
             return (b - 48) as int;
@@ -34,7 +34,7 @@ export let IntegerText = module (
     };
 
     /// @brief The text of digits stored least significant first, with a leading `-` when `negative` is set.
-    #Pure
+    .Pure
     export let digits_text = func(reversed: uint8[list], negative: bool) -> string {
         last bytes: uint8[list] = new;
         if (negative) {
@@ -49,7 +49,7 @@ export let IntegerText = module (
 
     /// @brief Left-pads `text` with copies of `pad` to `min_width` characters. A `0` pad goes after a leading
     /// `-`. `pad` must be one scalar value.
-    #Pure
+    .Pure
     export let pad_number = func(text: string, min_width: int, pad: string) -> string {
         last pad_length = pad.byte_length;
         if (pad_length == 0 || sequence_length(pad.byte_at(0)) != pad_length) {
@@ -71,7 +71,7 @@ export let IntegerText = module (
 
     /// @brief The first error of the grammar: an optional `+` or `-`, then one or more digits of the radix.
     /// None when the text matches.
-    #Pure
+    .Pure
     export let syntax_error = func(text: string, radix: int) -> Optional<Error> {
         last length = text.byte_length;
         if (length == 0) {
@@ -92,14 +92,14 @@ export let IntegerText = module (
     };
 
     /// @brief 1 when the text starts with `+` or `-`, otherwise 0.
-    #Pure
+    .Pure
     export let sign_length = func(text: string) -> int {
         last first = text.byte_at(0);
         return if (first == 43 || first == 45) -> 1 else -> 0;
     };
 
     /// @brief Creates an out-of-range parse error for the given numeric type.
-    #Pure
+    .Pure
     export let out_of_range = func(type_name: string) -> Error =>
         parse_error(ParseErrorKind.OutOfRange, 0, "value out of range for " .. type_name);
 

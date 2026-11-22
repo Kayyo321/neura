@@ -9,10 +9,10 @@ let optional = import:Std.Core.Optional;
 /// Individual key lookup, insertion, and removal take constant time. Traversal scans
 /// the key range in ascending order. Out-of-range keys cause a bounds trap.
 /// @see [Std.Collections.OrdinalMap](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-OrdinalMap)
-#Since("0.1.0")
+.Since("0.1.0")
 export let OrdinalMap = module (
     /// @brief A mutable map for a fixed range of integer keys. A key outside that range causes a bounds trap.
-    #NotThreadSafe
+    .NotThreadSafe
     export let OrdinalMap = class<V> implements MutableMap<int, V> (
         /// @brief Maps each legal key to its dense slot, or -1 when absent.
         last position: int[list];
@@ -98,7 +98,7 @@ export let OrdinalMap = module (
         export let contains_key = func(key: int) -> bool => position[key] >= 0;
 
         /// @brief Returns the associated value as `Some`, or `None` when the key is absent.
-        #NoDiscard
+        .NoDiscard
         export let get = func(key: int) -> optional.Optional<V> {
             last slot = position[key];
             if (slot < 0) {

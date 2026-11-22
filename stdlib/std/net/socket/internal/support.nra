@@ -11,7 +11,7 @@ let.promote _ = import:Std.Core.Unit;
 
 /// @brief Shared helpers of `Std.Net.Socket` and `Std.Net.Tls`: option application, timeouts and address
 /// conversion. Library use only.
-#Since("0.3.0")
+.Since("0.3.0")
 export let Support = module (
     /// @brief Converts a nonnegative duration to the host's timeout argument; a negative one traps with
     /// "invalid argument: negative timeout", as in Std.Net.TcpStream.
@@ -33,7 +33,7 @@ export let Support = module (
 
     /// @brief Sets every option of the set on an open socket, in option-number order, stopping at the first
     /// host error.
-    #NoDiscard
+    .NoDiscard
     export let apply = func(id: int64, options: SocketOptions, address: string) -> Result<Unit> {
         for (let pair in options.settings()) {
             let [number, value] = pair;
@@ -50,12 +50,12 @@ export let Support = module (
 
     /// @brief True when the set holds an option that must be set before bind: 1 `SO_REUSEADDR`, 2 `SO_REUSEPORT`
     /// or 4 `TCP_FASTOPEN`.
-    #Pure
+    .Pure
     export let needs_bind_time = func(options: SocketOptions) -> bool =>
         options.value_of(1) >= 0 || options.value_of(2) >= 0 || options.value_of(4) >= 0;
 
     /// @brief The option numbers of a set, for the bind-time host calls.
-    #NoDiscard
+    .NoDiscard
     export let numbers = func(options: SocketOptions) -> int[list] {
         let out: int[list] = new;
         for (let pair in options.settings()) {
@@ -66,7 +66,7 @@ export let Support = module (
     };
 
     /// @brief The option values of a set, in the order of `numbers`.
-    #NoDiscard
+    .NoDiscard
     export let values = func(options: SocketOptions) -> int64[list] {
         let out: int64[list] = new;
         for (let pair in options.settings()) {
@@ -77,7 +77,7 @@ export let Support = module (
     };
 
     /// @brief A socket address from a host's [address text, port] pair.
-    #NoDiscard
+    .NoDiscard
     export let reported_address = func(reported: [string, int]) -> Result<SocketAddr> {
         let [text, port] = reported;
         return socket_address(text, port);
@@ -85,7 +85,7 @@ export let Support = module (
 
     /// @brief A socket address from a host's numeric address text and port; InvalidData when the host's text
     /// is not a numeric address.
-    #NoDiscard
+    .NoDiscard
     export let socket_address = func(text: string, port: int) -> Result<SocketAddr> {
         return match (ips.parse(text)) {
             Result.Ok(ip) => Result<SocketAddr>.Ok(new SocketAddr(ip, port)),

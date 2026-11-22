@@ -19,13 +19,13 @@ let.promote _ = import:Std.Core.Unit;
 /// hook: the driver waits with `poll(2)` only, so it needs a runtime service that no runtime offers yet and
 /// traps in Neura 0.3.0.
 /// @see [Std.Net.Socket.EventLoop](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-EventLoop)
-#Since("0.3.0")
+.Since("0.3.0")
 export let EventLoop = module (
     /// @brief A kernel interface the driver can wait with.
     export let EventLoopBackend = enum (IoUring, Epoll, Kqueue, Poll);
 
     /// @brief An operating system and kernel version, as a deployment describes its target.
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let Platform = class (
         /// @brief The lowercase system name: "linux", "macos", "freebsd", "openbsd", "netbsd", "dragonfly",
         /// "windows", or another.
@@ -46,7 +46,7 @@ export let EventLoop = module (
         };
 
         /// @brief True when the kernel is at least `major_version`.`minor_version`.
-        #Pure
+        .Pure
         export let at_least = func(major_version: int, minor_version: int) -> bool =>
             major > major_version || (major == major_version && minor >= minor_version);
 
@@ -67,12 +67,12 @@ export let EventLoop = module (
     );
 
     /// @brief The default preference: `IoUring`, `Epoll`, `Kqueue`, `Poll`.
-    #NoDiscard
+    .NoDiscard
     export let default_order = func -> EventLoopBackend[list] =>
         new([EventLoopBackend.IoUring, EventLoopBackend.Epoll, EventLoopBackend.Kqueue, EventLoopBackend.Poll]);
 
     /// @brief Whether `platform` has `backend` (see the module documentation).
-    #Pure
+    .Pure
     export let is_available = func(backend: EventLoopBackend, platform: Platform) -> bool {
         last linux = platform.system == "linux";
         if (backend == EventLoopBackend.IoUring) {
@@ -87,7 +87,7 @@ export let EventLoop = module (
 
     /// @brief The first backend of `preference` that `platform` has, else the first of the default order it
     /// has. Err (a Custom error with the code `socket.event_loop`) when it has none, as on Windows.
-    #NoDiscard
+    .NoDiscard
     export let select = func(platform: Platform, preference: EventLoopBackend[list]) -> Result<EventLoopBackend> {
         for (let backend in preference) {
             if (is_available(backend, platform)) {
@@ -105,7 +105,7 @@ export let EventLoop = module (
 
     /// @brief Asks the runtime's driver to wait with `backend`. Traps in Neura 0.3.0: the driver waits with
     /// `poll(2)` only and no runtime offers a service to switch.
-    #NoDiscard
+    .NoDiscard
     export let install = func(backend: EventLoopBackend) -> Result<Unit> {
         last code = backend == EventLoopBackend.IoUring ? 1 : backend == EventLoopBackend.Epoll ? 2
             : backend == EventLoopBackend.Kqueue ? 3 : 4;

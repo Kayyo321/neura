@@ -30,17 +30,17 @@ let strings = import:Std.Text.Strings;
 /// - When removing dot segments leaves a path that starts with `//` and there is no authority, `/.` is put
 ///   in front so that the result still parses to the same components.
 /// @see [Std.Net.Core.Uri](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Core-Uri)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Uri = module (
     /// @brief Restricts construction of Uri values to this module.
     let Seal = enum (Token);
 
     /// @brief The form of a URI's host (RFC 3986 section 3.2.2).
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let HostKind = enum (RegName, Ipv4, Ipv6, IpFuture);
 
     /// @brief A URI or relative reference, its components as written.
-    #[Final, Immutable, ThreadSafe, Since("0.3.0")]
+    .[Final, Immutable, ThreadSafe, Since("0.3.0")]
     export let Uri = class (
         /// @brief The scheme as written, without `:`; None for a relative reference.
         export last scheme: optional.Optional<string>;
@@ -73,59 +73,59 @@ export let Uri = module (
         };
 
         /// @brief Tests whether the URI has an authority (`//` after the scheme).
-        #Pure
+        .Pure
         export let has_authority = func -> bool => optional.is_some<string>(host);
 
         /// @brief Tests whether this is a relative reference (no scheme).
-        #Pure
+        .Pure
         export let is_relative = func -> bool => optional.is_none<string>(scheme);
 
         /// @brief The authority as written (`userinfo@host:port`), if any.
-        #Pure
+        .Pure
         export let authority = func -> optional.Optional<string> {
             return optional.Optional<string>.None unless has_authority();
             return optional.Optional<string>.Some(authority_text(userinfo, host, port));
         };
 
         /// @brief The kind of host, if any.
-        #Pure
+        .Pure
         export let host_kind = func -> optional.Optional<HostKind> => match (host) {
             optional.Optional.Some(h) => optional.Optional<HostKind>.Some(kind_of_host(h)),
             optional.Optional.None => optional.Optional<HostKind>.None,
         };
 
         /// @brief The host without the brackets of an IP literal, as written; None without an authority.
-        #Pure
+        .Pure
         export let host_name = func -> optional.Optional<string> => match (host) {
             optional.Optional.Some(h) => optional.Optional<string>.Some(unbracket(h)),
             optional.Optional.None => optional.Optional<string>.None,
         };
 
         /// @brief The userinfo percent-decoded, or empty when absent. Errors as in PercentEncoding.decode.
-        #NoDiscard
+        .NoDiscard
         export let decoded_userinfo = func -> Result<string> => decode_optional(userinfo);
 
         /// @brief The host percent-decoded without IP-literal brackets, or empty when absent. Errors as in
         /// PercentEncoding.decode.
-        #NoDiscard
+        .NoDiscard
         export let decoded_host = func -> Result<string> => decode_optional(host_name());
 
         /// @brief The path percent-decoded. Errors as in PercentEncoding.decode.
-        #NoDiscard
+        .NoDiscard
         export let decoded_path = func -> Result<string> => percent.decode(path);
 
         /// @brief The query percent-decoded (`+` stays `+`), or empty when absent. Errors as in
         /// PercentEncoding.decode.
-        #NoDiscard
+        .NoDiscard
         export let decoded_query = func -> Result<string> => decode_optional(query);
 
         /// @brief The fragment percent-decoded, or empty when absent. Errors as in PercentEncoding.decode.
-        #NoDiscard
+        .NoDiscard
         export let decoded_fragment = func -> Result<string> => decode_optional(fragment);
 
         /// @brief The path's segments, each percent-decoded; the empty segment before a leading `/` is left
         /// out, so `/a/b/` gives `a`, `b`, and the empty text. Errors as in PercentEncoding.decode.
-        #NoDiscard
+        .NoDiscard
         export let path_segments = func -> Result<string[list]> {
             last segments: string[list] = new;
             if (path.byte_length == 0) {
@@ -141,13 +141,13 @@ export let Uri = module (
         };
 
         /// @brief The query parsed into key/value pairs (an empty list when absent). Errors as in Query.parse.
-        #NoDiscard
+        .NoDiscard
         export let query_parameters = func(mode: queries.QueryMode) -> Result<queries.QueryString> =>
             queries.parse(optional.value_or<string>(query, ""), mode);
 
         /// @brief The target of a reference resolved against this URI (RFC 3986 section 5.2.2, strict).
         /// Errors: Parse Syntax when this URI has no scheme.
-        #NoDiscard
+        .NoDiscard
         export let resolve = func(reference: Uri) -> Result<Uri> =>
             resolve_reference(base: copy(), reference: reference);
 
@@ -157,7 +157,7 @@ export let Uri = module (
         /// authority made `/`). A registered name with non-ASCII, written as UTF-8 or as percent-encoded UTF-8, is
         /// decoded and converted with Idna.to_ascii. Errors: those of PercentEncoding.decode and Idna.to_ascii
         /// for such a name.
-        #NoDiscard
+        .NoDiscard
         export let normalize = func -> Result<Uri> => normalize_uri(copy());
 
         /// @brief Tests whether both URIs normalize to the same components; when either does not normalize,
@@ -183,11 +183,11 @@ export let Uri = module (
         };
 
         /// @brief The hash of the recomposed text, consistent with equals.
-        #Pure
+        .Pure
         export let.override hash_code = func -> uint32 => hashing.combine(17, to_string().hash_code());
 
         /// @brief The recomposed reference (RFC 3986 section 5.3).
-        #Pure
+        .Pure
         export let.override to_string = func -> string => compose(scheme, userinfo, host, port, path, query, fragment);
 
         /// @brief A new Uri with the same components (the language has no expression for the receiver).
@@ -200,7 +200,7 @@ export let Uri = module (
     /// not `:port`, or an invalid IP literal; InvalidCharacter at a byte a component does not allow (including
     /// a `:` in the first segment of a relative path, non-ASCII outside a registered name, and a `%` without
     /// two hex digits); OutOfRange for a port above 65535.
-    #[NoDiscard, Pure, ThreadSafe, Since("0.3.0")]
+    .[NoDiscard, Pure, ThreadSafe, Since("0.3.0")]
     export let parse = func(text: string) -> Result<Uri> {
         last length = text.byte_length;
         let i = 0;
@@ -304,12 +304,12 @@ export let Uri = module (
     /// reference with a scheme is used as it is, apart from its dot segments). The base's fragment is ignored.
     ///
     /// Errors: Parse Syntax when the base has no scheme (section 5.2.1 requires an absolute base).
-    #[NoDiscard, Pure, ThreadSafe, Since("0.3.0")]
+    .[NoDiscard, Pure, ThreadSafe, Since("0.3.0")]
     export let resolve = func(base: Uri, reference: Uri) -> Result<Uri> =>
         resolve_reference(base: base, reference: reference);
 
     /// @brief The path with `.` and `..` segments removed (RFC 3986 section 5.2.4).
-    #[NoDiscard, Pure, ThreadSafe, Since("0.3.0")]
+    .[NoDiscard, Pure, ThreadSafe, Since("0.3.0")]
     export let remove_dot_segments = func(path: string) -> string {
         let input = path;
         let output = "";
@@ -340,7 +340,7 @@ export let Uri = module (
     };
 
     /// @brief The default port of http (80) and https (443), compared without case; None for other schemes.
-    #[Pure, ThreadSafe, Since("0.3.0")]
+    .[Pure, ThreadSafe, Since("0.3.0")]
     export let default_port = func(scheme: string) -> optional.Optional<int> {
         last lowered = strings.to_ascii_lower(scheme);
         if (lowered == "http") {
@@ -353,7 +353,7 @@ export let Uri = module (
     /// @brief Collects URI components and builds a checked Uri. Setters without `raw` percent-encode their
     /// argument for the component; `raw` setters take text that is already encoded. The builder does not
     /// return itself from setters (the language has no receiver expression); call them as statements.
-    #[Final, NotThreadSafe, Since("0.3.0")]
+    .[Final, NotThreadSafe, Since("0.3.0")]
     export let UriBuilder = class (
         let scheme_text = optional.Optional<string>.None;
         let userinfo_text = optional.Optional<string>.None;
@@ -503,7 +503,7 @@ export let Uri = module (
         /// contains `:`, or components that otherwise do not read back unchanged; the errors of parse for invalid
         /// raw components; those of PercentEncoding.decode and Idna.to_ascii for a non-ASCII host (which build
         /// decodes, converts, and encodes with the RegName set again).
-        #NoDiscard
+        .NoDiscard
         export let build = func -> Result<Uri> {
             let host = host_text;
             match (host_text) {

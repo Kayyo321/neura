@@ -35,21 +35,21 @@ let words = import:Std.Crypto.Internal.Words;
 /// The tag and key-wrap-integrity comparisons are branch-free in source. The runtime does not guarantee
 /// constant time.
 /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Jwe = module (
     /// @brief The content encryption algorithm bound to a JWE key.
     /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let ContentEncryption = enum (A128Gcm, A192Gcm, A256Gcm, A128CbcHs256, A192CbcHs384, A256CbcHs512);
 
     /// @brief The AES Key Wrap algorithm bound to a JWE wrapping key.
     /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let WrapAlgorithm = enum (A128Kw, A192Kw, A256Kw);
 
     /// @brief ECDH-ES direct key agreement and ECDH-ES with AES Key Wrap (RFC 7518, section 4.6).
     /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let EcdhAlgorithm = enum (Es, EsA128Kw, EsA192Kw, EsA256Kw);
 
     const InvalidJwe = "crypto.invalid_jwe";
@@ -123,17 +123,17 @@ export let Jwe = module (
 
     /// @brief A direct JWE content encryption key. The only permitted key management algorithm is dir.
     /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let DirectKey = class implements SecretMemory<uint8[list]> (
         /// @brief The expected content encryption algorithm.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export last encryption: ContentEncryption;
         last material: SecretBytes;
 
         /// @brief Copies the key. Its length must match the specified encryption algorithm.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let init = func(enc: ContentEncryption, bytes: uint8[list]) {
             require_encryption(enc);
             if (bytes.length != cek_length(enc)) {
@@ -145,47 +145,47 @@ export let Jwe = module (
 
         /// @brief A copy of the key. Exposing a wiped key traps.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #[NoDiscard, Since("0.3.0")]
+        .[NoDiscard, Since("0.3.0")]
         export let expose = func -> uint8[list] => words.copy(material.expose());
 
         /// @brief Overwrites and invalidates the stored key.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let wipe = func => material.wipe();
 
         /// @brief Whether the stored key has been invalidated.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #[NoDiscard, Since("0.3.0")]
+        .[NoDiscard, Since("0.3.0")]
         export let is_wiped = func -> bool => material.is_wiped();
 
         /// @brief Requests the underlying SecretBytes storage lock.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let lock = func => material.lock();
 
         /// @brief A fixed placeholder for the key.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let.override to_string = func -> string => "Jwe.DirectKey(<redacted>)";
     );
 
     /// @brief An AES JWE key-encryption key with both expected algorithms fixed by the caller.
     /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let WrappingKey = class implements SecretMemory<uint8[list]> (
         /// @brief The expected key wrap algorithm.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export last algorithm: WrapAlgorithm;
         /// @brief The expected content encryption algorithm.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export last encryption: ContentEncryption;
         last material: SecretBytes;
 
         /// @brief Copies the wrapping key. Its length must match the specified wrap algorithm.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let init = func(alg: WrapAlgorithm, enc: ContentEncryption, bytes: uint8[list]) {
             require_wrap(alg);
             require_encryption(enc);
@@ -199,38 +199,38 @@ export let Jwe = module (
 
         /// @brief A copy of the key. Exposing a wiped key traps.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #[NoDiscard, Since("0.3.0")]
+        .[NoDiscard, Since("0.3.0")]
         export let expose = func -> uint8[list] => words.copy(material.expose());
 
         /// @brief Overwrites and invalidates the stored key.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let wipe = func => material.wipe();
 
         /// @brief Whether the stored key has been invalidated.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #[NoDiscard, Since("0.3.0")]
+        .[NoDiscard, Since("0.3.0")]
         export let is_wiped = func -> bool => material.is_wiped();
 
         /// @brief Requests the underlying SecretBytes storage lock.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let lock = func => material.lock();
 
         /// @brief A fixed placeholder for the key.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let.override to_string = func -> string => "Jwe.WrappingKey(<redacted>)";
     );
 
     /// @brief The AES-GCM key encryption algorithm bound to a JWE wrapping key.
     /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let GcmWrapAlgorithm = enum (A128GcmKw, A192GcmKw, A256GcmKw);
 
     /// @brief The PBES2 HMAC and AES Key Wrap algorithms bound to a password.
     /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let Pbes2Algorithm = enum (Hs256A128Kw, Hs384A192Kw, Hs512A256Kw);
 
     let gcm_wrap_name = func(alg: GcmWrapAlgorithm) -> string => match (alg) {
@@ -261,22 +261,22 @@ export let Jwe = module (
     /// A wrapping IV must never repeat under a KEK. RFC 7518 limits AES-GCM to 2^32 encryption operations per KEK
     /// across its users. The caller manages that limit across key objects and processes.
     /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let GcmWrappingKey = class implements SecretMemory<uint8[list]> (
         /// @brief The expected key encryption algorithm.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export last algorithm: GcmWrapAlgorithm;
 
         /// @brief The expected content encryption algorithm.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export last encryption: ContentEncryption;
         last material: SecretBytes;
 
         /// @brief Copies the wrapping key. Its byte count must match the key encryption algorithm.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let init = func(enc: ContentEncryption, alg: GcmWrapAlgorithm, bytes: uint8[list]) {
             require_encryption(enc);
             crypto_policy.require(match (alg) {
@@ -294,54 +294,54 @@ export let Jwe = module (
 
         /// @brief Copies the key. Exposing a wiped key traps.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #[NoDiscard, Since("0.3.0")]
+        .[NoDiscard, Since("0.3.0")]
         export let expose = func -> uint8[list] => words.copy(material.expose());
 
         /// @brief Overwrites and invalidates the stored key.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let wipe = func => material.wipe();
 
         /// @brief Whether the stored key has been invalidated.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #[NoDiscard, Since("0.3.0")]
+        .[NoDiscard, Since("0.3.0")]
         export let is_wiped = func -> bool => material.is_wiped();
 
         /// @brief Requests the underlying SecretBytes storage lock.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let lock = func => material.lock();
 
         /// @brief A fixed redacted display.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let.override to_string = func -> string => "Jwe.GcmWrappingKey(<redacted>)";
     );
 
     /// @brief A password bound to a PBES2 algorithm, a content algorithm, and a PBKDF2 iteration budget.
     /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Pbes2Key = class implements SecretMemory<uint8[list]> (
         /// @brief The expected key management algorithm.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export last algorithm: Pbes2Algorithm;
 
         /// @brief The expected content encryption algorithm.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export last encryption: ContentEncryption;
 
         /// @brief The greatest PBKDF2 iteration count accepted when sealing or opening.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export last iteration_limit: int;
         last material: SecretBytes;
 
         /// @brief Copies a password as octets. Encode a textual password in UTF-8 before importing it.
         /// Supply a positive maximum count independently of token data.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let init = func(enc: ContentEncryption, alg: Pbes2Algorithm, password: uint8[list], max_iterations: int) {
             require_encryption(enc);
             require_wrap(pbes2_wrap(alg));
@@ -363,27 +363,27 @@ export let Jwe = module (
 
         /// @brief Copies the password. Exposing a wiped password traps.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #[NoDiscard, Since("0.3.0")]
+        .[NoDiscard, Since("0.3.0")]
         export let expose = func -> uint8[list] => words.copy(material.expose());
 
         /// @brief Overwrites and invalidates the stored password.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let wipe = func => material.wipe();
 
         /// @brief Whether the stored password has been invalidated.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #[NoDiscard, Since("0.3.0")]
+        .[NoDiscard, Since("0.3.0")]
         export let is_wiped = func -> bool => material.is_wiped();
 
         /// @brief Requests the underlying SecretBytes storage lock.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let lock = func => material.lock();
 
         /// @brief A fixed redacted display.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let.override to_string = func -> string => "Jwe.Pbes2Key(<redacted>)";
     );
 
@@ -400,21 +400,21 @@ export let Jwe = module (
 
     /// @brief An RSA public key bound to RSA-OAEP-256 and one content encryption algorithm.
     /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let RsaWrappingKey = class (
         /// @brief The expected content encryption algorithm.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export last encryption: ContentEncryption;
 
         /// @brief The RSA public key.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export last public_key: rsa.RsaPublicKey;
 
         /// @brief Binds the public key. A modulus shorter than 2048 bits traps.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let init = func(enc: ContentEncryption, rsa_key: rsa.RsaPublicKey) {
             require_rsa(rsa_key.bits(), enc);
             encryption = enc;
@@ -423,7 +423,7 @@ export let Jwe = module (
 
         /// @brief Whether the key and the content encryption algorithm are equal.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let.override equals = func(other: class) -> bool {
             if (other is not right: RsaWrappingKey) {
                 return false;
@@ -433,28 +433,28 @@ export let Jwe = module (
 
         /// @brief A hash of the public key and the content algorithm.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let.override hash_code = func -> uint32 => hashing.combine(public_key.hash_code(), (encryption as int) as uint32);
 
         /// @brief The key management and content encryption names.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let.override to_string = func -> string => "Jwe.RsaWrappingKey(" .. content_name(encryption) .. ")";
     );
 
     /// @brief An RSA private key bound to RSA-OAEP-256 and one content encryption algorithm.
     /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let RsaUnwrappingKey = class (
         /// @brief The expected content encryption algorithm.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export last encryption: ContentEncryption;
         last key: rsa.RsaPrivateKey;
 
         /// @brief Retains the private key. A modulus shorter than 2048 bits traps.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let init = func(enc: ContentEncryption, rsa_key: rsa.RsaPrivateKey) {
             require_rsa(rsa_key.bits(), enc);
             crypto_policy.require(Algorithm.Sha512);
@@ -466,13 +466,13 @@ export let Jwe = module (
         /// wiped. On failure to recover the expected CEK, it still checks content authentication using a
         /// pseudorandom substitute derived under the private key, and returns the same authentication error.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #[NoDiscard, Since("0.3.0")]
+        .[NoDiscard, Since("0.3.0")]
         export let open = func(compact: string) -> Result<uint8[list]> {
             require_live();
             return open_fields(parse(compact, RsaOaep256, encryption, (key.bits() + 7) / 8)?);
         };
 
-        #[Internal, Hidden]
+        .[Internal, Hidden]
         export let open_json = func(serialized: string, recipient_index: int, aad: uint8[list]) -> Result<uint8[list]> {
             require_live();
             return open_fields(parse_json(serialized, recipient_index, aad, RsaOaep256, encryption, (key.bits() + 7) / 8)?);
@@ -512,7 +512,7 @@ export let Jwe = module (
 
         /// @brief A fixed placeholder for the key.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let.override to_string = func -> string => "Jwe.RsaUnwrappingKey(<redacted>)";
     );
 
@@ -556,26 +556,26 @@ export let Jwe = module (
 
     /// @brief A P-256, P-384, or P-521 recipient public key bound to ECDH-ES and the expected content algorithm.
     /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let EcdhEncryptionKey = class (
         /// @brief The recipient's public key.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export last public_key: ecdsa.EcPublicKey;
 
         /// @brief Whether the derived key encrypts content directly or first wraps a CEK.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export last algorithm: EcdhAlgorithm;
 
         /// @brief The expected content encryption algorithm.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export last encryption: ContentEncryption;
 
         /// @brief Binds the recipient public key to one key-management and one content encryption algorithm.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let init = func(key: ecdsa.EcPublicKey, alg: EcdhAlgorithm, enc: ContentEncryption) {
             require_ecdh(key.curve, alg, enc);
             public_key = key;
@@ -585,7 +585,7 @@ export let Jwe = module (
 
         /// @brief Whether the recipient and both algorithms are equal.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let.override equals = func(other: class) -> bool {
             if (other is not right: EcdhEncryptionKey) {
                 return false;
@@ -595,36 +595,36 @@ export let Jwe = module (
 
         /// @brief A hash of the recipient and both algorithms.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let.override hash_code = func -> uint32 =>
             hashing.combine(hashing.combine(public_key.hash_code(), (algorithm as int) as uint32), (encryption as int) as uint32);
 
         /// @brief The configured algorithm names.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let.override to_string = func -> string =>
             "Jwe.EcdhEncryptionKey(" .. ecdh_name(algorithm) .. ", " .. content_name(encryption) .. ")";
     );
 
     /// @brief An ECDH-ES recipient private key with a bound key-management and content algorithm.
     /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let EcdhDecryptionKey = class (
         last key: ecdsa.EcPrivateKey;
 
         /// @brief The expected key-management algorithm.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export last algorithm: EcdhAlgorithm;
 
         /// @brief The expected content encryption algorithm.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export last encryption: ContentEncryption;
 
         /// @brief Retains the recipient's private key. Wiping that key also disables this decryption key.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let init = func(recipient: ecdsa.EcPrivateKey, alg: EcdhAlgorithm, enc: ContentEncryption) {
             require_ecdh(recipient.curve, alg, enc);
             key = recipient;
@@ -634,14 +634,14 @@ export let Jwe = module (
 
         /// @brief Authenticates and decrypts a compact JWE. Traps after the underlying private key is wiped.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #[NoDiscard, Since("0.3.0")]
+        .[NoDiscard, Since("0.3.0")]
         export let open = func(compact: string) -> Result<uint8[list]> {
             require_live();
             last fields = parse(compact, ecdh_name(algorithm), encryption, wrapped_length())?;
             return open_fields(fields, jwe_ecdh.parse(fields.protected_bytes, key.curve)?);
         };
 
-        #[Internal, Hidden]
+        .[Internal, Hidden]
         export let open_json = func(serialized: string, recipient_index: int, aad: uint8[list]) -> Result<uint8[list]> {
             require_live();
             last fields = parse_json(serialized, recipient_index, aad, ecdh_name(algorithm), encryption, wrapped_length())?;
@@ -672,7 +672,7 @@ export let Jwe = module (
 
         /// @brief A fixed placeholder for the key.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let.override to_string = func -> string => "Jwe.EcdhDecryptionKey(<redacted>)";
     );
 
@@ -1168,7 +1168,7 @@ export let Jwe = module (
     /// PBES2 takes fresh salt input of at least eight bytes and an iteration count of at least 1000 within
     /// the recipient's limit. An incorrect length or out-of-policy sealing count traps.
     /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let seal_with = func(key: DirectKey, plaintext: uint8[list], iv: uint8[list]) -> Result<string> =>
         seal_with(key, plaintext, iv, header("dir", key.encryption))
         or func(key: DirectKey, plaintext: uint8[list], iv: uint8[list], protected: string) -> Result<string> {
@@ -1255,7 +1255,7 @@ export let Jwe = module (
     /// AES-GCM wrapping generates a separate fresh wrapping IV. PBES2 generates a 16-byte salt input
     /// and takes an explicit sealing count.
     /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let seal = func(key: DirectKey, plaintext: uint8[list]) -> Result<string> =>
         seal_with(key, plaintext, entropy.os_bytes(iv_length(key.encryption))?)
         or func(key: DirectKey, plaintext: uint8[list], random: drbg.ChaCha20Drbg) -> Result<string> =>
@@ -1315,7 +1315,7 @@ export let Jwe = module (
     /// Malformed input and an algorithm mismatch return crypto.invalid_jwe. Integrity and decryption failures
     /// return crypto.authentication_failed, with no unauthenticated plaintext.
     /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let open = func(key: DirectKey, compact: string) -> Result<uint8[list]> =>
         open_direct(key, parse(compact, "dir", key.encryption, 0)?)
         or func(key: WrappingKey, compact: string) -> Result<uint8[list]> =>
@@ -1335,7 +1335,7 @@ export let Jwe = module (
     /// The profile accepts up to 4 MiB of serialized JSON, 64 recipients and 64 members per combined JOSE header.
     /// The protected segment may contain up to 64 KiB, and each JSON parse accepts up to 16,384 structural tokens.
     /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let open_json = func(key: DirectKey, serialized: string, recipient_index: int, aad: uint8[list]) -> Result<uint8[list]> =>
         open_direct(key, parse_json(serialized, recipient_index, aad, "dir", key.encryption, 0)?)
         or func(key: WrappingKey, serialized: string, recipient_index: int, aad: uint8[list]) -> Result<uint8[list]> =>

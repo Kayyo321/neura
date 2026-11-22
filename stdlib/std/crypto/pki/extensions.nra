@@ -16,7 +16,7 @@ let writer = import:Std.Crypto.Pki.DerWriter;
 /// compare. Each `parse_<name>` reads the extnValue contents and fails with a `Parse` error on a value that
 /// breaks the extension's ASN.1, or a constraint of RFC 5280 that a certificate user must check.
 /// @see [Std.Crypto.Pki.Extensions](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Extensions)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Extensions = module (
     // KeyUsage bits (RFC 5280, section 4.2.1.3).
     export const DigitalSignature: int = 0;
@@ -30,7 +30,7 @@ export let Extensions = module (
     export const DecipherOnly: int = 8;
 
     /// @brief One extension as encoded: its OID, criticality and the contents of extnValue.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Extension = class (
         export last oid: Oid;
         export last critical: bool;
@@ -71,7 +71,7 @@ export let Extensions = module (
     );
 
     /// @brief basicConstraints: cA and pathLenConstraint (-1 when absent).
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let BasicConstraints = class (
         export last ca: bool;
         export last path_length: int;
@@ -91,7 +91,7 @@ export let Extensions = module (
     );
 
     /// @brief keyUsage: a named bit list; `has(KeyCertSign)` and so on.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let KeyUsage = class (
         export last bits: BitString;
         export last der_bytes: uint8[list];
@@ -122,7 +122,7 @@ export let Extensions = module (
     );
 
     /// @brief extKeyUsage: the key purpose OIDs.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let ExtendedKeyUsage = class (
         export last purposes: Oid[list];
         export last der_bytes: uint8[list];
@@ -151,7 +151,7 @@ export let Extensions = module (
 
     /// @brief A GeneralSubtree of nameConstraints: the base name (minimum 0, maximum absent, as RFC 5280
     /// requires).
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let GeneralSubtree = class (
         export last base: GeneralName;
 
@@ -168,7 +168,7 @@ export let Extensions = module (
 
     /// @brief nameConstraints: permitted and excluded subtrees. `has_permitted` and `has_excluded` say
     /// whether each field was present.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let NameConstraints = class (
         export last permitted: GeneralSubtree[list];
         export last excluded: GeneralSubtree[list];
@@ -195,7 +195,7 @@ export let Extensions = module (
 
     /// @brief authorityKeyIdentifier: keyIdentifier, authorityCertIssuer and authorityCertSerialNumber, each
     /// possibly empty.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let AuthorityKeyIdentifier = class (
         export last key_identifier: uint8[list];
         export last has_key_identifier: bool;
@@ -221,7 +221,7 @@ export let Extensions = module (
 
     /// @brief A policy qualifier: CPS pointer (`text` is the URI), user notice (`text` is the explicit text,
     /// if any), or another qualifier kept raw.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let PolicyQualifier = class (
         export last id: Oid;
         export last text: string;
@@ -241,7 +241,7 @@ export let Extensions = module (
     );
 
     /// @brief One PolicyInformation of certificatePolicies.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let PolicyInformation = class (
         export last policy: Oid;
         export last qualifiers: PolicyQualifier[list];
@@ -261,7 +261,7 @@ export let Extensions = module (
     );
 
     /// @brief One pair of policyMappings.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let PolicyMapping = class (
         export last issuer_domain: Oid;
         export last subject_domain: Oid;
@@ -282,7 +282,7 @@ export let Extensions = module (
     );
 
     /// @brief policyConstraints: requireExplicitPolicy and inhibitPolicyMapping skip counts (-1 when absent).
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let PolicyConstraints = class (
         export last require_explicit_policy: int;
         export last inhibit_policy_mapping: int;
@@ -304,7 +304,7 @@ export let Extensions = module (
 
     /// @brief One DistributionPoint of cRLDistributionPoints. `full_name` holds the fullName alternative (or
     /// is empty); `relative_name` keeps nameRelativeToCRLIssuer's DER; `reasons` is empty when absent.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let DistributionPoint = class (
         export last full_name: GeneralName[list];
         export last relative_name: uint8[list];
@@ -329,7 +329,7 @@ export let Extensions = module (
     );
 
     /// @brief One AccessDescription of authorityInfoAccess or subjectInfoAccess.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let AccessDescription = class (
         export last method: Oid;
         export last location: GeneralName;
@@ -381,7 +381,7 @@ export let Extensions = module (
 
     /// @brief Reads an Extension SEQUENCE { extnID, critical BOOLEAN DEFAULT FALSE, extnValue OCTET STRING }.
     /// An explicit FALSE is not DER and is refused.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_extension = func(e: der.Element) -> Result<Extension> {
         if (not e.is_universal(der.TagSequence)) {
             return fail<Extension>(e.offset, "Extension must be a SEQUENCE");
@@ -402,7 +402,7 @@ export let Extensions = module (
     };
 
     /// @brief basicConstraints: SEQUENCE { cA BOOLEAN DEFAULT FALSE, pathLenConstraint INTEGER (0..MAX) OPTIONAL }.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_basic_constraints = func(value: uint8[list]) -> Result<BasicConstraints> {
         last e = sequence_of(value, "BasicConstraints")?;
         let r = e.reader();
@@ -426,7 +426,7 @@ export let Extensions = module (
     };
 
     /// @brief keyUsage: a non-empty named BIT STRING without trailing zero bits (DER).
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_key_usage = func(value: uint8[list]) -> Result<KeyUsage> {
         last e = der.parse(value)?;
         last bits = e.bit_string()?;
@@ -440,7 +440,7 @@ export let Extensions = module (
     };
 
     /// @brief extKeyUsage: SEQUENCE SIZE (1..MAX) OF KeyPurposeId.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_extended_key_usage = func(value: uint8[list]) -> Result<ExtendedKeyUsage> {
         last e = sequence_of(value, "ExtKeyUsageSyntax")?;
         let purposes: Oid[list] = new;
@@ -454,18 +454,18 @@ export let Extensions = module (
     };
 
     /// @brief subjectAltName or issuerAltName: GeneralNames.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_general_names = func(value: uint8[list]) -> Result<GeneralName[list]> =>
         general_names.parse_names(der.parse(value)?);
 
     /// @brief subjectKeyIdentifier: OCTET STRING.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_subject_key_identifier = func(value: uint8[list]) -> Result<uint8[list]> =>
         (der.parse(value)?).octet_string();
 
     /// @brief authorityKeyIdentifier: SEQUENCE { [0] keyIdentifier, [1] authorityCertIssuer,
     /// [2] authorityCertSerialNumber }, the last two together or not at all.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_authority_key_identifier = func(value: uint8[list]) -> Result<AuthorityKeyIdentifier> {
         last e = sequence_of(value, "AuthorityKeyIdentifier")?;
         let r = e.reader();
@@ -507,7 +507,7 @@ export let Extensions = module (
 
     /// @brief nameConstraints: SEQUENCE { permittedSubtrees [0], excludedSubtrees [1] }, at least one present
     /// and none empty; each subtree's minimum must be 0 and its maximum absent.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_name_constraints = func(value: uint8[list]) -> Result<NameConstraints> {
         last e = sequence_of(value, "NameConstraints")?;
         let r = e.reader();
@@ -567,7 +567,7 @@ export let Extensions = module (
     };
 
     /// @brief certificatePolicies: SEQUENCE SIZE (1..MAX) OF PolicyInformation, each policy at most once.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_certificate_policies = func(value: uint8[list]) -> Result<PolicyInformation[list]> {
         last e = sequence_of(value, "certificatePolicies")?;
         let out: PolicyInformation[list] = new;
@@ -633,7 +633,7 @@ export let Extensions = module (
     };
 
     /// @brief policyMappings: SEQUENCE SIZE (1..MAX) OF SEQUENCE { issuerDomainPolicy, subjectDomainPolicy }.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_policy_mappings = func(value: uint8[list]) -> Result<PolicyMapping[list]> {
         last e = sequence_of(value, "PolicyMappings")?;
         let out: PolicyMapping[list] = new;
@@ -654,7 +654,7 @@ export let Extensions = module (
     };
 
     /// @brief policyConstraints: SEQUENCE { requireExplicitPolicy [0], inhibitPolicyMapping [1] }, at least one.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_policy_constraints = func(value: uint8[list]) -> Result<PolicyConstraints> {
         last e = sequence_of(value, "PolicyConstraints")?;
         let r = e.reader();
@@ -696,14 +696,14 @@ export let Extensions = module (
     };
 
     /// @brief inhibitAnyPolicy: SkipCerts INTEGER (0..MAX).
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_inhibit_any_policy = func(value: uint8[list]) -> Result<int> {
         last e = der.parse(value)?;
         return Result<int>.Ok(e.small_integer(1000000)? as int);
     };
 
     /// @brief cRLDistributionPoints: SEQUENCE SIZE (1..MAX) OF DistributionPoint.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_crl_distribution_points = func(value: uint8[list]) -> Result<DistributionPoint[list]> {
         last e = sequence_of(value, "CRLDistributionPoints")?;
         let out: DistributionPoint[list] = new;
@@ -760,7 +760,7 @@ export let Extensions = module (
     };
 
     /// @brief authorityInfoAccess or subjectInfoAccess: SEQUENCE SIZE (1..MAX) OF AccessDescription.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_info_access = func(value: uint8[list]) -> Result<AccessDescription[list]> {
         last e = sequence_of(value, "AuthorityInfoAccessSyntax")?;
         let out: AccessDescription[list] = new;
@@ -781,6 +781,6 @@ export let Extensions = module (
     };
 
     /// @brief The RFC 6962 SCT list extension: an OCTET STRING holding the TLS-encoded list.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_sct_list = func(value: uint8[list]) -> Result<uint8[list]> => (der.parse(value)?).octet_string();
 );

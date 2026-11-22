@@ -8,7 +8,7 @@ let.promote _ = import:Std.Core.Result;
 /// of the base open, so the contract takes both parameters. `Std.Net.Socket.TcpServer` implements it over the
 /// host's TCP listener.
 /// @see [Std.Net.Listener](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Listener)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Listener = module (
     /// @brief An endpoint bound to `Addr` that yields connections of type `Conn`.
     export let Listener = interface<Addr, Conn>:Endpoint<Addr>, Closeable (

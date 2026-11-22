@@ -24,6 +24,15 @@ constexpr bool is_name_char(char c) {
     return is_name_start(c) || is_digit(c);
 }
 
+constexpr NumericSuffix numeric_suffixes[] = {
+    {"s8", "int8", TokenKind::Integer}, {"s16", "int16", TokenKind::Integer},
+    {"s32", "int32", TokenKind::Integer}, {"s64", "int64", TokenKind::Integer},
+    {"u8", "uint8", TokenKind::Integer}, {"u16", "uint16", TokenKind::Integer},
+    {"u32", "uint32", TokenKind::Integer}, {"u64", "uint64", TokenKind::Integer},
+    {"f16", "float16", TokenKind::Float}, {"bf16", "bfloat16", TokenKind::Float},
+    {"f32", "float32", TokenKind::Float}, {"f64", "float64", TokenKind::Float},
+};
+
 constexpr bool is_hex_digit(char c) {
     return is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
 }
@@ -228,8 +237,9 @@ public:
                 }
             }
             TokenKind kind;
+            const NumericSuffix* suffix = nullptr;
             try {
-                kind = scan(start);
+                kind = scan(start, suffix);
             } catch (const Skipped&) {
                 documentation_.reset();
                 parts_.reset();
@@ -243,7 +253,7 @@ public:
             documentation_.reset();
             tokens.push_back({kind, std::string(source_.substr(start.offset, width)),
                               {file_, start.line, start.column, start.offset, width},
-                              std::move(documentation), std::exchange(parts_, nullptr)});
+                              std::move(documentation), std::exchange(parts_, nullptr), suffix});
         }
         if (!errors_.empty()) {
             if (!diagnostics) throw combined();
@@ -380,7 +390,7 @@ private:
         ++column_;
     }
 
-    TokenKind scan(const Span& start) {
+    TokenKind scan(const Span& start, const NumericSuffix*& suffix) {
         if (is_name_start(peek())) {
             do {
                 advance();
@@ -390,7 +400,7 @@ private:
                                                                       : TokenKind::Identifier;
         }
         if (is_digit(peek())) {
-            return number();
+            return number(suffix);
         }
         if (peek() == '"') {
             return string(start);
@@ -463,17 +473,32 @@ private:
         throw Skipped{};
     }
 
-    TokenKind number() {
-        while (is_digit(peek())) {
+    [[noreturn]] void misplaced_digit_separator() {
+        auto invalid = location();
+        invalid.length = 1;
+        report(Diagnostic(std::move(invalid), "misplaced digit separator").with_code("E0106")
+            .label("a digit separator must be between two digits of one digit group"));
+        do {
+            advance();
+        } while (is_name_char(peek()) || peek() == '\'');
+        throw Skipped{};
+    }
+
+    void number_digits() {
+        const auto start = offset_;
+        while (is_digit(peek()) || peek() == '\'') {
+            if (peek() == '\'' && (offset_ == start || !is_digit(peek(1)))) misplaced_digit_separator();
             advance();
         }
+    }
+
+    TokenKind number(const NumericSuffix*& suffix) {
+        number_digits();
         auto kind = TokenKind::Integer;
-        if (peek() == '.' && is_digit(peek(1))) {
+        if (peek() == '.' && (is_digit(peek(1)) || peek(1) == '\'')) {
             kind = TokenKind::Float;
             advance();
-            while (is_digit(peek())) {
-                advance();
-            }
+            number_digits();
         }
         if (peek() == 'e' || peek() == 'E') {
             auto exponent = location();
@@ -482,25 +507,35 @@ private:
             if (peek() == '+' || peek() == '-') {
                 advance();
             }
-            if (!is_digit(peek())) {
+            if (!is_digit(peek()) && peek() != '\'') {
                 exponent.length = offset_ - exponent.offset;
                 report(Diagnostic(std::move(exponent), "expected digits in numeric exponent").with_code("E0105")
                     .label("an exponent needs at least one digit"));
                 while (is_name_char(peek())) advance();
                 throw Skipped{};
             }
-            while (is_digit(peek())) {
-                advance();
-            }
+            number_digits();
         }
         if (is_name_start(peek())) {
-            auto invalid = location();
-            invalid.length = 1;
-            report(Diagnostic(std::move(invalid), "unexpected character after numeric literal").with_code("E0105")
-                .label("a number cannot continue with a letter")
-                .help("separate the number from a following name with a space or an operator"));
+            auto spelling = location();
             while (is_name_char(peek())) advance();
-            throw Skipped{};
+            spelling.length = offset_ - spelling.offset;
+            const auto name = source_.substr(spelling.offset, spelling.length);
+            const auto found = std::ranges::find(numeric_suffixes, name, &NumericSuffix::spelling);
+            if (peek() == '\'') misplaced_digit_separator();
+            if (found == std::end(numeric_suffixes)) {
+                report(Diagnostic(std::move(spelling), "unknown numeric suffix '" + std::string(name) + "'")
+                    .with_code("E0105").label("not a supported literal type suffix")
+                    .help("separate the number from a following name with a space or an operator"));
+                throw Skipped{};
+            }
+            if (kind == TokenKind::Float && found->kind == TokenKind::Integer) {
+                report(Diagnostic(std::move(spelling), "integer suffix on a floating-point literal").with_code("E0107")
+                    .label("an integer suffix requires a number without a fraction or exponent"));
+                throw Skipped{};
+            }
+            suffix = found;
+            kind = found->kind;
         }
         return kind;
     }
@@ -915,11 +950,12 @@ private:
             }
             if (brackets.empty() && (peek() == '}' || peek() == ':')) break;
             const auto start = location();
-            const auto kind = scan(start);
+            const NumericSuffix* suffix = nullptr;
+            const auto kind = scan(start, suffix);
             const auto width = offset_ - start.offset;
             Token token{kind, std::string(source_.substr(start.offset, width)),
                         {file_, start.line, start.column, start.offset, width}, nullptr,
-                        std::exchange(parts_, nullptr)};
+                        std::exchange(parts_, nullptr), suffix};
             // A top-level '?' is a conditional's when the next token can
             // begin an expression, and otherwise a postfix propagation,
             // which ends no hole (docs/design/Matching030.md).
@@ -1057,6 +1093,16 @@ std::uint8_t decode_character_literal(std::string_view literal) {
     // The lexer accepted the literal, so its escape is valid and, for a
     // Unicode escape, at most U+00FF.
     return static_cast<std::uint8_t>(read_escape(text).value);
+}
+
+std::string numeric_literal_text(const Token& token) {
+    auto text = std::string_view(token.text);
+    if (token.numeric_suffix) text.remove_suffix(token.numeric_suffix->spelling.size());
+    std::string result(text);
+    std::erase(result, '\'');
+    if (token.kind == TokenKind::Float && result.find_first_of(".eE") == std::string::npos)
+        result += ".0";
+    return result;
 }
 
 std::string decode_string_literal(std::string_view literal) {

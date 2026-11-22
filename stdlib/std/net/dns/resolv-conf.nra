@@ -31,7 +31,7 @@ let v4 = import:Std.Net.Core.Ipv4Addr;
 /// network adapter settings, which this module does not read, so a Windows program builds its configuration
 /// with `parse` or the constructor and names its servers itself.
 /// @see [Std.Net.Dns.ResolvConf](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-ResolvConf)
-#Since("0.3.0")
+.Since("0.3.0")
 export let ResolvConf = module (
     /// @brief The usual location of the file on Linux and macOS. On Windows this constant names
     /// `/etc/resolv.conf` on the current drive, which normally does not exist, so reading it fails with NotFound.
@@ -55,7 +55,7 @@ export let ResolvConf = module (
 
     /// @brief A parsed configuration. Fields are public for reading; build one with `parse`, `defaults`, or
     /// the constructor.
-    #Final
+    .Final
     export let ResolvConf = class (
         /// @brief The configured name servers (at most 3), in file order.
         last servers: ips.IpAddr[list];
@@ -95,11 +95,11 @@ export let ResolvConf = module (
         };
 
         /// @brief The configured name servers, in file order; empty when the file names none.
-        #NoDiscard
+        .NoDiscard
         export let nameservers = func -> ips.IpAddr[list] => servers;
 
         /// @brief The servers to query: the configured ones, or 127.0.0.1 when there are none.
-        #NoDiscard
+        .NoDiscard
         export let effective_nameservers = func -> ips.IpAddr[list] {
             if (servers.length > 0) {
                 return servers;
@@ -110,7 +110,7 @@ export let ResolvConf = module (
         };
 
         /// @brief The effective name servers as socket addresses on `port` (usually `DnsPort`).
-        #NoDiscard
+        .NoDiscard
         export let nameserver_addresses = func(port: int) -> SocketAddr[list] {
             last out: SocketAddr[list] = new;
             for (let ip in effective_nameservers()) {
@@ -120,19 +120,19 @@ export let ResolvConf = module (
         };
 
         /// @brief The search list (a `domain` line gives a one-entry list).
-        #NoDiscard
+        .NoDiscard
         export let search = func -> string[list] => search_list;
 
         /// @brief The first search domain, or "" when the list is empty.
-        #NoDiscard
+        .NoDiscard
         export let domain = func -> string => search_list.length > 0 ? search_list[0] : "";
 
         /// @brief Options the parser did not know, as written.
-        #NoDiscard
+        .NoDiscard
         export let unknown_options = func -> string[list] => unknown;
 
         /// @brief The skipped lines and values, each "line N: reason".
-        #NoDiscard
+        .NoDiscard
         export let problems = func -> string[list] => skipped;
 
         /// @brief Equal when the servers, search list and options are equal (unknown options and problems are
@@ -192,12 +192,12 @@ export let ResolvConf = module (
     );
 
     /// @brief The configuration of an empty file: no servers, empty search list, default options.
-    #NoDiscard
+    .NoDiscard
     export let defaults = func -> ResolvConf =>
         new ResolvConf(new, new, DefaultNdots, DefaultTimeoutSeconds, DefaultAttempts, false, false, new, new);
 
     /// @brief Parses resolv.conf text; never fails. Skipped lines and values are listed in `problems`.
-    #NoDiscard
+    .NoDiscard
     export let parse = func(text: string) -> ResolvConf {
         last servers: ips.IpAddr[list] = new;
         let search: string[list] = new;
@@ -291,7 +291,7 @@ export let ResolvConf = module (
 
     /// @brief Reads and parses the file at `path` (usually `DefaultPath`). Fails only when the file cannot be
     /// read as UTF-8 text.
-    #NoDiscard
+    .NoDiscard
     export let read = func(path: string) -> Result<ResolvConf> {
         last text = filesystem.read_text(new paths.Path(path))?;
         return Result<ResolvConf>.Ok(parse(text));

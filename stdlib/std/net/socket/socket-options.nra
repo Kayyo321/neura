@@ -27,7 +27,7 @@ let.promote _ = import:Std.Core.Result;
 /// lets another socket take over a bound port, and `reuse_port`, `user_timeout` and multipath fail with
 /// Unsupported; the others set the Windows option of the same name.
 /// @see [Std.Net.Socket.SocketOptions](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-SocketOptions)
-#Since("0.3.0")
+.Since("0.3.0")
 export let SocketOptions = module (
     /// @brief The kind of socket an option set is built for.
     export let SocketKind = enum (TcpStream, TcpListener, Udp, UnixStream, UnixDatagram);
@@ -51,7 +51,7 @@ export let SocketOptions = module (
 
     /// @brief A validated option set: the host option numbers and values in option-number order, and whether
     /// the socket uses Multipath TCP.
-    #Final
+    .Final
     export let SocketOptions = class (
         /// @brief The kind the set was validated for.
         export last kind: SocketKind;
@@ -70,7 +70,7 @@ export let SocketOptions = module (
         /// @brief The option numbers and values in option-number order (the numbers of
         /// `neura.net.option.set`: 1 `SO_REUSEADDR` through 12 `SO_BROADCAST`; booleans are 0 or 1, the user
         /// timeout is in milliseconds and the keepalive timers in seconds). A copy.
-        #NoDiscard
+        .NoDiscard
         export let settings = func -> [int, int64][list] {
             let copy: [int, int64][list] = new;
             for (let pair in pairs) {
@@ -80,11 +80,11 @@ export let SocketOptions = module (
         };
 
         /// @brief True when no option is set and multipath is off, so applying needs no host call.
-        #Pure
+        .Pure
         export let is_empty = func -> bool => pairs.length == 0 && not multipath;
 
         /// @brief The value set for option number `option`, or -1 when it is not set.
-        #Pure
+        .Pure
         export let value_of = func(option: int) -> int64 {
             for (let pair in pairs) {
                 let [number, value] = pair;
@@ -144,7 +144,7 @@ export let SocketOptions = module (
 
     /// @brief Collects option values; `build` validates them for one socket kind. Setting an option again
     /// replaces its value.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let SocketOptionsBuilder = class (
         /// @brief Requested values by option number (index 13 is multipath). Durations in nanoseconds.
         last values: int64[list] = new;
@@ -231,7 +231,7 @@ export let SocketOptions = module (
 
         /// @brief The validated option set for `kind`, or the first problem as a Custom error with the code
         /// `socket.options` (see the module documentation).
-        #NoDiscard
+        .NoDiscard
         export let build = func(kind: SocketKind) -> Result<SocketOptions> {
             let option = 1;
             while (option <= MultipathSlot) {
@@ -307,16 +307,16 @@ export let SocketOptions = module (
     );
 
     /// @brief An empty builder.
-    #NoDiscard
+    .NoDiscard
     export let builder = func -> SocketOptionsBuilder => new SocketOptionsBuilder();
 
     /// @brief The empty option set for `kind`: nothing to apply.
-    #NoDiscard
+    .NoDiscard
     export let none = func(kind: SocketKind) -> SocketOptions =>
         new SocketOptions(kind, new, false);
 
     /// @brief Whether option number `option` (13 for multipath) applies to sockets of `kind`.
-    #Pure
+    .Pure
     export let applies = func(option: int, kind: SocketKind) -> bool {
         last tcp = kind == SocketKind.TcpStream || kind == SocketKind.TcpListener;
         if (option == 1) {

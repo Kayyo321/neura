@@ -6,13 +6,13 @@ let optional = import:Std.Core.Optional;
 /// @brief Maps whose associations are fixed at construction. Keys use `equals` and
 /// `hash_code`. Iteration follows the order of entries supplied to `of`.
 /// @see [Std.Collections.ImmutableMap](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-ImmutableMap)
-#Since("0.1.0")
+.Since("0.1.0")
 export let ImmutableMap = module (
     /// @brief A private token type that restricts construction to module factories.
     let Seal = enum (Token);
 
     /// @brief A read-only hash map with entries in construction order.
-    #[Final, NoDiscard]
+    .[Final, NoDiscard]
     export let ImmutableMap = class<K, V> implements Map<K, V> (
         /// @brief The private backing hash map created from the input entries.
         last associations: hash_map.HashMap<K, V>;
@@ -32,7 +32,7 @@ export let ImmutableMap = module (
         export let contains_key = func(key: K) -> bool => associations.contains_key(key);
 
         /// @brief Returns the associated value as `Some`, or `None` when the key is absent.
-        #NoDiscard
+        .NoDiscard
         export let get = func(key: K) -> optional.Optional<V> => associations.get(key);
 
         /// @brief Returns the associated value, or `fallback` when the key is absent.

@@ -13,16 +13,16 @@ let.promote _ = import:Std.Core.Result;
 /// `UdpDnsTransport` (needs `neura.net.udp.*`), `DohTransport` (RFC 8484 over `Std.Net.Http.Client`),
 /// `DotTransport` (RFC 7858) and `DoqTransport` (RFC 9250).
 /// @see [Std.Net.Dns.DnsTransport](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-DnsTransport)
-#Since("0.3.0")
+.Since("0.3.0")
 export let DnsTransport = module (
     /// @brief Sends a query and returns the response.
     export let DnsTransport = interface (
         /// @brief One exchange. Err for a transport failure (timeout, connection error, undecodable reply).
-        #NoDiscard
+        .NoDiscard
         let exchange = func(query: messages.Message) -> Result<messages.Message>;
         /// @brief Whether the transport is a stream (TCP, TLS, HTTPS, QUIC), whose responses are never truncated
         /// for size.
-        #NoDiscard
+        .NoDiscard
         let is_stream = func -> bool;
     );
 
@@ -34,7 +34,7 @@ export let DnsTransport = module (
     /// through `Message.encode` and `decode`. As a datagram transport it truncates (TC set, sections emptied) a
     /// response longer than 512 bytes, or the query's EDNS payload size. It can be told to fail the next exchanges
     /// with TimedOut, to answer with a wrong ID, or to answer with a fixed RCODE.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let MemoryTransport = class implements DnsTransport (
         /// @brief The zone data.
         last zone: messages.ResourceRecord[list] = new;
@@ -70,7 +70,7 @@ export let DnsTransport = module (
         };
 
         /// @brief The number of queries received.
-        #NoDiscard
+        .NoDiscard
         export let query_count = func -> int => received.length;
 
         /// @brief Whether this behaves as a stream.

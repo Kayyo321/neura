@@ -1,0 +1,15 @@
+let Item = class ( export let value: int = 7; );
+
+let read = func(input: class) -> int {
+    if (let item = input; item is found: Item && found.value > 0) {
+        return found.value;
+    }
+    if (let item = input; item is not found: Item) {
+        return 0;
+    }
+    return found.value;
+};
+
+if (let predicate = func() -> bool => true; predicate()) {
+    let _ = predicate();
+}

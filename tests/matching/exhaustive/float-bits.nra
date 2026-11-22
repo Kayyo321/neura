@@ -2,13 +2,13 @@ let console = import:Std.Io.Console;
 let program = import:Std.Program;
 
 let App = module:program.Entry (
-    #NoInline
+    .NoInline
     let half_bits = func(value: any) -> uint32 => match.is (value) {
         number: float16 => number.to_bits() as uint32,
         _ => 65536,
     };
 
-    #NoInline
+    .NoInline
     let brain_bits = func(value: any) -> uint32 => match.is (value) {
         number: bfloat16 => number.to_bits() as uint32,
         _ => 65536,

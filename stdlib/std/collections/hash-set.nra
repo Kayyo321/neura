@@ -7,13 +7,13 @@ let.promote _ = import:Std.Collections.MutableSet;
 /// removed elements can remain reachable pending compaction. Iterators and member
 /// callbacks detect structural changes and trap with `collection modified during iteration`.
 /// @see [Std.Collections.HashSet](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-HashSet)
-#Since("0.1.0")
+.Since("0.1.0")
 export let HashSet = module (
     /// @brief A private token type that restricts construction to module factories.
     let Seal = enum (Token);
 
     /// @brief A mutable set that tests membership by hash and equality and iterates in insertion order.
-    #NotThreadSafe
+    .NotThreadSafe
     export let HashSet = class<T> implements MutableSet<T> (
         /// @brief Never replaced, so iterators can read its modification count.
         last core: hash_core.HashCore;

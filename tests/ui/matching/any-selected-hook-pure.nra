@@ -4,7 +4,7 @@ let Session = class (
     | get: { count += 1; return instance; };
 );
 
-#Pure
+.Pure
 let selected = func(x: any) -> bool => match.is (x) {
     item: Session => true,
     _ => false,

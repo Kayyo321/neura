@@ -7,13 +7,13 @@ let oids = import:Std.Crypto.Pki.Oids;
 /// Nodes live in one list and refer to their parent by index; a deleted node stays in the list, marked. The
 /// tree is capped at `MaxNodes` nodes: policy trees can grow exponentially with crafted mappings (as in
 /// CVE-2023-0464), and validation fails when the cap is reached.
-#Since("0.3.0")
+.Since("0.3.0")
 export let PkiPolicyTree = module (
     /// @brief The largest number of nodes a tree may hold.
     export const MaxNodes: int = 2000;
 
     /// @brief One node: valid_policy, qualifier_set and expected_policy_set.
-    #Final
+    .Final
     export let PolicyNode = class (
         export last valid_policy: string;
         export last qualifiers: PolicyQualifier[list];
@@ -35,7 +35,7 @@ export let PkiPolicyTree = module (
     );
 
     /// @brief A valid_policy_tree; `is_null` once it became NULL.
-    #Final
+    .Final
     export let PolicyTree = class (
         export let nodes: PolicyNode[list] = new;
         export let is_null: bool = false;

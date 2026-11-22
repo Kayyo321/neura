@@ -17,10 +17,10 @@ let sha256 = import:Std.Digest.Sha256;
 /// positives (fresh early data refused, which only costs a round trip) and never false negatives within the
 /// window.
 /// @see [Std.Net.Quic.ReplayFilter](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Quic-ReplayFilter)
-#Since("0.3.0")
+.Since("0.3.0")
 export let ReplayFilter = module (
     /// @brief The double-hashing Bloom filter with two generations.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let ReplayFilter = class (
         /// @brief The number of bits per generation.
         export last bits: int64;
@@ -67,7 +67,7 @@ export let ReplayFilter = module (
         };
 
         /// @brief The probe positions of `token`, in probe order (see the module documentation).
-        #NoDiscard
+        .NoDiscard
         export let positions = func(token: uint8[list]) -> int64[list] {
             let input: uint8[list] = new;
             for (let b in seed) {
@@ -91,7 +91,7 @@ export let ReplayFilter = module (
 
         /// @brief Records `token` and returns Ok(true) when it was not seen within the window (accept the early
         /// data), Ok(false) when it may have been (refuse it). Err only when the clock fails.
-        #NoDiscard
+        .NoDiscard
         export let check_and_insert = func(token: uint8[list]) -> Result<bool> {
             rotate()?;
             last probes = positions(token);
@@ -105,7 +105,7 @@ export let ReplayFilter = module (
 
         /// @brief True when `token` may have been recorded within the window, without recording it. Err only
         /// when the clock fails.
-        #NoDiscard
+        .NoDiscard
         export let may_contain = func(token: uint8[list]) -> Result<bool> {
             rotate()?;
             last probes = positions(token);
@@ -137,7 +137,7 @@ export let ReplayFilter = module (
     );
 
     /// @brief A filter of `bits` bits and `hashes` probes with the server's secret `seed` and a replay window.
-    #NoDiscard
+    .NoDiscard
     export let create = func(bits: int64, hashes: int, seed: uint8[list], clock: Clock, window: Duration)
         -> ReplayFilter => new ReplayFilter(bits, hashes, seed, clock, window);
 

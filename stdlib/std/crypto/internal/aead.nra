@@ -3,7 +3,7 @@ let.promote _ = import:Std.Core.Result;
 let words = import:Std.Crypto.Internal.Words;
 
 /// @brief Checks and results shared by the AEADs of Std.Crypto.Symmetric. Internal.
-#Since("0.3.0")
+.Since("0.3.0")
 export let Aead = module (
     /// @brief The error every failed `open` returns: no plaintext, no detail about what differed.
     export let failure = func -> Result<uint8[list]> =>

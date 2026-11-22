@@ -11,7 +11,7 @@ let strings = import:Std.Text.Strings;
 /// not produce the optional mixed-case annotation (appendix A); the decoder accepts digits in either case and
 /// copies basic code points as they are.
 /// @see [Std.Net.Core.Punycode](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Core-Punycode)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Punycode = module (
     const Base: int64 = 36;
     const TMin: int64 = 1;
@@ -29,7 +29,7 @@ export let Punycode = module (
     ///
     /// Errors: Parse OutOfRange at the index of a value that is not a Unicode scalar value (a surrogate
     /// 0xD800-0xDFFF or above 0x10FFFF), or at 0 when the delta arithmetic would pass maxint.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let encode = func(code_points: uint32[list]) -> Result<string> {
         last count = code_points.length;
         last output: uint8[list] = new;
@@ -107,7 +107,7 @@ export let Punycode = module (
     /// delimiter or a byte that is not a base-36 digit after it; UnexpectedEnd when the last variable-length
     /// integer is cut short; OutOfRange when the arithmetic passes maxint or a decoded value is basic (below
     /// 0x80), a surrogate, or above 0x10FFFF.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let decode = func(text: string) -> Result<uint32[list]> {
         last length = text.byte_length;
         last output: uint32[list] = new;
@@ -177,11 +177,11 @@ export let Punycode = module (
     };
 
     /// @brief The Punycode encoding of the text's scalar values. Errors as in encode (only overflow can occur).
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let encode_text = func(text: string) -> Result<string> => encode(strings.scalars(text));
 
     /// @brief The text a Punycode string encodes. Errors as in decode.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let decode_text = func(text: string) -> Result<string> {
         last points = decode(text)?;
         return Result<string>.Ok(strings.from_scalars(points));

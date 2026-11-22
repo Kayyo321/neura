@@ -5,7 +5,7 @@ error[E0911]: function 'raw_total' is internal to its library
   |                  ^^^^^^^^^^^^^^ used outside the library that declares it
  ::: $DIR/acme/core.nra:2:5
   |
-2 |     #Internal
+2 |     .Internal
   |     --------- 'raw_total' is marked internal here
   |
   = note: an #Internal declaration is usable only from files in '$DIR/acme' and its subdirectories

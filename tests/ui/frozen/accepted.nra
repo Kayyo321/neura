@@ -2,7 +2,7 @@
 // enums and nested FrozenLists (Components030 cases 2, 16, 17).
 let frozen = import:Std.Collections.Frozen;
 
-#Immutable
+.Immutable
 let Stock = class (
     export last name: string;
     export last count: int32;

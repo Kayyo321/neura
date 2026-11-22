@@ -16,10 +16,10 @@ let.promote _ = import:Std.Core.Unit;
 /// service. Closing does not remove the socket file. After close, `accept` fails with Closed. On Windows a listener
 /// is bound to a path; an abstract name fails with Unsupported there, as on every system but Linux.
 /// @see [Std.Net.Socket.UnixListener](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-UnixListener)
-#Since("0.3.0")
+.Since("0.3.0")
 export let UnixListener = module (
     /// @brief A listening Unix-domain stream socket.
-    #[Final, NoDiscard(reason: "a listener must be closed"), NotThreadSafe]
+    .[Final, NoDiscard(reason: "a listener must be closed"), NotThreadSafe]
     export let UnixListener = class implements Listener<UnixAddr, UnixStream> (
         /// @brief The host's listener ID.
         last id: int64;
@@ -38,7 +38,7 @@ export let UnixListener = module (
         export let address = func -> UnixAddr => bound;
 
         /// @brief Waits for the next connection; its local address is this listener's and its peer is unknown.
-        #NoDiscard
+        .NoDiscard
         export let accept = func -> Result<UnixStream> {
             return Result<UnixStream>.Err(bytes.closed("listener", bound.to_string())) unless open_now;
             return match (host.accept(id)) {
@@ -66,7 +66,7 @@ export let UnixListener = module (
     );
 
     /// @brief Listens on `address`.
-    #NoDiscard
+    .NoDiscard
     export let bind = func(address: UnixAddr) -> Result<UnixListener> {
         last text = address.to_string();
         return match (host.unix_listen(text)) {

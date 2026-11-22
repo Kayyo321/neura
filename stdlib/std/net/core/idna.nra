@@ -19,7 +19,7 @@ let strings = import:Std.Text.Strings;
 /// (controls, uppercase Latin-1, Greek and Cyrillic letters, the halfwidth and fullwidth forms block,
 /// noncharacters, U+FFFD), but it cannot detect every unmapped or disallowed scalar. `map_uts46` is a stub.
 /// @see [Std.Net.Core.Idna](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Core-Idna)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Idna = module (
     /// @brief The longest label in bytes of its ASCII form (RFC 1035 section 2.3.4).
     export const MaxLabelLength: int = 63;
@@ -32,12 +32,12 @@ export let Idna = module (
     /// or an empty label other than a final root label; InvalidCharacter for a scalar that needs UTS 46
     /// mapping or is disallowed, or a hyphen rule violation; Syntax for an `xn--` label that is not valid
     /// Punycode of a non-ASCII label; OutOfRange for a label over 63 bytes or a name over 253 bytes.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let to_ascii = func(domain: string) -> Result<string> => convert_to_ascii(domain, std3: false);
 
     /// @brief to_ascii with the STD3 ASCII rules (UTS 46 UseSTD3ASCIIRules): an ASCII scalar in a label must
     /// also be a letter, a digit, or `-`, as in a host name (RFC 1123 section 2.1). Errors as in to_ascii.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let to_ascii_strict = func(domain: string) -> Result<string> => convert_to_ascii(domain, std3: true);
 
     /// @brief The Unicode (U-label) form of a domain name: ASCII letters lowercased, each `xn--` label
@@ -45,7 +45,7 @@ export let Idna = module (
     ///
     /// Errors (Parse, offset of the failing label): Empty as in to_ascii; Syntax for an `xn--` label that does
     /// not decode.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let to_unicode = func(domain: string) -> Result<string> {
         last labels = split_labels(domain)?;
         let text = "";
@@ -77,19 +77,19 @@ export let Idna = module (
 
     /// @brief The UTS 46 mapping step (IdnaMappingTable lookup, case folding, NFC) of a domain name.
     /// @stub needs the Unicode IdnaMappingTable and NFC data tables, which the library does not carry
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let map_uts46 = func(domain: string) -> string {
         trap_with_message("unsupported: Std.Net.Core.Idna.map_uts46 is not implemented in Neura 0.3.0 (needs the Unicode IdnaMappingTable and NFC data tables, which the library does not carry)");
     };
 
     /// @brief Tests whether a scalar is `.` or one of the IDNA dot variants U+3002, U+FF0E, U+FF61.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let is_dot = func(scalar: uint32) -> bool => scalar == 46 or 12290 or 65294 or 65377;
 
     // Internal helpers.
 
     /// @brief One label of the input and the byte offset where it starts.
-    #Final
+    .Final
     let Label = class (
         export last text: string;
         export last offset: int;

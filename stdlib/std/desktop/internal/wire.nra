@@ -53,7 +53,7 @@ export let Wire = module (
 
     /// @brief A cursor over a received body. A read past the end, or a text that is not UTF-8, marks the
     /// cursor failed and answers zero or the empty text; the caller checks `failed` once at the end.
-    #Final
+    .Final
     export let Cursor = class (
         /// @brief The body being read.
         last body: uint8[list];
@@ -144,7 +144,7 @@ export let Wire = module (
     };
 
     /// @brief One received frame.
-    #Final
+    .Final
     export let Frame = class (
         /// @brief The kind byte.
         export last kind: uint8;
@@ -162,7 +162,7 @@ export let Wire = module (
     );
 
     /// @brief Splits a byte stream into frames. It keeps only the bytes of frames not yet complete.
-    #Final
+    .Final
     export let Reader = class (
         /// @brief Received bytes not yet returned as frames.
         let buffer: uint8[list] = new;

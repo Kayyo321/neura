@@ -1,9 +1,9 @@
-error[E0403]: expected bool, got int32
- --> $DIR/not-on-integer.nra:4:19
+error[E0403]: expected bool or a class or interface reference, got int32
+ --> $DIR/not-on-integer.nra:3:19
   |
-4 | let negated = not count;
-  |                   ^^^^^ expected bool, found int32
+3 | let negated = not count;
+  |                   ^^^^^ expected bool or a class or interface reference
   |
-  = note: 'not' requires a bool operand, as '!' does
+  = note: 'not' requires a bool or a class or interface reference operand, as '!' does
 
 For more information about this error, try `neura explain E0403`.

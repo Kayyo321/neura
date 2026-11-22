@@ -26,7 +26,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// is branch-free in source; candidate rejection during generation is not, and the runtime does not guarantee
 /// constant time.
 /// @see [Std.Crypto.Asymmetric.Rsa](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-Rsa)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Rsa = module (
     /// @brief The smallest and largest modulus sizes accepted.
     const MinBits = 1024;
@@ -70,7 +70,7 @@ export let Rsa = module (
     };
 
     /// @brief An RSA public key (n, e). Equal keys have equal numbers.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let RsaPublicKey = class (
         /// @brief The numbers and their arithmetic (library use).
         export last core: rsa_core.PublicCore;
@@ -90,11 +90,11 @@ export let Rsa = module (
         export let bits = func -> int => core.bits;
 
         /// @brief n as big-endian bytes without leading zeros.
-        #NoDiscard
+        .NoDiscard
         export let modulus = func -> uint8[list] => words.copy(core.n_bytes);
 
         /// @brief e as big-endian bytes without leading zeros.
-        #NoDiscard
+        .NoDiscard
         export let exponent = func -> uint8[list] => rsa_core.strip(mp.to_bytes_be(core.e, core.e.length * 4));
 
         export let.override equals = func(other: class) -> bool {
@@ -118,7 +118,7 @@ export let Rsa = module (
     /// @brief An RSA private key in CRT form. `expose` gives the concatenated big-endian numbers d, p, q, dP, dQ
     /// and qInv, each of n's byte length (or half of it for the last five), in secret memory. `to_string` never
     /// prints them.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let RsaPrivateKey = class implements PrivateKey<RsaPrivateKey> (
         /// @brief The public key.
         export last public_key: RsaPublicKey;
@@ -266,7 +266,7 @@ export let Rsa = module (
 
     /// @brief A public key from outside the program. Unusable numbers are `Custom` code `crypto.invalid_key`; a
     /// modulus below 2048 bits under a policy that denies `Rsa1024` is `Custom` code `crypto.policy`.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_public_key = func(modulus: uint8[list], exponent: uint8[list]) -> Result<RsaPublicKey> {
         if (modulus.length == 0 || exponent.length == 0) {
             return Result<RsaPublicKey>.Err(error.custom("crypto.invalid_key", "empty RSA number"));
@@ -284,7 +284,7 @@ export let Rsa = module (
     /// @brief A private key from outside the program: n, e, d, p, q and the optional dP, dQ, qInv (pass empty
     /// lists to compute them). Numbers that are not a consistent key are `Custom` code `crypto.invalid_key`; a
     /// modulus below 2048 bits under a policy that denies `Rsa1024` is `Custom` code `crypto.policy`.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_private_key = func(modulus: uint8[list], exponent: uint8[list], private_exponent: uint8[list],
         prime_p: uint8[list], prime_q: uint8[list], exponent_p: uint8[list], exponent_q: uint8[list],
         coefficient: uint8[list]) -> Result<RsaPrivateKey> {
@@ -337,7 +337,7 @@ export let Rsa = module (
     };
 
     /// @brief A source of random bytes: a generator, or the operating system.
-    #Final
+    .Final
     let ByteSource = class (
         let generator: drbg.ChaCha20Drbg;
         let has_generator: bool = false;
@@ -516,7 +516,7 @@ export let Rsa = module (
     /// @brief A new key of `bits` bits (2048, 3072 or 4096; another size traps) with e = 65537, from
     /// `Entropy.os_bytes` or from the given generator (deterministic for a seeded one). Fails when the entropy
     /// source fails, or with `Custom` code `crypto.key_generation` after FIPS 186-5's bound on attempts.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let generate_key_pair = func(bits: int) -> Result<RsaPrivateKey> => generate_with(bits, new ByteSource())
         or func(bits: int, random: drbg.ChaCha20Drbg) -> Result<RsaPrivateKey> => generate_with(bits, new ByteSource(random));
 

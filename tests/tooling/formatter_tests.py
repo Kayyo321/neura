@@ -156,6 +156,64 @@ let Gauge=class(export let level:int=0;|get:level;|set:{if(value<0){return;}leve
         self.assertIn('        };\n\n    export let reset', formatted)
         self.assertIn('    };\n\n    export let read', formatted)
 
+    def test_dot_and_mixed_tags_keep_their_spelling(self):
+        source = """#Note("declaration")
+.[Final, Since("0.3.1")]
+let Cell = class (
+    export let value = 1;
+);
+let State = enum (.Likely Ready, #Unlikely Waiting);
+let read = func(.Note("parameter") item: Cell) -> int32 {
+    .Note("local")
+    let result = item
+        .value;
+    return result;
+};
+"""
+        self.assertEqual(self.formatted(source), source)
+        self.assertEqual(self.formatted(source, "--tag-style=keep"), source)
+        self.assertEqual(execute("--check", source=source.encode()).returncode, 0)
+        hash_source = self.formatted(source, "--tag-style=hash")
+        self.assertEqual(execute("--check", source=hash_source.encode()).returncode, 0)
+
+    def test_comments_among_standalone_tags_keep_the_declaration_indent(self):
+        for sigil in ("#", "."):
+            with self.subTest(sigil=sigil):
+                source = f"""let Values = module (
+    {sigil}[Since("0.3.1"), Stable]
+    /// A reading in milliseconds.
+    {sigil}Unit("ms")
+    export let period = 1;
+);
+"""
+                self.assertEqual(self.formatted(source), source)
+
+    def test_tag_conversions_only_replace_sigil_bytes(self):
+        # Preserve a BOM, mixed line endings, unformatted layout, no final
+        # newline, and the sigils inside comments, strings and member access.
+        mixed = (b'\xef\xbb\xbf#Note("literal .Note and #Note")\r\n'
+                 b'.[Final, Since("0.3.1")]  let Cell=class(export let value=1;);\n'
+                 b'let get=func(#Note("param") cell:Cell)=>cell\r\n'
+                 b'    .value; // #Note and .Note')
+        dot = mixed.replace(b'\xbf#Note(', b'\xbf.Note(').replace(b'func(#Note(', b'func(.Note(')
+        hash_source = mixed.replace(b'\n.[Final', b'\n#[Final')
+        self.assertEqual(self.formatted(mixed, "--tag-style=dot").encode(), dot)
+        self.assertEqual(self.formatted(mixed, "--tag-style=hash").encode(), hash_source)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / 'mixed.nra'
+            path.write_bytes(mixed)
+            self.assertEqual(execute("--check", "--tag-style=dot", str(path)).returncode, 1)
+            self.assertEqual(path.read_bytes(), mixed)
+            self.assertEqual(execute("--write", "--tag-style=dot", str(path)).returncode, 0)
+            self.assertEqual(path.read_bytes(), dot)
+            self.assertEqual(execute("--check", "--tag-style=dot", str(path)).returncode, 0)
+
+    def test_tag_conversion_inside_html_expression_interpolation(self):
+        source = 'let f = html() { <p>{ $"Hello {(func(#Note("input") x: int) -> int => x)(3)}" }</p> };'
+        self.assertEqual(self.formatted(source, "--tag-style=dot"), source.replace("#Note", ".Note"))
+        self.assertEqual(self.formatted(source.replace("#Note", ".Note"), "--tag-style=hash"), source)
+
     def test_generics_shifts_references_and_unary_operators(self):
         source = '''let map=func<T:Renderable>(value:List<List<T>>)->List<T> =>value[0];
 let adjust=func(value:int,other:int)->int{return(value<<2)>>1- -other;};
@@ -225,6 +283,21 @@ let t=['\t','\\','\'','\x41','\xff'];let n='a'..'z';let y=t[0]+'B';let s=$"{'}'}
         self.assertIn("let n = 'a' .. 'z';", formatted)
         self.assertIn("let y = t[0] + 'B';", formatted)
         self.assertIn("""let s = $"{'}'}";""", formatted)
+
+    def test_if_initializer_uses_inline_semicolon(self):
+        source = 'let run=func{if(let ready=true;ready){return;}else if(let other=false;other){return;}};'
+        formatted = self.formatted(source)
+        self.assertIn('if (let ready = true; ready) {', formatted)
+        self.assertIn('} else if (let other = false; other) {', formatted)
+
+    def test_if_initializer_tags_stay_inline(self):
+        for sigil in ("#", "."):
+            with self.subTest(sigil=sigil):
+                source = (f'let run=func{{if({sigil}Note("m") let p=1;p>0){{return;}}'
+                          f'else if({sigil}[Note("n"), Unit("ms")] let q=2;q>0){{return;}}}};')
+                formatted = self.formatted(source, "--tag-style=keep")
+                self.assertIn(f'    if ({sigil}Note("m") let p = 1; p > 0) {{\n', formatted)
+                self.assertIn(f'    }} else if ({sigil}[Note("n"), Unit("ms")] let q = 2; q > 0) {{\n', formatted)
 
     def test_for_header_and_overload_groups(self):
         source = '''let Example=module(export let run=func(){for(let i=0;i<10;i++){if(i==3){continue;}else{let last=i;last++;}}}or func(value:int){do{value--;}while(value>0);};);'''
@@ -342,7 +415,7 @@ let handle=func(value:Shape){match(value){Shape.Point{x,y}=>{if(x>y){return;}},S
 
     def test_invalid_options(self):
         for flags in [('--write', '--stdin'), ('--check', '--write'), ('--tab-size', '0'),
-                      ('--tab-size', '17'), ('--tab-size', 'two'), ('--unknown',)]:
+                      ('--tab-size', '17'), ('--tab-size', 'two'), ('--tag-style=unknown',), ('--unknown',)]:
             with self.subTest(flags=flags):
                 result = execute(*flags, source=b'let value=1;')
                 self.assertNotEqual(result.returncode, 0)

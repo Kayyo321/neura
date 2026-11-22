@@ -13,10 +13,10 @@ let.promote _ = import:Std.Net.Socket.TcpSocket;
 /// Multipath TCP host service that no runtime offers yet and traps, and a non-empty option set is applied with the
 /// host's option service after connecting.
 /// @see [Std.Net.Socket.TcpConnector](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-TcpConnector)
-#Since("0.3.0")
+.Since("0.3.0")
 export let TcpConnector = module (
     /// @brief Dials `address()` for each `connect`.
-    #Final
+    .Final
     export let TcpConnector = class implements Connector<SocketAddr, TcpSocket> (
         /// @brief The address dialed.
         last target: SocketAddr;
@@ -39,7 +39,7 @@ export let TcpConnector = module (
         export let address = func -> SocketAddr => target;
 
         /// @brief Opens a new connection to `address()`.
-        #NoDiscard
+        .NoDiscard
         export let connect = func -> Result<TcpSocket> => connect_with(target, timeout, settings);
 
         /// @brief Text such as "TcpConnector(127.0.0.1:8080)".
@@ -47,7 +47,7 @@ export let TcpConnector = module (
     );
 
     /// @brief A connector for `address` with `timeout` and no options.
-    #NoDiscard
+    .NoDiscard
     export let create = func(address: SocketAddr, timeout: Duration) -> TcpConnector =>
         new TcpConnector(address, timeout, none(SocketKind.TcpStream));
 );

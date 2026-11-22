@@ -38,15 +38,15 @@ let policy_tree = import:Std.Crypto.Internal.PkiPolicyTree;
 /// never critical, critical basicConstraints in CA certificates, critical nameConstraints only in CA certificates,
 /// critical policyConstraints, a non-critical authorityInfoAccess, and keyCertSign only with cA.
 /// @see [Std.Crypto.Pki.PathValidation](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-PathValidation)
-#Since("0.3.0")
+.Since("0.3.0")
 export let PathValidation = module (
     /// @brief The most comparisons of names against name-constraint subtrees for one certificate; a certificate
     /// that would need more fails with pki.name_constraints (a guard against crafted certificates, like Go's).
-    #Since("0.3.0")
+    .Since("0.3.0")
     export const MaxNameComparisons: int = 100000;
 
     /// @brief The inputs of section 6.1.1 and this library's extra checks. Set the fields after construction.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let ValidationOptions = class (
         /// @brief The instant at which every certificate must be valid.
         export let time: instant.Instant;
@@ -76,7 +76,7 @@ export let PathValidation = module (
 
         /// @brief Options for validation at the instant using the library verifier or a supplied verifier.
         /// @see [Std.Crypto.Pki.PathValidation](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-PathValidation)
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let init = func(at: instant.Instant) {
             time = at;
             verifier = new algorithm_verifier.AlgorithmVerifier();
@@ -90,7 +90,7 @@ export let PathValidation = module (
 
     /// @brief A validated path: the certificates from the leaf to the trust anchor, and the outputs of section
     /// 6.1.6.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let ValidatedPath = class (
         /// @brief Leaf first, trust anchor last.
         export last chain: Certificate[list];
@@ -137,7 +137,7 @@ export let PathValidation = module (
     let failure = func<T>(code: string, message: string) -> Result<T> => Result<T>.Err(error.custom(code, message));
 
     /// @brief The state of the search for a path.
-    #Final
+    .Final
     let Search = class (
         export last leaf: Certificate;
         export last intermediates: Certificate[list];
@@ -175,7 +175,7 @@ export let PathValidation = module (
     /// pki.path_length, pki.key_usage, pki.name_constraints, pki.policy, pki.unknown_critical_extension,
     /// pki.extended_key_usage, pki.host_name, pki.profile, pki.weak_key or pki.budget. When several candidate
     /// paths fail, the error of the first is returned.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let validate = func(leaf: Certificate, intermediates: Certificate[list], anchors: Certificate[list],
         options: ValidationOptions) -> Result<ValidatedPath> {
         if (anchors.length == 0) {

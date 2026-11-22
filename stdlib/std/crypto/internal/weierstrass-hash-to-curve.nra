@@ -9,7 +9,7 @@ let xmd = import:Std.Crypto.Internal.HashToCurveXmd;
 
 /// @brief RFC 9380 XMD SSWU random-oracle suites for the three NIST Weierstrass curves. Internal.
 /// Field and point arithmetic are in Montgomery form.
-#Since("0.3.0")
+.Since("0.3.0")
 export let WeierstrassHashToCurve = module (
     // The signs of these roots are arbitrary. The map sets the output sign from the reduced field input.
     const SqrtTen = "da538e3be1d89b99c978fc675180aab27b8d1ff84c55d5b62ccd3427e433c47f";

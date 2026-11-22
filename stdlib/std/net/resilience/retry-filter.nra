@@ -14,10 +14,10 @@ let.promote _ = import:Std.Net.Service;
 /// last result. The default predicate retries every `Err`; a caller retrying non-idempotent requests supplies a
 /// narrower one. A clock failure during the sleep is returned as the request's error.
 /// @see [Std.Net.Resilience.RetryFilter](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-RetryFilter)
-#Since("0.3.0")
+.Since("0.3.0")
 export let RetryFilter = module (
     /// @brief Retries the next service with backoff under a budget.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let RetryFilter = class<Req, Resp> implements SimpleFilter<Req, Resp> (
         /// @brief The most calls per request, the first included.
         last max_attempts: int;
@@ -75,7 +75,7 @@ export let RetryFilter = module (
     );
 
     /// @brief A filter that retries every `Err`.
-    #NoDiscard
+    .NoDiscard
     export let on_error = func<Req, Resp>(max_attempts: int, backoff: backoffs.Backoff, budget: budgets.RetryBudget,
         clock: Clock) -> RetryFilter<Req, Resp> =>
             new RetryFilter<Req, Resp>(max_attempts, func(outcome: Result<Resp>) -> bool => match (outcome) {
@@ -84,7 +84,7 @@ export let RetryFilter = module (
             }, backoff, budget, clock);
 
     /// @brief A filter that retries the results `should_retry` returns true for.
-    #NoDiscard
+    .NoDiscard
     export let when = func<Req, Resp>(max_attempts: int, should_retry: func(Result<Resp>) -> bool,
         backoff: backoffs.Backoff, budget: budgets.RetryBudget, clock: Clock) -> RetryFilter<Req, Resp> =>
             new RetryFilter<Req, Resp>(max_attempts, should_retry, backoff, budget, clock);

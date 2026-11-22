@@ -4,7 +4,7 @@
 /// Sizes and alignments are in bytes. A struct places each member at the next offset aligned for it and pads its
 /// size to a multiple of its alignment, as C does; explicit padding members may add more space.
 /// @see [Std.DynamicForeign.MemoryLayout](https://github.com/Kayyo321/neura/wiki/Stdlib-DynamicForeign-MemoryLayout)
-#Since("0.1.0")
+.Since("0.1.0")
 export let MemoryLayout = module (
     /// @brief The Neura type that carries a scalar value. Address carries a MemorySegment.
     export let Carrier = enum (
@@ -26,7 +26,7 @@ export let MemoryLayout = module (
     export let Shape = enum (Value, Struct, Union, Sequence, Padding);
 
     /// @brief An immutable description of a region of native memory.
-    #Final
+    .Final
     export let MemoryLayout = class (
         /// @brief The layout's kind.
         last kind: Shape;
@@ -62,23 +62,23 @@ export let MemoryLayout = module (
         };
 
         /// @brief The kind of the layout.
-        #Pure
+        .Pure
         export let shape = func -> Shape => kind;
 
         /// @brief The size in bytes.
-        #Pure
+        .Pure
         export let byte_size = func -> int64 => size;
 
         /// @brief The alignment in bytes.
-        #Pure
+        .Pure
         export let byte_alignment = func -> int64 => alignment;
 
         /// @brief The name, or the empty string when unnamed.
-        #Pure
+        .Pure
         export let name = func -> string => label;
 
         /// @brief The scalar carrier. Traps with "invalid argument: not a value layout" for other shapes.
-        #Pure
+        .Pure
         export let carrier = func -> Carrier {
             if (kind != Shape.Value) {
                 trap_with_message("invalid argument: not a value layout");
@@ -105,7 +105,7 @@ export let MemoryLayout = module (
         };
 
         /// @brief The members of a struct or union in order, or the element of a sequence.
-        #Pure
+        .Pure
         export let member_layouts = func -> MemoryLayout[list] {
             last copy: MemoryLayout[list] = new;
             for (let part in parts) {
@@ -115,7 +115,7 @@ export let MemoryLayout = module (
         };
 
         /// @brief The offsets of the members of a struct or union, in the order of member_layouts.
-        #Pure
+        .Pure
         export let member_offsets = func -> int64[list] {
             last copy: int64[list] = new;
             for (let offset in offsets) {
@@ -125,15 +125,15 @@ export let MemoryLayout = module (
         };
 
         /// @brief The number of elements of a sequence; 0 for other shapes.
-        #Pure
+        .Pure
         export let element_count = func -> int64 => count;
 
         /// @brief The member named `member`. Traps with "invalid argument: no member <name>" when absent.
-        #Pure
+        .Pure
         export let member = func(member_name: string) -> MemoryLayout => parts[member_index(member_name)];
 
         /// @brief The offset of the member reached by following `path` through named struct and union members.
-        #Pure
+        .Pure
         export let byte_offset = func(path: ...string) -> int64 {
             if (path.length == 0) {
                 return 0;
@@ -150,7 +150,7 @@ export let MemoryLayout = module (
         };
 
         /// @brief The offset of element `index` of a sequence. Traps outside 0 through element_count() - 1.
-        #Pure
+        .Pure
         export let element_offset = func(index: int64) -> int64 {
             if (kind != Shape.Sequence) {
                 trap_with_message("invalid argument: not a sequence layout");
@@ -184,11 +184,11 @@ export let MemoryLayout = module (
         };
 
         /// @brief Hashes the text form.
-        #Pure
+        .Pure
         export let.override hash_code = func -> uint32 => to_string().hash_code();
 
         /// @brief A compact form such as `i32`, `[i32(x)i32(y)](point)`, or `4:i8`.
-        #Pure
+        .Pure
         export let.override to_string = func -> string {
             last text = match (kind) {
                 Shape.Value => carrier_name(value_carrier),
@@ -214,7 +214,7 @@ export let MemoryLayout = module (
     };
 
     /// @brief The short name of a carrier.
-    #Pure
+    .Pure
     export let carrier_name = func(carrier: Carrier) -> string => match (carrier) {
         Carrier.Bool => "z",
         Carrier.Int8 => "i8",
@@ -231,7 +231,7 @@ export let MemoryLayout = module (
     };
 
     /// @brief The fixed size of a carrier; an address has the runner's pointer size, 8 here.
-    #Pure
+    .Pure
     export let carrier_size = func(carrier: Carrier) -> int64 => match (carrier) {
         Carrier.Bool => 1,
         Carrier.Int8 => 1,
@@ -248,14 +248,14 @@ export let MemoryLayout = module (
     };
 
     /// @brief A scalar layout with its natural size and alignment.
-    #Pure
+    .Pure
     export let value = func(carrier: Carrier) -> MemoryLayout {
         last size = carrier_size(carrier);
         return new(Shape.Value, carrier, size, size, new, new, 0);
     };
 
     /// @brief A scalar layout with an explicit size and alignment, for C types whose size the runner reports.
-    #Pure
+    .Pure
     export let value_sized = func(carrier: Carrier, size: int64, alignment: int64) -> MemoryLayout {
         if (size != carrier_size(carrier) || alignment < 1 || (alignment & (alignment - 1)) != 0) {
             trap_with_message("invalid argument: value layout size or alignment");
@@ -264,7 +264,7 @@ export let MemoryLayout = module (
     };
 
     /// @brief `bytes` bytes of padding with alignment 1.
-    #Pure
+    .Pure
     export let padding_layout = func(bytes: int64) -> MemoryLayout {
         if (bytes < 1) {
             trap_with_message("invalid argument: padding size");
@@ -328,7 +328,7 @@ export let MemoryLayout = module (
     };
 
     /// @brief `offset` rounded up to a multiple of `alignment`.
-    #Pure
+    .Pure
     export let align_up = func(offset: int64, alignment: int64) -> int64 =>
         (offset + alignment - 1) / alignment * alignment;
 

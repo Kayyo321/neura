@@ -15,10 +15,10 @@ let words = import:Std.Crypto.Internal.Words;
 /// Every function is the Keccak-p[1600] sponge in Neura code, with no hardware acceleration. Each digest checks the
 /// current Std.Crypto.Core.CryptoPolicy when it is created.
 /// @see [Std.Crypto.Hash.Sha3](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Hash-Sha3)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Sha3 = module (
     /// @brief A running SHA3-224 digest: 28 bytes of output, 144-byte rate.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Sha3_224 = class implements StreamingDigest<Sha3_224> (
         /// @brief The sponge.
         last sponge: keccak.Sponge = new(144, 6, 24);
@@ -54,7 +54,7 @@ export let Sha3 = module (
     );
 
     /// @brief The SHA3-224 hash of the bytes.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let sha3_224 = func(bytes: uint8[list]) -> uint8[list] {
         let digest = new Sha3_224();
         digest.update(bytes);
@@ -62,7 +62,7 @@ export let Sha3 = module (
     };
 
     /// @brief A running SHA3-256 digest: 32 bytes of output, 136-byte rate.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Sha3_256 = class implements StreamingDigest<Sha3_256> (
         /// @brief The sponge.
         last sponge: keccak.Sponge = new(136, 6, 24);
@@ -98,7 +98,7 @@ export let Sha3 = module (
     );
 
     /// @brief The SHA3-256 hash of the bytes.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let sha3_256 = func(bytes: uint8[list]) -> uint8[list] {
         let digest = new Sha3_256();
         digest.update(bytes);
@@ -106,7 +106,7 @@ export let Sha3 = module (
     };
 
     /// @brief A running SHA3-384 digest: 48 bytes of output, 104-byte rate.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Sha3_384 = class implements StreamingDigest<Sha3_384> (
         /// @brief The sponge.
         last sponge: keccak.Sponge = new(104, 6, 24);
@@ -142,7 +142,7 @@ export let Sha3 = module (
     );
 
     /// @brief The SHA3-384 hash of the bytes.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let sha3_384 = func(bytes: uint8[list]) -> uint8[list] {
         let digest = new Sha3_384();
         digest.update(bytes);
@@ -150,7 +150,7 @@ export let Sha3 = module (
     };
 
     /// @brief A running SHA3-512 digest: 64 bytes of output, 72-byte rate.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Sha3_512 = class implements StreamingDigest<Sha3_512> (
         /// @brief The sponge.
         last sponge: keccak.Sponge = new(72, 6, 24);
@@ -186,7 +186,7 @@ export let Sha3 = module (
     );
 
     /// @brief The SHA3-512 hash of the bytes.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let sha3_512 = func(bytes: uint8[list]) -> uint8[list] {
         let digest = new Sha3_512();
         digest.update(bytes);
@@ -194,7 +194,7 @@ export let Sha3 = module (
     };
 
     /// @brief SHAKE128. An extendable-output function: `squeeze` and `read` continue the output stream.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Shake128 = class implements ExtendableOutput<Shake128> (
         /// @brief The sponge.
         let sponge: keccak.Sponge;
@@ -229,7 +229,7 @@ export let Sha3 = module (
     );
 
     /// @brief The first `length` bytes of SHAKE128 of the bytes.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let shake128 = func(bytes: uint8[list], length: int) -> uint8[list] {
         let xof = new Shake128();
         xof.update(bytes);
@@ -237,7 +237,7 @@ export let Sha3 = module (
     };
 
     /// @brief SHAKE256. An extendable-output function: `squeeze` and `read` continue the output stream.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Shake256 = class implements ExtendableOutput<Shake256> (
         /// @brief The sponge.
         let sponge: keccak.Sponge;
@@ -272,7 +272,7 @@ export let Sha3 = module (
     );
 
     /// @brief The first `length` bytes of SHAKE256 of the bytes.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let shake256 = func(bytes: uint8[list], length: int) -> uint8[list] {
         let xof = new Shake256();
         xof.update(bytes);
@@ -280,7 +280,7 @@ export let Sha3 = module (
     };
 
     /// @brief cSHAKE128 (SP 800-185, section 3). With an empty function name N and customization S it is SHAKE128; otherwise the sponge first absorbs bytepad(encode_string(N) || encode_string(S)) and pads with 0x04.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let CShake128 = class implements ExtendableOutput<CShake128> (
         /// @brief The sponge.
         let sponge: keccak.Sponge;
@@ -318,7 +318,7 @@ export let Sha3 = module (
     );
 
     /// @brief The first `length` bytes of cSHAKE128(bytes, length, function_name, customization).
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let cshake128 = func(bytes: uint8[list], length: int, function_name: uint8[list], customization: uint8[list])
         -> uint8[list] {
         let xof = new CShake128(function_name, customization);
@@ -327,7 +327,7 @@ export let Sha3 = module (
     };
 
     /// @brief cSHAKE256 (SP 800-185, section 3). With an empty function name N and customization S it is SHAKE256; otherwise the sponge first absorbs bytepad(encode_string(N) || encode_string(S)) and pads with 0x04.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let CShake256 = class implements ExtendableOutput<CShake256> (
         /// @brief The sponge.
         let sponge: keccak.Sponge;
@@ -365,7 +365,7 @@ export let Sha3 = module (
     );
 
     /// @brief The first `length` bytes of cSHAKE256(bytes, length, function_name, customization).
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let cshake256 = func(bytes: uint8[list], length: int, function_name: uint8[list], customization: uint8[list])
         -> uint8[list] {
         let xof = new CShake256(function_name, customization);
@@ -375,7 +375,7 @@ export let Sha3 = module (
 
     /// @brief A cSHAKE sponge of the rate: SHAKE's when N and S are empty, otherwise primed with
     /// bytepad(encode_string(N) || encode_string(S), rate) and padded with 0x04. Also used by TupleHash and KMAC.
-    #[Internal, Since("0.3.0")]
+    .[Internal, Since("0.3.0")]
     export let start = func(rate: int, function_name: uint8[list], customization: uint8[list]) -> keccak.Sponge {
         if (function_name.length == 0 && customization.length == 0) {
             return new keccak.Sponge(rate, 31, 24);
@@ -387,7 +387,7 @@ export let Sha3 = module (
     };
 
     /// @brief TurboSHAKE128 (RFC 9861). The Keccak-p[1600, 12] sponge with a domain byte D from 0x01 to 0x7F (0x1F by default).
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let TurboShake128 = class implements ExtendableOutput<TurboShake128> (
         /// @brief The sponge.
         let sponge: keccak.Sponge;
@@ -428,7 +428,7 @@ export let Sha3 = module (
     );
 
     /// @brief TurboSHAKE256 (RFC 9861). The Keccak-p[1600, 12] sponge with a domain byte D from 0x01 to 0x7F (0x1F by default).
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let TurboShake256 = class implements ExtendableOutput<TurboShake256> (
         /// @brief The sponge.
         let sponge: keccak.Sponge;

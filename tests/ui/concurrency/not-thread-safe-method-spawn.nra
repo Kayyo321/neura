@@ -9,7 +9,7 @@ let Report = class (
         return lines;
     };
 
-    #NotThreadSafe
+    .NotThreadSafe
     export let flush = func() -> int64 => lines;
 );
 

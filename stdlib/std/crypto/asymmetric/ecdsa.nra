@@ -30,14 +30,14 @@ let words = import:Std.Crypto.Internal.Words;
 /// s to the lower half (`low_s`) and a verifier can require it, as Bitcoin does. The point arithmetic uses
 /// complete formulas and is branch-free in source; the runtime does not guarantee constant time.
 /// @see [Std.Crypto.Asymmetric.Ecdsa](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-Ecdsa)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Ecdsa = module (
     /// @brief The curves.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let Curve = enum (P256, P384, P521, Secp256k1);
 
     /// @brief The policy identifier of a curve: `P256`, `P384`, `P521` or `Secp256k1`.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let algorithm_of = func(curve: Curve) -> Algorithm => match (curve) {
         Curve.P256 => Algorithm.P256,
         Curve.P384 => Algorithm.P384,
@@ -46,7 +46,7 @@ export let Ecdsa = module (
     };
 
     /// @brief The default hash of a curve: SHA-256, SHA-384, SHA-512 or SHA-256.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let default_hash = func(curve: Curve) -> Algorithm => match (curve) {
         Curve.P256 => Algorithm.Sha256,
         Curve.P384 => Algorithm.Sha384,
@@ -55,7 +55,7 @@ export let Ecdsa = module (
     };
 
     /// @brief The byte length of a scalar or a field element: 32, 48, 66 or 32.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let scalar_length = func(curve: Curve) -> int => match (curve) {
         Curve.P384 => 48,
         Curve.P521 => 66,
@@ -63,7 +63,7 @@ export let Ecdsa = module (
     };
 
     /// @brief The internal group of a curve, built for one operation.
-    #NoDiscard
+    .NoDiscard
     export let group = func(curve: Curve) -> weierstrass.Curve => new(match (curve) {
         Curve.P256 => weierstrass.CurveId.P256,
         Curve.P384 => weierstrass.CurveId.P384,
@@ -80,7 +80,7 @@ export let Ecdsa = module (
 
     /// @brief An elliptic-curve public key: a point of the curve, held as its uncompressed SEC1 encoding.
     /// Equal keys have equal curves and points.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let EcPublicKey = class (
         /// @brief The curve.
         export last curve: Curve;
@@ -103,7 +103,7 @@ export let Ecdsa = module (
         };
 
         /// @brief The SEC1 encoding: 0x04 || x || y, or 0x02 / 0x03 || x when compressed.
-        #NoDiscard
+        .NoDiscard
         export let to_sec1 = func(compressed: bool) -> uint8[list] {
             return words.copy(encoded) unless compressed;
             last size = scalar_length(curve);
@@ -132,7 +132,7 @@ export let Ecdsa = module (
 
     /// @brief An elliptic-curve private key: the scalar d (1 <= d < n) as big-endian bytes of the curve's
     /// scalar length in secret memory, with its public key. `to_string` never prints it.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let EcPrivateKey = class implements PrivateKey<EcdsaSigner> (
         /// @brief The curve.
         export last curve: Curve;
@@ -167,7 +167,7 @@ export let Ecdsa = module (
         export let public_key_bytes = func -> uint8[list] => words.copy(public_encoded);
 
         /// @brief The matching public key.
-        #NoDiscard
+        .NoDiscard
         export let public_key = func -> EcPublicKey => new(curve, public_encoded);
 
         /// @brief A fixed placeholder, never the key.
@@ -175,7 +175,7 @@ export let Ecdsa = module (
     );
 
     /// @brief Signs with RFC 6979 deterministic ECDSA; it also verifies against the matching public key.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let EcdsaSigner = class implements Signer<EcPrivateKey, uint8[list]>, Verifier<EcPublicKey, uint8[list]> (
         last key: EcPrivateKey;
         /// @brief The hash of the message and of HMAC_DRBG.
@@ -219,13 +219,13 @@ export let Ecdsa = module (
             encode_der(key.curve, sign_core(key, asym_hash.digest(hash, message), hash, low_s));
 
         /// @brief The r || s signature of the message, each the curve's scalar length.
-        #NoDiscard
+        .NoDiscard
         export let sign_raw = func(message: uint8[list]) -> uint8[list] =>
             encode_raw(key.curve, sign_core(key, asym_hash.digest(hash, message), hash, low_s));
 
         /// @brief The DER signature of a digest computed elsewhere (of any length; RFC 6979's bits2int takes
         /// its leftmost bits). The nonce still uses this signer's hash.
-        #NoDiscard
+        .NoDiscard
         export let sign_digest = func(digest: uint8[list]) -> uint8[list] =>
             encode_der(key.curve, sign_core(key, digest, hash, low_s));
 
@@ -237,7 +237,7 @@ export let Ecdsa = module (
     );
 
     /// @brief Verifies ECDSA signatures under a public key.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let EcdsaVerifier = class implements Verifier<EcPublicKey, uint8[list]> (
         last key: EcPublicKey;
         /// @brief The hash of the message.
@@ -280,7 +280,7 @@ export let Ecdsa = module (
             verify_digest(asym_hash.digest(hash, message), signature);
 
         /// @brief Whether the r || s signature is valid for the message. A wrong length is false.
-        #NoDiscard
+        .NoDiscard
         export let verify_raw = func(message: uint8[list], signature: uint8[list]) -> bool {
             last g = group(key.curve);
             last parts = decode_raw(g, signature);
@@ -288,7 +288,7 @@ export let Ecdsa = module (
         };
 
         /// @brief Whether the DER signature is valid for a digest computed elsewhere.
-        #NoDiscard
+        .NoDiscard
         export let verify_digest = func(digest: uint8[list], signature: uint8[list]) -> bool {
             last g = group(key.curve);
             last parts = decode_der(g, signature);
@@ -523,7 +523,7 @@ export let Ecdsa = module (
 
     /// @brief The r || s form of a DER signature. Malformed DER or values outside 1 to n - 1 are `Custom` code
     /// `crypto.invalid_signature`.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let der_to_raw = func(curve: Curve, der: uint8[list]) -> Result<uint8[list]> {
         last parts = decode_der(group(curve), der);
         if (parts.length != 2) {
@@ -534,7 +534,7 @@ export let Ecdsa = module (
 
     /// @brief The DER form of an r || s signature. A wrong length or values outside 1 to n - 1 are `Custom` code
     /// `crypto.invalid_signature`.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let raw_to_der = func(curve: Curve, raw: uint8[list]) -> Result<uint8[list]> {
         last parts = decode_raw(group(curve), raw);
         if (parts.length != 2) {
@@ -545,7 +545,7 @@ export let Ecdsa = module (
 
     /// @brief A public key from a SEC1 point. A point that is not on the curve, or a malformed encoding, is
     /// `Custom` code `crypto.invalid_key`.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_public_key = func(curve: Curve, sec1: uint8[list]) -> Result<EcPublicKey> {
         crypto_policy.require(algorithm_of(curve));
         if (optional_is_none(group(curve).decode(sec1))) {
@@ -556,7 +556,7 @@ export let Ecdsa = module (
 
     /// @brief A private key from big-endian scalar bytes. A wrong length or a scalar outside 1 to n - 1 is
     /// `Custom` code `crypto.invalid_key`.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_private_key = func(curve: Curve, bytes: uint8[list]) -> Result<EcPrivateKey> {
         crypto_policy.require(algorithm_of(curve));
         if (bytes.length != scalar_length(curve) || optional_is_none(group(curve).scalar_in_range(bytes))) {
@@ -573,7 +573,7 @@ export let Ecdsa = module (
     /// @brief A new private key by rejection sampling (FIPS 186-5, appendix A.4.2): scalar-length bytes, with
     /// the bits above n's length cleared, until the value is from 1 to n - 1. The bytes come from
     /// `Entropy.os_bytes` or from the given generator; an entropy failure is returned.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let generate_key_pair = func(curve: Curve) -> Result<EcPrivateKey> {
         crypto_policy.require(algorithm_of(curve));
         last g = group(curve);

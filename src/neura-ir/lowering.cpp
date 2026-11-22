@@ -188,6 +188,9 @@ std::vector<ReferenceFieldInitialization> reference_fields(const Declaration& de
 
 struct ClosureEnvironment;
 
+// Bool remains an inference hint for truth-test operands.
+enum class ValueUse { Ordinary, TruthOperand, NotOperand };
+
 struct Context {
     SymbolId owner;
     SymbolId function = no_symbol;
@@ -424,11 +427,13 @@ private:
 
     Context context(SymbolId owner);
     IrNode expression(const Expr& expr, Context& context, const IrType* expected = nullptr,
-                      bool call_argument = false);
-    IrNode expression_node(const Expr& expr, Context& context, const IrType* expected,
-                           bool call_argument);
+                      bool call_argument = false, ValueUse use = ValueUse::Ordinary);
+    IrNode expression_node(const Expr& expr, Context& context, const IrType* expected, bool call_argument,
+                           ValueUse use);
     IrNode value(const Expr& expr, Context& context, const IrType* expected = nullptr,
-                 bool call_argument = false);
+                 bool call_argument = false, ValueUse use = ValueUse::Ordinary);
+    IrNode condition_value(const Expr& expr, Context& context);
+    IrNode nil_test(IrNode reference, const Span& span, bool negated);
     IrNode reference(SymbolId id, const Span& span, Context& context, bool implicit_receiver = true);
     IrNode select(const Expr& expr, Context& context, bool for_call = false);
     IrNode wrapped_member(const Expr& expr, const IrType& type, Context& context,
@@ -450,9 +455,9 @@ private:
     IrNode allocate(const Expr& expr, Context& context, const IrType* target = nullptr);
     IrNode binary(const Expr& expr, Context& context, const IrType* expected);
     IrNode comparison_chain(const Expr& expr, Context& context);
-    IrNode conditional(const Expr& expr, Context& context, const IrType* expected, bool call_argument);
+    IrNode conditional(const Expr& expr, Context& context, const IrType* expected, bool call_argument, ValueUse use);
     IrNode update(const Expr& expr, Context& context);
-    IrNode number(const Expr& expr, const IrType* expected, bool negative = false);
+    IrNode number(const Expr& expr, const IrType* expected, const Span* signed_span = nullptr);
     SymbolId cast_method(const IrType& source, const IrType& target, const Context& context,
                          bool diagnose_ambiguity = true);
     IrNode cast_call(SymbolId target, IrNode source, const IrType& type, const Span& span);
@@ -476,7 +481,8 @@ private:
                      const std::vector<SymbolId>* globals = nullptr);
     void resolve_destructure(const Statement& stmt, SymbolId file);
     IrNode lower_match(const Statement& stmt, Context& context, bool produces_value,
-                       const IrType* expected = nullptr, bool call_argument = false);
+                       const IrType* expected = nullptr, bool call_argument = false,
+                       ValueUse use = ValueUse::Ordinary);
     // Guards, nested and tuple patterns, and match.is
     // (docs/design/Matching030.md). The implementation is in
     // lowering_matching.inc.
@@ -567,7 +573,9 @@ private:
     std::set<SymbolId> generator_bodies_;
     IrNode any_guard(const Expr& expr, Context& context, const std::function<IrNode()>& lower);
     IrNode general_match(const Statement& stmt, Context& context, bool produces_value, const IrType* expected,
-                         bool call_argument, std::optional<IrNode> lowered_subject = std::nullopt);
+                         bool call_argument, ValueUse use, std::optional<IrNode> lowered_subject = std::nullopt);
+    IrNode lower_if(const Statement& stmt, Context& context, std::vector<IrNode>* hoisted = nullptr,
+                    Names* after = nullptr);
     IrNode narrowing_if(const Statement& stmt, Context& context, std::vector<IrNode>* hoisted = nullptr,
                         Names* after = nullptr);
     IrNode do_loop(const Statement& stmt, Context& context);
@@ -3078,12 +3086,17 @@ IrNode Lowering::allocate(const Expr& expr, Context& context, const IrType* targ
     return finish_call(std::move(result));
 }
 
-IrNode Lowering::number(const Expr& expr, const IrType* expected, bool negative) {
+IrNode Lowering::number(const Expr& expr, const IrType* expected, const Span* signed_span) {
     const bool floating = expr.kind == ExprKind::Float;
     auto kind = floating ? TypeKind::Float : TypeKind::Integer;
+    const bool negative = signed_span != nullptr;
+    const bool suffixed = !expr.literal_type.empty();
+    const auto& span = signed_span ? *signed_span : expr.span;
+    const auto& diagnostic_span = suffixed ? span : expr.span;
     // A character literal defaults to `byte` (docs/design/Expressions030.md).
-    auto result = node(floating ? IrOp::Float : IrOp::Integer, expr.span,
-                       expected && expected->kind == kind ? *expected
+    auto result = node(floating ? IrOp::Float : IrOp::Integer, span,
+                       suffixed                           ? *primitive(expr.literal_type)
+                       : expected && expected->kind == kind ? *expected
                        : floating                         ? float64_type
                        : expr.character                   ? uint8_type
                                                           : int32_type);
@@ -3094,12 +3107,13 @@ IrNode Lowering::number(const Expr& expr, const IrType* expected, bool negative)
         const auto format = float_format(result.type);
         const auto parsed = parse_float_literal(result.text, *format);
         if (parsed.error == FloatLiteralError::Overflow)
-            throw Diagnostic(expr.span, "float literal is outside the range of " + result.type.name).with_code("E0424");
+            throw Diagnostic(diagnostic_span, "float literal is outside the range of " + result.type.name)
+                .with_code("E0424");
         if (parsed.error == FloatLiteralError::Underflow)
-            throw Diagnostic(expr.span, "nonzero float literal rounds to zero in " + result.type.name)
+            throw Diagnostic(diagnostic_span, "nonzero float literal rounds to zero in " + result.type.name)
                 .with_code("E0424");
         if (parsed.error)
-            throw Diagnostic(expr.span, "malformed float literal").with_code("E0105");
+            throw Diagnostic(diagnostic_span, "malformed float literal").with_code("E0105");
         return result;
     }
     const auto& name = result.type.name;
@@ -3118,19 +3132,23 @@ IrNode Lowering::number(const Expr& expr, const IrType* expected, bool negative)
     std::uint64_t magnitude = 0;
     auto [end, error] = std::from_chars(expr.text.data(), expr.text.data() + expr.text.size(), magnitude);
     if (error != std::errc{} || end != expr.text.data() + expr.text.size() ||
-        magnitude > limit || (negative && !signed_integer)) {
-        auto error = Diagnostic(expr.span, "integer literal is outside the range of " + name).with_code("E0424");
+        magnitude > limit || (negative && !signed_integer && (!suffixed || magnitude != 0))) {
+        auto error = Diagnostic(diagnostic_span, "integer literal is outside the range of " + name).with_code("E0424");
         if (expr.character) error.note("a character literal is the integer " + expr.text);
         throw error;
     }
+    if (negative && !signed_integer) result.text = expr.text;
     return result;
 }
 
-bool numeric_literal(const Expr& expr) {
-    if (expr.kind == ExprKind::Integer || expr.kind == ExprKind::Float) return true;
-    return expr.kind == ExprKind::Unary && expr.text == "-" &&
-           (expr.operands.front().kind == ExprKind::Integer ||
-            expr.operands.front().kind == ExprKind::Float);
+const Expr* numeric_literal(const Expr& expr) {
+    const auto& literal = expr.kind == ExprKind::Unary && expr.text == "-" ? expr.operands.front() : expr;
+    return literal.kind == ExprKind::Integer || literal.kind == ExprKind::Float ? &literal : nullptr;
+}
+
+bool contextual_number(const Expr& expr) {
+    const auto* literal = numeric_literal(expr);
+    return literal && literal->literal_type.empty();
 }
 
 bool literal_tree(const Expr& expr) {
@@ -3142,7 +3160,7 @@ bool literal_tree(const Expr& expr) {
     case ExprKind::Collection:
         return std::ranges::all_of(expr.operands, literal_tree);
     default:
-        return numeric_literal(expr);
+        return numeric_literal(expr) != nullptr;
     }
 }
 
@@ -3207,7 +3225,7 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
     // is a class it can construct, and it is lowered once, for the chosen one.
     const auto target_typed = [](const Expr& input) { return input.kind == ExprKind::New && !input.type; };
     const auto contextual = [&](const Expr& input) {
-        return numeric_literal(input) || input.kind == ExprKind::Nil ||
+        return contextual_number(input) || input.kind == ExprKind::Nil ||
             (input.kind == ExprKind::Collection && literal_tree(input)) || target_typed(input) ||
             untyped_lambda_expr(input);
     };
@@ -3420,12 +3438,13 @@ IrNode Lowering::binary(const Expr& expr, Context& context, const IrType* expect
     if (is_shift(op)) {
         left = value(lhs, context, expected);
         right = value(rhs, context);
-    } else if (numeric_literal(lhs) && !numeric_literal(rhs)) {
+    } else if (contextual_number(lhs) && !contextual_number(rhs)) {
         right = value(rhs, context, comparison ? nullptr : expected);
         left = value(lhs, context, &right.type);
     } else {
         left = value(lhs, context, comparison ? nullptr : expected);
         if (equality && class_reference(left.type)) {
+            if (rhs.kind == ExprKind::Nil) return nil_test(std::move(left), expr.span, op == "==");
             const auto root = symbol(root_class()).type;
             right = value(rhs, context, &root);
         } else {
@@ -3445,20 +3464,22 @@ IrNode Lowering::binary(const Expr& expr, Context& context, const IrType* expect
     return result;
 }
 
-IrNode Lowering::conditional(const Expr& expr, Context& context, const IrType* expected, bool call_argument) {
-    auto condition = value(expr.operands[0], context, &bool_type);
+IrNode Lowering::conditional(const Expr& expr, Context& context, const IrType* expected, bool call_argument,
+                             ValueUse use) {
+    auto condition = condition_value(expr.operands[0], context);
     const auto& yes = expr.operands[1];
     const auto& no = expr.operands[2];
     auto result = node(IrOp::SelectValue, expr.span);
     result.operands.push_back(std::move(condition));
-    if (!expected && ((numeric_literal(yes) && !numeric_literal(no)) || yes.kind == ExprKind::Nil)) {
-        auto when_false = value(no, context);
+    const auto* required = use == ValueUse::Ordinary ? expected : nullptr;
+    if (!required && ((contextual_number(yes) && !contextual_number(no)) || yes.kind == ExprKind::Nil)) {
+        auto when_false = value(no, context, expected, false, use);
         result.type = when_false.type;
         result.body.push_back(value(yes, context, &result.type));
         result.alternative.push_back(std::move(when_false));
     } else {
-        auto when_true = value(yes, context, expected, call_argument);
-        result.type = expected ? *expected : when_true.type;
+        auto when_true = value(yes, context, expected, call_argument, use);
+        result.type = required ? *required : when_true.type;
         result.body.push_back(std::move(when_true));
         result.alternative.push_back(value(no, context, &result.type, call_argument && expected));
     }
@@ -3469,7 +3490,7 @@ IrNode Lowering::comparison_chain(const Expr& expr, Context& context) {
     const auto& subject_expr = expr.operands.front();
     const auto& first_expr = expr.operands[1];
     std::optional<IrNode> first;
-    if (numeric_literal(subject_expr) && !numeric_literal(first_expr)) {
+    if (contextual_number(subject_expr) && !contextual_number(first_expr)) {
         first = value(first_expr, context);
     }
     auto subject = value(subject_expr, context, first ? &first->type : nullptr);
@@ -3820,21 +3841,22 @@ IrNode Lowering::concatenation_assignment(const Statement& stmt, Context& contex
     return result;
 }
 
-IrNode Lowering::expression(const Expr& expr, Context& context, const IrType* expected, bool call_argument) {
+IrNode Lowering::expression(const Expr& expr, Context& context, const IrType* expected, bool call_argument,
+                            ValueUse use) {
     if (expr.kind == ExprKind::Binary && expr.text == "!==") {
         // docs/design/Expressions030.md, Value inequality: `a !== b` is
         // `!(a === b)`, lowered as that form so it builds the same image.
         Expr equal = expr;
         equal.text = "===";
         Expr negation{ExprKind::Unary, expr.span, "!", {std::move(equal)}, {}, {}};
-        return expression(negation, context, expected, call_argument);
+        return expression(negation, context, expected, call_argument, use);
     }
     const bool guarded = expr.kind == ExprKind::Binary || expr.kind == ExprKind::Unary ||
                          expr.kind == ExprKind::PrefixUpdate || expr.kind == ExprKind::PostfixUpdate ||
                          expr.kind == ExprKind::ComparisonChain || expr.kind == ExprKind::Member ||
                          expr.kind == ExprKind::Index || expr.kind == ExprKind::Call;
-    auto result = guarded ? any_guard(expr, context, [&] { return expression_node(expr, context, expected, call_argument); })
-                          : expression_node(expr, context, expected, call_argument);
+    const auto lower = [&] { return expression_node(expr, context, expected, call_argument, use); };
+    auto result = guarded ? any_guard(expr, context, lower) : lower();
     if (is_primitive_reference(result.type) && (!expected || result.type != *expected))
         return read_reference(std::move(result));
     return result;
@@ -3842,7 +3864,8 @@ IrNode Lowering::expression(const Expr& expr, Context& context, const IrType* ex
 
 #include "lowering_ui.inc"
 
-IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrType* expected, bool call_argument) {
+IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrType* expected, bool call_argument,
+                                 ValueUse use) {
     switch (expr.kind) {
     case ExprKind::HtmlFactory:
         return html_factory(expr, context);
@@ -3921,6 +3944,7 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
         return result;
     }
     case ExprKind::Nil: {
+        if (use != ValueUse::Ordinary) expected = nullptr;
         if (expected && !class_reference(*expected))
             throw Diagnostic(expr.span, "nil requires a class reference type").with_code("E0425");
         const auto target = expected ? *expected : symbol(root_class()).type;
@@ -3933,25 +3957,16 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
     }
     case ExprKind::Unary: {
         const auto& child = expr.operands.front();
-        if (expr.text == "-" && (child.kind == ExprKind::Integer || child.kind == ExprKind::Float)) {
-            auto literal = number(child, expected, true);
-            literal.span = expr.span;
-            return literal;
-        }
-        bool logical = expr.text == "!";
-        auto input = [&] {
-            if (!expr.spelled_not) return value(child, context, logical ? &bool_type : expected);
-            // A diagnostic about the operand of `not` names `not`
-            // (docs/design/Expressions030.md, Negation words).
-            try {
-                return value(child, context, &bool_type);
-            } catch (Diagnostic& error) {
-                if (error.code() == "E0403" && error.span.offset == child.span.offset &&
-                    error.span.length == child.span.length)
-                    error.note("'not' requires a bool operand, as '!' does");
-                throw;
-            }
-        }();
+        if (expr.text == "-" && (child.kind == ExprKind::Integer || child.kind == ExprKind::Float))
+            return number(child, expected, &expr.span);
+        const bool logical = expr.text == "!";
+        // The synthetic negation in a guarded return takes a bool guard.
+        const auto operand_use = expr.implicit ? ValueUse::Ordinary
+                               : expr.spelled_not && !expr.is_not ? ValueUse::NotOperand
+                                                                : ValueUse::TruthOperand;
+        auto input = logical ? value(child, context, &bool_type, false, operand_use)
+                             : value(child, context, expected);
+        if (logical && class_reference(input.type)) return nil_test(std::move(input), expr.span, true);
         if (expr.text == "~" && input.type.kind != TypeKind::Integer)
             throw Diagnostic(expr.span, "unary '~' requires an integer operand").with_code("E0413");
         if (expr.text == "-" && input.type.kind != TypeKind::Integer && input.type.kind != TypeKind::Float)
@@ -3964,7 +3979,7 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
     case ExprKind::Binary:
         return binary(expr, context, expected);
     case ExprKind::Conditional:
-        return conditional(expr, context, expected, call_argument);
+        return conditional(expr, context, expected, call_argument, use);
     case ExprKind::PrefixUpdate:
     case ExprKind::PostfixUpdate:
         return update(expr, context);
@@ -4049,7 +4064,7 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
         return enum_construct(target, expr, context);
     }
     case ExprKind::Match:
-        return lower_match(*expr.match, context, true, expected, call_argument);
+        return lower_match(*expr.match, context, true, expected, call_argument, use);
     case ExprKind::TypeTest:
     case ExprKind::Cast: {
         // The parser admits a narrowing only where narrowing_if lowers it.
@@ -4105,7 +4120,8 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
     throw Diagnostic(expr.span, "unsupported expression").with_code("E0899");
 }
 
-IrNode Lowering::value(const Expr& expr, Context& context, const IrType* expected, bool call_argument) {
+IrNode Lowering::value(const Expr& expr, Context& context, const IrType* expected, bool call_argument,
+                       ValueUse use) {
     const auto origin = std::exchange(expected_origin_, std::nullopt);
     // A value is packed where an `any` is expected; a conditional or a match
     // packs each of its results (docs/design/Matching030.md).
@@ -4113,7 +4129,7 @@ IrNode Lowering::value(const Expr& expr, Context& context, const IrType* expecte
         expr.kind != ExprKind::Match)
         return pack_expression(expr, context, call_argument);
     if (expr.kind == ExprKind::New && origin) new_origin_.emplace(&expr, *origin);
-    auto result = expression(expr, context, expected, call_argument);
+    auto result = expression(expr, context, expected, call_argument, use);
     if (expected && is_primitive_reference(*expected))
         return bind_reference(std::move(result), *expected);
     if (result.op == IrOp::Reference && result.symbol != no_symbol &&
@@ -4133,6 +4149,17 @@ IrNode Lowering::value(const Expr& expr, Context& context, const IrType* expecte
          (result.symbol == no_symbol || symbol(result.symbol).kind != SymbolKind::Variant))) {
         throw Diagnostic(expr.span, "expected a value").with_code("E0422");
     }
+    if (use != ValueUse::Ordinary) {
+        if (!assignable(result.type, bool_type) && !class_reference(result.type)) {
+            auto error = Diagnostic(expr.span, "expected bool or a class or interface reference, got " +
+                                                   describe(result.type))
+                .with_code("E0403").label("expected bool or a class or interface reference");
+            if (use == ValueUse::NotOperand)
+                error.note("'not' requires a bool or a class or interface reference operand, as '!' does");
+            throw error;
+        }
+        return result;
+    }
     if (expected) reject_erasure(result.type, *expected, expr.span);
     if (expected && call_argument && !assignable(result.type, *expected)) {
         if (const auto method = cast_method(result.type, *expected, context); method != no_symbol)
@@ -4140,6 +4167,21 @@ IrNode Lowering::value(const Expr& expr, Context& context, const IrType* expecte
     }
     if (expected) require_type(result.type, *expected, expr.span, origin ? &*origin : nullptr);
     return result;
+}
+
+IrNode Lowering::nil_test(IrNode reference, const Span& span, bool negated) {
+    auto result = node(IrOp::Binary, span, bool_type);
+    result.text = negated ? "==" : "!=";
+    // Anchor the sentinel at the comparison, independent of the source spelling.
+    result.operands.push_back(std::move(reference));
+    result.operands.push_back(node(IrOp::Nil, span, symbol(root_class()).type));
+    return result;
+}
+
+IrNode Lowering::condition_value(const Expr& expr, Context& context) {
+    auto operand = value(expr, context, &bool_type, false, ValueUse::TruthOperand);
+    if (class_reference(operand.type)) return nil_test(std::move(operand), expr.span, false);
+    return operand;
 }
 
 void Lowering::place(const IrNode& destination) const {
@@ -4813,7 +4855,7 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
     }
     case StmtKind::Assignment: {
         if (reference_field_bindings_.contains(&stmt)) {
-            auto destination = expression_node(stmt.expressions[0], context, nullptr, false);
+            auto destination = expression_node(stmt.expressions[0], context, nullptr, false, ValueUse::Ordinary);
             auto result = node(IrOp::Store, stmt.span);
             auto source = value(stmt.expressions[1], context, &destination.type);
             result.operands = {std::move(destination), std::move(source)};
@@ -4846,14 +4888,8 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
         result.body = body(stmt.body, context);
         return result;
     }
-    case StmtKind::If: {
-        if (!stmt.bindings.empty()) return narrowing_if(stmt, context);
-        auto result = node(IrOp::Branch, stmt.span);
-        result.operands.push_back(value(stmt.expressions.front(), context, &bool_type));
-        result.body = body(stmt.body, context);
-        result.alternative = body(stmt.alternative, context);
-        return result;
-    }
+    case StmtKind::If:
+        return lower_if(stmt, context);
     case StmtKind::Match:
         return lower_match(stmt, context, false);
     case StmtKind::Destructure:
@@ -4867,7 +4903,7 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
         return lower_yield(stmt, context);
     case StmtKind::While: {
         auto result = node(IrOp::Loop, stmt.span);
-        result.operands.push_back(value(stmt.expressions.front(), context, &bool_type));
+        result.operands.push_back(condition_value(stmt.expressions.front(), context));
         ++context.loops;
         result.body = body(stmt.body, context);
         --context.loops;
@@ -4956,7 +4992,7 @@ bool has_loop_transfer(const std::vector<IrNode>& region) {
 IrNode Lowering::do_loop(const Statement& stmt, Context& context) {
     std::optional<IrNode> condition;
     if (!stmt.expressions.empty())
-        condition = value(stmt.expressions.front(), context, &bool_type);
+        condition = condition_value(stmt.expressions.front(), context);
     ++context.loops;
     auto instructions = body(stmt.body, context);
     --context.loops;
@@ -5012,7 +5048,7 @@ IrNode Lowering::for_loop(const Statement& stmt, Context& context) {
         always.text = "true";
         loop.operands.push_back(std::move(always));
     } else {
-        loop.operands.push_back(value(stmt.expressions.front(), context, &bool_type));
+        loop.operands.push_back(condition_value(stmt.expressions.front(), context));
     }
     ++context.loops;
     loop.body = body(stmt.body, context);
@@ -5247,12 +5283,31 @@ IrNode Lowering::for_each_iterable(const Statement& stmt, Context& context, IrNo
     return result;
 }
 
+IrNode Lowering::lower_if(const Statement& stmt, Context& context, std::vector<IrNode>* hoisted, Names* after) {
+    const auto branch = [&] {
+        if (!stmt.bindings.empty()) return narrowing_if(stmt, context, hoisted, after);
+        auto result = node(IrOp::Branch, stmt.span);
+        result.operands.push_back(condition_value(stmt.expressions.front(), context));
+        result.body = body(stmt.body, context);
+        result.alternative = body(stmt.alternative, context);
+        return result;
+    };
+    if (stmt.initializer.empty()) return branch();
+
+    auto result = node(IrOp::Block, stmt.span);
+    context.scopes.emplace_back();
+    append_statement(result.body, stmt.initializer.front(), context);
+    result.body.push_back(branch());
+    context.scopes.pop_back();
+    return result;
+}
+
 void Lowering::append_statement(std::vector<IrNode>& instructions, const Statement& stmt, Context& context) {
     if (stmt.kind == StmtKind::If && stmt.negated_narrowing) {
         // `if (x is not y: T) A` where A cannot complete binds `y` for the
         // rest of the block (docs/design/Expressions030.md, Narrowing).
         Names after;
-        auto lowered = narrowing_if(stmt, context, &instructions, &after);
+        auto lowered = lower_if(stmt, context, &instructions, &after);
         auto& names = context.scopes.back();
         for (const auto& [name, id] : after) {
             if (names.contains(name))
@@ -5332,13 +5387,13 @@ void Lowering::resolve_destructure(const Statement& stmt, SymbolId file) {
 }
 
 IrNode Lowering::lower_match(const Statement& stmt, Context& context, bool produces_value,
-                             const IrType* expected, bool call_argument) {
+                             const IrType* expected, bool call_argument, ValueUse use) {
     if (stmt.match_is || std::ranges::any_of(stmt.arms, &MatchArm::general))
-        return general_match(stmt, context, produces_value, expected, call_argument);
+        return general_match(stmt, context, produces_value, expected, call_argument, use);
     auto subject = value(stmt.expressions.front(), context);
     const auto enum_type = subject.type;
     if (enum_type.kind == TypeKind::Tuple)
-        return general_match(stmt, context, produces_value, expected, call_argument, std::move(subject));
+        return general_match(stmt, context, produces_value, expected, call_argument, use, std::move(subject));
     if (enum_type.kind != TypeKind::Enum)
         throw Diagnostic(subject.span, "match requires an enum value").with_code("E0411");
     auto owner = context.owner;
@@ -5354,7 +5409,7 @@ IrNode Lowering::lower_match(const Statement& stmt, Context& context, bool produ
     };
     auto result = node(produces_value ? IrOp::ScopedValue : IrOp::Block, stmt.span);
     std::optional<IrType> match_type;
-    if (expected) match_type = *expected;
+    if (expected && use == ValueUse::Ordinary) match_type = *expected;
     auto save = node(IrOp::Initialize, subject.span);
     save.symbol = temporary;
     save.operands.push_back(std::move(subject));
@@ -5419,8 +5474,8 @@ IrNode Lowering::lower_match(const Statement& stmt, Context& context, bool produ
             region.body.push_back(std::move(init));
         }
         if (produces_value) {
-            auto returned = value(*arm.value, context, match_type ? &*match_type : nullptr,
-                                  call_argument && expected);
+            auto returned = value(*arm.value, context, match_type ? &*match_type : expected,
+                                  call_argument && expected, match_type ? ValueUse::Ordinary : use);
             if (!match_type) match_type = returned.type;
             region.type = *match_type;
             region.body.push_back(std::move(returned));

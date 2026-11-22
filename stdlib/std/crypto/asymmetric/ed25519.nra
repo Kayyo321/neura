@@ -26,11 +26,11 @@ let words = import:Std.Crypto.Internal.Words;
 /// These are the rules of libsodium's `crypto_sign_verify_detached`, so both accept the same signatures. The
 /// scalar multiplications are branch-free in source; the runtime does not guarantee constant time.
 /// @see [Std.Crypto.Asymmetric.Ed25519](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-Ed25519)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Ed25519 = module (
     /// @brief An Ed25519 public key: the 32-byte encoding of A. Equal keys have equal bytes. The point is
     /// checked when a signature is verified.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Ed25519PublicKey = class (
         last encoded: uint8[list];
 
@@ -44,7 +44,7 @@ export let Ed25519 = module (
         };
 
         /// @brief A copy of the 32 bytes.
-        #NoDiscard
+        .NoDiscard
         export let to_bytes = func -> uint8[list] => words.copy(encoded);
 
         export let.override equals = func(other: class) -> bool {
@@ -67,7 +67,7 @@ export let Ed25519 = module (
 
     /// @brief An Ed25519 private key: the 32-byte seed of RFC 8032 in secret memory, with its public key.
     /// `to_string` never prints it.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Ed25519PrivateKey = class implements PrivateKey<Ed25519Signer> (
         last material: SecretBytes;
         last public_encoded: uint8[list];
@@ -92,7 +92,7 @@ export let Ed25519 = module (
         export let public_key_bytes = func -> uint8[list] => words.copy(public_encoded);
 
         /// @brief The matching public key.
-        #NoDiscard
+        .NoDiscard
         export let public_key = func -> Ed25519PublicKey => new(public_encoded);
 
         /// @brief A fixed placeholder, never the key.
@@ -100,7 +100,7 @@ export let Ed25519 = module (
     );
 
     /// @brief Signs with an Ed25519 private key; it also verifies against the matching public key.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Ed25519Signer = class implements Signer<Ed25519PrivateKey, uint8[list]>,
         Verifier<Ed25519PublicKey, uint8[list]> (
         last key: Ed25519PrivateKey;
@@ -121,7 +121,7 @@ export let Ed25519 = module (
         export let sign = func(message: uint8[list]) -> uint8[list] => sign_core(key, new, message);
 
         /// @brief The Ed25519ctx signature under a context of 1 to 255 bytes; another length traps.
-        #NoDiscard
+        .NoDiscard
         export let sign_with_context = func(message: uint8[list], context: uint8[list]) -> uint8[list] {
             check_context(context, false);
             return sign_core(key, dom2(0, context), message);
@@ -129,7 +129,7 @@ export let Ed25519 = module (
 
         /// @brief The Ed25519ph signature: the message is hashed with SHA-512 first. The context has at most 255
         /// bytes; another length traps.
-        #NoDiscard
+        .NoDiscard
         export let sign_prehashed = func(message: uint8[list], context: uint8[list]) -> uint8[list] {
             check_context(context, true);
             return sign_core(key, dom2(1, context), sha2.sha512(message));
@@ -146,7 +146,7 @@ export let Ed25519 = module (
 
     /// @brief Verifies Ed25519, Ed25519ctx and Ed25519ph signatures under a public key, strictly (see the
     /// module).
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let Ed25519Verifier = class implements Verifier<Ed25519PublicKey, uint8[list]> (
         last key: Ed25519PublicKey;
 
@@ -169,7 +169,7 @@ export let Ed25519 = module (
 
         /// @brief Whether the signature is a valid Ed25519ctx signature under the context (1 to 255 bytes;
         /// another length traps).
-        #NoDiscard
+        .NoDiscard
         export let verify_with_context = func(message: uint8[list], signature: uint8[list], context: uint8[list])
             -> bool {
             check_context(context, false);
@@ -177,7 +177,7 @@ export let Ed25519 = module (
         };
 
         /// @brief Whether the signature is a valid Ed25519ph signature (context of at most 255 bytes).
-        #NoDiscard
+        .NoDiscard
         export let verify_prehashed = func(message: uint8[list], signature: uint8[list], context: uint8[list])
             -> bool {
             check_context(context, true);
@@ -285,7 +285,7 @@ export let Ed25519 = module (
 
     /// @brief A new private key from a 32-byte seed of `Entropy.os_bytes`, or from the given generator. Fails
     /// when the entropy source fails.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let generate_key_pair = func -> Result<Ed25519PrivateKey> {
         match (entropy.os_bytes(32)) {
             Result.Ok(seed) => {
@@ -306,7 +306,7 @@ export let Ed25519 = module (
 
     /// @brief A public key from outside the program. A wrong length, or bytes that are not the canonical
     /// encoding of a point, is `Custom` code `crypto.invalid_key`.
-    #[NoDiscard, Since("0.3.0")]
+    .[NoDiscard, Since("0.3.0")]
     export let parse_public_key = func(bytes: uint8[list]) -> Result<Ed25519PublicKey> {
         if (bytes.length != 32) {
             return Result<Ed25519PublicKey>.Err(error.custom("crypto.invalid_key", "Ed25519 public key must be 32 bytes"));

@@ -6,10 +6,10 @@ let optional = import:Std.Core.Optional;
 /// @brief Double-ended queues backed by two built-in lists used as stacks.
 /// Removal drops the vacated slot, and equality and hashing use identity.
 /// @see [Std.Collections.ArrayDeque](https://github.com/Kayyo321/neura/wiki/Stdlib-Collections-ArrayDeque)
-#Since("0.1.0")
+.Since("0.1.0")
 export let ArrayDeque = module (
     /// @brief A double-ended queue with constant-time indexing and amortized constant-time end operations.
-    #NotThreadSafe
+    .NotThreadSafe
     export let ArrayDeque = class<T> implements Deque<T> (
         /// @brief The first part of the deque in reverse order: its last element is
         /// the deque's first.
@@ -151,7 +151,7 @@ export let ArrayDeque = module (
         };
 
         /// @brief The first element, or None when empty.
-        #NoDiscard
+        .NoDiscard
         export let peek = func -> optional.Optional<T> {
             if (front.length > 0) {
                 return optional.Optional<T>.Some(front[front.length - 1]);

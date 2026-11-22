@@ -4,10 +4,10 @@
 /// generated from their section headings with the command recorded in `notes-http.md`. A code outside 100
 /// through 599 is not a status code.
 /// @see [Std.Net.Http.Status](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-Status)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Status = module (
     /// @brief The reason phrase of `code`, or "" for a code without one.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let reason_phrase = func(code: int) -> string {
         if (code == 100) {
             return "Continue";
@@ -155,36 +155,36 @@ export let Status = module (
     };
 
     /// @brief Whether `code` is in 100 through 599.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let is_valid = func(code: int) -> bool => code >= 100 && code <= 599;
 
     /// @brief 1xx (RFC 9110 section 15.2).
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let is_informational = func(code: int) -> bool => code >= 100 && code <= 199;
 
     /// @brief 2xx (RFC 9110 section 15.3).
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let is_success = func(code: int) -> bool => code >= 200 && code <= 299;
 
     /// @brief 3xx (RFC 9110 section 15.4).
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let is_redirection = func(code: int) -> bool => code >= 300 && code <= 399;
 
     /// @brief 4xx (RFC 9110 section 15.5).
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let is_client_error = func(code: int) -> bool => code >= 400 && code <= 499;
 
     /// @brief 5xx (RFC 9110 section 15.6).
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let is_server_error = func(code: int) -> bool => code >= 500 && code <= 599;
 
     /// @brief Whether a response with `code` never has content: 1xx, 204 and 304 (RFC 9110 section 6.4.1).
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let has_no_content = func(code: int) -> bool => is_informational(code) || code == 204 || code == 304;
 
     /// @brief The codes heuristically cacheable by default (RFC 9110 section 15.1): 200, 203, 204, 206, 300,
     /// 301, 308, 404, 405, 410, 414, 501.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let is_heuristically_cacheable = func(code: int) -> bool =>
         code == 200 or 203 or 204 or 206 or 300 or 301 or 308 or 404 or 405 or 410 or 414 or 501;
 );

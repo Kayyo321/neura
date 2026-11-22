@@ -38,7 +38,7 @@ let page_view = html(title: string) {
 
 // The command's input: how long the load waits. A class of its own gives the work a function type no other closure
 // of the program shares (docs/apps/Components.md, "Commands").
-#Immutable
+.Immutable
 let Delay = class (
     export last millis: int64;
 

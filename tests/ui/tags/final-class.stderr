@@ -1,7 +1,7 @@
 error[E0912]: class 'Point3' extends the final class 'Point'
  --> $DIR/final-class.nra:7:20
   |
-2 | #Final
+2 | .Final
   | ------ 'Point' is marked #Final here
 ...
 7 | let Point3 = class:Point (

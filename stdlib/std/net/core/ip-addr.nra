@@ -11,15 +11,15 @@ let.promote _ = import:Std.Core.Result;
 /// An IPv4-mapped IPv6 address (`::ffff:a.b.c.d`) stays a `V6` value and is not equal to the `V4` value it
 /// maps; convert with `Ipv6Addr.to_ipv4_mapped` when that is wanted.
 /// @see [Std.Net.Core.IpAddr](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Core-IpAddr)
-#Since("0.3.0")
+.Since("0.3.0")
 export let IpAddr = module (
     /// @brief An IPv4 or an IPv6 address.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let IpAddr = enum (V4(v4.Ipv4Addr), V6(v6.Ipv6Addr));
 
     /// @brief Parses an IPv6 address (with optional zone) when the text contains `:`, otherwise a strict
     /// dotted-decimal IPv4 address; the error is that of the parser chosen.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let parse = func(text: string) -> Result<IpAddr> {
         for (let i = 0; i < text.byte_length; i++) {
             if (text.byte_at(i) == 58) {
@@ -36,28 +36,28 @@ export let IpAddr = module (
     };
 
     /// @brief The address's canonical text (dotted decimal, or RFC 5952 with any zone).
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let to_string = func(ip: IpAddr) -> string => match (ip) {
         IpAddr.V4(a) => a.to_string(),
         IpAddr.V6(a) => a.to_string(),
     };
 
     /// @brief The address bytes in network order: 4 for IPv4, 16 for IPv6 (the zone is not included).
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let octets = func(ip: IpAddr) -> uint8[list] => match (ip) {
         IpAddr.V4(a) => a.octets(),
         IpAddr.V6(a) => a.octets(),
     };
 
     /// @brief `AddressFamily.Ipv4` or `AddressFamily.Ipv6`.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let family = func(ip: IpAddr) -> AddressFamily => match (ip) {
         IpAddr.V4(_) => AddressFamily.Ipv4,
         IpAddr.V6(_) => AddressFamily.Ipv6,
     };
 
     /// @brief Tests whether both are the same family and equal addresses (an IPv6 zone included).
-    #ThreadSafe
+    .ThreadSafe
     export let equals = func(a: IpAddr, b: IpAddr) -> bool => match (a) {
         IpAddr.V4(x) => match (b) {
             IpAddr.V4(y) => x.equals(y),
@@ -70,14 +70,14 @@ export let IpAddr = module (
     };
 
     /// @brief A hash consistent with `equals`: the family tag combined with the address's hash code.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let hash = func(ip: IpAddr) -> uint32 => match (ip) {
         IpAddr.V4(a) => hashing.combine(4, a.hash_code()),
         IpAddr.V6(a) => hashing.combine(6, a.hash_code()),
     };
 
     /// @brief Tests for `127.0.0.0/8` or `::1`.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let is_loopback = func(ip: IpAddr) -> bool => match (ip) {
         IpAddr.V4(a) => a.is_loopback(),
         IpAddr.V6(a) => a.is_loopback(),

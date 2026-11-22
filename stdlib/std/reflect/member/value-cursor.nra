@@ -4,10 +4,10 @@ let model = import:Std.Reflect.Internal.Model;
 /// member indexes (a field of a class, an element of a collection or tuple, a payload of an enum). Neura has no
 /// raw pointers, so a cursor reads and writes through the checked operations of `Std.Reflect.Dynamic`.
 /// @see [Std.Reflect.Member.ValueCursor](https://github.com/Kayyo321/neura/wiki/Stdlib-Reflect-Member-ValueCursor)
-#Since("0.3.0")
+.Since("0.3.0")
 export let ValueCursor = module (
     /// @brief A read-only position in a value.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let ValueCursor = class (
         export last root: model.Variant;
         export last path: int[list];
@@ -45,7 +45,7 @@ export let ValueCursor = module (
 
     /// @brief A position whose field can be written: the last step names a field of the object the rest of the
     /// path reaches.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let ValueCursorMut = class (
         export last root: model.Variant;
         export last path: int[list];
@@ -82,7 +82,7 @@ export let ValueCursor = module (
     );
 
     /// @brief A cursor at the root of `value`.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let at = func(value: model.Variant) -> ValueCursor => new ValueCursor(value, new);
 
     let step_into = func(current: model.Variant, step: int) -> model.Variant {

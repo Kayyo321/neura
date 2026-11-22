@@ -38,7 +38,7 @@ let.promote _ = import:Std.Core.Unit;
 /// `neura.http.server.body.close`), and the client's network call (`neura.http.fetch` version 1). Everything
 /// else, including requests with in-memory bodies, works today.
 /// @see [Std.Net.Http](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Http = module (
     /// @brief The header map type (`Std.Net.Http.Headers.Headers`).
     export let Headers = header_maps.Headers;
@@ -60,7 +60,7 @@ export let Http = module (
     );
 
     /// @brief A body held in memory.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let MemoryBody = class implements BodySource (
         /// @brief The bytes.
         last data: uint8[list];
@@ -91,7 +91,7 @@ export let Http = module (
 
     /// @brief The body of the request the server host assigned to this worker. Host-dependent: its reads trap
     /// until the runtime provides `neura.http.server.body.read`.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let HostBody = class implements BodySource (
         /// @brief Whether the host reported the end.
         let finished: bool = false;
@@ -121,7 +121,7 @@ export let Http = module (
 
     /// @brief Reads a request body in chunks within the request's limit; a closeable owner (close it when done;
     /// `using` is not in this branch).
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let BodyReader = class implements Closeable (
         /// @brief The source.
         last source: BodySource;
@@ -140,7 +140,7 @@ export let Http = module (
 
         /// @brief Up to `max` bytes; an empty list at the end. Fails with "http.body_too_large" past the limit
         /// and with Closed after close. A maximum below 1 traps.
-        #NoDiscard
+        .NoDiscard
         export let read = func(max: int) -> Result<uint8[list]> {
             if (max < 1) {
                 trap_with_message("invalid argument: maximum below 1");
@@ -179,7 +179,7 @@ export let Http = module (
     );
 
     /// @brief A sink that collects the body in memory (for tests and conversions).
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let MemorySink = class implements BodySink (
         /// @brief The bytes written.
         last collected: uint8[list] = new;
@@ -219,7 +219,7 @@ export let Http = module (
 
     /// @brief The response body of the current host request. Host-dependent: writes trap until the runtime
     /// provides `neura.http.server.body.write` and `neura.http.server.body.close`.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let HostSink = class implements BodySink (
         /// @brief The sink of the current host response.
         export let init = func {
@@ -238,7 +238,7 @@ export let Http = module (
     // ---------------------------------------------------------------- requests
 
     /// @brief The authenticated identity of a request, produced by an `Authenticator`.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Principal = class (
         /// @brief The identity: a user or service identifier.
         export last subject: string;
@@ -262,7 +262,7 @@ export let Http = module (
         };
 
         /// @brief The scopes, as a new list.
-        #NoDiscard
+        .NoDiscard
         export let scopes = func -> string[list] {
             last copy: string[list] = new;
             for (let s in granted) {
@@ -316,7 +316,7 @@ export let Http = module (
     );
 
     /// @brief An ordered list of names and values: the path parameters of a matched route, or query pairs.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Params = class (
         /// @brief The names in order.
         last names: string[list] = new;
@@ -334,7 +334,7 @@ export let Http = module (
         };
 
         /// @brief The first value of `name`.
-        #NoDiscard
+        .NoDiscard
         export let get = func(name: string) -> Optional<string> {
             for (let i = 0; i < names.length; i++) {
                 if (names[i] == name) {
@@ -345,7 +345,7 @@ export let Http = module (
         };
 
         /// @brief Every value of `name` in order.
-        #NoDiscard
+        .NoDiscard
         export let get_all = func(name: string) -> string[list] {
             last found: string[list] = new;
             for (let i = 0; i < names.length; i++) {
@@ -357,7 +357,7 @@ export let Http = module (
         };
 
         /// @brief The value of `name`, or an InvalidInput error naming it (for handlers: `params.value("id")?`).
-        #NoDiscard
+        .NoDiscard
         export let value = func(name: string) -> Result<string> {
             for (let i = 0; i < names.length; i++) {
                 if (names[i] == name) {
@@ -419,7 +419,7 @@ export let Http = module (
     /// body within the limit and keeps it, so later calls and `open_body()` see the same bytes; `open_body()`
     /// before `body()` streams the body and can be called once. `headers` returns a copy, so a handler cannot
     /// change the request.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Request = class (
         /// @brief The method token, such as "GET".
         export last method: string;
@@ -490,7 +490,7 @@ export let Http = module (
             | get: fields.copy();
 
         /// @brief The first value of header `name`.
-        #NoDiscard
+        .NoDiscard
         export let header = func(name: string) -> Optional<string> => fields.get(name);
 
         /// @brief The host the request is for: the Host header's host, lowercase, without a port; "" when absent.
@@ -500,11 +500,11 @@ export let Http = module (
         };
 
         /// @brief The query's pairs, decoded as `application/x-www-form-urlencoded`.
-        #NoDiscard
+        .NoDiscard
         export let query_params = func -> Params => parse_query(query);
 
         /// @brief The authenticated principal, set by `require`.
-        #NoDiscard
+        .NoDiscard
         export let principal = func -> Optional<Principal> {
             return if (identity.length == 0) -> Optional<Principal>.None
                 else -> Optional<Principal>.Some(identity[0]);
@@ -512,7 +512,7 @@ export let Http = module (
 
         /// @brief The whole body within `body_limit`, read once and kept. Fails with "http.body_too_large" past
         /// the limit, and with InvalidInput after `open_body()` streamed it.
-        #NoDiscard
+        .NoDiscard
         export let body = func -> Result<uint8[list]> {
             if (cache.length == 1) {
                 return Result<uint8[list]>.Ok(copy_bytes(cache[0]));
@@ -538,12 +538,12 @@ export let Http = module (
         };
 
         /// @brief The body as UTF-8 text; invalid UTF-8 is an Encoding error.
-        #NoDiscard
+        .NoDiscard
         export let body_text = func -> Result<string> => strings.from_bytes(body()?);
 
         /// @brief The body as a chunk reader within `body_limit`; close it when done. After `body()` it reads the
         /// kept bytes; otherwise it can be opened once.
-        #NoDiscard
+        .NoDiscard
         export let open_body = func -> Result<BodyReader> {
             if (cache.length == 1) {
                 return Result<BodyReader>.Ok(new BodyReader(new MemoryBody(copy_bytes(cache[0])), body_limit));
@@ -556,7 +556,7 @@ export let Http = module (
         };
 
         /// @brief The same request carrying `who` as its principal. The copy shares the body.
-        #NoDiscard
+        .NoDiscard
         export let with_principal = func(who: Principal) -> Request {
             last copy = new Request(method, target, fields, source, body_limit, client, scheme, request_id);
             copy.share_body(cache, opened);
@@ -585,7 +585,7 @@ export let Http = module (
     ///
     /// The header map is the response's own and mutable, so middleware can add fields on the way out. A streamed
     /// body is a producer that writes to a `BodySink` when the response is sent (`write_to`).
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Response = class (
         /// @brief The status code, 100 through 599.
         export last status: int;
@@ -633,7 +633,7 @@ export let Http = module (
         export let is_streamed = func -> bool => streamed;
 
         /// @brief Writes the body to `sink` and closes it: the bytes, or whatever the producer writes.
-        #NoDiscard
+        .NoDiscard
         export let write_to = func(sink: BodySink) -> Result<Unit> {
             if (streamed) {
                 last run = producer;
@@ -646,7 +646,7 @@ export let Http = module (
 
         /// @brief The same status and a copy of the fields with no body, as a HEAD answer: a byte body's length
         /// becomes `Content-Length` unless the field is already set; a stream is not run.
-        #NoDiscard
+        .NoDiscard
         export let without_body = func -> Response {
             last fields = headers.copy();
             if (not streamed && not fields.contains("Content-Length") && not statuses.has_no_content(status)) {
@@ -663,11 +663,11 @@ export let Http = module (
     );
 
     /// @brief A response with an empty body.
-    #NoDiscard
+    .NoDiscard
     export let empty = func(status: int) -> Response => new Response(status);
 
     /// @brief A `text/plain; charset=utf-8` response.
-    #NoDiscard
+    .NoDiscard
     export let text = func(status: int, body: string) -> Response {
         last fields = new Headers();
         fields.set("Content-Type", "text/plain; charset=utf-8");
@@ -675,7 +675,7 @@ export let Http = module (
     };
 
     /// @brief A response with the given content type and bytes.
-    #NoDiscard
+    .NoDiscard
     export let binary = func(status: int, content_type: string, body: uint8[list]) -> Response {
         last fields = new Headers();
         fields.set("Content-Type", content_type);
@@ -687,25 +687,25 @@ export let Http = module (
     ///
     /// Backend030 writes `http.json(status, value, codec)` with the codec itself; `Std.Encoding.Json.Codec<T>` is
     /// a static contract not in this branch, so this form takes its `encode` function.
-    #NoDiscard
+    .NoDiscard
     export let json = func<T>(status: int, value: T, encode: func(T) -> Result<string>) -> Result<Response> {
         last encoded = encode(value)?;
         return Result<Response>.Ok(json_body(status, encoded));
     };
 
     /// @brief An `application/json` response of a JSON tree.
-    #NoDiscard
+    .NoDiscard
     export let json_value = func(status: int, value: json_text.JsonValue) -> Response =>
         json_body(status, json_text.write(value));
 
     /// @brief A streamed response whose body `writer` produces when it is sent.
-    #NoDiscard
+    .NoDiscard
     export let stream = func(status: int, fields: Headers, writer: func(BodySink) -> Result<Unit>) -> Response =>
         new Response(status, fields, writer);
 
     /// @brief The framework envelope `{"error":{"code":...,"message":...,"request_id":...}}` as an
     /// `application/json` response.
-    #NoDiscard
+    .NoDiscard
     export let envelope = func(status: int, code: string, message: string, request_id: string) -> Response {
         last inner: [string, json_text.JsonValue][list] = new;
         inner.append(["code", json_text.JsonValue.Text(code)]);
@@ -717,18 +717,18 @@ export let Http = module (
     };
 
     /// @brief A request with an empty header map and body (for tests).
-    #NoDiscard
+    .NoDiscard
     export let request = func(method: string, target: string) -> Request =>
         new Request(method, target, new Headers(), new uint8[list]());
 
     /// @brief A request with the given fields and in-memory body (for tests).
-    #NoDiscard
+    .NoDiscard
     export let request_with = func(method: string, target: string, fields: Headers, body: uint8[list]) -> Request =>
         new Request(method, target, fields, body);
 
     /// @brief The request the server host assigned (`neura.http.server.next` gives these fields to `Std.App`).
     /// Its body is read from the host.
-    #NoDiscard
+    .NoDiscard
     export let host_request = func(method: string, target: string, fields: Headers, limit: int64, peer: string,
         scheme: string, request_id: string) -> Request =>
             new Request(method, target, fields, new HostBody(), limit, peer, scheme, request_id);
@@ -736,7 +736,7 @@ export let Http = module (
     // ---------------------------------------------------------------- message conversions
 
     /// @brief The request as a protocol-agnostic message with its whole body (read within the limit).
-    #NoDiscard
+    .NoDiscard
     export let to_message = func(request: Request) -> Result<messages.HttpRequest<uint8[list]>> {
         last body = request.body()?;
         last method = match (methods.parse(request.method)) {
@@ -749,12 +749,12 @@ export let Http = module (
     };
 
     /// @brief A request with the message's method, target, fields and body.
-    #NoDiscard
+    .NoDiscard
     export let from_message = func(message: messages.HttpRequest<uint8[list]>) -> Request =>
         new Request(message.method_name(), message.target, message.headers, message.body);
 
     /// @brief The response as a message; a streamed body is run into memory.
-    #NoDiscard
+    .NoDiscard
     export let response_to_message = func(response: Response) -> Result<messages.HttpResponse<uint8[list]>> {
         last sink = new MemorySink();
         response.write_to(sink)?;
@@ -764,7 +764,7 @@ export let Http = module (
     };
 
     /// @brief A response with the message's status, fields and body.
-    #NoDiscard
+    .NoDiscard
     export let response_from_message = func(message: messages.HttpResponse<uint8[list]>) -> Response =>
         new Response(message.status, message.headers.copy(), message.body);
 
@@ -772,7 +772,7 @@ export let Http = module (
 
     /// @brief The rest of the chain a middleware calls: the next middleware or the handler. A
     /// `Std.Net.Service<Request, Response>`.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Next = class implements services.Service<Request, Response> (
         /// @brief The service the chain continues with.
         last rest: services.Service<Request, Response>;
@@ -790,7 +790,7 @@ export let Http = module (
     );
 
     /// @brief One middleware stored in a router or route group.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     let Layer = class (
         /// @brief The middleware function.
         export last run: func(Request, Next) -> Result<Response>;
@@ -805,7 +805,7 @@ export let Http = module (
     );
 
     /// @brief A middleware applied around a service.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     let LayerService = class implements services.Service<Request, Response> (
         /// @brief The middleware.
         last layer: Layer;
@@ -829,7 +829,7 @@ export let Http = module (
     );
 
     /// @brief A matched route's handler with its parameters, as a service.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     let HandlerService = class implements services.Service<Request, Response> (
         /// @brief The handler.
         last handler: func(Request, Params) -> Result<Response>;
@@ -853,7 +853,7 @@ export let Http = module (
     );
 
     /// @brief A fixed response, as a service (404, 405).
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     let FixedService = class implements services.Service<Request, Response> (
         /// @brief The status.
         last status: int;
@@ -886,7 +886,7 @@ export let Http = module (
     );
 
     /// @brief A middleware as a `Std.Net.Filter.SimpleFilter<Request, Response>`.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let MiddlewareFilter = class implements filters.SimpleFilter<Request, Response> (
         /// @brief The middleware.
         last layer: Layer;
@@ -907,19 +907,19 @@ export let Http = module (
     );
 
     /// @brief `middleware` as a simple filter.
-    #NoDiscard
+    .NoDiscard
     export let as_filter = func(middleware: func(Request, Next) -> Result<Response>)
         -> filters.SimpleFilter<Request, Response> => new MiddlewareFilter(middleware);
 
     /// @brief A simple filter as a middleware.
-    #NoDiscard
+    .NoDiscard
     export let from_filter = func(filter: filters.SimpleFilter<Request, Response>)
         -> func(Request, Next) -> Result<Response> =>
             new func(request: Request, next: Next) -> Result<Response> => filter.apply(request, next);
 
     /// @brief A middleware that logs one line per request ("ID METHOD PATH STATUS Nms", or "error" in place of
     /// the status) at Info through `logger`, timing with `clock`'s monotonic time.
-    #NoDiscard
+    .NoDiscard
     export let request_log_to = func(logger: logging.Logger, clock: clocks.Clock)
         -> func(Request, Next) -> Result<Response> =>
             new func(request: Request, next: Next) -> Result<Response> {
@@ -936,14 +936,14 @@ export let Http = module (
             };
 
     /// @brief `request_log_to` with a logger named "http" writing to standard error and the system clock.
-    #NoDiscard
+    .NoDiscard
     export let request_log = func -> func(Request, Next) -> Result<Response> =>
         request_log_to(logging.create("http", stderr_line, logging.LogLevel.Info), system_clocks.create());
 
     // ---------------------------------------------------------------- routes and the router
 
     /// @brief One route: method, path pattern, optional host pattern, handler and the route's own middleware.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Route = class (
         /// @brief The method token.
         export last method: string;
@@ -983,7 +983,7 @@ export let Http = module (
     /// "api.example.com", or "*.example.com" for any host with one or more labels before ".example.com"; case
     /// is ignored and the request's port is not compared. The group's `use` middlewares run before each route's
     /// own middlewares, after the router's.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Routes = class (
         /// @brief The host pattern, or "".
         export last host: string;
@@ -1044,7 +1044,7 @@ export let Http = module (
     );
 
     /// @brief A registered route with its group's middleware and parsed pattern.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     let Entry = class (
         /// @brief The route.
         export last route: Route;
@@ -1065,7 +1065,7 @@ export let Http = module (
     );
 
     /// @brief The routes of one host pattern.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     let HostTree = class (
         /// @brief The host pattern, or "".
         export last host: string;
@@ -1097,7 +1097,7 @@ export let Http = module (
     /// otherwise 404; both carry the framework envelope. The router's `use` middlewares wrap every request,
     /// including 404 and 405 answers (so `cors` can answer preflight requests and `request_log` sees misses);
     /// a route's group and own middlewares wrap only that route's handler.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Router = class implements services.Service<Request, Response> (
         /// @brief The trees, the any-host tree first.
         last trees: HostTree[list] = new;
@@ -1168,14 +1168,14 @@ export let Http = module (
 
         /// @brief The startup check: Ok when every route is valid and unique; otherwise an error whose message
         /// lists the problems.
-        #NoDiscard
+        .NoDiscard
         export let check = func -> Result<Unit> {
             return if (problems.length == 0) -> Result<Unit>.Ok(Unit.Value)
                 else -> Result<Unit>.Err(errors.custom("http.router.invalid", strings.join(problems, "; ")));
         };
 
         /// @brief The registration problems, as a new list.
-        #NoDiscard
+        .NoDiscard
         export let problems_found = func -> string[list] {
             last copy: string[list] = new;
             for (let p in problems) {
@@ -1186,7 +1186,7 @@ export let Http = module (
 
         /// @brief The answer to the host's startup check request, without calling a route: 200
         /// `{"status":"ok","routes":N}`, or 500 with the envelope code "startup_check_failed" and the problems.
-        #NoDiscard
+        .NoDiscard
         export let startup_response = func -> Response {
             if (problems.length > 0) {
                 return envelope(500, "startup_check_failed", strings.join(problems, "; "), "");
@@ -1199,13 +1199,13 @@ export let Http = module (
 
         /// @brief Answers `request`. Never fails: an `Err` from a handler or middleware is logged and becomes 500
         /// with the framework envelope.
-        #NoDiscard
+        .NoDiscard
         export let dispatch = func(request: Request) -> Response => answer(request, true);
 
         /// @brief `dispatch` for a host that drops a HEAD response's body itself and computes `Content-Length`
         /// from the body it was given (the `Std.App` server host): a HEAD request is answered from the GET route
         /// with the body kept.
-        #NoDiscard
+        .NoDiscard
         export let dispatch_for_host = func(request: Request) -> Response => answer(request, false);
 
         /// @brief Dispatches; `strip_head` removes a HEAD answer's body.
@@ -1351,7 +1351,7 @@ export let Http = module (
 
     /// @brief Bearer tokens (RFC 6750 section 2.1) checked by a function the application supplies. The library
     /// defines no token format.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let BearerAuthenticator = class implements Authenticator (
         /// @brief The application's check.
         last verify: func(string) -> Result<Optional<Principal>>;
@@ -1376,13 +1376,13 @@ export let Http = module (
     );
 
     /// @brief A bearer authenticator over `check`.
-    #NoDiscard
+    .NoDiscard
     export let bearer = func(check: func(string) -> Result<Optional<Principal>>) -> Authenticator =>
         new BearerAuthenticator(check);
 
     /// @brief The token of an `Authorization: Bearer <token>` field (scheme case-insensitive, token of
     /// b64token characters, RFC 6750 section 2.1), or None.
-    #NoDiscard
+    .NoDiscard
     export let bearer_token = func(request: Request) -> Optional<string> {
         last field = request.header("Authorization");
         last value = match (field) {
@@ -1414,7 +1414,7 @@ export let Http = module (
     /// @brief A middleware that requires a principal: 401 with the envelope (and `WWW-Authenticate: Bearer` for
     /// a bearer authenticator) when there is none; otherwise the rest of the chain sees the request carrying it
     /// (`request.principal()`). An `Err` from the authenticator is returned (500).
-    #NoDiscard
+    .NoDiscard
     export let require = func(authenticator: Authenticator) -> func(Request, Next) -> Result<Response> =>
         new func(request: Request, next: Next) -> Result<Response> {
             last found = authenticator.authenticate(request)?;
@@ -1434,7 +1434,7 @@ export let Http = module (
     /// @brief A middleware for cookie-authenticated routes: a request with an unsafe method (not GET, HEAD,
     /// OPTIONS, TRACE) passes only with `Sec-Fetch-Site: same-origin`, or, without that field, an `Origin` equal
     /// to the request's own origin (scheme and Host); otherwise 403 with the envelope. Safe methods pass.
-    #NoDiscard
+    .NoDiscard
     export let same_origin = func -> func(Request, Next) -> Result<Response> =>
         new func(request: Request, next: Next) -> Result<Response> {
             return if (methods.is_safe_name(request.method) || is_same_origin(request)) -> next.call(request)
@@ -1462,7 +1462,7 @@ export let Http = module (
 
     /// @brief Which cross-origin requests `cors` admits: an explicit list of origins (no wildcard), methods,
     /// request headers, exposed headers, credentials and the preflight cache time.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let CorsPolicy = class (
         /// @brief The admitted origins, lowercase scheme and host.
         last origins: string[list] = new;
@@ -1579,7 +1579,7 @@ export let Http = module (
         };
 
         /// @brief The 204 answer to an admitted preflight request from `origin`.
-        #NoDiscard
+        .NoDiscard
         export let preflight = func(origin: string) -> Response {
             last response = new Response(204);
             decorate(response, origin);
@@ -1603,7 +1603,7 @@ export let Http = module (
     /// otherwise. Other requests run the chain; an admitted origin's response gets `Access-Control-Allow-Origin`
     /// (the origin itself, never "*") and `Vary: Origin`; a refused origin's response is left without them, so
     /// the browser withholds it.
-    #NoDiscard
+    .NoDiscard
     export let cors = func(policy: CorsPolicy) -> func(Request, Next) -> Result<Response> =>
         new func(request: Request, next: Next) -> Result<Response> {
             last origin = match (request.header("Origin")) {
@@ -1634,7 +1634,7 @@ export let Http = module (
     export let CredentialsMode = enum (Omit, SameOrigin, Include);
 
     /// @brief The `uint32` code of `mode` for `neura.http.fetch`.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let credentials_code = func(mode: CredentialsMode) -> uint32 => match (mode) {
         CredentialsMode.Omit => 0,
         CredentialsMode.SameOrigin => 1,
@@ -1642,7 +1642,7 @@ export let Http = module (
     };
 
     /// @brief An outgoing request: method, URL, header fields, body, deadline and credentials mode.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let ClientRequest = class (
         /// @brief The method token.
         export last method: string;
@@ -1711,7 +1711,7 @@ export let Http = module (
 
     /// @brief The host transport: `neura.http.fetch` version 1. Host-dependent: traps until the runtime provides
     /// the service.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let HostTransport = class implements Transport (
         /// @brief The host transport.
         export let init = func {
@@ -1736,7 +1736,7 @@ export let Http = module (
     /// @brief An HTTP client over a transport (Components030, "HTTP clients"); a `Std.Net.Service<ClientRequest,
     /// Response>`. The URL must be absolute `http` or `https`; otherwise the send fails with InvalidInput before
     /// the transport is called.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Client = class implements services.Service<ClientRequest, Response> (
         /// @brief The transport.
         last transport: Transport;
@@ -1756,7 +1756,7 @@ export let Http = module (
         };
 
         /// @brief Sends `request`.
-        #NoDiscard
+        .NoDiscard
         export let send = func(request: ClientRequest) -> Result<Response> {
             last lower = strings.to_ascii_lower(request.url);
             if (not strings.starts_with(lower, "http://") && not strings.starts_with(lower, "https://")) {
@@ -1774,11 +1774,11 @@ export let Http = module (
         export let call = func(request: ClientRequest) -> Result<Response> => send(request);
 
         /// @brief A GET of `url`.
-        #NoDiscard
+        .NoDiscard
         export let get = func(url: string) -> Result<Response> => send(new ClientRequest("GET", url));
 
         /// @brief A POST of `body` with `content_type` to `url`.
-        #NoDiscard
+        .NoDiscard
         export let post = func(url: string, content_type: string, body: uint8[list]) -> Result<Response> {
             last request = new ClientRequest("POST", url);
             request.headers.set("Content-Type", content_type);
@@ -1825,7 +1825,7 @@ export let Http = module (
 
     /// @brief The pairs of an `application/x-www-form-urlencoded` query: split on "&", then on the first "=";
     /// "+" is a space and percent escapes are decoded (invalid escapes and invalid UTF-8 are kept as written).
-    #NoDiscard
+    .NoDiscard
     export let parse_query = func(query: string) -> Params {
         last pairs = new Params();
         if (query.byte_length == 0) {
@@ -1847,7 +1847,7 @@ export let Http = module (
 
     /// @brief `text` with percent escapes decoded; the text unchanged when an escape is malformed or the result
     /// is not UTF-8.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let percent_decode_segment = func(text: string) -> string => decode_escapes(text, false);
 
     /// @brief Form decoding: "+" is a space, then percent escapes.

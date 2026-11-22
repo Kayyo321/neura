@@ -8,10 +8,10 @@ let kinds = import:Std.Reflect.Type.TypeKind;
 /// SQL table. In the JSON Schema, classes, records and enums are defined once under `$defs` and referenced by
 /// `$ref`, so recursive types are described.
 /// @see [Std.Reflect.Codec.SchemaBuilder](https://github.com/Kayyo321/neura/wiki/Stdlib-Reflect-Codec-SchemaBuilder)
-#Since("0.3.0")
+.Since("0.3.0")
 export let SchemaBuilder = module (
     /// @brief The JSON Schema of `type` as a JSON tree.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let json_schema = func(type: model.TypeDescriptor) -> JsonValue {
         last definitions: [string, JsonValue][list] = new;
         last root = schema_of(type, definitions);
@@ -32,7 +32,7 @@ export let SchemaBuilder = module (
     };
 
     /// @brief The JSON Schema of `type` as text.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let json_schema_text = func(type: model.TypeDescriptor) -> string => json.write(json_schema(type));
 
     /// @brief The proto3 messages for a class or record and every class, record and enum it reaches. Fields are
@@ -40,7 +40,7 @@ export let SchemaBuilder = module (
     /// `int64`, `uint32`, `uint64`, `float` (float32 and narrower floats), `double`; int8 and int16 are `int32`,
     /// uint8 and uint16 `uint32`; a list is `repeated` (a list of lists traps); `Optional<T>` is `optional T`; a
     /// fieldless enum is a proto enum; an enum with payloads, a tuple or a function value traps.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let protobuf_schema = func(type: model.TypeDescriptor) -> string {
         last done: string[list] = new;
         last parts: string[list] = new;
@@ -56,7 +56,7 @@ export let SchemaBuilder = module (
     /// of them: a column per field (`#Skip` left out), `NOT NULL` unless optional. Types: `BOOLEAN`, `SMALLINT`
     /// (8- and 16-bit), `INTEGER` (32-bit), `BIGINT` (64-bit; uint64 values above the BIGINT range do not fit),
     /// `REAL`, `DOUBLE PRECISION`, `TEXT`. Another field type traps.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let sql_table = func(type: model.TypeDescriptor, table: string) -> string {
         if (type.kind != kinds.TypeKind.Class && type.kind != kinds.TypeKind.Record) {
             trap_with_message("invalid argument: a SQL table describes a class or record, not " .. type.name);

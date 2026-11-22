@@ -47,7 +47,7 @@ let page_view = html(form: ui.View, status: ui.View) {
 
 // One call to the backend: the command's input. A class of its own gives the work a function type no other
 // closure of the program shares (docs/apps/Components.md, "Commands").
-#Immutable
+.Immutable
 let Call = class (
     export last method: string;
     export last path: string;

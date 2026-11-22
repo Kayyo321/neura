@@ -1,7 +1,7 @@
 error[E0919]: field 'cause' of #Immutable class 'Link' has the mutable type Chain
   --> $DIR/immutable-recursive-link.nra:11:21
    |
- 9 |     #[Final, Immutable]
+ 9 |     .[Final, Immutable]
    |              --------- 'Link' is marked #Immutable here
 10 |     let Link = class (
 11 |         export last cause: Chain;

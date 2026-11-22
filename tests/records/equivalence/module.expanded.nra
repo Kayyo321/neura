@@ -7,7 +7,7 @@ let Describe = interface (
 );
 
 let App = module (
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let Label = class implements Describe (
         export last text: string;
         export let init = func(text: string) => set;

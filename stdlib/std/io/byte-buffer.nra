@@ -5,16 +5,16 @@ let.promote _ = import:Std.Core.Unit;
 
 /// @brief An in-memory byte accumulator (Stdlib.md section 11.1). Its bound write method is a byte sink.
 /// @see [Std.Io.ByteBuffer](https://github.com/Kayyo321/neura/wiki/Stdlib-Io-ByteBuffer)
-#Since("0.1.0")
+.Since("0.1.0")
 export let ByteBuffer = module (
     /// @brief A growable in-memory byte sink that can create independent readers.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let ByteBuffer = class (
         /// @brief Stores all bytes written since construction or the last clear.
         let data: uint8[list] = new;
 
         /// @brief The current number of bytes. Read-only.
-        #Since("0.2.0")
+        .Since("0.2.0")
         export let size: int;
             | get: data.length;
 
@@ -25,7 +25,7 @@ export let ByteBuffer = module (
         };
 
         /// @brief A copy of the bytes written so far.
-        #Pure
+        .Pure
         export let to_list = func -> uint8[list] => bytes.copy_range(data, 0, data.length);
 
         /// @brief Discards all accumulated bytes.
@@ -45,15 +45,15 @@ export let ByteBuffer = module (
         };
 
         /// @brief Hashes the current byte sequence.
-        #Pure
+        .Pure
         export let.override hash_code = func -> uint32 => data.hash_code();
 
         /// @brief Returns the built-in list representation of the bytes.
-        #Pure
+        .Pure
         export let.override to_string = func -> string => data.to_string();
 
         /// @brief A byte source over a copy of the current contents. A maximum count below 1 traps.
-        #[NoDiscard, Pure]
+        .[NoDiscard, Pure]
         export let reader = func -> func(int) -> Result<uint8[list]> {
             last snapshot = to_list();
             last position = cell.of<int>(0);
@@ -71,6 +71,6 @@ export let ByteBuffer = module (
     );
 
     /// @brief Creates an empty byte buffer.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let create = func -> ByteBuffer => new();
 );

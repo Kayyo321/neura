@@ -8,7 +8,7 @@ let.promote _ = import:Std.Core.Result;
 /// module parses the address texts it returns and checks the family. The service blocks every task while it
 /// waits, which is why `StubResolver` exists.
 /// @see [Std.Net.Dns.SystemResolver](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-SystemResolver)
-#Since("0.3.0")
+.Since("0.3.0")
 export let SystemResolver = module (
     /// @brief Any family.
     export const AnyFamily: int = 0;
@@ -23,7 +23,7 @@ export let SystemResolver = module (
     /// @brief The addresses of `host` from the system resolver: `family` 0 (any), 4 or 6. Err (Io NotFound) when
     /// the name does not exist; other host errors as Stdlib.md section 4.5 maps them. A family other than 0, 4 or
     /// 6 traps with "invalid argument: family". Addresses the host returns that do not parse are skipped.
-    #NoDiscard
+    .NoDiscard
     export let resolve = func(host: string, family: int) -> Result<ips.IpAddr[list]> {
         if (family != AnyFamily && family != Ipv4Only && family != Ipv6Only) {
             trap_with_message("invalid argument: family");
@@ -36,7 +36,7 @@ export let SystemResolver = module (
     };
 
     /// @brief The addresses among host texts, skipping any that do not parse.
-    #NoDiscard
+    .NoDiscard
     export let parse_all = func(texts: string[list]) -> ips.IpAddr[list] {
         last out: ips.IpAddr[list] = new;
         for (let text in texts) {

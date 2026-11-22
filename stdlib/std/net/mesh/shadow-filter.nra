@@ -37,13 +37,13 @@ let.promote _ = import:Std.Net.Service;
 /// In both forms a trap in the shadow function ends the whole run, like any trap in any task (Concurrency.md
 /// section 4.2); a shadow that can fail should return `Err`, which is counted in `shadow_failures`.
 /// @see [Std.Net.Mesh.ShadowFilter](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Mesh-ShadowFilter)
-#Since("0.3.0")
+.Since("0.3.0")
 export let ShadowFilter = module (
     /// @brief The rate that mirrors every request, in basis points.
     export const AllBasisPoints: int = 10000;
 
     /// @brief Mirrors requests to a channel that a shadow worker drains; never waits.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let ShadowFilter = class<Req, Resp> implements SimpleFilter<Req, Resp> (
         /// @brief The channel the mirrored requests are offered to.
         last sink: channels.Sender<Req>;
@@ -84,11 +84,11 @@ export let ShadowFilter = module (
         };
 
         /// @brief Requests handed to the channel so far.
-        #NoDiscard
+        .NoDiscard
         export let mirrored = func -> int64 => mirrored_count;
 
         /// @brief Requests selected but dropped so far.
-        #NoDiscard
+        .NoDiscard
         export let dropped = func -> int64 => dropped_count;
 
         /// @brief Text such as "ShadowFilter(500 bp, 3 mirrored, 1 dropped)".
@@ -97,7 +97,7 @@ export let ShadowFilter = module (
     );
 
     /// @brief Mirrors requests to a shadow task that runs beside the primary call; returns after both.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let ConcurrentShadowFilter = class<Req, Resp> implements SimpleFilter<Req, Resp> (
         /// @brief The shadow function, run as a task.
         last shadow: func(Req) -> Result<Resp>;
@@ -142,11 +142,11 @@ export let ShadowFilter = module (
         };
 
         /// @brief Shadow calls made so far.
-        #NoDiscard
+        .NoDiscard
         export let mirrored = func -> int64 => mirrored_count;
 
         /// @brief Shadow calls that returned Err so far.
-        #NoDiscard
+        .NoDiscard
         export let shadow_failures = func -> int64 => failed_count;
 
         /// @brief Text such as "ConcurrentShadowFilter(500 bp, 3 mirrored, 0 failed)".
@@ -155,7 +155,7 @@ export let ShadowFilter = module (
     );
 
     /// @brief What a shadow worker did before its channel closed.
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let WorkerReport = class (
         /// @brief Requests passed to the shadow function.
         export last handled: int64;
@@ -188,7 +188,7 @@ export let ShadowFilter = module (
 
     /// @brief Calls `shadow` for each request received from `queue`, in order, until the channel is closed (or this
     /// task is cancelled); run it with `spawn` in the scope that serves requests.
-    #NoDiscard
+    .NoDiscard
     export let run_worker = func<Req, Resp>(queue: channels.Receiver<Req>, shadow: func(Req) -> Result<Resp>)
         -> WorkerReport {
         let handled: int64 = 0;
@@ -217,7 +217,7 @@ export let ShadowFilter = module (
     };
 
     /// @brief A non-blocking filter mirroring `percent` % (0 to 100) of requests to `queue`.
-    #NoDiscard
+    .NoDiscard
     export let of_percent = func<Req, Resp>(queue: channels.Sender<Req>, percent: int, random: Random)
         -> ShadowFilter<Req, Resp> {
         if (percent < 0 || percent > 100) {
@@ -227,7 +227,7 @@ export let ShadowFilter = module (
     };
 
     /// @brief A concurrent filter mirroring `percent` % (0 to 100) of requests to `shadow`.
-    #NoDiscard
+    .NoDiscard
     export let concurrent_percent = func<Req, Resp>(shadow: func(Req) -> Result<Resp>, percent: int, random: Random)
         -> ConcurrentShadowFilter<Req, Resp> {
         if (percent < 0 || percent > 100) {

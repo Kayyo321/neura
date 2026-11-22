@@ -21,11 +21,11 @@ let Base = class (
     export let id: int64 = 0;
 );
 
-#Note("a circle")
+.Note("a circle")
 let Circle = class : Base implements Shape (
     export let radius: float64 = 1.0;
     export last label: string = "c";
-    #Unit("px")
+    .Unit("px")
     export let width: int32 = 3;
         | get: width;
         | set: width = value;

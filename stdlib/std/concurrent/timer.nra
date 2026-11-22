@@ -6,13 +6,13 @@ let system_clock = import:Std.Time.SystemClock;
 /// @brief A one-shot timer on the monotonic clock (Concurrency.md section 9). Its wait is selectable, which is
 /// how a select gives up on its other arms after a time.
 /// @see [Std.Concurrent.Timer](https://github.com/Kayyo321/neura/wiki/Stdlib-Concurrent-Timer)
-#Since("0.1.0")
+.Since("0.1.0")
 export let Timer = module (
     /// @brief What a wait reports.
     export let TimerOutcome = enum (Fired, Cancelled);
 
     /// @brief A timer that fires once, at a reading of the monotonic clock.
-    #[Final, ThreadSafe]
+    .[Final, ThreadSafe]
     export let Timer = class (
         /// @brief A timer that fires when the monotonic clock reads `at` nanoseconds. Use after or at.
         export let init = func(at: int64) {
@@ -23,11 +23,11 @@ export let Timer = module (
         export let wait = func -> TimerOutcome => wait_selected(wait_timer(instance));
 
         /// @brief What a select waits on for this timer. Used by the select statement.
-        #[Hidden, Pure]
+        .[Hidden, Pure]
         export let select_handle = func -> Timer => instance;
 
         /// @brief The outcome of a wait that a select committed. Used by the select statement.
-        #[Hidden, Pure]
+        .[Hidden, Pure]
         export let wait_selected = func(code: uint32) -> TimerOutcome {
             return if (code == 0) -> TimerOutcome.Fired else -> TimerOutcome.Cancelled;
         };
@@ -37,7 +37,7 @@ export let Timer = module (
     );
 
     /// @brief A timer that fires once the duration has passed. Needs the clock capability.
-    #NoDiscard
+    .NoDiscard
     export let after = func(span: duration.Duration) -> result.Result<Timer> =>
         match (system_clock.create().monotonic()) {
             result.Result.Ok(now) => result.Result<Timer>.Ok(new Timer(now.to_nanos() + span.to_nanos())),
@@ -45,7 +45,7 @@ export let Timer = module (
         };
 
     /// @brief A timer that fires at the instant. Needs the clock capability.
-    #NoDiscard
+    .NoDiscard
     export let at = func(moment: instant.Instant) -> result.Result<Timer> {
         last clock = system_clock.create();
         return match (clock.now()) {

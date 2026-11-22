@@ -7,20 +7,20 @@ let.promote _ = import:Std.Core.Result;
 /// A limiter answers whether `permits` units of work for a key (a client IP, a tenant, an API key) may proceed now.
 /// `TokenBucketLimiter` and `GcraLimiter` implement it; `RateLimitFilter` applies one to requests.
 /// @see [Std.Net.Resilience.RateLimiter](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-RateLimiter)
-#Since("0.3.0")
+.Since("0.3.0")
 export let RateLimiter = module (
     /// @brief Decides whether work for a key may proceed now.
     export let RateLimiter = interface (
         /// @brief Takes `permits` units for `key` when they are available and reports the decision. Err when the
         /// limiter's clock or store fails.
-        #NoDiscard
+        .NoDiscard
         let try_acquire = func(key: string, permits: int) -> Result<RateDecision>;
     );
 
     /// @brief The answer of a limiter: whether the work may proceed, how many more single permits would be granted
     /// at once, how long to wait before the same request could succeed, and how long until the limiter is back to
     /// its full allowance.
-    #[Final, Immutable, NoDiscard]
+    .[Final, Immutable, NoDiscard]
     export let RateDecision = class (
         /// @brief Whether the permits were granted.
         export last allowed: bool;

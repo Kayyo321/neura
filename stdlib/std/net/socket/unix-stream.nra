@@ -21,10 +21,10 @@ let.promote _ = import:Std.Core.Unit;
 /// traps (a client's local address is usually unnamed). On Windows, whose `AF_UNIX` serves streams, a Unix-domain
 /// stream is named by a path; an abstract name fails with Unsupported there, as on every system but Linux.
 /// @see [Std.Net.Socket.UnixStream](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-UnixStream)
-#Since("0.3.0")
+.Since("0.3.0")
 export let UnixStream = module (
     /// @brief One connected Unix-domain stream.
-    #[Final, NoDiscard(reason: "a socket must be closed"), NotThreadSafe]
+    .[Final, NoDiscard(reason: "a socket must be closed"), NotThreadSafe]
     export let UnixStream = class implements StreamSocket<UnixAddr> (
         /// @brief The host's socket ID.
         last id: int64;
@@ -49,15 +49,15 @@ export let UnixStream = module (
         };
 
         /// @brief Up to `max` bytes; an empty list once the peer has finished sending. A maximum below 1 traps.
-        #NoDiscard
+        .NoDiscard
         export let read = func(max: int) -> Result<uint8[list]> => stream.read(max);
 
         /// @brief Writes every byte.
-        #NoDiscard
+        .NoDiscard
         export let write = func(data: uint8[list]) -> Result<Unit> => stream.write(data);
 
         /// @brief The next bytes the peer sent (at most `ReceiveChunk`), or `None` at the end of its data.
-        #NoDiscard
+        .NoDiscard
         export let receive = func -> Result<Optional<uint8[list]>> {
             last chunk = stream.read(ReceiveChunk)?;
             return if (chunk.length == 0) -> Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.None)
@@ -65,7 +65,7 @@ export let UnixStream = module (
         };
 
         /// @brief Sends every byte; the `Std.Net.Transport` form of `write`.
-        #NoDiscard
+        .NoDiscard
         export let send = func(data: uint8[list]) -> Result<Unit> => stream.write(data);
 
         /// @brief The longest a read waits; zero waits without limit.
@@ -81,7 +81,7 @@ export let UnixStream = module (
 
         /// @brief The listener's address for an accepted socket; otherwise it asks the host, which traps in
         /// Neura 0.3.0 (no local-address service).
-        #NoDiscard
+        .NoDiscard
         export let local_address = func -> Result<UnixAddr> {
             return Result<UnixAddr>.Err(bytes.closed("socket", label)) unless open_now;
             return match (known_local) {
@@ -95,7 +95,7 @@ export let UnixStream = module (
         };
 
         /// @brief Ends reading, writing or both. Traps in Neura 0.3.0: the runtime has no shutdown service.
-        #NoDiscard
+        .NoDiscard
         export let shutdown = func(how: Shutdown) -> Result<Unit> {
             return Result<Unit>.Err(bytes.closed("socket", label)) unless open_now;
             last code = how == Shutdown.Read ? 0 : how == Shutdown.Write ? 1 : 2;
@@ -119,7 +119,7 @@ export let UnixStream = module (
     );
 
     /// @brief Connects to the Unix-domain stream socket at `address` (`neura.net.unix.connect`).
-    #NoDiscard
+    .NoDiscard
     export let connect = func(address: UnixAddr) -> Result<UnixStream> {
         last text = address.to_string();
         return match (host.unix_connect(text)) {

@@ -3,10 +3,10 @@
 ///
 /// Every sum modulo 2^64 splits its operands into 32-bit halves, so no intermediate value leaves uint64
 /// (Stdlib.md section 7.2), and no branch depends on the values.
-#Since("0.3.0")
+.Since("0.3.0")
 export let Words = module (
     /// @brief a + b modulo 2^64.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let add64 = func(a: uint64, b: uint64) -> uint64 {
         last low = (a & 4294967295) + (b & 4294967295);
         last high = (a >> 32) + (b >> 32) + (low >> 32);
@@ -14,28 +14,28 @@ export let Words = module (
     };
 
     /// @brief a + b modulo 2^32.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let add32 = func(a: uint32, b: uint32) -> uint32 => (((a as uint64) + (b as uint64)) & 4294967295) as uint32;
 
     /// @brief The 32-bit big-endian word at the offset.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let load32_be = func(bytes: uint8[list], at: int) -> uint32 =>
         ((bytes[at] as uint32) << 24) | ((bytes[at + 1] as uint32) << 16) | ((bytes[at + 2] as uint32) << 8)
         | (bytes[at + 3] as uint32);
 
     /// @brief The 32-bit little-endian word at the offset.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let load32_le = func(bytes: uint8[list], at: int) -> uint32 =>
         ((bytes[at + 3] as uint32) << 24) | ((bytes[at + 2] as uint32) << 16) | ((bytes[at + 1] as uint32) << 8)
         | (bytes[at] as uint32);
 
     /// @brief The 64-bit big-endian word at the offset.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let load64_be = func(bytes: uint8[list], at: int) -> uint64 =>
         ((load32_be(bytes, at) as uint64) << 32) | (load32_be(bytes, at + 4) as uint64);
 
     /// @brief The 64-bit little-endian word at the offset.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let load64_le = func(bytes: uint8[list], at: int) -> uint64 =>
         ((load32_le(bytes, at + 4) as uint64) << 32) | (load32_le(bytes, at) as uint64);
 
@@ -68,7 +68,7 @@ export let Words = module (
     };
 
     /// @brief A new list of `count` zero bytes.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let zeros = func(count: int) -> uint8[list] {
         let out: uint8[list] = new;
         for (let i = 0; i < count; i++) {
@@ -78,7 +78,7 @@ export let Words = module (
     };
 
     /// @brief A new list with the bytes from `start` up to `end`.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let slice = func(bytes: uint8[list], start: int, end: int) -> uint8[list] {
         let out: uint8[list] = new;
         for (let i = start; i < end; i++) {
@@ -88,7 +88,7 @@ export let Words = module (
     };
 
     /// @brief A new list with a copy of the bytes.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let copy = func(bytes: uint8[list]) -> uint8[list] => slice(bytes, 0, bytes.length);
 
     /// @brief Appends every byte of `bytes` to `out`.
@@ -99,7 +99,7 @@ export let Words = module (
     };
 
     /// @brief A new list: `a` followed by `b`.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let concat = func(a: uint8[list], b: uint8[list]) -> uint8[list] {
         let out = copy(a);
         append_all(out, b);
@@ -107,7 +107,7 @@ export let Words = module (
     };
 
     /// @brief A new list of the byte-wise exclusive or of two lists of one length.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let xor = func(a: uint8[list], b: uint8[list]) -> uint8[list] {
         let out: uint8[list] = new;
         for (let i = 0; i < a.length; i++) {
@@ -124,7 +124,7 @@ export let Words = module (
     };
 
     /// @brief The bytes of the string's UTF-8 encoding.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let utf8 = func(text: string) -> uint8[list] {
         let out: uint8[list] = new;
         for (let i = 0; i < text.byte_length; i++) {

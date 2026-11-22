@@ -24,7 +24,7 @@ let.promote _ = import:Std.Core.Unit;
 /// consecutive failed fetch up to `max_backoff_millis`; `max_attempts` bounds the consecutive failed fetches.
 /// Errors are Custom errors with the codes `sse.failed` and `sse.gave_up`, or the parser's `sse.limit`.
 /// @see [Std.Net.Realtime.Sse.Client](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-Sse-Client)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Client = module (
     /// @brief The reconnection time before any `retry` field, in milliseconds. The specification leaves it to
     /// the implementation ("a few seconds").
@@ -36,7 +36,7 @@ export let Client = module (
     export let ReadyState = enum (Connecting, Open, Closed);
 
     /// @brief One connection attempt: the URL and the cursor to resume from.
-    #[Final, Immutable]
+    .[Final, Immutable]
     export let SseRequest = class (
         /// @brief The event-stream URL.
         export last url: string;
@@ -54,7 +54,7 @@ export let Client = module (
 
         /// @brief The request header lines: `Accept: text/event-stream`, `Cache-Control: no-store`, and
         /// `Last-Event-ID` when the cursor is not empty.
-        #NoDiscard
+        .NoDiscard
         export let header_lines = func -> string[list] {
             last lines: string[list] = new;
             lines.append("Accept: " .. EventStreamType);
@@ -85,7 +85,7 @@ export let Client = module (
 
     /// @brief The response to an attempt: status, media type, and the body as a chunk source that returns
     /// `None` at the end of the body.
-    #Final
+    .Final
     export let SseResponse = class (
         /// @brief The HTTP status code.
         export last status: int;
@@ -107,7 +107,7 @@ export let Client = module (
     );
 
     /// @brief A reconnecting event-stream client. Not for use by several tasks at once.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let EventSourceClient = class implements Closeable (
         /// @brief The event-stream URL.
         export last url: string;
@@ -166,7 +166,7 @@ export let Client = module (
 
         /// @brief The next event, `None` once the stream has ended (status 204 or `close`), or an error that
         /// failed the connection.
-        #NoDiscard
+        .NoDiscard
         export let next = func -> Result<Optional<SseEvent>> {
             while (true) {
                 if (queue_index < queue.length) {
@@ -208,7 +208,7 @@ export let Client = module (
 
         /// @brief The wait before the next attempt: the reconnection time, doubled per consecutive failure up
         /// to `max_backoff_millis` when backoff is on.
-        #NoDiscard
+        .NoDiscard
         export let next_delay_millis = func -> int64 {
             let delay = reconnection_millis;
             if (max_backoff_millis <= reconnection_millis) {
@@ -324,7 +324,7 @@ export let Client = module (
 
     /// @brief Decodes each event of a client into a `T` with a decoding hook, such as a JSON decoder for
     /// streamed model tokens.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let TypedEventSource = class<T> implements Closeable (
         /// @brief The client that supplies the events.
         export last source: EventSourceClient;
@@ -339,7 +339,7 @@ export let Client = module (
 
         /// @brief The next decoded value, `None` at the end, or the client's or decoder's error. After a decoder
         /// error the client stays open and the next call reads the following event.
-        #NoDiscard
+        .NoDiscard
         export let next = func -> Result<Optional<T>> {
             return match (source.next()) {
                 Result.Err(e) => Result<Optional<T>>.Err(e),
@@ -361,13 +361,13 @@ export let Client = module (
     );
 
     /// @brief A client for a new stream at `url`.
-    #NoDiscard
+    .NoDiscard
     export let connect = func(url: string, fetch: func(SseRequest) -> Result<SseResponse>, clock: Clock)
         -> EventSourceClient => new EventSourceClient(url, "", fetch, clock);
 
     /// @brief Whether a Content-Type value names `text/event-stream`, ignoring parameters, surrounding
     /// whitespace and ASCII case.
-    #[NoDiscard, Pure]
+    .[NoDiscard, Pure]
     export let is_event_stream = func(content_type: string) -> bool {
         last semicolon = strings.index_of(content_type, ";");
         last media = semicolon < 0 ? content_type : content_type.slice(0, semicolon);

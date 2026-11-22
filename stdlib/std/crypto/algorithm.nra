@@ -5,10 +5,10 @@
 /// algorithms that Std.Crypto does not implement (Sha1, Md5, Rsa1024) so that a policy can deny them, and
 /// the public-key and post-quantum algorithms of the later Std.Crypto packages.
 /// @see [Std.Crypto.Algorithm](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Algorithm)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Algorithm = module (
     /// @brief One algorithm. `to_string` gives the variant name.
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let Algorithm = enum (
         Md5, Sha1, Sha224, Sha256, Sha384, Sha512, Sha512_256,
         Sha3_224, Sha3_256, Sha3_384, Sha3_512, Shake128, Shake256, CShake128, CShake256,

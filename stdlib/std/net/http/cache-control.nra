@@ -20,14 +20,14 @@ let strings = import:Std.Text.Strings;
 /// (`is_malformed`); an element with a valid name keeps its directive, with the raw rest of the element as its
 /// argument, so an invalid `max-age` stays visible. `parse_strict` returns Err for such a text instead.
 /// @see [Std.Net.Http.CacheControl](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-CacheControl)
-#Since("0.3.0")
+.Since("0.3.0")
 export let CacheControl = module (
     /// @brief The value a delta-seconds that does not fit is read as: 2^31 (RFC 9111 section 1.2.2).
     export const MaxDeltaSeconds: int64 = 2147483648;
 
     /// @brief One cache directive: a lowercase name and an optional argument (quoted-string arguments are
     /// stored unquoted).
-    #[Final, Immutable, ThreadSafe]
+    .[Final, Immutable, ThreadSafe]
     export let Directive = class (
         /// @brief The directive name in lowercase.
         export last name: string;
@@ -59,7 +59,7 @@ export let CacheControl = module (
     );
 
     /// @brief An ordered list of cache directives with typed accessors for the RFC 9111 directives.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let CacheControl = class (
         /// @brief The directives in order.
         last directives: Directive[list] = new;
@@ -102,7 +102,7 @@ export let CacheControl = module (
         export let has = func(name: string) -> bool => find(strings.to_ascii_lower(name)) >= 0;
 
         /// @brief The argument of the first `name` directive; None when absent or without an argument.
-        #NoDiscard
+        .NoDiscard
         export let argument = func(name: string) -> Optional<string> {
             last at = find(strings.to_ascii_lower(name));
             return if (at < 0) -> Optional<string>.None
@@ -111,20 +111,20 @@ export let CacheControl = module (
 
         /// @brief `max-age` (request, section 5.2.1.1; response, section 5.2.2.1) in seconds; an invalid
         /// argument reads as 0.
-        #NoDiscard
+        .NoDiscard
         export let max_age = func -> Optional<int64> => strict_delta("max-age");
 
         /// @brief `s-maxage` (section 5.2.2.10) in seconds; an invalid argument reads as 0.
-        #NoDiscard
+        .NoDiscard
         export let s_maxage = func -> Optional<int64> => strict_delta("s-maxage");
 
         /// @brief `min-fresh` (section 5.2.1.3) in seconds; None when absent or invalid.
-        #NoDiscard
+        .NoDiscard
         export let min_fresh = func -> Optional<int64> => lenient_delta("min-fresh");
 
         /// @brief `max-stale` (section 5.2.1.2) in seconds: 2147483648 (any staleness) without an argument,
         /// None when absent or when the argument is invalid.
-        #NoDiscard
+        .NoDiscard
         export let max_stale = func -> Optional<int64> {
             last at = find("max-stale");
             if (at < 0) {
@@ -138,11 +138,11 @@ export let CacheControl = module (
 
         /// @brief `stale-while-revalidate` (RFC 5861, kept as an extension) in seconds; None when absent or
         /// invalid.
-        #NoDiscard
+        .NoDiscard
         export let stale_while_revalidate = func -> Optional<int64> => lenient_delta("stale-while-revalidate");
 
         /// @brief `stale-if-error` (RFC 5861, kept as an extension) in seconds; None when absent or invalid.
-        #NoDiscard
+        .NoDiscard
         export let stale_if_error = func -> Optional<int64> => lenient_delta("stale-if-error");
 
         /// @brief `no-cache`, qualified or not (sections 5.2.1.4, 5.2.2.4).
@@ -150,7 +150,7 @@ export let CacheControl = module (
 
         /// @brief The field names of a qualified `no-cache` (section 5.2.2.4); empty when unqualified or
         /// absent.
-        #NoDiscard
+        .NoDiscard
         export let no_cache_fields = func -> string[list] => field_names("no-cache");
 
         /// @brief `no-store` (sections 5.2.1.5, 5.2.2.5).
@@ -178,11 +178,11 @@ export let CacheControl = module (
         export let is_private = func -> bool => has("private");
 
         /// @brief The field names of a qualified `private` (section 5.2.2.7); empty when unqualified or absent.
-        #NoDiscard
+        .NoDiscard
         export let private_fields = func -> string[list] => field_names("private");
 
         /// @brief The directives that RFC 9111 section 5.2 does not define, in order.
-        #NoDiscard
+        .NoDiscard
         export let extensions = func -> Directive[list] {
             last found: Directive[list] = new;
             for (let d in directives) {
@@ -291,7 +291,7 @@ export let CacheControl = module (
 
     /// @brief The directives of a `Cache-Control` field value (RFC 9111 section 5.2). Never fails; see the
     /// module description for malformed elements.
-    #NoDiscard
+    .NoDiscard
     export let parse = func(text: string) -> CacheControl {
         last list = new CacheControl();
         parse_into(list, text);
@@ -299,7 +299,7 @@ export let CacheControl = module (
     };
 
     /// @brief The directives of every `Cache-Control` field line of `fields`, in order.
-    #NoDiscard
+    .NoDiscard
     export let of_headers = func(fields: headers.Headers) -> CacheControl {
         last list = new CacheControl();
         for (let value in fields.get_all("Cache-Control")) {
@@ -310,7 +310,7 @@ export let CacheControl = module (
 
     /// @brief `parse`, but Err (Syntax, at the start of the offending element) when an element does not fit
     /// `token [ "=" ( token / quoted-string ) ]`.
-    #NoDiscard
+    .NoDiscard
     export let parse_strict = func(text: string) -> Result<CacheControl> {
         last list = new CacheControl();
         last bad = parse_into(list, text);
@@ -323,7 +323,7 @@ export let CacheControl = module (
 
     /// @brief delta-seconds (RFC 9111 section 1.2.2): one or more ASCII digits; values above 2147483648 read as
     /// 2147483648. None for an empty text or any other byte.
-    #[NoDiscard, Pure, ThreadSafe]
+    .[NoDiscard, Pure, ThreadSafe]
     export let parse_delta_seconds = func(text: string) -> Optional<int64> {
         if (text.byte_length == 0) {
             return Optional<int64>.None;
@@ -345,7 +345,7 @@ export let CacheControl = module (
     };
 
     /// @brief Whether RFC 9111 section 5.2 defines `name` (lowercase), as a request or a response directive.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let is_known = func(name: string) -> bool =>
         name == "max-age" || name == "max-stale" || name == "min-fresh" || name == "no-cache" || name == "no-store"
         || name == "no-transform" || name == "only-if-cached" || name == "must-revalidate"
@@ -353,7 +353,7 @@ export let CacheControl = module (
         || name == "s-maxage";
 
     /// @brief `text` as a quoted-string: in double quotes, with `"` and `\` escaped by a backslash.
-    #[Pure, ThreadSafe]
+    .[Pure, ThreadSafe]
     export let quote = func(text: string) -> string {
         let out = "\"";
         let start = 0;

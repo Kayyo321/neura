@@ -15,7 +15,7 @@ let Square = class implements Shape (
     };
 );
 
-#Pure
+.Pure
 let total = func(shape: Shape) -> int64 {
     return shape.area() + 1;
 };

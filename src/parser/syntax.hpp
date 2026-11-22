@@ -51,8 +51,8 @@ struct TagArgumentSyntax {
     std::vector<TagArgumentSyntax> items{};
 };
 
-// `#Name` or `#Name(arguments)`, written before a declaration. A group
-// `#[A, B]` gives one TagSyntax per tag.
+// One tag written before a declaration. A group gives one TagSyntax per
+// tag, with the same representation for dot and hash spellings.
 struct TagSyntax {
     Span span;
     Span name_span;
@@ -185,6 +185,8 @@ struct Expr {
     // operand, and a range written in braces, `{a .. b}`.
     bool grouped{};
     bool braced{};
+    // A numeric suffix fixes this literal's primitive type.
+    std::string_view literal_type{};
 };
 
 // The pattern and holes of an interpolated string. The pattern is the
@@ -236,6 +238,7 @@ struct Statement {
     std::vector<Expr> expressions;
     std::vector<Statement> body;
     std::vector<Statement> alternative;
+    // The header binding of an `if`, or the initializer of a three-part `for`.
     std::vector<Statement> initializer;
     std::vector<Statement> step;
     std::vector<Token> bindings;
@@ -504,8 +507,11 @@ struct ParsedFile {
     std::optional<Span> untyped_variadic{};
 };
 
-ParsedFile parse(const std::vector<Token>& tokens);
+// When requested, records the byte offsets of tag sigils for source tools.
+// A speculative parse may record an offset more than once.
+ParsedFile parse(const std::vector<Token>& tokens, std::vector<std::size_t>* tag_sigils = nullptr);
 // Retains valid declarations around recovered syntax errors for editor use.
-ParsedFile parse_recovering(const std::vector<Token>& tokens, std::vector<Diagnostic>& diagnostics);
+ParsedFile parse_recovering(const std::vector<Token>& tokens, std::vector<Diagnostic>& diagnostics,
+                            std::vector<std::size_t>* tag_sigils = nullptr);
 
 } // namespace neura

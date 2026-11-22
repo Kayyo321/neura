@@ -39,7 +39,7 @@ let wire = import:Std.Desktop.Internal.Wire;
 /// an operation reaches the window host through `call.host()`, never through a captured `Context`. A trap in
 /// the child ends the application.
 /// @see docs/design/Desktop030.md
-#Since("0.3.0")
+.Since("0.3.0")
 export let Desktop = module (
     /// @brief The most windows open at once (D-1). `open_window` answers Busy beyond it. The window host refuses
     /// a package that raises D-1 or D-3, because this child keeps the defaults.
@@ -61,7 +61,7 @@ export let Desktop = module (
     /// An identifier has 1 to 128 bytes of lowercase ASCII letters, digits, `.`, `_` and `-`. The canonical
     /// text is `{"operations":[...],"schema":1}` with the identifiers in ascending byte order and no spaces;
     /// the host and the child compare the SHA-256 of exactly that text.
-    #Final
+    .Final
     export let Registry = class (
         /// @brief The identifiers in ascending byte order.
         export last operations: string[list];
@@ -118,7 +118,7 @@ export let Desktop = module (
     );
 
     /// @brief Writes frames to standard output, one whole frame at a time, from any task.
-    #[Final, Synchronized]
+    .[Final, Synchronized]
     let Writer = class (
         /// @brief A writer of the process's standard output.
         export let init = func {};
@@ -158,7 +158,7 @@ export let Desktop = module (
     /// @brief The services of the window host, usable from any task. Each request waits for its answer while
     /// the reader task runs; a request of a cancelled task answers Cancelled. Requests made through one `Host`
     /// take turns; `Context.host()` and `Call.host()` give every call its own.
-    #[Final, Synchronized]
+    .[Final, Synchronized]
     export let Host = class (
         /// @brief Writes the request frames.
         last writer: Writer;
@@ -310,7 +310,7 @@ export let Desktop = module (
                 file_dialog("neura.desktop.dialog.save_file", window, suggested_name, filters);
 
         /// @brief Runs a file dialog service. Used by the two dialogs.
-        #Hidden
+        .Hidden
         export let file_dialog = func(service: string, window: Window, suggested_name: string, filters: FileFilter[list])
             -> Result<DialogOutcome<GrantedFile>> {
             last args: uint8[list] = new;
@@ -367,7 +367,7 @@ export let Desktop = module (
         };
 
         /// @brief Runs a window request that answers nothing. Used by `Window`.
-        #Hidden
+        .Hidden
         export let window_request = func(service: string, handle: uint32, title: string, with_title: bool)
             -> Result<Unit> {
             last args: uint8[list] = new;
@@ -384,7 +384,7 @@ export let Desktop = module (
         /// @brief Sends a HostCall frame for `service` and waits for its answer: the result bytes, or the
         /// service's error code as an Io error. UnexpectedEnd once the channel has ended; Cancelled when this
         /// task is cancelled while it waits, and the answer is then dropped.
-        #Hidden
+        .Hidden
         export let request = func(service: string, args: uint8[list]) -> Result<uint8[list]> {
             last id = (ids.add(1) % 4294967295 + 1) as uint32;
             const [reply, answers, closer] = channels.open<Answer>(1);
@@ -418,7 +418,7 @@ export let Desktop = module (
         };
 
         /// @brief The count of open windows the reader task lowers at each Closed. Used by `run_application`.
-        #Hidden
+        .Hidden
         export let window_counter = func -> atomics.AtomicInt64 => window_count;
 
         /// @brief The status given to `quit`, or 0.
@@ -431,7 +431,7 @@ export let Desktop = module (
     );
 
     /// @brief A window of this application, identified by the host's handle. Usable from any task.
-    #[Final, Synchronized]
+    .[Final, Synchronized]
     export let Window = class (
         /// @brief The host's handle; never reused while the application runs.
         export last handle: uint32;
@@ -492,7 +492,7 @@ export let Desktop = module (
 
     /// @brief A group of file types a dialog offers, such as "Images" with `png` and `jpg`. An extension is 1 to
     /// 16 ASCII letters and digits, or `*` for every file.
-    #Final
+    .Final
     export let FileFilter = class (
         /// @brief The text the dialog shows for the group.
         export last label: string;
@@ -534,7 +534,7 @@ export let Desktop = module (
     /// @brief One entry of an application menu: an item, a separator, or a submenu. Immutable; the `with_`
     /// functions answer a changed copy. Roles (`copy`, `paste`, `cut`, `undo`, `redo`, `select_all`, `quit`,
     /// `about`) are performed by the system, and their items never reach the child or the page.
-    #Final
+    .Final
     export let MenuItem = class (
         /// @brief "item", "separator" or "submenu".
         export last kind: string;
@@ -642,7 +642,7 @@ export let Desktop = module (
     /// A read grant only reads and a write grant only writes (PermissionDenied otherwise); the file is replaced
     /// at the first write. `close` revokes the grant, after which every use is InvalidInput and another `close`
     /// does nothing.
-    #[Final, Synchronized]
+    .[Final, Synchronized]
     export let GrantedFile = class implements closeable.Closeable (
         /// @brief The host's handle of the grant.
         export last handle: uint32;
@@ -726,7 +726,7 @@ export let Desktop = module (
 
     /// @brief One bridge call from a window. It carries nothing of the page: no URL, no script, no path. A call
     /// is handed to the task that runs its operation.
-    #[Final, Synchronized]
+    .[Final, Synchronized]
     export let Call = class (
         /// @brief The host's request identifier.
         export last id: uint32;
@@ -780,7 +780,7 @@ export let Desktop = module (
     );
 
     /// @brief One operation of a dispatcher and its implementation.
-    #Final
+    .Final
     let Route = class (
         /// @brief The operation identifier.
         export last operation: string;
@@ -799,7 +799,7 @@ export let Desktop = module (
     /// @brief Maps each operation of a registry to its implementation. An operation without one answers the
     /// caller with error 13 (Unsupported). Each implementation runs as its own task: it must be task-safe and
     /// capture only transferable values (docs/lang/Concurrency.md section 5).
-    #Final
+    .Final
     export let Dispatcher = class (
         /// @brief The operations this dispatcher serves.
         export last registry: Registry;
@@ -832,13 +832,13 @@ export let Desktop = module (
         };
 
         /// @brief Passes `event` to the handler given to `on_event`. Used by `Context.run`.
-        #Hidden
+        .Hidden
         export let notice = func(event: Event) {
             observer(event);
         };
 
         /// @brief The implementation of `operation`, if one was added. Used by `Context.run`.
-        #Hidden
+        .Hidden
         export let handler = func(operation: string) -> Optional<func(Call) -> Result<uint8[list]>> {
             last index = find(operation);
             if (index < 0) {
@@ -872,7 +872,7 @@ export let Desktop = module (
     );
 
     /// @brief A bridge call that `Context.run` started and that has not reported finishing.
-    #Final
+    .Final
     let Running = class (
         /// @brief The host's request identifier.
         export last id: uint32;
@@ -889,7 +889,7 @@ export let Desktop = module (
     );
 
     /// @brief The connection of the native child to its window host, used by the task that runs `start`.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let Context = class (
         /// @brief The registry sent in Hello.
         export last registry: Registry;
@@ -1090,7 +1090,7 @@ export let Desktop = module (
         export let exit_status = func -> int => services.exit_status();
 
         /// @brief Starts the reader task's handshake and waits for its outcome. Used once by `run_application`.
-        #Hidden
+        .Hidden
         export let connect = func -> Result<Unit> {
             writer.send(wire.Hello, wire.hello(registry.digest()));
             while (true) {
@@ -1119,20 +1119,20 @@ export let Desktop = module (
         };
 
         /// @brief Where the reader task passes calls, cancels and events. Used once by `run_application`.
-        #Hidden
+        .Hidden
         export let reader_inbound = func -> channels.Sender<Inbound> => inbound_sender;
 
         /// @brief Where the reader task receives host request registrations. Used once by `run_application`.
-        #Hidden
+        .Hidden
         export let reader_waiters = func -> channels.Receiver<Waiter> => waiter_receiver;
 
         /// @brief What the reader task closes at the end of input. Used once by `run_application`.
-        #Hidden
+        .Hidden
         export let reader_waiter_closer = func -> channels.Closer<Waiter> => waiter_closer;
 
         /// @brief The count of open windows the reader task lowers at each Closed. Used once by
         /// `run_application`.
-        #Hidden
+        .Hidden
         export let window_counter = func -> atomics.AtomicInt64 => services.window_counter();
 
         /// @brief The next message from the reader, applying events: Closed forgets its window.

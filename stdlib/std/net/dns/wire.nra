@@ -14,13 +14,13 @@ let string_maps = import:Std.Collections.StringMap;
 /// name against every name it wrote before at offsets below 16384 (the reach of a 14-bit pointer), comparing
 /// suffixes without regard to ASCII case.
 /// @see [Std.Net.Dns.Wire](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-Wire)
-#Since("0.3.0")
+.Since("0.3.0")
 export let Wire = module (
     /// @brief The largest offset a compression pointer can hold.
     export const MaxPointerOffset: int = 16383;
 
     /// @brief A bounds-checked reader over one DNS message.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let WireReader = class (
         /// @brief The whole message.
         last data: uint8[list];
@@ -36,7 +36,7 @@ export let Wire = module (
         };
 
         /// @brief The offset of the next byte.
-        #NoDiscard
+        .NoDiscard
         export let offset = func -> int => position;
 
         /// @brief Moves to `target` (0 to the message length).
@@ -48,15 +48,15 @@ export let Wire = module (
         };
 
         /// @brief The bytes left.
-        #NoDiscard
+        .NoDiscard
         export let remaining = func -> int => data.length - position;
 
         /// @brief The message length.
-        #NoDiscard
+        .NoDiscard
         export let length = func -> int => data.length;
 
         /// @brief One byte.
-        #NoDiscard
+        .NoDiscard
         export let read_u8 = func -> Result<int> {
             if (position >= data.length) {
                 return Result<int>.Err(truncated(position, "byte"));
@@ -67,7 +67,7 @@ export let Wire = module (
         };
 
         /// @brief A big-endian 16-bit value.
-        #NoDiscard
+        .NoDiscard
         export let read_u16 = func -> Result<int> {
             if (position + 2 > data.length) {
                 return Result<int>.Err(truncated(position, "16-bit field"));
@@ -78,7 +78,7 @@ export let Wire = module (
         };
 
         /// @brief A big-endian 32-bit unsigned value.
-        #NoDiscard
+        .NoDiscard
         export let read_u32 = func -> Result<int64> {
             if (position + 4 > data.length) {
                 return Result<int64>.Err(truncated(position, "32-bit field"));
@@ -92,7 +92,7 @@ export let Wire = module (
         };
 
         /// @brief The next `count` bytes.
-        #NoDiscard
+        .NoDiscard
         export let read_bytes = func(count: int) -> Result<uint8[list]> {
             if (count < 0 || position + count > data.length) {
                 return Result<uint8[list]>.Err(truncated(position, "byte string"));
@@ -106,7 +106,7 @@ export let Wire = module (
         };
 
         /// @brief A character-string: a length byte and that many bytes (RFC 1035 section 3.3).
-        #NoDiscard
+        .NoDiscard
         export let read_character_string = func -> Result<uint8[list]> {
             last count = read_u8()?;
             return read_bytes(count);
@@ -114,7 +114,7 @@ export let Wire = module (
 
         /// @brief A domain name, following compression pointers; the reader moves past the name as written here
         /// (past the first pointer when there is one).
-        #NoDiscard
+        .NoDiscard
         export let read_name = func -> Result<names.DnsName> {
             last labels: uint8[list][list] = new;
             let at = position;
@@ -175,7 +175,7 @@ export let Wire = module (
     );
 
     /// @brief A writer that builds one DNS message and remembers name offsets for compression.
-    #[Final, NotThreadSafe]
+    .[Final, NotThreadSafe]
     export let WireWriter = class (
         /// @brief The bytes written.
         last out: uint8[list] = new;
@@ -187,11 +187,11 @@ export let Wire = module (
         };
 
         /// @brief The bytes written so far (the writer's own list).
-        #NoDiscard
+        .NoDiscard
         export let bytes = func -> uint8[list] => out;
 
         /// @brief The number of bytes written.
-        #NoDiscard
+        .NoDiscard
         export let length = func -> int => out.length;
 
         /// @brief Appends one byte; a value outside 0-255 traps with "invalid argument: u8".

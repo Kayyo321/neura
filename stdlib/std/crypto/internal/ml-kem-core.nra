@@ -4,7 +4,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// @brief The algorithms of FIPS 203 (ML-KEM) over byte lists, without policy checks or key objects. Internal:
 /// Std.Crypto.Pqc.MlKem wraps it. Polynomials are `int32[list]` of 256 coefficients in [0, q), q = 3329, and
 /// every product of two coefficients stays below 2^24, so no intermediate value leaves `int32`.
-#Since("0.3.0")
+.Since("0.3.0")
 export let MlKemCore = module (
     const Q = 3329;
 

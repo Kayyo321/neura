@@ -1,7 +1,7 @@
 /// @brief The compiler's reflection operations (docs/design/Reflect030.md, Lowering). Each call becomes a
 /// NeuraIR `reflect` node that the compiler expands after specialization; the functions have no body. Programs
 /// use the public Std.Reflect modules instead.
-#Since("0.3.0")
+.Since("0.3.0")
 export let Intrinsics = module (
     /// @brief The ordinal of the value's type: the dynamic class of a reference or any, the static type otherwise.
     export let ordinal = func<T>(value: T) -> int;

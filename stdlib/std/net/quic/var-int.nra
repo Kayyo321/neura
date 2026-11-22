@@ -10,14 +10,14 @@ let.promote _ = import:Std.Core.Result;
 /// returns the value and the number of bytes read. Values are `uint64` from 0 through `MaxValue` (2^62 - 1);
 /// a larger value traps with "invalid argument: varint above 2^62-1".
 /// @see [Std.Net.Quic.VarInt](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Quic-VarInt)
-#Since("0.3.0")
+.Since("0.3.0")
 export let VarInt = module (
     /// @brief The largest encodable value, 2^62 - 1.
     export const MaxValue: uint64 = 4611686018427387903;
 
     /// @brief The shortest encoding length of `value`: 1 through 63 take 1 byte, through 16,383 2, through
     /// 1,073,741,823 4, and the rest 8.
-    #Pure
+    .Pure
     export let encoded_length = func(value: uint64) -> int {
         check(value);
         if (value <= 63) {
@@ -31,12 +31,12 @@ export let VarInt = module (
     };
 
     /// @brief The shortest encoding of `value`.
-    #NoDiscard
+    .NoDiscard
     export let encode = func(value: uint64) -> uint8[list] => encode_with_length(value, encoded_length(value));
 
     /// @brief The encoding of `value` in `length` bytes (1, 2, 4 or 8). Another length, or one too short for the
     /// value, traps with "invalid argument: varint length".
-    #NoDiscard
+    .NoDiscard
     export let encode_with_length = func(value: uint64, length: int) -> uint8[list] {
         let out: uint8[list] = new;
         append_with_length(out, value, length);
@@ -65,7 +65,7 @@ export let VarInt = module (
 
     /// @brief The value encoded at `offset` and the number of bytes it took (RFC 9000 section A.1). A Parse
     /// error of kind UnexpectedEnd, at `offset`, when the bytes end inside it; an offset outside the list traps.
-    #NoDiscard
+    .NoDiscard
     export let decode = func(bytes: uint8[list], offset: int) -> Result<[uint64, int]> {
         if (offset < 0 || offset > bytes.length) {
             trap_with_message("invalid argument: offset");

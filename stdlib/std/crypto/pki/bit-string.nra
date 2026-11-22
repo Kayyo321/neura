@@ -1,10 +1,10 @@
 /// @brief The ASN.1 BIT STRING value (Stdlib.md section 21.10).
 /// @see [Std.Crypto.Pki.BitString](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-BitString)
-#Since("0.3.0")
+.Since("0.3.0")
 export let BitString = module (
     /// @brief A bit string: whole bytes, of which the last `unused_bits` low-order bits are not part of the
     /// value and are zero. Bit 0 is the most significant bit of the first byte, as ASN.1 numbers named bits.
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let BitString = class (
         /// @brief The bytes. Do not change the list.
         export last bytes: uint8[list];

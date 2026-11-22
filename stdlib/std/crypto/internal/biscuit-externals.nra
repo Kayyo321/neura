@@ -14,14 +14,14 @@ export let BiscuitExternals = module (
 
     /// @brief A Datalog map key passed to an application function.
     /// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Biscuit)
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let ExternalMapKey = enum (Integer(int64), Text(string));
 
     /// @brief An exact Biscuit Datalog value passed to an application function.
     /// Date values are whole seconds since the UTC Unix epoch.
     /// Values are copied across the callback boundary. Set members share a scalar type.
     /// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Biscuit)
-    #Since("0.3.0")
+    .Since("0.3.0")
     export let ExternalValue = enum (
         Integer(int64), Date(uint64), Boolean(bool), Text(string), Bytes(uint8[list]), Null,
         Set(ExternalValue[list]), Array(ExternalValue[list]), Map([ExternalMapKey, ExternalValue][list])
@@ -30,15 +30,15 @@ export let BiscuitExternals = module (
     /// @brief An application function available by name during an authorization call.
     /// Supply pure application logic. A token selects the function's operands and can call it repeatedly.
     /// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Biscuit)
-    #[Final, Since("0.3.0")]
+    .[Final, Since("0.3.0")]
     export let ExternalFunction = class (
         /// @brief The unqualified name referred to by `extern::name` in Datalog.
-        #Since("0.3.0")
+        .Since("0.3.0")
         export last name: string;
         last callback: func(ExternalValue, Optional<ExternalValue>) -> Result<ExternalValue>;
 
         /// @brief Binds an explicit name and a pure callback. A unary call passes no second value.
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let init = func(identifier: string, operation: func(ExternalValue, Optional<ExternalValue>)
             -> Result<ExternalValue>) {
             name = identifier;
@@ -46,7 +46,7 @@ export let BiscuitExternals = module (
         };
 
         /// @brief Calls the registered application function.
-        #Since("0.3.0")
+        .Since("0.3.0")
         export let call = func(left: ExternalValue, right: Optional<ExternalValue>) -> Result<ExternalValue> =>
             callback(left, right);
 

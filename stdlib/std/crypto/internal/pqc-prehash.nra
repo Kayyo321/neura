@@ -6,7 +6,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// @brief The message formatting shared by ML-DSA (FIPS 204) and SLH-DSA (FIPS 205): the domain-separated M'
 /// of the pure and pre-hash variants. Internal. The pre-hash digests use the public Std.Crypto.Hash functions,
 /// so the policy is checked for the pre-hash function.
-#Since("0.3.0")
+.Since("0.3.0")
 export let PqcPrehash = module (
     /// @brief OID || PH(M): the DER object identifier of the pre-hash function (FIPS 204, section 5.4; FIPS 205,
     /// section 10.2) followed by the digest of the message; SHAKE128 gives 32 bytes and SHAKE256 64. Another
