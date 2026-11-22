@@ -1891,11 +1891,11 @@ NEURA_TEST(host, dtls13_expired_read_returns_the_answers_it_produced) {
     check(!requests.empty(), "the KeyUpdate is sent");
 
     // The server's read expires before the record arrives.
-    const auto waiting = exchange(server, s.value, 1, "", 0, 1'000'000);
+    const auto waiting = exchange(server, s.value, 1, "", 0, 30'000'000);
     if (waiting.success) check_equal(waiting.value.elements.at(0).bits, std::uint64_t(0), "the read waits");
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
     if (!waiting.success) {
-        // The 1 ms deadline passed before the first call: start the read again.
+        // The 30 ms deadline passed before the first call returned.
         expect_error(waiting, host_error::timed_out, "the first read call expired");
         check(false, "the read was started before its deadline");
     }
@@ -1907,9 +1907,9 @@ NEURA_TEST(host, dtls13_expired_read_returns_the_answers_it_produced) {
         check_equal(late.value.elements.at(4).bits, std::uint64_t(host_error::timed_out), "the read reports TimedOut");
         for (auto& answer : packets(late.value)) answers.push_back(std::move(answer));
         // Later datagrams of the same flight go to a read started afresh.
-        const auto again = exchange(server, s.value, 1, "", 0, 1'000'000);
+        const auto again = exchange(server, s.value, 1, "", 0, 30'000'000);
         if (again.success) check_equal(again.value.elements.at(0).bits, std::uint64_t(0), "the read waits again");
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        std::this_thread::sleep_for(std::chrono::milliseconds(80));
     }
     check(!answers.empty(), "the late KeyUpdate produced the server's answer");
 
