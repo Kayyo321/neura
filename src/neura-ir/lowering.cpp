@@ -19,6 +19,7 @@
 #include "linker.hpp"
 #include "monitors.hpp"
 #include "frozen.hpp"
+#include "nil_narrowing.hpp"
 #include "nominal.hpp"
 #include "purity.hpp"
 #include "reference_initialization.hpp"
@@ -6045,6 +6046,25 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
     // No event is emitted under a monitor guard (Lifetime030.md, Events).
     check_event_guards(program_);
     check_render_factories(program_, prebuilt);
+    for (SymbolId id = linked_symbols; id < entries_.size(); ++id) {
+        const auto* decl = entries_[id].declaration;
+        const auto& binding = symbol(id);
+        if (decl && decl->initializer && (binding.kind == SymbolKind::Field || binding.kind == SymbolKind::Global) &&
+            class_reference(binding.type)) {
+            const auto& init = *decl->initializer;
+            program_.nil_bindings.push_back({id, init.kind == ExprKind::Nil, init.span});
+        }
+    }
+    analyze_nil_references(program_, linked_bodies);
+    if (auto* sink = DiagnosticSink::current()) {
+        sink->deduplicate(warning_mark);
+        auto errors = sink->take_errors(warning_mark);
+        if (!errors.empty()) {
+            auto error = std::move(errors.front());
+            for (std::size_t index = 1; index < errors.size(); ++index) error.also(std::move(errors[index]));
+            throw error;
+        }
+    }
     return std::move(program_);
 }
 

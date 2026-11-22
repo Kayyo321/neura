@@ -319,6 +319,21 @@ let length = func(first: Node) -> int32 {
 
 Only class and interface references are conditions this way. An integer, a string, an `Optional`, or an array is not, and each is still a type error. The test reads the reference and nothing else, so it never fails, and a later access through a reference that is nil still fails with the nil-reference failure.
 
+The compiler records a non-nil fact for a local, parameter, or immutable global binding when every path to that read proves the binding non-nil. A nil test can establish the fact in a branch, in the right operand of a short-circuit condition, or in a match arm. The fact also holds after an early exit when every path that continues established it. Assigning to the binding ends the narrowing. Field reads, mutable globals, closure fields, and reads that can call a class getter do not establish a fact about later reads. `neura emit-ir` reports proven reads under `non_nil_uses`, with their source spans. Accesses through references still execute their runtime nil checks.
+
+### Nil-access and nil-argument warnings
+
+The compiler distinguishes known non-nil values, values that may be nil, and values whose state is unknown. It reports a warning only when the analysis has evidence that a nil value can reach the use.
+
+A parameter with a `nil` default may be nil. Any other parameter promises a non-nil reference. A field or module binding with a written `nil` initializer may be nil, and one with another initializer promises a non-nil reference. A field or module binding without a written initializer is unknown. Locals follow the values assigned along each path. A join is possibly nil if either path may supply nil, then unknown if either path remains unknown, and otherwise non-nil.
+
+A function result's nil state is inferred from its returns and recorded in NeuraIR. The result of a bodyless function, a call through a function value, or a collection element read is unknown. A reference coalesced with a non-nil fallback is non-nil. With an Optional on the left, a present nil payload still yields nil.
+
+- [`nil-access`](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/W0006.md) reports a dereference through a receiver that may be nil. Use `?.` to keep absence in the result, or narrow the receiver with a condition. Copy a rereadable field to a local with an `if` initializer before testing it.
+- [`nil-argument`](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/W0007.md) reports a possibly nil value passed to a parameter or assigned to a field or module binding that promises a non-nil reference.
+
+A nil test can establish a non-nil fact for an eligible binding. The compiler uses that fact for warnings and the runtime checks the reference when it is dereferenced.
+
 ### Function values and closures
 
 A lambda is a function expression with parameters and a body. Its type lists the parameter types in order, followed by the result. An invocation evaluates the callable expression first and its arguments from left to right.

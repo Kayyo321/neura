@@ -19,9 +19,11 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ### Added
 
+- The `nil-access` and `nil-argument` warnings report dereferences and transfers that may encounter a nil reference. A guard can prove a binding non-nil, and function result summaries survive separate compilation. [Nil warnings](docs/lang/CoreLanguage.md#nil-access-and-nil-argument-warnings)
 - Numeric literals accept apostrophe digit separators and fixed-width integer and floating-point suffixes.
 - `if (let binding = value; condition)` evaluates one binding or destructuring before the condition, with its names scoped to the condition and branches. `else if` may have its own initializer.
 - Class and interface references can be tested directly in conditions and with `!` or `not`. The tests use normal nil comparisons and preserve reference reads and runtime safety checks.
+- NeuraIR 1.16 records which reference reads a nil condition proves non-nil. `neura emit-ir` shows those use spans and runtime nil checks remain in place.
 - Tags accept dot or hash sigils in the same positions. CLI and editor formatting preserve the spelling by default and can explicitly convert only tag sigils.
 - `Std.Net` adds Unicode UTS 46 mapping, more socket provider operations, multicast DNS, DNS over QUIC, and TLS 1.3 over a caller-supplied stream. TLS builds support mutual TLS and narrower client and server version ranges.
 - `Std.Net.Tls` adds ACME client operations and SPIFFE SVID verification. `Handshake.dtls13` uses a bound UDP socket, verifies peer identity and uses server-side cookies. `TlsStream` exposes the verified DER certificate chain.

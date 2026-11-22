@@ -57,23 +57,33 @@ A condition is a `bool`, or a class or interface reference. A reference is true 
 
 `not` and `!` are the same operator on a reference. `if (not val)` and `if (!val)` are the same nil check, and `not val` and `!val` give the same `bool` wherever they appear.
 
-A nil condition narrows like a type test. Inside the body of `if (val)`, `val` is known to be non-nil, so its members can be used without another check. The same holds in the `else` body of `if (!val)` or `if (not val)`, and in the code after such an `if` when its body always leaves through `return`, `break`, `continue`, or a trap.
+A nil condition narrows like a type test. Inside the body of `if (val)`, `val` is known to be non-nil. The same holds in the `else` body of `if (!val)` or `if (not val)`, and in the code after such an `if` when its body always leaves through `return`, `break`, `continue`, or a trap. Lowering records the proven use and its span in NeuraIR 1.16. A proven reference can use either ordinary member access or `?.` without a warning. Ordinary member access continues to execute the runtime nil check.
 
-<!-- example: fragment: specified for 0.3.1 and not yet implemented -->
+<!-- example: check -->
 ```neura
-if (not val) {
-    return;
-}
-console.println(val.message);  // val is non-nil here
+let Entry = class (
+    export last message = "ready";
+);
+
+let message_or_empty = func(val: Entry) -> string {
+    if (not val) {
+        return "";
+    }
+    return val.message;  // val is non-nil here
+};
 ```
 
-Narrowing follows the same limits as narrowing with `is`. It applies to a local, a parameter, or a `last` binding that cannot change between the test and the use. It does not apply to a field or a reassignable module binding, which another call could set to `nil`. After the narrowed name is assigned again, it is no longer known to be non-nil.
+Narrowing applies to a local, a parameter, or an immutable global binding that cannot change between the test and the use. A field, a reassignable module binding, a closure field, or a read that can invoke a class getter does not establish a fact about later reads. Assigning to the narrowed binding ends the narrowing. When execution can reach a read from more than one branch, each path must establish that the binding is non-nil.
+
+`nil-access` warns when there is evidence of a nil value at a dereference. The diagnostic names the declaration or inferred return that can yield nil. Use `?.` when the result should be optional, or test the reference first. For a field, test a local copy, for example `if (let value = self.field; value) { ... }`.
+
+A parameter without a nil default and a field or module binding with a written non-nil initializer promise a non-nil reference. `nil-argument` warns if a value that may be nil is passed or stored in one of these declarations. The compiler also tracks assignments to locals and summarizes possible nil results across calls. A value with an unknown nil state produces neither warning. [Nil warnings](CoreLanguage.md#nil-access-and-nil-argument-warnings) describes the declaration and coalescing rules.
 
 Numbers, strings, enums, and other values that cannot be `nil` are still not conditions. `and` and `or` still require `bool`. A reference becomes a `bool` through `!`, `not`, or a comparison, and that `bool` can then be combined with `and` or `or`.
 
 `Error` is a payload enum and cannot be `nil`. The test applies to a reference, such as a missing log entry:
 
-<!-- example: fragment: specified for 0.3.1 and not yet implemented -->
+<!-- example: check -->
 ```neura
 let console = import:Std.Io.Console;
 

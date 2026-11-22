@@ -157,6 +157,30 @@ class LanguageServerTests(unittest.TestCase):
         self.assertTrue(diagnostics[0])
         self.assertEqual(diagnostics[-1], [])
 
+    def test_nil_warnings_offer_quick_fixes(self):
+        path = self.root / 'nil-warning.nra'
+        source = ('let Entry = class ( export let ready = true; );\n'
+                  'let required = func(value: Entry) -> bool => value.ready;\n'
+                  'let maybe = func(entry: Entry = nil) -> bool {\n'
+                  '    let state = required(nil);\n'
+                  '    return entry.ready;\n'
+                  '};\n')
+        self.client.open(path, source)
+        self.client.request('textDocument/documentSymbol', params(path))
+        diagnostics = [diagnostic for notification in self.client.notifications
+                       if notification.get('method') == 'textDocument/publishDiagnostics'
+                       for diagnostic in notification['params']['diagnostics']]
+        self.assertEqual({(d['code'], d['severity']) for d in diagnostics}, {('W0006', 2), ('W0007', 2)})
+
+        def fixes(line, character):
+            position = {'line': line, 'character': character}
+            actions = self.client.request('textDocument/codeAction', {
+                **params(path), 'range': {'start': position, 'end': position}, 'context': {'diagnostics': []}})
+            return {action['title'] for action in actions if action['kind'] == 'quickfix'}
+
+        self.assertIn('provide a non-nil value', fixes(3, 25))
+        self.assertTrue({'use optional access', 'narrow the reference with an if condition'} <= fixes(4, 12))
+
     def test_unsaved_import_definition_references_and_rename(self):
         module = self.root / 'math.nra'
         main = self.root / 'main.nra'

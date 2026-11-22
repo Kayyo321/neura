@@ -21,6 +21,8 @@ Lexer -> Parser -> NeuraIR -> IR optimization -> IRtoNeuronConversion -> output
 
 Semantic analysis belongs at the boundary between the syntax tree and valid NeuraIR. By the time optimization starts, operations should have explicit types and effects. For example, the parser can represent `left && right` as a Boolean expression. NeuraIR must express that the right-hand side is evaluated only when the left-hand side is true if evaluating it could change state or fail.
 
+Lowering records [non-nil reference uses](lang/CoreLanguage.md#nil-conditions) after analyzing the typed control flow. The NeuraIR 1.16 metadata names the binding and the span of each proven read. The linker remaps those references and `neura emit-ir` displays them. Optimization, conversion and execution use the same operations and runtime checks whether the metadata is present or absent.
+
 Lowering resolves function overloads and object cast targets from static types. Each call names a single function, and each explicit construction or base initialization names its selected constructor when one is declared. Conversion uses that constructor's symbol and emits its normal field initialization and body. Object casts and primitive companion calls use ordinary typed call operations, including their effects and evaluation order.
 
 Lowering also validates the [tags](lang/Tags.md) written before declarations against the tag registry, stores each accepted tag on its symbol as a NeuraIR `tag` attribute, and checks the uses of tagged symbols, including those of prebuilt modules. A tag never changes the operations lowering emits; only the inlining directive that `#Inline` and `#NoInline` set reaches a later stage, the `inline-calls` optimization pass, which may warn that it cannot honor it.

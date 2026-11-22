@@ -541,6 +541,7 @@ add_library(neura_compiler STATIC
     src/neura-ir/linker.cpp
     src/neura-ir/reference_initialization.cpp
     src/neura-ir/definite_assignment.cpp
+    src/neura-ir/nil_narrowing.cpp
     src/neura-ir/reference_storage.cpp
     src/ir-optimization/analysis.cpp
     src/ir-optimization/effects.cpp
@@ -1708,6 +1709,12 @@ if(BUILD_TESTING AND NEURA_SDK)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/parameters/equivalence.py" "$<TARGET_FILE:neura>"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressions/equivalence")
     set_tests_properties(expressions-equivalence PROPERTIES TIMEOUT 300)
+    add_test(NAME expressions-nil-narrowing COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressions/nil-narrowing.py" "$<TARGET_FILE:neura>"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressions/nil-narrowing.nra")
+    add_test(NAME expressions-nil-warnings COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressions/nil-warnings.py" "$<TARGET_FILE:neura>"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressions/nil-warnings.nra")
     # A range literal as a for-each source is counted without a region.
     add_test(NAME expressions-range-loop-stack COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressions/range-loop-stack.py" "$<TARGET_FILE:neura>")

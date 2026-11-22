@@ -260,6 +260,12 @@ Version 1.15 adds the operations of [the 0.3.0 expression features](design/Expre
 
 A concat text evaluates its operands once each, left to right, then builds their text with one allocation (NVR `concat-text`). It may trap, allocates, and is never merged with another, split, or reassociated by an optimization; a parenthesized inner chain is a separate operation. Specialization replaces every type of whose types are concrete with constants, class tests and selections, so none reaches conversion; one in a generic declaration stays there. A file is written as 1.15 only when a body contains one of these operations; every other program keeps the earliest version that can encode it, and its bytes are unchanged. A 1.13 reader rejects a 1.15 file with `NeuraIR format 1.15 is not supported; this reader accepts 1.0 through 1.13`, and the 1.15 reader rejects tag 73 in a file that declares an earlier version.
 
+### Nil-narrowing facts
+
+An optional `NNIL` section follows the other trailing sections. Its four-byte tag precedes a nonempty `vector<NonNilUse>`. Each entry contains the read's `Span` and the binding's required `u32` symbol reference. The binding is a local, a parameter or an immutable global whose type can be a class or interface reference. Paths are drawn from Files and use spans have nonzero line, column and length. The reader rejects a nil-narrowing section in an earlier revision.
+
+These facts describe source lowering in the compilation that produced the file. The linker remaps the binding and source file references when it combines artifacts. Build stages do not use the table to skip checks. Removing it preserves the executable image.
+
 ## Reading
 
 The reader checks structure and leaves semantics to the [NeuraIR verifier](IrOptimization.md#neurair-verifier), which every build runs on the result. It rejects:
@@ -287,3 +293,14 @@ The table starts with the four ASCII bytes `LAWS` followed by a nonempty counted
 | Proof | `kind:u8`, `span:Span`, `symbol:u32` optional, `receiver:u32` optional, `index:u32`, `bindings:vector<u32>`, `terms:vector<Term>`, `proofs:vector<Proof>` |
 
 A declaration's owner is its module. A fulfillment names the original law symbol and the derived module that supplies a certificate for the same statement. Status 0 denotes an abstract law, 1 a law with a certificate, and 2 a trusted axiom reserved for Phase 2. Introductions count the leading universals and hypotheses that open the certificate's scope. The reader checks each certificate and recomputes its unfolding footprint. The linker remaps symbols and type references and rechecks obligations in the combined module hierarchy. The compiler erases the law table and its symbols before specializing executable NeuraIR.
+
+### Reference nil summaries
+
+The optional `NILS` table precedes `NNIL` and is available from revision 1.16. It begins with its four ASCII bytes and two counted vectors.
+
+| Record | Fields in order |
+| --- | --- |
+| Declaration | `binding:u32`, `initialized_nil:u8` (0 or 1), `initializer:Span` |
+| Result | `function:u32`, `state:u8`, `nil_return:Span` |
+
+Result state is 0 for non-nil, 1 for possibly nil, and 2 for unknown. A possibly nil result carries the source span of a return that can yield nil, when available. The declaration and function references are remapped by the linker. The compiler uses these summaries when checking source that imports a prebuilt artifact. Circuits execute the same operations whether the summaries are present or absent.

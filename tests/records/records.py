@@ -429,7 +429,10 @@ class StaticRequirementTests(unittest.TestCase):
             (directory / 'numbers.nra').write_text(STATIC)
             result = run('emit-ir', 'numbers.nra', '-o', 'numbers.nir', cwd=directory)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual((directory / 'numbers.nir').read_bytes()[4:8], bytes([1, 0, 13, 0]))
+            # This library records nil contracts in addition to its static conformance.
+            data = (directory / 'numbers.nir').read_bytes()
+            self.assertEqual(data[4:8], bytes([1, 0, 16, 0]))
+            self.assertIn(b'NILS', data)
             images = []
             for source, files in (('"numbers.nir".Numbers', []), ('Numbers', ['numbers.nra'])):
                 (directory / 'app.nra').write_text(STATIC_APP.format(source=source))

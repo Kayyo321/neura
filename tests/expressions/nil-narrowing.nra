@@ -1,0 +1,225 @@
+let program = import:Std.Program;
+
+let Entry = class (
+    export last ready = true;
+);
+
+let Holder = class (
+    export let item: Entry = nil;
+);
+
+let Hooked = class (
+    | get: instance;
+
+    export last ready = true;
+);
+
+let mutable_global: Entry = nil;
+last stable_global: Entry = new;
+
+let when_true = func(entry: Entry) -> bool {
+    if (entry) {
+        return entry.ready;  // non-nil entry
+    }
+    return false;
+};
+
+let when_bang_false = func(entry: Entry) -> bool {
+    if (!entry) {
+        return false;
+    } else {
+        return entry.ready;  // non-nil entry
+    }
+};
+
+let when_not_false = func(entry: Entry) -> bool {
+    if (not entry) {
+        return false;
+    } else {
+        return entry.ready;  // non-nil entry
+    }
+};
+
+let after_return = func(entry: Entry) -> bool {
+    if (!entry) {
+        return false;
+    }
+    return entry.ready;  // non-nil entry
+};
+
+let after_trap = func(entry: Entry) -> bool {
+    if (!entry) {
+        trap_with_message("entry required");
+    }
+    return entry.ready;  // non-nil entry
+};
+
+let after_break = func(entry: Entry, keep: bool) -> bool {
+    while (keep) {
+        if (!entry) {
+            break;
+        }
+        return entry.ready;  // non-nil entry
+    }
+    return entry.ready;  // maybe-nil entry
+};
+
+let after_continue = func(entry: Entry, keep: bool) -> bool {
+    while (keep) {
+        if (not entry) {
+            continue;
+        }
+        return entry.ready;  // non-nil entry
+    }
+    return false;
+};
+
+let while_guarded = func(entry: Entry) -> bool {
+    let current = entry;
+    while (current) {
+        let ready = current.ready;  // non-nil current
+        current = nil;
+        if (ready) {
+            break;
+        }
+        return current.ready;  // maybe-nil current
+    }
+    return false;
+};
+
+let while_exhausted = func(fallback: Entry) -> bool {
+    let current: Entry = nil;
+    while (!current) {
+        current = fallback;
+    }
+    return current.ready;  // non-nil current
+};
+
+let do_first_iteration = func(entry: Entry, fallback: Entry) -> bool {
+    let current = entry;
+    do {
+        let observed = current.ready;  // maybe-nil current
+        current = fallback;
+    } while (!current);
+    return current.ready;  // non-nil current
+};
+
+let latch_overwrites = func(entry: Entry, keep: bool) -> bool {
+    if (!entry) {
+        return false;
+    }
+    let current = entry;
+    if (!current) {
+        return false;
+    }
+    for (; keep; current = nil) {
+        let observed = current.ready;  // maybe-nil current
+        if (observed) {
+            continue;
+        }
+        break;
+    }
+    return false;
+};
+
+let both_necessary = func(entry: Entry) -> bool {
+    if (entry != nil && entry.ready) {  // non-nil entry
+        return entry.ready;  // non-nil entry
+    }
+    return entry.ready;  // maybe-nil entry
+};
+
+let either_sufficient = func(entry: Entry) -> bool {
+    if (entry == nil || entry.ready) {  // non-nil entry
+        return entry.ready;  // maybe-nil entry
+    }
+    return entry.ready;  // non-nil entry
+};
+
+let comparison_chain = func(entry: Entry, distinct_from: Entry) -> bool {
+    if (entry != nil and distinct_from) {
+        return entry.ready;  // non-nil entry
+    }
+    return false;
+};
+
+let initializes = func(entry: Entry) -> bool {
+    if (let local = entry; local) {
+        return local.ready;  // non-nil local
+    }
+    return false;
+};
+
+let modified = func(entry: Entry) -> bool {
+    let current = entry;
+    if (current) {
+        let before = current.ready;  // non-nil current
+        current = nil;
+        return before && current.ready;  // maybe-nil current
+    }
+    return false;
+};
+
+let shadows = func(entry: Entry) -> bool {
+    if (entry) {
+        let entry: Entry = nil;
+        return entry.ready;  // maybe-nil entry
+    }
+    return false;
+};
+
+let external_reads = func(holder: Holder, hooks: Hooked) -> bool {
+    if (holder.item) {
+        return holder.item.ready;  // maybe-nil item
+    }
+    if (mutable_global) {
+        return mutable_global.ready;  // maybe-nil mutable_global
+    }
+    if (stable_global) {
+        return stable_global.ready;  // non-nil stable_global
+    }
+    if (hooks) {
+        return hooks.ready;  // maybe-nil hooks
+    }
+    return false;
+};
+
+let captured = func(entry: Entry) -> bool {
+    let check = func() -> bool {
+        if (entry) {
+            return entry.ready;  // maybe-nil entry
+        }
+        return false;
+    };
+    return check();
+};
+
+let selected = func(entry: Entry, skip_nil: bool) -> bool {
+    match.is (entry) {
+        nil if skip_nil => {
+            return false;
+        },
+        _ if entry != nil => {
+            return entry.ready;  // non-nil entry
+        },
+        _ => {
+            return entry.ready;  // maybe-nil entry
+        },
+    }
+};
+
+let exhaustive = func(entry: Entry) -> bool => match.is (entry) {
+    nil => false,
+    _ => entry.ready,  // non-nil entry
+};
+
+let rejects_nil_pattern = func(entry: Entry) -> bool => match.is (entry) {
+    Entry => entry.ready,  // non-nil entry
+    _ => false,
+};
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        return program.ExitCode.Ok;
+    };
+);

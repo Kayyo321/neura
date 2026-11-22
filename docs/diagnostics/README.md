@@ -435,3 +435,5 @@ Warnings do not stop compilation unless `-Werror` or a `#Deny` tag makes them er
 | [W0003](W0003.md) | `unused-result` | discarded result of a #NoDiscard call |
 | [W0004](W0004.md) | `inline` | #Inline(always: true) function that cannot be inlined |
 | [W0005](W0005.md) | `setter-never-stores` | setter that never stores its field |
+| [W0006](W0006.md) | `nil-access` | access through a reference that may be nil |
+| [W0007](W0007.md) | `nil-argument` | possibly nil value goes into a non-nil binding |

@@ -353,6 +353,26 @@ void print_ir(std::ostream& output, const IrProgram& program) {
         print_nodes(output, body.instructions, 1);
         output << "}\n";
     }
+    if (!program.nil_results.empty()) {
+        output << "nil_results {\n";
+        for (const auto& summary : program.nil_results) {
+            const auto state = summary.state == NilState::NonNil ? "non_nil" :
+                summary.state == NilState::MaybeNil ? "maybe_nil" : "unknown";
+            output << "  result %" << summary.function << ' ' << state;
+            print_span(output, summary.nil_return);
+            output << '\n';
+        }
+        output << "}\n";
+    }
+    if (!program.non_nil_uses.empty()) {
+        output << "non_nil_uses {\n";
+        for (const auto& [span, binding] : program.non_nil_uses) {
+            output << "  non_nil %" << binding;
+            print_span(output, span);
+            output << '+' << span.length << '\n';
+        }
+        output << "}\n";
+    }
 }
 
 } // namespace neura

@@ -253,6 +253,7 @@ public:
 
     void symbol(IrSymbol& value, SymbolId id) const;
     void node(IrNode& value) const;
+    void span(Span& value) const;
     void law(IrLawRecord& value) const;
     SymbolId reference(SymbolId id) const { return id == no_symbol ? id : mapping_.at(id); }
 
@@ -262,7 +263,6 @@ private:
     std::vector<std::string> new_names_;
     std::map<std::string, std::string, std::less<>> file_names_;
 
-    void span(Span& value) const;
     void type(IrType& value) const;
     void term(LawTerm& value) const;
     void proof(LawProof& value) const;
@@ -526,6 +526,34 @@ std::vector<SymbolId> link_ir(IrProgram& destination, IrProgram incoming, const 
         if (entry.field >= existing) destination.static_constants.push_back(std::move(entry));
     for (auto& law : incoming.laws)
         if (law.owner >= existing) destination.laws.push_back(std::move(law));
+    if (!incoming.non_nil_uses.empty()) {
+        // Record paths by value: appending to the destination can move its
+        // spans, including file names held by a short-string buffer.
+        const auto key = [](const std::pair<Span, SymbolId>& entry) {
+            return std::tuple{entry.first.file, entry.first.offset, entry.first.length, entry.second};
+        };
+        std::set<std::tuple<std::string, std::size_t, std::size_t, SymbolId>> seen;
+        for (const auto& use : destination.non_nil_uses) seen.insert(key(use));
+        for (auto& use : incoming.non_nil_uses) {
+            remapping.span(use.first);
+            use.second = remapping.reference(use.second);
+            if (seen.insert(key(use)).second) destination.non_nil_uses.push_back(std::move(use));
+        }
+    }
+    std::set<SymbolId> nil_records;
+    for (const auto& record : destination.nil_bindings) nil_records.insert(record.binding);
+    for (auto& record : incoming.nil_bindings) {
+        record.binding = remapping.reference(record.binding);
+        remapping.span(record.initializer);
+        if (nil_records.insert(record.binding).second) destination.nil_bindings.push_back(std::move(record));
+    }
+    nil_records.clear();
+    for (const auto& record : destination.nil_results) nil_records.insert(record.function);
+    for (auto& record : incoming.nil_results) {
+        record.function = remapping.reference(record.function);
+        remapping.span(record.nil_return);
+        if (nil_records.insert(record.function).second) destination.nil_results.push_back(std::move(record));
+    }
     apply_lexical_names(destination, renamed);
     return mapping;
 }
@@ -574,6 +602,12 @@ void erase_laws(IrProgram& program) {
         return remapping.reference(use.second) == no_symbol;
     });
     for (auto& use : program.name_uses) use.second = remapping.reference(use.second);
+    std::erase_if(program.non_nil_uses, [&](const auto& use) {
+        return remapping.reference(use.second) == no_symbol;
+    });
+    for (auto& use : program.non_nil_uses) use.second = remapping.reference(use.second);
+    for (auto& record : program.nil_bindings) record.binding = remapping.reference(record.binding);
+    for (auto& record : program.nil_results) record.function = remapping.reference(record.function);
     for (auto& codec : program.derived_codecs) {
         codec.module = remapping.reference(codec.module);
         for (auto& member : codec.members) member.symbol = remapping.reference(member.symbol);

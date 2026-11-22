@@ -309,7 +309,7 @@ Each `json` object has `code` (a string, or `null`), `severity` (`error` or `war
 | `-Werror` | Report every warning as an error; the command then exits with status 1. |
 | `--warn-library` | Also report warnings in the standard library, which are otherwise hidden. A warning about a use is reported where the use is, so a program that uses a deprecated standard library declaration gets the warning without this option. |
 
-The warnings come from [tags](Tags.md) and [accessors](Types.md#accessors):
+Warnings cover [tags](Tags.md), [accessors](Types.md#accessors), and [possibly nil references](CoreLanguage.md#nil-access-and-nil-argument-warnings).
 
 | Code | Name | Warning | Reported by |
 | --- | --- | --- | --- |
@@ -318,6 +318,8 @@ The warnings come from [tags](Tags.md) and [accessors](Types.md#accessors):
 | `W0003` | `unused-result` | An expression statement that discards the result of a `#NoDiscard` function or type, or a `new` of a `#NoDiscard` class | `check`, `prove`, `emit-ir`, `build`, `test` |
 | `W0004` | `inline` | An `#Inline(always: true)` function that the `inline-calls` pass cannot inline | `emit-ir`, `build`, and `test` when they optimize |
 | `W0005` | `setter-never-stores` | A setter that never assigns its field | `check`, `prove`, `emit-ir`, `build`, `test` |
+| `W0006` | `nil-access` | A dereference of a receiver that may be nil | `check`, `prove`, `emit-ir`, `build`, `test` |
+| `W0007` | `nil-argument` | A value that may be nil passed or stored where a non-nil reference is declared | `check`, `prove`, `emit-ir`, `build`, `test` |
 
 `#Allow(<name or code>)` on a declaration silences a warning inside it, and `#Deny(...)` makes it an error there; neither is affected by `-Wno-<name>`, and `-Werror` applies to the warnings that remain.
 

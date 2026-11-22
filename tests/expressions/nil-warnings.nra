@@ -1,0 +1,204 @@
+let optional = import:Std.Core.Optional;
+let result = import:Std.Core.Result;
+let unit = import:Std.Core.Unit;
+let closeable = import:Std.Io.Closeable;
+
+let Entry = class (
+    export let ready = true;
+    export let get_ready = func() -> bool => ready;
+);
+
+let Holder = class (
+    export let maybe: Entry = nil;
+    export let required: Entry = new;
+);
+
+let StaticHolder = class (
+    export static let required: Entry = new;
+);
+
+let Shorthand = class (
+    export let entry: Entry = new;
+    export let init = func(entry: Entry = nil) => set;
+);
+
+let Allocated = class (
+    export let init = func(entry: Entry) {};
+);
+
+let nullable_global: Entry = nil;
+let non_nil_global: Entry = new;
+
+let required_parameter = func(entry: Entry) -> bool {
+    return entry.ready;
+};
+
+let default_nil_parameter = func(entry: Entry = nil) -> bool {
+    return entry.ready;  // W0006 entry nil-default
+};
+
+let narrowed_parameter = func(entry: Entry = nil) -> bool {
+    if (!entry) {
+        return false;
+    }
+    let result = entry?.ready;
+    return entry.ready;
+};
+
+let local_nil = func() -> bool {
+    let entry: Entry = nil;
+    let safe = entry?.ready;
+    return entry.get_ready();  // W0006 entry initialized-nil
+};
+
+let constructed = func() -> bool {
+    let entry: Entry = new;
+    return entry.ready;
+};
+
+let saw_assignment = func(flag: bool) -> bool {
+    let entry: Entry = new;
+    if (flag) {
+        entry = nil;
+    }
+    return entry.ready;  // W0006 entry assigned-nil
+};
+
+let repaired_after_guard = func() -> bool {
+    let entry: Entry = nil;
+    if (!entry) {
+        entry = new;
+    }
+    return entry.ready;
+};
+
+let field_read = func(holder: Holder) -> bool {
+    return holder.maybe.ready;  // W0006 holder.maybe initialized-nil
+};
+
+let field_copy = func(holder: Holder) -> bool {
+    if (let entry = holder.maybe; entry) {
+        return entry.ready;
+    }
+    return false;
+};
+
+let field_write = func(holder: Holder) {
+    let entry: Entry = nil;
+    holder.required = entry;  // W0007 entry initialized-nil
+    holder.maybe = entry;
+};
+
+let global_read = func() -> bool {
+    return nullable_global.ready;  // W0006 nullable_global initialized-nil
+};
+
+let global_write = func() {
+    let entry: Entry = nil;
+    non_nil_global = entry;  // W0007 entry initialized-nil
+    nullable_global = entry;
+};
+
+let static_write = func() {
+    StaticHolder.required = nil;  // W0007 nil literal-nil
+};
+
+let literal_argument = func() -> bool {
+    return required_parameter(nil);  // W0007 nil literal-nil
+};
+
+let constructor_argument = func() {
+    let value = new Allocated(nil);  // W0007 nil literal-nil
+};
+
+let valid_argument = func(entry: Entry = nil) -> bool {
+    if (entry) {
+        return required_parameter(entry);
+    }
+    return default_nil_parameter(nil);
+};
+
+let make = func(flag: bool) -> Entry {
+    if (flag) {
+        return nil;
+    }
+    return new;
+};
+
+let read_call = func(flag: bool) -> bool {
+    return make(flag).ready;  // W0006 make(flag) inferred-return
+};
+
+let make_known = func() -> Entry {
+    return new;
+};
+
+let read_known_call = func() -> bool {
+    return make_known().ready;
+};
+
+let recursive = func(depth: int32) -> Entry {
+    if (depth == 0) {
+        return nil;
+    }
+    return recursive(depth - 1);
+};
+
+let read_recursive_call = func() -> bool {
+    return recursive(0).ready;  // W0006 recursive(0) inferred-return
+};
+
+let Provider = interface (
+    export let get = func() -> Entry;
+);
+
+let unknown_sources = func(provider: Provider, values: Entry[], factory: func() -> Entry, erased: class) -> bool {
+    let from_interface = provider.get().ready;
+    let from_collection = values[0].ready;
+    let from_value = factory().ready;
+    let typed = erased as Entry;
+    return from_interface || from_collection || from_value || typed.ready;
+};
+
+let coalesced = func(entry: Entry = nil) -> bool {
+    let fallback: Entry = new;
+    let result = entry ?? fallback;
+    return result.ready;
+};
+
+let optional_payload = func() -> bool {
+    let fallback: Entry = new;
+    let absent_payload = optional.Optional<Entry>.Some(nil);
+    let entry = absent_payload ?? fallback;
+    return entry.ready;  // W0006 entry initialized-nil
+};
+
+let destroyed = func(entry: Entry = nil) {
+    destroy entry;  // W0006 entry nil-default
+};
+
+let Resource = class implements closeable.Closeable (
+    export let condition = true;
+    export let close = func() -> result.Result<unit.Unit> => result.Result<unit.Unit>.Ok(unit.Unit.Value);
+);
+
+let resource = func(present: bool) -> Resource {
+    return present ? new : nil;
+};
+
+let using_constructor = func() -> result.Result<bool> {
+    using (opened = new Resource()) {
+        return result.Result<bool>.Ok(opened.condition);
+    }
+};
+
+let using_maybe = func(present: bool) -> result.Result<bool> {
+    using (opened = resource(present)) {  // W0006 resource(present) inferred-return
+        return result.Result<bool>.Ok(opened.condition);
+    }
+};
+
+.Allow("nil-access")
+let locally_allowed = func(entry: Entry = nil) -> bool {
+    return entry.ready;
+};

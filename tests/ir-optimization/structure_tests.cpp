@@ -2,8 +2,12 @@
 // are declined, and what the pass manager reports. These tests say nothing
 // about runtime behavior; see behavior_tests.cpp for that evidence.
 #include "ir-optimization/optimizer.hpp"
+#include "parser/syntax.hpp"
 #include "support.hpp"
+#include "util/source_map.hpp"
 
+#include <algorithm>
+#include <fstream>
 #include <map>
 #include <stdexcept>
 
@@ -64,6 +68,60 @@ std::string with_call(std::string_view format) {
 }
 
 } // namespace
+
+NEURA_TEST(structure, nil_narrowing_tracks_source_binding_uses) {
+    const auto fixture = environment.source_dir / "tests/expressions/nil-narrowing.nra";
+    const auto program = lower_files({fixture});
+    std::ifstream file(fixture);
+    check(file.is_open(), "could not open the nil-narrowing fixture");
+    std::string line;
+    std::size_t line_number = 0;
+    std::size_t expectations = 0;
+    while (std::getline(file, line)) {
+        ++line_number;
+        const auto comment = line.find("// ");
+        if (comment == std::string::npos) continue;
+        const auto expectation = std::string_view(line).substr(comment + 3);
+        const auto name = expectation.substr(expectation.find(' ') + 1);
+        const auto offset = std::string_view(line).substr(0, comment).rfind(name);
+        check(offset != std::string_view::npos, "could not locate a use named by the fixture");
+        const auto present = std::ranges::any_of(program.non_nil_uses, [&](const auto& use) {
+            const auto& [span, binding] = use;
+            return fs::path(span.file).filename() == fixture.filename() && span.line == line_number &&
+                   span.column == offset + 1 && span.length == name.size() && program.symbols.at(binding).name == name;
+        });
+        check_equal(present, expectation.starts_with("non-nil "), "narrowing fact on line " + std::to_string(line_number));
+        ++expectations;
+    }
+    check(expectations >= 25, "the fixture lost its narrowing assertions");
+}
+
+NEURA_TEST(structure, nil_warnings_skip_generated_import_sources) {
+    const std::string file = "test.h.Test.nra";
+    const std::string text = R"nra(let Entry = class ( export let ready = true; );
+let required = func(value: Entry) -> bool => value.ready;
+let check = func(entry: Entry = nil) -> bool {
+    let ignored = required(nil);
+    return entry.ready;
+};
+)nra";
+    for (const auto kind : {SourceKind::User, SourceKind::Generated}) {
+        SourceMap sources;
+        SourceMapScope source_scope(sources);
+        sources.add(file, text, kind, "test.h");
+        DiagnosticSink sink;
+        DiagnosticSinkScope warning_scope(sink);
+        std::vector<ParsedFile> files;
+        files.push_back(parse(lex(text, file)));
+        (void)lower(files);
+        std::size_t warnings = 0;
+        for (const auto& diagnostic : sink.entries()) {
+            if (diagnostic.code() == "W0006" || diagnostic.code() == "W0007") ++warnings;
+        }
+        check_equal(warnings, kind == SourceKind::User ? std::size_t{2} : std::size_t{0},
+                    "only authors receive warnings about the written nil use");
+    }
+}
 
 NEURA_TEST(structure, folds_defined_integer_and_boolean_constants) {
     expect_shapes(environment, "folding.nra",

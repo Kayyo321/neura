@@ -345,6 +345,21 @@ struct IrBundleFile {
     std::string contents;
 };
 
+enum class NilState : std::uint8_t { NonNil, MaybeNil, Unknown };
+
+struct IrNilBinding {
+    SymbolId binding;
+    bool initialized_nil;
+    Span initializer;
+};
+
+struct IrNilResult {
+    SymbolId function;
+    NilState state;
+    // A return of a maybe-nil value, present only for MaybeNil.
+    Span nil_return;
+};
+
 struct IrProgram {
     std::vector<IrSymbol> symbols;
     std::vector<IrBody> bodies;
@@ -373,6 +388,12 @@ struct IrProgram {
     std::vector<std::string> stylesheet_links{};
     // Checked in lowering and on artifact input, then removed before execution.
     std::vector<IrLawRecord> laws{};
+    // A load's written span and its binding, proven non-nil on every path
+    // to that use by source lowering. This table is diagnostic metadata.
+    std::vector<std::pair<Span, SymbolId>> non_nil_uses{};
+    // Source contracts and inferred return summaries for nil diagnostics.
+    std::vector<IrNilBinding> nil_bindings{};
+    std::vector<IrNilResult> nil_results{};
 };
 
 // The source loader can supply this trusted library file and retry lowering.

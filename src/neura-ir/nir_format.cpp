@@ -20,6 +20,8 @@ namespace {
 constexpr std::string_view magic = "NEIR";
 constexpr std::string_view payload_names_tag = "PNAM";
 constexpr std::string_view laws_tag = "LAWS";
+constexpr std::string_view nil_summaries_tag = "NILS";
+constexpr std::string_view non_nil_uses_tag = "NNIL";
 constexpr std::uint32_t absent = 0xffffffffU;
 // Bounds the reader's recursion and that of the passes that later walk the
 // program, with room to spare under sanitizers.
@@ -49,6 +51,31 @@ constexpr std::uint16_t task_minor = 9;
 // NeuraIR 1.10 adds symbol attributes and deferred initialization.
 constexpr std::uint16_t attribute_minor = 10;
 constexpr std::uint16_t newest_node_minor = nir_expressions_minor;
+
+bool valid_non_nil_use(const IrProgram& program, const Span& use, SymbolId id) {
+    if (id >= program.symbols.size() || use.file.empty() || !use.line || !use.column || !use.length ||
+        use.offset > std::numeric_limits<std::size_t>::max() - use.length) return false;
+    const auto& binding = program.symbols[id];
+    return (binding.kind == SymbolKind::Local || binding.kind == SymbolKind::Parameter ||
+            (binding.kind == SymbolKind::Global && binding.constant)) &&
+           (binding.type.kind == TypeKind::TypeParameter ||
+            (binding.type.kind == TypeKind::Object && !binding.type.name.starts_with('&')));
+}
+
+bool valid_nil_binding(const IrProgram& program, const IrNilBinding& record) {
+    if (record.binding >= program.symbols.size() || record.initializer.file.empty()) return false;
+    const auto& symbol = program.symbols[record.binding];
+    return (symbol.kind == SymbolKind::Field || symbol.kind == SymbolKind::Global) &&
+        (symbol.type.kind == TypeKind::Object || symbol.type.kind == TypeKind::TypeParameter);
+}
+
+bool valid_nil_result(const IrProgram& program, const IrNilResult& record) {
+    if (record.function >= program.symbols.size()) return false;
+    const auto& symbol = program.symbols[record.function];
+    return symbol.kind == SymbolKind::Function && !symbol.external && symbol.has_body &&
+        (symbol.type.kind == TypeKind::Object || symbol.type.kind == TypeKind::TypeParameter) &&
+        (record.state == NilState::MaybeNil ? !record.nil_return.file.empty() : record.nil_return.file.empty());
+}
 
 bool hook_attribute(const IrSymbol& symbol) {
     return has_attribute(symbol, AttributeId::HookGet) || has_attribute(symbol, AttributeId::HookSet) ||
@@ -272,6 +299,9 @@ public:
             }
         }
         for (const auto& constant : program.static_constants) paths(constant.value);
+        for (const auto& record : program.nil_bindings) path(record.initializer.file);
+        for (const auto& record : program.nil_results) path(record.nil_return.file);
+        for (const auto& use : program.non_nil_uses) path(use.first.file);
         for (const auto& law : program.laws) {
             law_paths(law.statement);
             if (law.certificate) law_paths(*law.certificate);
@@ -331,6 +361,8 @@ public:
             }))
             version = std::max(version, nir_lifetime_minor);
         if (!program.laws.empty()) version = nir_laws_minor;
+        if (!program.non_nil_uses.empty() || !program.nil_bindings.empty() || !program.nil_results.empty())
+            version = nir_narrowing_minor;
         polls_ = version >= 9;
         u16(version);
         count(files_.size());
@@ -381,7 +413,7 @@ public:
                 }
             }
         }
-        if (version >= nir_laws_minor) {
+        if (!program.laws.empty()) {
             for (const char letter : laws_tag) u8(letter);
             count(program.laws.size());
             for (const auto& law : program.laws) {
@@ -398,6 +430,32 @@ public:
                 }
                 u8(law.certificate.has_value());
                 if (law.certificate) proof(*law.certificate);
+            }
+        }
+        if (!program.nil_bindings.empty() || !program.nil_results.empty()) {
+            for (const char letter : nil_summaries_tag) u8(letter);
+            count(program.nil_bindings.size());
+            for (const auto& record : program.nil_bindings) {
+                if (!valid_nil_binding(program, record)) throw NirError("invalid nil binding contract");
+                reference(record.binding);
+                u8(record.initialized_nil);
+                span(record.initializer);
+            }
+            count(program.nil_results.size());
+            for (const auto& record : program.nil_results) {
+                if (!valid_nil_result(program, record)) throw NirError("invalid nil result summary");
+                reference(record.function);
+                u8(static_cast<std::uint8_t>(record.state));
+                span(record.nil_return);
+            }
+        }
+        if (!program.non_nil_uses.empty()) {
+            for (const char letter : non_nil_uses_tag) u8(letter);
+            count(program.non_nil_uses.size());
+            for (const auto& [use, binding] : program.non_nil_uses) {
+                if (!valid_non_nil_use(program, use, binding)) throw NirError("invalid nil-narrowing fact");
+                span(use);
+                reference(binding);
             }
         }
         return std::move(bytes_);
@@ -699,12 +757,53 @@ public:
                 }
             }
         }
-        if (minor_ >= nir_laws_minor) {
-            if (remaining() < laws_tag.size() ||
-                !std::equal(laws_tag.begin(), laws_tag.end(), bytes_.begin() + position_))
-                fail("missing NeuraIR 1.16 law table");
+        if (remaining() >= laws_tag.size() &&
+            std::equal(laws_tag.begin(), laws_tag.end(), bytes_.begin() + position_)) {
+            if (minor_ < nir_laws_minor) fail("law records require NeuraIR format 1.16");
             position_ += laws_tag.size();
             program.laws = laws();
+        } else if (std::ranges::any_of(program.symbols, [](const IrSymbol& value) {
+            return value.kind == SymbolKind::Law;
+        })) {
+            fail("missing NeuraIR 1.16 law table");
+        }
+        if (remaining() >= nil_summaries_tag.size() &&
+            std::equal(nil_summaries_tag.begin(), nil_summaries_tag.end(), bytes_.begin() + position_)) {
+            if (minor_ < nir_narrowing_minor) fail("nil summaries require NeuraIR format 1.16");
+            position_ += nil_summaries_tag.size();
+            const auto bindings = count(41);
+            std::set<SymbolId> seen;
+            for (std::uint32_t i = 0; i < bindings; ++i) {
+                IrNilBinding record{required_reference(), tag(1, "nil binding contract") != 0, span()};
+                if (!valid_nil_binding(program, record) || !seen.insert(record.binding).second)
+                    fail("invalid or repeated nil binding contract");
+                program.nil_bindings.push_back(std::move(record));
+            }
+            const auto results = count(41);
+            if (bindings == 0 && results == 0) fail("empty nil summary table");
+            seen.clear();
+            for (std::uint32_t i = 0; i < results; ++i) {
+                const auto function = required_reference();
+                const auto state = static_cast<NilState>(tag(static_cast<std::uint8_t>(NilState::Unknown), "nil result"));
+                IrNilResult record{function, state, span()};
+                if (!valid_nil_result(program, record) || !seen.insert(record.function).second)
+                    fail("invalid or repeated nil result summary");
+                program.nil_results.push_back(std::move(record));
+            }
+        }
+        if (remaining() >= non_nil_uses_tag.size() &&
+            std::equal(non_nil_uses_tag.begin(), non_nil_uses_tag.end(), bytes_.begin() + position_)) {
+            if (minor_ < nir_narrowing_minor) fail("nil-narrowing facts require NeuraIR format 1.16");
+            position_ += non_nil_uses_tag.size();
+            const auto entries = count(40);
+            if (entries == 0) fail("empty nil-narrowing table");
+            program.non_nil_uses.reserve(entries);
+            for (std::uint32_t i = 0; i < entries; ++i) {
+                auto use = span();
+                const auto binding = required_reference();
+                if (!valid_non_nil_use(program, use, binding)) fail("invalid nil-narrowing fact");
+                program.non_nil_uses.emplace_back(std::move(use), binding);
+            }
         }
         if (position_ != bytes_.size()) {
             fail(std::to_string(bytes_.size() - position_) + " unread bytes at the end of the file");

@@ -71,11 +71,11 @@ bool compiler_class(const IrSymbol& item) {
 
 } // namespace
 
-HookIndex::HookIndex(const IrProgram& program) {
+HookIndex::HookIndex(const IrProgram& program, bool include_templates) {
     if (!has_class_hooks(program)) return;
     for (SymbolId id = 0; id < program.symbols.size(); ++id) {
         const auto& item = program.symbols[id];
-        if (item.kind != SymbolKind::Class || !item.generics.empty()) continue;
+        if (item.kind != SymbolKind::Class || (!include_templates && !item.generics.empty())) continue;
         const auto get = effective_hook(program, id, HookKind::Get);
         const auto set = effective_hook(program, id, HookKind::Set);
         if (get == no_symbol && set == no_symbol) continue;

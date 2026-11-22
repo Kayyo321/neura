@@ -34,7 +34,9 @@ bool has_class_hooks(const IrProgram& program);
 // assignable to it has an effective clause.
 class HookIndex {
 public:
-    explicit HookIndex(const IrProgram& program);
+    // Source analysis includes generic class templates conservatively by
+    // nominal symbol; hook elaboration normally indexes concrete classes.
+    explicit HookIndex(const IrProgram& program, bool include_templates = false);
     bool any() const { return !views_.empty(); }
     bool carrying(const IrType& type) const;
     // Whether the value contains a policy word, following inline tuples and
