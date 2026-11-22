@@ -24,6 +24,12 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - Class and interface references can be tested directly in conditions and with `!` or `not`. The tests use normal nil comparisons and preserve reference reads and runtime safety checks.
 - Tags accept dot or hash sigils in the same positions. CLI and editor formatting preserve the spelling by default and can explicitly convert only tag sigils.
 
+### Changed
+
+- Empty tag groups (`#[]` and `.[]`) are now rejected with `E0910`.
+- `E0105` now reads "unknown numeric suffix".
+- The condition diagnostic now reads "expected bool or a class or interface reference".
+
 ## [0.3.0] - 2026-11-20
 
 ### Added
