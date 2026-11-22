@@ -149,6 +149,11 @@ struct Callee {
     Size size;
 };
 
+struct PreparedCallee {
+    std::optional<Callee> callee;
+    const char* refusal = nullptr;
+};
+
 // Where a Call sits in its block: the write-back before it, the counter
 // reload after it (and the kernel step reload, in a function with inline
 // kernels), and the jump to the resume block.
@@ -163,10 +168,11 @@ struct CallSite {
     std::vector<std::uint32_t> words;
 };
 
-std::optional<CallSite> call_site(const Function& f, std::uint32_t block) {
+std::optional<CallSite> call_site(const Function& f, std::uint32_t block, bool* has_call = nullptr) {
     const auto& insts = f.blocks[block].insts;
     for (std::size_t k = 0; k < insts.size(); ++k) {
         if (f.insts[insts[k]].op != Op::Call) continue;
+        if (has_call) *has_call = true;
         // The builder's shape: write-back, call, constants (the result's
         // flag), counter reload, kernel step reload (with inline kernels),
         // jump.
@@ -214,11 +220,12 @@ public:
     }
 
 private:
+    void refuse(const char* reason) { ++source_.refusals[reason]; }
+
     // Inlines what the rules allow into `f`, at `level` below the root, with
     // the functions of `chain` (f's included) above it. Returns f's size
     // after its own inlining, starting from `own`.
     Size inline_into(Function& f, std::vector<std::uint32_t>& chain, std::uint32_t level, Size own) {
-        if (level >= max_depth) return own;
         // The blocks that are exits of a Dispatch, and the Dispatch blocks.
         std::vector<std::uint8_t> dispatch_exit(f.blocks.size(), 0);
         std::vector<std::uint32_t> dispatches;
@@ -231,7 +238,15 @@ private:
             }
         }
         for (std::uint32_t b = 0; b < f.blocks.size(); ++b) {
-            if (!dispatch_exit[b] && call_site(f, b)) calls.push_back(b);
+            if (dispatch_exit[b]) continue;
+            bool has_call = false;
+            if (call_site(f, b, &has_call)) calls.push_back(b);
+            else if (has_call) refuse("unsupported call sequence");
+        }
+        if (level >= max_depth) {
+            const auto sites = calls.size() + dispatches.size();
+            if (sites != 0) source_.refusals["inline depth limit"] += sites;
+            return own;
         }
         // The root keeps within the total; a callee within its own limits.
         const auto room = [&](const Size& add) {
@@ -247,7 +262,15 @@ private:
             const auto site = *call_site(f, b);
             const auto& call = f.insts[site.call];
             const auto callee = prepare(static_cast<std::uint32_t>(call.imm), chain, level + 1, max_callee_blocks);
-            if (!callee || !room(callee->size) || !compatible(f, site, *callee->ir)) continue;
+            if (!callee) continue;
+            if (!room(callee->size)) {
+                refuse("caller growth limit");
+                continue;
+            }
+            if (!compatible(f, site, *callee->ir)) {
+                refuse("arguments or results do not fit");
+                continue;
+            }
             splice(f, site, *callee->ir);
             grow(callee->size);
         }
@@ -260,7 +283,9 @@ private:
                          const Room& room, const Grow& grow) {
         const auto dispatch = f.blocks[d].insts.back();
         const auto table_index = static_cast<std::uint32_t>(f.insts[dispatch].imm);
-        if (table_index >= f.dispatch_tables.size() || table_index >= f.dispatch_origins.size()) return;
+        if (table_index >= f.dispatch_tables.size() || table_index >= f.dispatch_origins.size()) {
+            return refuse("missing dispatch table");
+        }
         const auto table = f.dispatch_tables[table_index];
         // The exits to inline, and the class tests (tag, exit) to make.
         std::vector<std::uint32_t> exits;
@@ -271,7 +296,8 @@ private:
             const auto [program, index] = f.dispatch_origins[table_index];
             const auto* record = source_.record ? source_.record(*f.programs[program], index) : nullptr;
             std::vector<std::uint64_t> tags;
-            if (record == nullptr || !record->read(tags)) return;
+            if (record == nullptr) return refuse("no dispatch profile");
+            if (!record->read(tags)) return refuse("too many receiver classes");
             for (const auto tag : tags) {
                 const auto found = std::lower_bound(table.exits.begin(), table.exits.end(), tag,
                                                     [](const auto& entry, std::uint64_t key) { return entry.first < key; });
@@ -279,25 +305,30 @@ private:
                 tests.emplace_back(tag, found->second);
                 if (std::find(exits.begin(), exits.end(), found->second) == exits.end()) exits.push_back(found->second);
             }
-            if (exits.size() > max_class_exits) return;
+            if (exits.size() > max_class_exits) return refuse("too many dispatch exits");
         }
-        if (exits.empty()) return;
+        if (exits.empty()) return refuse("no profiled dispatch target");
         // Every exit's callee must pass, or nothing is inlined here.
         std::vector<std::pair<CallSite, Callee>> chosen;
         Size added;
         for (const auto exit : exits) {
-            if (exit == table.fallback || exit >= f.blocks[d].succs.size()) return;
+            if (exit == table.fallback || exit >= f.blocks[d].succs.size()) {
+                return refuse("unsupported dispatch exit");
+            }
             const auto block = f.blocks[d].succs[exit];
             const auto site = call_site(f, block);
-            if (!site || f.blocks[block].preds.size() != 1 || f.insts[f.blocks[block].insts.front()].op == Op::Phi) return;
+            if (!site || f.blocks[block].preds.size() != 1 || f.insts[f.blocks[block].insts.front()].op == Op::Phi) {
+                return refuse("unsupported dispatch exit");
+            }
             const auto callee =
                 prepare(static_cast<std::uint32_t>(f.insts[site->call].imm), chain, level + 1, max_dispatch_blocks);
-            if (!callee || !compatible(f, *site, *callee->ir)) return;
+            if (!callee) return;
+            if (!compatible(f, *site, *callee->ir)) return refuse("arguments or results do not fit");
             added.ops += callee->size.ops;
             added.blocks += callee->size.blocks;
             chosen.emplace_back(*site, *callee);
         }
-        if (!room(added)) return;
+        if (!room(added)) return refuse("caller growth limit");
         for (const auto& [site, callee] : chosen) {
             splice(f, site, *callee.ir);
             grow(callee.size);
@@ -312,42 +343,60 @@ private:
     // passes the rules; `max_blocks` is the most blocks it may have.
     std::optional<Callee> prepare(std::uint32_t function, std::vector<std::uint32_t>& chain, std::uint32_t level,
                                   std::uint64_t max_blocks) {
-        if (level > max_depth) return std::nullopt;
-        // No recursion on the current chain.
-        if (std::find(chain.begin(), chain.end(), function) != chain.end()) return std::nullopt;
-        const auto* program = source_.program ? source_.program(function) : nullptr;
-        if (program == nullptr || !program->program || program->entries.empty() ||
-            program->entries.front().block != 0) {
+        const auto reject = [&](const char* reason) -> std::optional<Callee> {
+            refuse(reason);
             return std::nullopt;
+        };
+        // No recursion on the current chain.
+        if (std::find(chain.begin(), chain.end(), function) != chain.end()) return reject("recursive call");
+        const auto found_program = source_.program ? source_.program(function) : InlineSource::CalleeProgram{};
+        if (!found_program.settled) return reject("callee program not settled");
+        const auto* program = found_program.region;
+        if (program == nullptr) return reject("callee has no function program");
+        if (!program->program || program->entries.empty() || program->entries.front().block != 0) {
+            return reject("callee has no function entry");
         }
         for (const auto slot : program->entries.front().reads) {
-            if (slot >= program->parameter_count) return std::nullopt;
+            if (slot >= program->parameter_count) return reject("callee entry reads non-parameters");
         }
-        if (uses_storage_regions(image_.functions.at(function))) return std::nullopt;
+        if (uses_storage_regions(image_.functions.at(function))) return reject("callee uses storage regions");
         const auto base = size_of(*program);
-        if (base.blocks > max_blocks || base.ops > max_callee_ops) return std::nullopt;
+        if (base.blocks > max_blocks) return reject("callee block limit");
+        if (base.ops > max_callee_ops) return reject("callee operation limit");
         auto key = chain;
         key.push_back(function);
         key.push_back(level);
-        if (const auto found = prepared_.find(key); found != prepared_.end()) {
-            if (!found->second || found->second->size.blocks > max_blocks) return std::nullopt;
-            return found->second;
+        const auto [found, inserted] = prepared_.try_emplace(std::move(key));
+        auto& prepared = found->second;
+        if (inserted) {
+            auto built = build(image_, *program, false);
+            if (!built.program) {
+                prepared.refusal = "callee could not be lowered";
+            } else {
+                auto& ir = built.program->ir;
+                chain.push_back(function);
+                const auto own = inline_into(ir, chain, level, base);
+                chain.pop_back();
+                prepared.refusal = inlining_refusal(ir, own);
+                if (!prepared.refusal) {
+                    // Only entry 0 is ever entered in a caller.
+                    ir.entries.resize(1);
+                    detail::remove_unreachable(ir);
+                    detail::compact(ir);
+                    prepared.callee = Callee{std::make_shared<const Function>(std::move(ir)), own};
+                }
+            }
         }
-        auto& slot = prepared_[key];
-        auto built = build(image_, *program, false);
-        if (!built.program) return std::nullopt;
-        auto& ir = built.program->ir;
-        chain.push_back(function);
-        const auto own = inline_into(ir, chain, level, base);
-        chain.pop_back();
-        if (own.blocks > max_callee_blocks || own.ops > max_callee_ops || !inlinable(ir)) return std::nullopt;
-        // Only entry 0 is ever entered in a caller.
-        ir.entries.resize(1);
-        detail::remove_unreachable(ir);
-        detail::compact(ir);
-        slot = Callee{std::make_shared<const Function>(std::move(ir)), own};
-        if (slot->size.blocks > max_blocks) return std::nullopt;
-        return slot;
+        if (prepared.refusal) return reject(prepared.refusal);
+        if (prepared.callee->size.blocks > max_blocks) return reject("callee block limit after nested inlining");
+        return prepared.callee;
+    }
+
+    static const char* inlining_refusal(const Function& f, const Size& size) {
+        if (size.blocks > max_callee_blocks) return "callee block limit after nested inlining";
+        if (size.ops > max_callee_ops) return "callee operation limit after nested inlining";
+        if (!inlinable(f)) return "callee requires a frame or helper";
+        return nullptr;
     }
 
     // Whether a function has a storage region operation (NVR 1.7) in any
@@ -833,7 +882,7 @@ private:
     std::uint64_t limit_ = 0;
     std::uint64_t total_ = 0;
     // Callees prepared so far, by inline chain, function and level.
-    std::map<std::vector<std::uint32_t>, std::optional<Callee>> prepared_;
+    std::map<std::vector<std::uint32_t>, PreparedCallee> prepared_;
 };
 
 } // namespace

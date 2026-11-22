@@ -10,6 +10,8 @@ import tempfile
 STATS = re.compile(rb"^stats: steps (\d+), peak heap cells (\d+)", re.MULTILINE)
 REBUILDS = re.compile(rb"^tier 3 program (\d+) of function (\d+) \(callee settlement rebuild\):", re.MULTILINE)
 COMPILATION = re.compile(rb"^tier: native programs \d+ \(\d+ bytes of code, (\d+) calls inlined", re.MULTILINE)
+INLINE_REFUSAL = re.compile(rb"^tier: inline refusal [1-9]\d*: callee program not settled$", re.MULTILINE)
+LOOP_REFUSAL = re.compile(rb"^tier: loop hoist refusal [1-9]\d*: .+$", re.MULTILINE)
 
 
 def run(binary, mode, image, *args, program_args=()):
@@ -33,6 +35,7 @@ def main():
     parser.add_argument("neura", type=Path)
     parser.add_argument("--fixture", type=Path, default=Path(__file__).with_name("fixtures") / "callee-settlement.nra")
     parser.add_argument("--native", action="store_true")
+    parser.add_argument("--refusals-base", type=Path, help="compare new refusal counters against a binary without them")
     args = parser.parse_args()
     binary = args.neura.resolve()
     mode = "native" if args.native else "interp"
@@ -52,6 +55,13 @@ def main():
             assert f"tier 3 program {program.decode()} of function {function.decode()}:".encode() in result.stderr
         compilation = COMPILATION.search(result.stderr)
         assert compilation and int(compilation[1]) > 0, "settlement did not unlock an inline"
+        if args.refusals_base:
+            assert INLINE_REFUSAL.search(result.stderr), "no unsettled callee refusal was reported"
+            assert LOOP_REFUSAL.search(result.stderr), "no skipped natural loop was reported"
+            base, old = run(args.refusals_base.resolve(), mode, image)
+            assert old == expected, (mode, old, expected)
+            assert b"tier: inline refusal" not in base.stderr, "baseline already reports inline refusals"
+            assert b"tier: loop hoist refusal" not in base.stderr, "baseline already reports loop refusals"
 
         # A step limit before the first result or after the missing callee is
         # called, and overflow in the newly eligible inlined arithmetic.

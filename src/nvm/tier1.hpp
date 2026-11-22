@@ -276,6 +276,10 @@ struct TierStatistics {
     std::uint64_t native_class_tests = 0;
     std::uint64_t native_failed = 0;
     std::map<std::string, std::uint64_t> native_rejections;
+    // Failed inlining attempts and natural loops LICM left in place, each
+    // grouped by the first reason the attempted transformation could not run.
+    std::map<std::string, std::uint64_t> native_inline_refusals;
+    std::map<std::string, std::uint64_t> native_loop_refusals;
     NativeCounts native;
     std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint64_t> native_deopts;
     // The heap checks tier 3's passes removed from the native programs made,

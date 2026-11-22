@@ -458,12 +458,17 @@ struct DispatchRecord {
     bool read(std::vector<std::uint64_t>& tags) const;
 };
 
-// What the inliner reads from the cache: the published function program of a
-// function (null when it has none), and the speculation record of a dispatch
-// table of a program (null when there is none).
+// What the inliner reads from the cache: each function's Tier 2 program and
+// readiness, and the speculation record of a dispatch table (if any).
 struct InlineSource {
-    std::function<const tier2::Region*(std::uint32_t function)> program;
+    struct CalleeProgram {
+        const tier2::Region* region = nullptr;
+        bool settled = true;
+    };
+
+    std::function<CalleeProgram(std::uint32_t function)> program;
     std::function<const DispatchRecord*(const tier2::Region& program, std::uint32_t table)> record;
+    std::map<std::string, std::uint64_t>& refusals;
 };
 
 // Inlines calls into `function` (the IR of a function program, built and not

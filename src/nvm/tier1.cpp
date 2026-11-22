@@ -172,6 +172,14 @@ std::string describe(const TierStatistics& s) {
         for (const auto& [reason, count] : s.native_rejections) {
             out += "tier: no native program " + std::to_string(count) + ": " + reason + "\n";
         }
+        const auto refusals = [&](const std::string& label, const auto& counts) {
+            if (counts.empty()) out += "tier: " + label + "s: none\n";
+            for (const auto& [reason, count] : counts) {
+                out += "tier: " + label + " " + std::to_string(count) + ": " + reason + "\n";
+            }
+        };
+        refusals("inline refusal", s.native_inline_refusals);
+        refusals("loop hoist refusal", s.native_loop_refusals);
         std::vector<std::pair<std::uint64_t, std::pair<std::uint32_t, std::uint32_t>>> ends;
         for (const auto& [block, count] : s.native_deopts) ends.emplace_back(count, block);
         std::sort(ends.begin(), ends.end(), std::greater<>());

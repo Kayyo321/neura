@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <map>
+#include <string_view>
 #include <utility>
 
 namespace neura::nvm::tier3 {
@@ -1916,6 +1917,7 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
     }
     tier3::BuildResult built;
     std::vector<std::uint32_t> pending;
+    std::map<std::string, std::uint64_t> inline_refusals;
     std::uint64_t bytes = 0;
     try {
         built = tier3::build(image_, program, tier3::verify_enabled(), variant);
@@ -1923,16 +1925,16 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
         // Only the standard variant inlines: the profile and checkable
         // variants keep every call and return the reference's.
         if (built.program && variant == tier3::Variant::Standard && options_.native_inlining) {
-            tier3::InlineSource source;
-            source.program = [this, previous, &pending](std::uint32_t function) -> const tier2::Region* {
-                const std::lock_guard lock(mutex_);
-                const auto& found = programs_[function];
-                if (found.state == RegionEntry::State::Settled) return found.region.get();
-                if (!previous) pending.push_back(function);
-                return nullptr;
-            };
-            source.record = [this](const tier2::Region& region, std::uint32_t table) -> const tier3::DispatchRecord* {
-                return dispatch_record(region, table);
+            const tier3::InlineSource source{
+                [this, previous, &pending](std::uint32_t function) -> tier3::InlineSource::CalleeProgram {
+                    const std::lock_guard lock(mutex_);
+                    const auto& found = programs_[function];
+                    if (found.state == RegionEntry::State::Settled) return {found.region.get(), true};
+                    if (!previous) pending.push_back(function);
+                    return {nullptr, false};
+                },
+                [this](const tier2::Region& region, std::uint32_t table) { return dispatch_record(region, table); },
+                inline_refusals,
             };
             const auto failure = tier3::inline_calls(image_, built.program->ir, source, tier3::verify_enabled());
             if (!failure.empty()) {
@@ -2019,6 +2021,7 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
     bool settled_during_build = false;
     {
         const std::lock_guard lock(mutex_);
+        for (const auto& [reason, count] : inline_refusals) statistics_.native_inline_refusals[reason] += count;
         if (built.program) {
             std::sort(pending.begin(), pending.end());
             pending.erase(std::unique(pending.begin(), pending.end()), pending.end());
@@ -2033,6 +2036,11 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
                 for (const auto& [name, count] : entry->ir.pass_counts) pass_counts[name] += count;
             }
             for (const auto& [name, count] : pass_counts) {
+                constexpr std::string_view skip = "licm.skip.";
+                if (name.starts_with(skip)) {
+                    statistics_.native_loop_refusals[name.substr(skip.size())] += count;
+                    continue;
+                }
                 for (const char* kind : {"nil", "lookup", "kind", "init", "bounds", "global"}) {
                     if (name == std::string("gvn.") + kind || name == std::string("elim.") + kind) {
                         statistics_.native_heap_checks[kind] += count;

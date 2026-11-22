@@ -318,6 +318,17 @@ bool hoist_one(Function& f, const Cfg& cfg, const Loop& loop, Counts& counts) {
         bool check;
     };
     std::vector<Move> plan;
+    const char* first_refusal = nullptr;
+    const auto refuse = [&](const char* reason) {
+        if (!first_refusal) first_refusal = reason;
+    };
+    const auto check_refusal = [&](const Inst& in, bool on_every_path, bool effect_seen) -> const char* {
+        if (!has_state) return "header has no reconstructible frame state";
+        if (!on_every_path) return "check does not execute on every back edge";
+        if (effect_seen) return "check follows a possible effect";
+        if (in.guard != none) return "check depends on a guard";
+        return nullptr;
+    };
     for (const auto b : cfg.rpo) {
         if (!loop.in_body[b]) continue;
         bool effect_seen = tainted[b] != 0;
@@ -355,13 +366,21 @@ bool hoist_one(Function& f, const Cfg& cfg, const Loop& loop, Counts& counts) {
                 // global's flag, while nothing in the loop frees or
                 // collects.
                 const bool of_values = in.op == Op::CheckNotNil || in.op == Op::CheckIndex;
-                if (has_state && on_every_path && !effect_seen && in.guard == none && (of_values || !safepoint)) {
+                if (const auto reason = check_refusal(in, on_every_path, effect_seen)) {
+                    refuse(reason);
+                } else if (!of_values && safepoint) {
+                    refuse("loop may invalidate a heap check");
+                } else {
                     take_constants();
                     if (in.op == Op::Lookup) outside[id] = 1;
                     if (in.op == Op::CheckKind) kind_checked[in.operands[0]] = 1;
                     plan.push_back({id, true});
                 }
-            } else if (is_heap_read(in.op) && in.op != Op::LoadElement && !safepoint) {
+            } else if (is_heap_read(in.op) && in.op != Op::LoadElement) {
+                if (safepoint) {
+                    refuse("loop may invalidate a heap read");
+                    continue;
+                }
                 bool moves = true;
                 switch (in.op) {
                 case Op::LoadField:
@@ -376,19 +395,27 @@ bool hoist_one(Function& f, const Cfg& cfg, const Loop& loop, Counts& counts) {
                     outside[id] = 1;
                     plan.push_back({id, false});
                     ++counts["licm.read"];
+                } else {
+                    refuse("heap read depends on mutable or unchecked storage");
                 }
-            } else if (in.op == Op::Lift && (in.flags & Checked) != 0 && in.guard == none && has_state && on_every_path &&
-                       !effect_seen &&
+            } else if (in.op == Op::Lift && (in.flags & Checked) != 0 &&
                        !lift::float_opcode(in.lifted.op)) {
-                take_constants();
-                outside[id] = 1;
-                plan.push_back({id, true});
+                if (const auto reason = check_refusal(in, on_every_path, effect_seen)) {
+                    refuse(reason);
+                } else {
+                    take_constants();
+                    outside[id] = 1;
+                    plan.push_back({id, true});
+                }
             }
         }
     }
-    if (plan.empty() && invariant_phis.empty()) return false;
     // A preheader only when something moves; the phis alone are not worth one.
-    if (plan.empty()) return false;
+    if (plan.empty()) {
+        if (!first_refusal) first_refusal = invariant_phis.empty() ? "no movable invariant operation" : "only invariant phis";
+        ++counts[std::string("licm.skip.") + first_refusal];
+        return false;
+    }
     const auto preheader = make_preheader(f, loop);
     Replacements repl(f.insts.size());
     for (const auto id : invariant_phis) repl.set(id, entry_operand(f, loop, id));
