@@ -8,6 +8,7 @@ import http.client
 import os
 from pathlib import Path
 import queue
+import select
 import socket
 import ssl
 import subprocess
@@ -475,24 +476,84 @@ class H2Relay:
         if not self.negotiated:
             raise AssertionError("the native client did not negotiate h2")
 
-    def copy(self, source, target):
+    def pump(self, front, backend):
+        # One thread owns BOTH SSL objects. Concurrent recv/send on one
+        # SSLSocket can corrupt TLS state even when the directions differ.
+        peers = (front, backend)
+        outgoing = {front: bytearray(), backend: bytearray()}
+        writing = {front: b"", backend: b""}
+        send_needs_read = {front: False, backend: False}
+        read_needs_write = {front: False, backend: False}
+        response_frames = bytearray()
+        response_complete = False
         deadline = time.monotonic() + 6
-        try:
-            while not self.stop.is_set() and time.monotonic() < deadline:
+        for peer in peers:
+            peer.setblocking(False)
+        while not self.stop.is_set() and time.monotonic() < deadline:
+            readers = list(peers)
+            writers = [peer for peer in peers if read_needs_write[peer] or
+                       ((outgoing[peer] or writing[peer]) and not send_needs_read[peer])]
+            readable, writable, _ = select.select(readers, writers, [], 0.1)
+            for peer in peers:
+                if peer.pending() and peer not in readable:
+                    readable.append(peer)
+            # Retain the exact write bytes across SSLWantRead/SSLWantWrite.
+            for peer in peers:
+                if not writing[peer] and outgoing[peer]:
+                    writing[peer] = bytes(outgoing[peer][:65536])
+                    del outgoing[peer][:len(writing[peer])]
+                ready = peer in readable if send_needs_read[peer] else peer in writable
+                if not writing[peer] or not ready:
+                    continue
                 try:
-                    data = source.recv(65536)
-                except socket.timeout:
+                    sent = peer.send(writing[peer])
+                    if sent == 0:
+                        raise AssertionError("TLS relay write made no progress")
+                    writing[peer] = writing[peer][sent:]
+                    send_needs_read[peer] = False
+                except ssl.SSLWantReadError:
+                    send_needs_read[peer] = True
+                except ssl.SSLWantWriteError:
+                    send_needs_read[peer] = False
+            if response_complete and not outgoing[front] and not writing[front]:
+                # Let the client consume the final frame before closing the
+                # transport, even if its last control frame is still in flight.
+                self.stop.wait(timeout=max(0, deadline - time.monotonic()))
+                return
+            for peer in peers:
+                if send_needs_read[peer]:
+                    continue
+                if peer not in readable and not (read_needs_write[peer] and peer in writable):
+                    continue
+                try:
+                    data = peer.recv(65536)
+                    read_needs_write[peer] = False
+                except ssl.SSLWantReadError:
+                    read_needs_write[peer] = False
+                    continue
+                except ssl.SSLWantWriteError:
+                    read_needs_write[peer] = True
                     continue
                 if not data:
-                    return
-                target.sendall(data)
-        except (ConnectionError, ssl.SSLError):
-            # Closing a completed one-request fetch tears down its TLS session.
-            pass
-        finally:
-            self.stop.set()
-            with contextlib.suppress(OSError):
-                target.shutdown(socket.SHUT_RDWR)
+                    raise AssertionError("TLS relay peer closed before a complete HTTP/2 response was forwarded")
+                target = backend if peer is front else front
+                outgoing[target].extend(data)
+                if len(outgoing[target]) > 256 * 1024:
+                    raise AssertionError("TLS relay buffer exceeded its bound")
+                if peer is backend:
+                    response_frames.extend(data)
+                    while len(response_frames) >= 9:
+                        size = int.from_bytes(response_frames[:3], "big")
+                        if size > 65536:
+                            raise AssertionError("unexpectedly large HTTP/2 fixture frame")
+                        if len(response_frames) < 9 + size:
+                            break
+                        frame_type, flags = response_frames[3], response_frames[4]
+                        stream = int.from_bytes(response_frames[5:9], "big") & 0x7fffffff
+                        if stream == 1 and frame_type in (0, 1) and flags & 1:
+                            response_complete = True
+                        del response_frames[:9 + size]
+        raise AssertionError("TLS relay stopped before forwarding the complete HTTP/2 response")
 
     def serve(self):
         try:
@@ -507,14 +568,7 @@ class H2Relay:
                             if backend.selected_alpn_protocol() != "h2":
                                 raise AssertionError("Neura HTTPS server did not select h2")
                             self.negotiated = True
-                            front.settimeout(0.25)
-                            backend.settimeout(0.25)
-                            reverse = threading.Thread(target=self.copy, args=(backend, front), daemon=True)
-                            reverse.start()
-                            self.copy(front, backend)
-                            reverse.join(timeout=5)
-                            if reverse.is_alive():
-                                raise AssertionError("HTTP/2 reverse relay exceeded its deadline")
+                            self.pump(front, backend)
         except Exception as error:
             self.errors.put(error)
 
