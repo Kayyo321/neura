@@ -234,6 +234,7 @@ private:
                           const IrType& type, const Span& span);
     void branch_statement(const IrNode& node);
     void loop(const IrNode& node);
+    void batch_list_run(const IrNode& node, std::uint32_t head, std::uint32_t body, std::uint32_t latch);
     void destroy(const IrNode& node);
     Operand expression(const IrNode& node);
     // The words of a node: `expression` for a node that is not inline.
@@ -479,6 +480,12 @@ public:
     const nvr::Function& converted(std::uint32_t index) const { return image_.functions.at(index); }
     const nvr::Type& type_at(std::uint32_t index) const { return image_.types.at(index); }
     const nvr::Global& global_at(std::uint32_t index) const { return image_.globals.at(index); }
+    bool jump_only(const nvr::Block& block) const {
+        // Polling changes scheduler state, so keep a block that polls.
+        return block.inputs.empty() && image_.graphs[block.graph].nodes.empty() && block.exits.size() == 1 &&
+               block.exits.front().kind == nvr::ExitKind::Continue && block.exits.front().assignments.empty() &&
+               !block.exits.front().poll;
+    }
 
 private:
     void index_program();
@@ -1591,22 +1598,14 @@ void Converter::build_dispatch(const Dispatch& dispatch) {
 void Converter::thread_jumps() {
     for (auto& function : image_.functions) {
         const auto count = static_cast<std::uint32_t>(function.blocks.size());
-        const auto jump_only = [&](std::uint32_t index) {
-            const auto& block = function.blocks[index];
-            // A poll is an effect of the exit that carries it, so a block that
-            // only polls and continues stays.
-            return block.inputs.empty() && image_.graphs[block.graph].nodes.empty() && block.exits.size() == 1 &&
-                   block.exits.front().kind == nvr::ExitKind::Continue && block.exits.front().assignments.empty() &&
-                   !block.exits.front().poll;
-        };
         std::vector<std::uint32_t> forward(count);
         for (std::uint32_t b = 0; b < count; ++b) {
             auto target = b;
-            for (std::uint32_t hops = 0; hops <= count && jump_only(target); ++hops) {
+            for (std::uint32_t hops = 0; hops <= count && jump_only(function.blocks[target]); ++hops) {
                 target = function.blocks[target].exits.front().resume;
             }
             // A chain that does not reach a block with work cycles; keep it.
-            forward[b] = jump_only(target) ? b : target;
+            forward[b] = jump_only(function.blocks[target]) ? b : target;
         }
         for (auto& block : function.blocks) {
             for (auto& exit : block.exits) {
@@ -2687,7 +2686,155 @@ void FunctionCompiler::loop(const IrNode& node) {
             jump(head, node.poll);
         }
     }
+    batch_list_run(node, head, body, latch);
     begin(exit, node.span);
+}
+
+void FunctionCompiler::batch_list_run(const IrNode& node, std::uint32_t head, std::uint32_t body,
+                                      std::uint32_t latch) {
+    if (origin_.role != Role::Function || c_.debug_statements() || node.poll) return;
+    const auto& function = c_.symbol(origin_.symbol);
+    auto file = function.owner;
+    while (file != no_symbol && c_.symbol(file).kind != SymbolKind::File) file = c_.symbol(file).owner;
+    if (file == no_symbol) return;
+    const auto& library = c_.symbol(file).library_path;
+    const bool repeat = library == "std/collections/lists.nra" && function.name.starts_with("filled<");
+    const bool copy = library == "std/io/internal/bytes.nra" && function.name == "append_range";
+    const bool builder = library == "std/core/string-builder.nra" && function.name == "append";
+    const bool join = library == "std/text/strings.nra" && function.name == "append_bytes";
+    if (!repeat && !copy && !builder && !join) return;
+
+    // Match the typed loop even for the standard-library helpers. Its
+    // only effects must be the appends and updates to its integer index.
+    const auto local = [&](const IrNode& value) {
+        return value.op == IrOp::Load && slots_.contains(value.symbol);
+    };
+    const auto plus = [&](const IrNode& value, std::string_view number) {
+        return value.op == IrOp::Binary && value.text == "+" && local(value.operands[0]) &&
+            value.operands[1].op == IrOp::Integer && value.operands[1].text == number;
+    };
+    const auto& test = node.operands.front();
+    const bool quad = join && test.op == IrOp::Binary && test.text == "<=" && plus(test.operands[0], "4");
+    if (test.op != IrOp::Binary || (!quad && test.text != "<") || !local(test.operands[1])) return;
+    const auto& cursor = quad ? test.operands[0].operands[0] : test.operands[0];
+    if (!local(cursor)) return;
+    const auto cursor_slot = slots_.at(cursor.symbol);
+    const auto end_slot = slots_.at(test.operands[1].symbol);
+    const auto i32 = c_.scalar(nvr::TypeKind::Signed, 32);
+    if (cursor_slot == end_slot || function_.frame_types[cursor_slot] != i32 ||
+        function_.frame_types[end_slot] != i32) return;
+
+    const auto group = quad ? 4U : 1U;
+    const auto stride = (quad ? "4" : "1");
+    auto previous_index = cursor.symbol;
+    const IrNode* increment;
+    if (builder) {
+        // The for-loop latch's postfix increment saves its old value in
+        // one hidden local that the loop never observes after the latch.
+        if (node.body.size() != 1 || node.alternative.size() != 1 || latch == head) return;
+        const auto& discarded = node.alternative.front();
+        if (discarded.op != IrOp::Discard || discarded.operands.front().op != IrOp::ScopedValue) return;
+        const auto& scope = discarded.operands.front().body;
+        if (scope.size() != 3 || scope[0].op != IrOp::Initialize || scope[0].operands.size() != 1 ||
+            !local(scope[0].operands.front()) || scope[0].operands.front().symbol != cursor.symbol ||
+            !local(scope[2]) || scope[2].symbol != scope[0].symbol) return;
+        previous_index = scope[0].symbol;
+        increment = &scope[1];
+    } else {
+        if (node.body.size() != group + 1 || !node.alternative.empty()) return;
+        const auto& block = node.body.back();
+        if (block.op != IrOp::Block || block.body.size() != 1) return;
+        increment = &block.body.front();
+    }
+    if (increment->op != IrOp::Store || !local(increment->operands[0]) ||
+        increment->operands[0].symbol != cursor.symbol || !plus(increment->operands[1], stride) ||
+        increment->operands[1].operands[0].symbol != previous_index) return;
+
+    SymbolId destination = no_symbol;
+    SymbolId source = no_symbol;
+    for (std::size_t i = 0; i < group; ++i) {
+        const auto& discarded = node.body[i];
+        if (discarded.op != IrOp::Discard || discarded.operands.front().op != IrOp::Append) return;
+        const auto& operands = discarded.operands.front().operands;
+        const auto& list = operands[0];
+        if (builder) {
+            if (list.op != IrOp::Field || list.operands.front().op != IrOp::Receiver) return;
+        } else if (!local(list)) {
+            return;
+        }
+        if (i != 0 && list.symbol != destination) return;
+        destination = list.symbol;
+        const auto& value = operands[1];
+        if (repeat) {
+            if (!local(value) || cursor.symbol == value.symbol) return;
+            continue;
+        }
+        if (value.op != (copy ? IrOp::Index : IrOp::TextByteAt) || !local(value.operands[0]) ||
+            value.type.kind != TypeKind::Integer || value.type.name != "uint8") return;
+        if (i != 0 && source != value.operands[0].symbol) return;
+        source = value.operands[0].symbol;
+        const auto& access = value.operands[1];
+        if (i == 0) {
+            if (!local(access) || access.symbol != cursor.symbol) return;
+        } else if (!plus(access, std::to_string(i)) || access.operands[0].symbol != cursor.symbol) {
+            return;
+        }
+    }
+
+    // Keep the first checked access and the original continuation. Check
+    // the emitted topology as well: a different lowering may split any of
+    // these expressions into more blocks and need a different step charge.
+    const auto& test_exits = function_.blocks[head].exits;
+    if (test_exits.size() != (quad ? 3U : 2U) || test_exits[0].kind != nvr::ExitKind::Continue ||
+        test_exits[0].resume != body) return;
+    const auto state_exit = [&](std::uint32_t block, nvr::StateOp op) -> nvr::Exit* {
+        auto& exits = function_.blocks[block].exits;
+        if (exits.empty() || exits.front().kind != nvr::ExitKind::State || exits.front().operation != op ||
+            !exits.front().assignments.empty()) return nullptr;
+        return &exits.front();
+    };
+    if (builder) {
+        const auto* field = state_exit(body, nvr::StateOp::ReadField);
+        if (!field) return;
+        body = field->resume;
+    }
+    nvr::Exit* run = nullptr;
+    for (std::size_t i = 0; i < group; ++i) {
+        if (!repeat) {
+            const auto* read = state_exit(body, nvr::StateOp::ReadElement);
+            if (!read) return;
+            body = read->resume;
+        }
+        if (function_.blocks[body].exits.size() != 1) return;
+        run = state_exit(body, nvr::StateOp::AppendElement);
+        if (!run) return;
+        body = run->resume;
+    }
+    if (builder && body != latch) {
+        // Normal conversion removes the empty jump from the append to
+        // the for-loop latch. It contributes no step to the final image.
+        const auto& jump = function_.blocks[body];
+        if (!c_.jump_only(jump) || jump.exits.front().resume != latch) return;
+        body = latch;
+    }
+    const auto& back = function_.blocks[body].exits;
+    if (back.empty() || back.front().kind != nvr::ExitKind::Continue || back.front().resume != head ||
+        back.front().assignments.size() != (builder ? 2U : 1U) ||
+        !std::ranges::any_of(back.front().assignments, [&](const auto& a) { return a.slot == cursor_slot; })) return;
+
+    const nvr::Value index{nvr::ValueKind::Slot, i32, cursor_slot};
+    const nvr::Value limit{nvr::ValueKind::Slot, i32, end_slot};
+    run->arguments.insert(run->arguments.begin() + 1, {index, limit});
+    if (!repeat) {
+        const auto source_slot = slots_.at(source);
+        run->arguments.push_back({nvr::ValueKind::Slot, function_.frame_types[source_slot], source_slot});
+    }
+    const auto kind = repeat ? nvr::AppendRunKind::Repeat : copy ? nvr::AppendRunKind::ByteRange :
+        builder ? nvr::AppendRunKind::TextFieldRange : quad ? nvr::AppendRunKind::TextQuadRange :
+        nvr::AppendRunKind::TextRange;
+    run->operation = nvr::StateOp::AppendRun;
+    run->immediate = static_cast<std::uint32_t>(kind);
+    run->result_slot = cursor_slot;
 }
 
 void FunctionCompiler::destroy(const IrNode& node) {

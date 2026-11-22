@@ -830,10 +830,11 @@ private:
                 const bool resumes = exit.kind == nvr::ExitKind::Continue || exit.kind == nvr::ExitKind::Call ||
                                      exit.kind == nvr::ExitKind::State || exit.kind == nvr::ExitKind::Host ||
                                      exit.kind == nvr::ExitKind::Scheduler;
-                // A kernel charges steps the Budget did not count: its resume is
-                // an entry, so a checkpoint, although the program follows it.
-                const bool kernel = exit.kind == nvr::ExitKind::State && exit.operation == nvr::StateOp::Kernel;
-                if (!resumes || (edge(local, exit) && exit.kind != nvr::ExitKind::Call && !kernel)) continue;
+                // Helpers that charge extra steps need a checkpoint before
+                // the next block, even when the program follows the resume.
+                const bool charges_steps = exit.kind == nvr::ExitKind::State &&
+                    (exit.operation == nvr::StateOp::Kernel || exit.operation == nvr::StateOp::AppendRun);
+                if (!resumes || (edge(local, exit) && exit.kind != nvr::ExitKind::Call && !charges_steps)) continue;
                 if (in_region(exit.resume)) entry[local_.at(exit.resume)] = 1;
                 if (exit.kind == nvr::ExitKind::Host && in_region(exit.error_resume)) {
                     entry[local_.at(exit.error_resume)] = 1;

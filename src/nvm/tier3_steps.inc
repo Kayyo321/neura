@@ -197,7 +197,7 @@
         }
         ++self.region_counts_.helpers;
         if (exit->kind == nvr::ExitKind::State && exit->operation == nvr::StateOp::Kernel) ++self.native_counts_.kernel_helpers;
-        // A kernel charged steps of its own.
+        // A state helper may charge steps of its own.
         self.tier3_room(*context);
         return tier3::Status::Ok;
     }

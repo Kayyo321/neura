@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstddef>
 #include <memory>
 #include <type_traits>
@@ -3944,6 +3945,96 @@ private:
         return roots;
     }
 
+    void append_element(Heap::Ref item, std::uint64_t handle, std::uint32_t list_type,
+                        std::span<const std::uint64_t> words) {
+        const auto* fields = components_of(list_type);
+        const auto cells = words.size();
+        const auto store = [&] {
+            if (fields) heap_.append_words(item, words);
+            else heap_.append(item, words.front());
+        };
+        if (heap_.in_region(item)) {
+            ensure_stack_cells(cells, "growth by ");
+            store();
+            record_stack_cells(cells);
+            return;
+        }
+        if (fields) {
+            auto roots = component_roots(*fields, words);
+            roots.push_back(handle);
+            ensure_heap_cells(cells, "growth by ", roots);
+        } else {
+            const auto element_type = type(heap_.type(item)).reference;
+            const std::array roots{handle, nvr::is_reference(type(element_type).kind) ? words.front() : std::uint64_t{0}};
+            ensure_heap_cells(1, "growth by ", roots);
+        }
+        store();
+        add_live_cells(cells);
+    }
+
+    std::uint64_t append_run(const nvr::Exit& exit, std::span<const std::uint64_t> args) {
+        const auto list_type = exit.arguments[0].type;
+        const auto item = typed_entry(args[0], list_type);
+        const auto kind = static_cast<nvr::AppendRunKind>(exit.immediate);
+        const bool copy = kind != nvr::AppendRunKind::Repeat;
+        const auto words = copy ? args.subspan(3, 1) : args.subspan(3);
+        const auto single = [&] {
+            append_element(item, args[0], list_type, words);
+            return args[1];
+        };
+#ifdef NEURA_WASM_RUNTIME
+        // Leave every iteration visible to the browser's cooperative slices.
+        return single();
+#else
+        const auto index = std::bit_cast<std::int32_t>(static_cast<std::uint32_t>(args[1]));
+        const auto end = std::bit_cast<std::int32_t>(static_cast<std::uint32_t>(args[2]));
+        if (index < 0 || index >= end || scheduler_ || fleet_heap_ || limits_.block_observer || heap_.in_region(item)) {
+            return single();
+        }
+
+        // The append block is already charged. Each additional iteration
+        // includes the increment and test, then its reads and appends.
+        std::uint64_t iteration_steps = copy ? 4 : 3;
+        if (kind == nvr::AppendRunKind::TextFieldRange) iteration_steps = 5;
+        if (kind == nvr::AppendRunKind::TextQuadRange) iteration_steps = 10;
+        const std::uint64_t group = kind == nvr::AppendRunKind::TextQuadRange ? 4 : 1;
+        const auto start = static_cast<std::uint64_t>(index) + group - 1;
+        if (start >= static_cast<std::uint64_t>(end)) return single();
+        const auto remaining_steps = limits_.max_steps - std::min(steps_, limits_.max_steps);
+        const auto threshold = std::min(next_collection_, limits_.max_heap_cells);
+        const auto heap_room = threshold - std::min(live_cells_, threshold);
+        const auto storage_limit = Heap::max_elements();
+        const auto storage_room = storage_limit - std::min(length(item), storage_limit);
+        auto count = std::min({static_cast<std::uint64_t>(end) - start, remaining_steps / iteration_steps * group + 1,
+                               heap_room / words.size(), static_cast<std::uint64_t>(storage_room / words.size())});
+        if (count <= group) return single();
+
+        Heap::Ref source;
+        if (copy) {
+            source = heap_.find(args[4]);
+            if (!source || heap_.type(source) != exit.arguments[4].type || !heap_.bytes_are_packed(item) ||
+                (kind == nvr::AppendRunKind::ByteRange && !heap_.bytes_are_packed(source)) ||
+                words.front() > 255) return single();
+            const auto source_length = static_cast<std::uint64_t>(length(source));
+            count = std::min(count, source_length - std::min(source_length, start));
+            if (count <= group) return single();
+        }
+        const auto iterations = (count - 1) / group;
+        count = iterations * group + 1;
+        if (copy) {
+            heap_.append_byte_run(item, source, static_cast<std::size_t>(start), static_cast<std::uint8_t>(words.front()),
+                                  static_cast<std::size_t>(count));
+        } else {
+            heap_.append_repeated(item, words, static_cast<std::size_t>(count));
+        }
+        add_live_cells(count * words.size());
+        const auto cost = iterations * iteration_steps;
+        charge_auxiliary_steps(cost);
+        tier_steps_.list_run += cost;
+        return static_cast<std::uint64_t>(index) + count - 1;
+#endif
+    }
+
     std::uint64_t state(const nvr::Exit& exit, const std::vector<std::uint64_t>& args) {
         const auto& types = exit.arguments;
         switch (exit.operation) {
@@ -4206,37 +4297,12 @@ private:
             return 0;
         }
         case nvr::StateOp::AppendElement: {
-            // The list is a root of any collection the growth starts, so
-            // `item` stays valid across it.
             const auto item = typed_entry(args[0], types[0].type);
-            if (heap_.in_region(item)) {
-                // A region list grows in place, in its region: stack cells,
-                // and no collection.
-                const auto* fields = components_of(types[0].type);
-                const auto cells = fields ? fields->size() : 1;
-                ensure_stack_cells(cells, "growth by ");
-                if (fields) heap_.append_words(item, std::span<const std::uint64_t>(args).subspan(1));
-                else heap_.append(item, args[1]);
-                record_stack_cells(cells);
-                return 0;
-            }
-            if (const auto* fields = components_of(types[0].type)) {
-                // The element's words are appended together: one structural
-                // change, and one cell per word.
-                auto roots = component_roots(*fields, std::span<const std::uint64_t>(args).subspan(1));
-                roots.push_back(args[0]);
-                ensure_heap_cells(fields->size(), "growth by ", roots);
-                heap_.append_words(item, std::span<const std::uint64_t>(args).subspan(1));
-                add_live_cells(fields->size());
-                return 0;
-            }
-            const auto element_type = type(heap_.type(item)).reference;
-            const std::array roots{args[0], nvr::is_reference(type(element_type).kind) ? args[1] : std::uint64_t{0}};
-            ensure_heap_cells(1, "growth by ", roots);
-            heap_.append(item, args[1]);
-            add_live_cells(1);
+            append_element(item, args[0], types[0].type, std::span<const std::uint64_t>(args).subspan(1));
             return 0;
         }
+        case nvr::StateOp::AppendRun:
+            return append_run(exit, args);
         case nvr::StateOp::RemoveElement: {
             const auto item = typed_entry(args[0], types[0].type);
             const bool in_region = heap_.in_region(item);
@@ -4406,8 +4472,12 @@ private:
         if (cost > limits_.max_steps - std::min(steps_, limits_.max_steps)) {
             fault(TrapKind::StepLimit, std::to_string(limits_.max_steps) + " steps");
         }
-        steps_ += cost;
+        charge_auxiliary_steps(cost);
         tier_steps_.kernel += cost;
+    }
+
+    void charge_auxiliary_steps(std::uint64_t cost) {
+        steps_ += cost;
         if (scheduler_ && limits_.profile) current_task().steps += cost;
         if (limits_.profile) {
             if (function_steps_.size() != image_.functions.size()) function_steps_.resize(image_.functions.size());

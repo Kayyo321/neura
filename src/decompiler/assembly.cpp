@@ -29,7 +29,7 @@ constexpr std::array<std::string_view, nvr::state_op_count> state_ops{
     "class-is",        "class-cast",       "scalar-text", "repeat-collection", "kernel",
     "read-component",  "write-component",
     "enter-region",    "release-region",   "region-object", "region-collection", "region-repeat",
-    "move-to-region",  "hook-enter",       "hook-leave",    "concat-text",
+    "move-to-region",  "hook-enter",       "hook-leave",    "concat-text", "append-run",
 };
 constexpr std::array<std::string_view, 3> value_kinds{"slot", "constant", "lanes"};
 
@@ -522,12 +522,16 @@ nvr::Image assemble(std::string_view text) {
             }
             header = true;
             const auto version = in.next("format version");
-            if (version.size() != 3 || !version.starts_with("1.") ||
-                version[2] < '0' || version[2] - '0' > nvr::minor_version) {
+            const auto digits = std::string_view(version).substr(version.starts_with("1.") ? 2 : version.size());
+            std::uint16_t minor{};
+            const auto digits_end = digits.data() + digits.size();
+            const auto [next, error] = std::from_chars(digits.data(), digits_end, minor);
+            if (error != std::errc{} || next != digits_end || minor > nvr::minor_version ||
+                (digits.size() > 1 && digits.front() == '0')) {
                 in.error("NVR " + version + " is not supported; this assembler writes 1.0 through 1." +
                          std::to_string(nvr::minor_version));
             }
-            image.minor_version = static_cast<std::uint16_t>(version.back() - '0');
+            image.minor_version = minor;
             in.keyword("profile");
             if (in.index("graph profile") != nvr::graph_profile) {
                 in.error("only graph profile 1 is supported");
@@ -740,6 +744,9 @@ nvr::Image assemble(std::string_view text) {
                 }
                 if (exit.operation == nvr::StateOp::ConcatText && image.minor_version < nvr::concat_minor_version) {
                     in.error("concat-text requires NVR 1." + std::to_string(nvr::concat_minor_version));
+                }
+                if (exit.operation == nvr::StateOp::AppendRun && image.minor_version < nvr::append_run_minor_version) {
+                    in.error("append-run requires NVR 1." + std::to_string(nvr::append_run_minor_version));
                 }
                 in.keyword("immediate");
                 exit.immediate = in.index("immediate");

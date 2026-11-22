@@ -27,6 +27,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - `Std.Net.Tls` adds ACME client operations and SPIFFE SVID verification. `Handshake.dtls13` uses a bound UDP socket, verifies peer identity and uses server-side cookies. `TlsStream` exposes the verified DER certificate chain.
 - `Std.Net.Http` streams bodies through the assigned server worker. The native `neura.http.fetch` service supports HTTP/1.1 and negotiates HTTP/2 over verified TLS in builds with HTTP/2. Grant it with `--allow-http-client` or the project capability `http_client`. `H2` opens a TLS connection with ALPN `h2`, writes frames and supports HPACK in builds with nghttp2. [Host services](docs/runtime/NVM.md#http-client-services)
 - `Std.Crypto` adds codec-backed generic secret locking and process generation observation for fork-safe random generation.
+- Managed-list runs batch `Lists.filled` and byte appends in `StringBuilder`, `Strings.join`, and internal I/O buffers with element-wise step, heap, and version accounting. Images that use them require NVR 1.10. [Managed list runs](docs/runtime/NVM.md#managed-list-runs)
 
 ### Changed
 

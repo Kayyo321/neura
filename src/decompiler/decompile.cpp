@@ -271,6 +271,12 @@ public:
             case nvr::StateOp::ReadElement: operation = a(0) + "[" + a(1) + "]"; break;
             case nvr::StateOp::WriteElement: operation = a(0) + "[" + a(1) + "] = " + a(2); break;
             case nvr::StateOp::AppendElement: operation = "append(" + a(0) + ", " + words(1) + ")"; break;
+            case nvr::StateOp::AppendRun: {
+                constexpr std::array names{"append_repeat", "append_byte_range", "append_text_range",
+                                           "append_text_field_range", "append_text_quad_range"};
+                operation = std::string(names.at(exit.immediate)) + "(" + values(function, args, lifted, inputs) + ")";
+                break;
+            }
             case nvr::StateOp::ReadComponent:
                 operation = a(0) + "[" + a(1) + "].c" + std::to_string(exit.immediate);
                 break;

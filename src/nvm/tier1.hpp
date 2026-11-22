@@ -145,6 +145,8 @@ struct TierSteps {
     // which the block that called it does not count: they are in the run's
     // step count, and so here, whatever tier ran the call.
     std::uint64_t kernel = 0;
+    // Original loop steps charged by managed-list runs.
+    std::uint64_t list_run = 0;
 };
 
 // Tier 2 events of one execution, by kind. A region is entered, then ends

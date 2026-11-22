@@ -84,7 +84,8 @@ bool tier_shadow_heap_always() { return false; }
 
 std::string describe(const TierStatistics& s) {
     const auto& steps = s.steps;
-    const auto total = steps.lifted + steps.wired + steps.empty + steps.declined + steps.reference + steps.region + steps.kernel;
+    const auto total = steps.lifted + steps.wired + steps.empty + steps.declined + steps.reference + steps.region +
+                       steps.kernel + steps.list_run;
     const auto percent = [&](std::uint64_t part) {
         char text[32];
         std::snprintf(text, sizeof text, "%.1f%%", total ? 100.0 * static_cast<double>(part) / total : 0.0);
@@ -106,7 +107,8 @@ std::string describe(const TierStatistics& s) {
            " (lifted " + std::to_string(steps.lifted) + ", wired " + std::to_string(steps.wired) + ", empty " +
            std::to_string(steps.empty) + "), tier 0 " + percent(steps.reference + steps.declined) + " (reference " +
            std::to_string(steps.reference) + ", declined " + std::to_string(steps.declined) + ")" +
-           (steps.kernel != 0 ? ", kernel calls " + std::to_string(steps.kernel) : std::string()) + "\n";
+           (steps.kernel != 0 ? ", kernel calls " + std::to_string(steps.kernel) : std::string()) +
+           (steps.list_run != 0 ? ", managed list runs " + std::to_string(steps.list_run) : std::string()) + "\n";
     const auto& r = s.region_counts;
     if (s.regions != 0 || !s.region_rejections.empty()) {
         out += "tier: regions " + std::to_string(s.regions) + " (" + std::to_string(s.region_blocks) +
@@ -625,6 +627,7 @@ void TierCache::add_steps(const TierSteps& steps) {
     statistics_.steps.reference += steps.reference;
     statistics_.steps.region += steps.region;
     statistics_.steps.kernel += steps.kernel;
+    statistics_.steps.list_run += steps.list_run;
 }
 
 TierStatistics TierCache::statistics() const {

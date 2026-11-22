@@ -1535,6 +1535,47 @@ void Validator::state(const Function& function, const Exit& exit,
         no_result();
         break;
     }
+    case StateOp::AppendRun: {
+        if (image_.minor_version < append_run_minor_version) invalid(where + ": append-run requires NVR 1.10");
+        if (args.size() < 4) invalid(where + ": append-run takes at least four arguments");
+        require_kind(0, {TypeKind::List});
+        const auto i32 = [&](std::uint32_t index) {
+            const auto& type = image_.types[index];
+            return type.kind == TypeKind::Signed && type.width == 32;
+        };
+        if (!i32(args[1].type) || !i32(args[2].type)) invalid(where + ": append-run bounds must be int32");
+        require_slot_type(i32, "int32");
+        switch (static_cast<AppendRunKind>(exit.immediate)) {
+        case AppendRunKind::Repeat:
+            if (const auto* words = components(0)) {
+                arity(3 + words->size());
+                for (std::size_t i = 0; i < words->size(); ++i) {
+                    assign(args[3 + i].type, (*words)[i], where + " component value " + std::to_string(i));
+                }
+            } else {
+                arity(4);
+                assign(args[3].type, element_type(0), where + " element value");
+            }
+            break;
+        case AppendRunKind::ByteRange:
+        case AppendRunKind::TextRange:
+        case AppendRunKind::TextFieldRange:
+        case AppendRunKind::TextQuadRange:
+            arity(5);
+            if (!is_unsigned(element_type(0), 8) || !is_unsigned(args[3].type, 8))
+                invalid(where + ": append-run byte range requires a uint8 list and element");
+            if (exit.immediate == static_cast<std::uint32_t>(AppendRunKind::ByteRange)) {
+                require_kind(4, {TypeKind::List});
+                if (!is_unsigned(element_type(4), 8)) invalid(where + ": append-run source must be a uint8 list");
+            } else {
+                require_kind(4, {TypeKind::Text});
+            }
+            break;
+        default:
+            invalid(where + ": unknown append-run kind");
+        }
+        break;
+    }
     case StateOp::RemoveElement:
         arity(2);
         zero_immediate();

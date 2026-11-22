@@ -359,6 +359,52 @@ public:
         ++item.version;
     }
 
+    // The executor has reserved `count * words.size()` cells without
+    // crossing a collection threshold. The caller checks addressability.
+    void append_repeated(Ref ref, std::span<const std::uint64_t> words, std::size_t count) {
+        auto& item = list(ref);
+        if (words.size() == 1 && !fits(words.front(), item.array.head.storage)) widen(ref);
+        const auto length = static_cast<std::size_t>(item.array.head.count);
+        const auto end = length + count * words.size();
+        if (end > item.capacity) grow(item, end);
+        const auto width = item.array.head.storage;
+        auto* dest = item.array.data + length * static_cast<std::size_t>(width);
+        if (width == ElementWidth::W1) {
+            std::memset(dest, static_cast<int>(words.front() & 0xffU), count);
+        } else {
+            for (std::size_t i = 0; i < count; ++i) {
+                for (const auto word : words) {
+                    store(word, dest, width);
+                    dest += static_cast<std::size_t>(width);
+                }
+            }
+        }
+        item.array.head.count = end;
+        item.version += count;
+    }
+
+    bool bytes_are_packed(Ref ref) const {
+        return list(ref).array.head.storage == ElementWidth::W1;
+    }
+
+    // The caller checks list storage widths and bounds in the source list
+    // or text.
+    // The first byte was read by the circuit; the remaining bytes are read
+    // here. Resolve the source buffer after growing in case it is this list.
+    void append_byte_run(Ref ref, Ref source, std::size_t start, std::uint8_t first, std::size_t count) {
+        auto& item = list(ref);
+        const auto length = static_cast<std::size_t>(item.array.head.count);
+        const auto end = length + count;
+        if (end > item.capacity) grow(item, end);
+        auto* dest = item.array.data + length;
+        dest[0] = first;
+        const auto* bytes = kind(source) == EntryKind::List
+            ? list(source).array.data : reinterpret_cast<const unsigned char*>(text(source).data());
+        std::memmove(dest + 1, bytes + start + 1, count - 1);
+        item.array.head.count = end;
+        item.version += count;
+    }
+
     // Removes the `words` words that start at word `first` (one aggregate
     // element); later words move down and the version rises by one.
     void remove_words(Ref ref, std::size_t first, std::size_t words) {

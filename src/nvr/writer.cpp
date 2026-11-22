@@ -351,13 +351,17 @@ bool concurrent_image(const Image& image) {
 }
 
 std::uint16_t required_minor_version(const Image& image) {
+    bool concat = false;
     for (const auto& function : image.functions) {
         for (const auto& block : function.blocks) {
             for (const auto& exit : block.exits) {
-                if (exit.kind == ExitKind::State && exit.operation == StateOp::ConcatText) return concat_minor_version;
+                if (exit.kind != ExitKind::State) continue;
+                if (exit.operation == StateOp::AppendRun) return append_run_minor_version;
+                if (exit.operation == StateOp::ConcatText) concat = true;
             }
         }
     }
+    if (concat) return concat_minor_version;
     for (const auto& function : image.functions) {
         for (const auto& block : function.blocks) {
             for (const auto& exit : block.exits) {

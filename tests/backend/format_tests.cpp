@@ -7,6 +7,7 @@
 #include "decompiler/decompile.hpp"
 #include "fixtures.hpp"
 
+#include <algorithm>
 #include <fstream>
 #include <functional>
 #include <stdexcept>
@@ -785,7 +786,8 @@ NEURA_TEST(format, storage_regions_need_version_1_7) {
     check_equal(static_cast<unsigned>(nvr::StateOp::HookEnter), 33U, "the hook-enter number");
     check_equal(static_cast<unsigned>(nvr::StateOp::HookLeave), 34U, "the hook-leave number");
     check_equal(static_cast<unsigned>(nvr::StateOp::ConcatText), 35U, "the concat-text number");
-    check_equal(static_cast<unsigned>(nvr::state_op_count), 36U, "the operation count");
+    check_equal(static_cast<unsigned>(nvr::StateOp::AppendRun), 36U, "the append-run number");
+    check_equal(static_cast<unsigned>(nvr::state_op_count), 37U, "the operation count");
     const auto image = region_image(environment);
     check_equal(image.minor_version, std::uint16_t{7}, "the assembly text declares 1.7");
     check(nvr::uses_regions(image), "the image uses regions");
@@ -1535,6 +1537,89 @@ export let Main = module : program.Entry (
                     Kind::Invalid, "argument 1 has the wrong type");
     expect_rejected(mutated([](nvr::Exit& e, nvr::Function&) { e.result_slot = nvr::absent; }), Kind::Invalid,
                     "result slot must have type text");
+}
+
+NEURA_TEST(format, append_run_needs_version_1_10_and_keeps_loop_accounting) {
+    const auto path = fs::temp_directory_path() / "neura-format-tests" / "append-run.nra";
+    fs::create_directories(path.parent_path());
+    std::ofstream(path) << R"(let buffers = import:Std.Io.ByteBuffer;
+let builders = import:Std.Core.StringBuilder;
+let lists = import:Std.Collections.Lists;
+let program = import:Std.Program;
+let strings = import:Std.Text.Strings;
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last bytes = lists.filled<uint8>(513, 97);
+        last buffer = buffers.create();
+        buffer.write(bytes);
+        last builder = builders.create();
+        last joined = strings.join(new(["first", "second", "third"]), ":");
+        builder.append(joined);
+        if (bytes.version != 513 || buffer.size != 513 || builder.to_string() != "first:second:third") {
+            return program.ExitCode.Failure;
+        }
+        return program.ExitCode.Ok;
+    };
+);
+)";
+    const auto image = build_program({path});
+    check_equal(image.minor_version, std::uint16_t{10}, "a list run declares 1.10");
+    const auto binary = nvr::encode(image);
+    check_equal(binary[6], std::uint8_t{10}, "the writer emits 1.10");
+    check(nvr::encode(nvr::load(binary)) == binary, "a list run round trips through the loader");
+    check(nvr::encode(decompiler::assemble(decompiler::disassemble(image))) == binary,
+          "assembly round trips every list run byte");
+    auto old_header = binary;
+    old_header[6] = 9;
+    expect_rejected(old_header, Kind::Malformed, "uses NVR 1.10 features but declares 1.9");
+
+    auto fallback = image;
+    std::array<bool, 5> seen{};
+    std::optional<nvr::Image> invalid;
+    for (std::size_t f = 0; f < fallback.functions.size(); ++f) {
+        for (std::size_t b = 0; b < fallback.functions[f].blocks.size(); ++b) {
+            for (auto& exit : fallback.functions[f].blocks[b].exits) {
+                if (exit.kind != nvr::ExitKind::State || exit.operation != nvr::StateOp::AppendRun) continue;
+                if (!invalid) {
+                    invalid = image;
+                    invalid->functions[f].blocks[b].exits.front().immediate = 99;
+                }
+                seen.at(exit.immediate) = true;
+                exit.arguments.erase(exit.arguments.begin() + 1, exit.arguments.begin() + 3);
+                if (exit.immediate != static_cast<std::uint32_t>(nvr::AppendRunKind::Repeat)) exit.arguments.pop_back();
+                exit.operation = nvr::StateOp::AppendElement;
+                exit.result_slot = nvr::absent;
+                exit.immediate = 0;
+            }
+        }
+    }
+    if (!invalid) return;
+    expect_invalid(*invalid, "unknown append-run kind");
+    check(std::ranges::all_of(seen, [](bool present) { return present; }), "all five list-run forms are emitted");
+    fallback.minor_version = nvr::required_minor_version(fallback);
+    const auto elementwise = nvr::load(nvr::encode(fallback));
+
+    for (std::uint8_t tier = 0; tier <= 2; ++tier) {
+        nvm::RunLimits limits;
+        limits.tier = tier;
+        limits.profile = true;
+        const auto ample_budget = limits.max_steps;
+        for (const auto budget : {std::uint64_t{100}, std::uint64_t{800}, ample_budget}) {
+            limits.max_steps = budget;
+            const auto expected = run_captured(elementwise, limits);
+            const auto actual = run_captured(image, limits);
+            check(actual.result.completed == expected.result.completed, "list-run completion matches the loop");
+            check_equal(actual.result.status, expected.result.status, "status and version checks match");
+            check(actual.result.trap.kind == expected.result.trap.kind &&
+                  actual.result.trap.detail == expected.result.trap.detail &&
+                  actual.result.trap.block == expected.result.trap.block, "list-run failure matches the loop");
+            check_equal(actual.result.steps, expected.result.steps, "logical steps match");
+            check_equal(actual.result.peak_heap_cells, expected.result.peak_heap_cells, "peak heap matches");
+            check(actual.result.function_steps == expected.result.function_steps, "profiled steps match per function");
+            if (budget == ample_budget) check(actual.result.completed && actual.result.status == 0, "contents and version match");
+        }
+    }
 }
 
 } // namespace neura::testing
