@@ -2037,7 +2037,7 @@ if(BUILD_TESTING AND NEURA_SDK)
         add_test(NAME stdlib-net-tls-ktls COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/net-tls/ktls.py" "$<TARGET_FILE:neura_backend_tests>"
             "${CMAKE_CURRENT_SOURCE_DIR}" "${NEURA_SERVER_TEST_OPENSSL}")
-        set_tests_properties(stdlib-net-tls-ktls PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 45)
+        set_tests_properties(stdlib-net-tls-ktls PROPERTIES TIMEOUT 45)
     endif()
 
     # Standard library tests under the reference evaluator and NVM.
