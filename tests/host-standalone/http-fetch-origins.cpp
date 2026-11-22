@@ -39,6 +39,10 @@ extern "C" int __wrap_getaddrinfo(const char* host, const char* port, const addr
     if (name == "link-local.test") numeric = "fe80::1";
     if (name == "unspecified.test") numeric = "::";
     if (name == "private.test") numeric = "10.8.0.1";
+    // Numeric hosts written as absolute names: a resolver that does not read
+    // them as addresses may answer anything, here a public address.
+    if (name == "127.0.0.2.") numeric = "93.184.216.34";
+    if (name == "127.0.0.1.") numeric = "127.0.0.1";
     // The first answer is public, every later one private.
     if (name == "changing.test") numeric = changing_answers++ == 0 ? "93.184.216.34" : "10.8.0.1";
     assert(numeric);
@@ -152,6 +156,17 @@ int main() {
     // A numeric origin allows exactly its address.
     permit("127.0.0.1", std::vector{origin("127.0.0.1")});
     deny("127.0.0.1", {origin("127.0.0.2")});
+    // A numeric host with the trailing dot of an absolute name is that
+    // address: its listed numeric origin allows exactly that address, never
+    // the global answers of a lookup of the dotted name.
+    {
+        const auto previous_connects = connects.load();
+        const auto done = fetch(origin("127.0.0.2."), std::vector{origin("127.0.0.2")});
+        assert(done.success && done.value.elements[0].bits == 0);
+        assert(done.value.elements[3].bytes == origin("127.0.0.2") && connects == previous_connects);
+    }
+    permit("127.0.0.1.", std::vector{origin("127.0.0.1")});
+    permit("127.0.0.1", std::vector{origin("127.0.0.1.")});
     // `localhost` is a name: its loopback addresses need numeric origins.
     deny("localhost", {origin("localhost")});
     // No list keeps the unscoped grant; an empty list allows nothing.

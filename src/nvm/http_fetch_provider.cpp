@@ -246,15 +246,21 @@ struct Address {
     }
 };
 
+// The host without the trailing dot of an absolute name. `1.2.3.4.` is the
+// address 1.2.3.4 both in its origin and in the origin filter, so a listed
+// numeric origin still allows exactly that address.
+std::string bare_host(const std::string& host) {
+    return host.size() > 1 && host.back() == '.' ? host.substr(0, host.size() - 1) : host;
+}
+
 std::string Url::origin() const {
-    auto name = lower(host);
-    const Address address(host.c_str());
+    const auto bare = bare_host(host);
+    auto name = lower(bare);
+    const Address address(bare.c_str());
     if (address.family != AF_UNSPEC) {
         char numeric[INET6_ADDRSTRLEN];
         if (::inet_ntop(address.family, address.bytes.data(), numeric, sizeof numeric)) name = numeric;
         if (address.family == AF_INET6) name = "[" + name + "]";
-    } else if (name.ends_with('.') && name.size() > 1) {
-        name.pop_back();
     }
     return std::string(secure ? "https://" : "http://") + name + ":" + std::to_string(port);
 }
@@ -385,14 +391,14 @@ client_socket::AddressFilter origin_filter(const Url& url, const Origins& origin
     // allows exactly its address. A listed name allows its global addresses,
     // and another address only when a numeric origin with the same scheme
     // and port lists it. Each connect attempt checks its own candidate.
-    const auto literal = Address(url.host.c_str()).unmapped();
+    const auto literal = Address(bare_host(url.host).c_str()).unmapped();
     return [&url, &origins, literal](std::string_view numeric) {
         const auto candidate = Address(std::string(numeric).c_str()).unmapped();
         if (candidate.family == AF_UNSPEC) return false;
         if (literal.family != AF_UNSPEC) return candidate == literal;
         if (global_address(candidate)) return true;
         return std::ranges::any_of(*origins, [&](const auto& allowed) {
-            const auto listed = Address(allowed.host.c_str()).unmapped();
+            const auto listed = Address(bare_host(allowed.host).c_str()).unmapped();
             return allowed.secure == url.secure && allowed.port == url.port && listed.family != AF_UNSPEC &&
                    candidate == listed;
         });
