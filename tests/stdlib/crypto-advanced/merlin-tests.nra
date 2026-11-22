@@ -16,7 +16,12 @@ let MerlinTests = module (
             last label = decode(rows[i + 2]);
             if (operation == "new") {
                 current = new merlin.Transcript(label);
-            } else if (operation == "append") {
+                continue;
+            }
+            if (not current) {
+                trap_with_message("expected a transcript before " .. operation);
+            }
+            if (operation == "append") {
                 current.append_message(label, decode(rows[i + 3]));
             } else if (operation == "u64") {
                 current.append_u64(label, test.assert_ok(uint64s.parse(rows[i + 3])));
