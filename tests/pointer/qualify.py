@@ -192,7 +192,11 @@ let make = func -> ListPointer<int64> {
         self.run_modes(139, "", "nil class reference", ("nil-cell",))
 
     def test_erasure_reflection_and_native_packing(self):
-        declarations = "let types = import:Std.Reflect.Type.TypeDescriptor;\n" + FOREIGN
+        declarations = "let types = import:Std.Reflect.Type.TypeDescriptor;\n" + FOREIGN + """
+let invoke_erased = func<T>(value: T) {
+    native().invoke(value);
+};
+"""
         source = program('''
         let ptr: Pointer<int64> = new(cell.of<int64>(19));
         let erased: class = ptr;
@@ -202,18 +206,59 @@ let make = func -> ListPointer<int64> {
         if (args.length != 0) {
             if (args[0] == "class") {
                 native().invoke(erased);
+            } else if (args[0] == "generic-class") {
+                invoke_erased<class>(erased);
             } else if (args[0] == "destroy") {
                 destroy erased;
             } else {
-                native().invoke(held);
+                invoke_erased<any>(held);
             }
         }
 ''', declarations)
         self.build(source)
         self.run_modes(0, "Pointer<int64> 0\n")
-        for erased in ("class", "any"):
+        for erased in ("class", "generic-class", "any"):
             self.run_modes(134, "Pointer<int64> 0\n", "argument does not fit", (erased,))
         self.run_modes(134, "Pointer<int64> 0\n", "a managed pointer cannot be destroyed", ("destroy",))
+
+    def test_c2_native_variadic_rejects_static_any(self):
+        source = FOREIGN + """
+let reject = func {
+    let held: any = 5 as int64;
+    native().invoke(held);
+};
+"""
+        self.source.write_text(source, encoding="utf-8")
+        checked = self.command("check", "--error-format=json", self.source)
+        self.assertEqual(checked.returncode, 1, checked.stderr)
+        diagnostic = json.loads(checked.stderr.splitlines()[0])
+        self.assertEqual(diagnostic["code"], "E0493", checked.stderr)
+        self.assertIn("operation is not defined for any", diagnostic["message"])
+        primary = next(span for span in diagnostic["spans"] if span["primary"])
+        self.assertEqual(source[primary["offset"]:primary["offset"] + primary["length"]], "held")
+
+    def test_c4_generic_native_argument_uses_existing_nir_version(self):
+        source = program("""
+        invoke_generic<int64>(5);
+""", FOREIGN + """
+let invoke_generic = func<T>(value: T) {
+    native().invoke(value);
+};
+""").removeprefix(POINTER)
+        self.build(source)
+
+        module = self.path / "native-generic.nir"
+        emitted = self.command("emit-ir", self.source, "-o", module)
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        artifact = module.read_bytes()
+        self.assertEqual(artifact[:6], b"NEIR\x01\x00")
+        self.assertLess(int.from_bytes(artifact[6:8], "little"), 17)
+        self.assertIn(b"$native_argument", artifact)
+
+        rebuilt = self.path / "native-generic.nvr"
+        built = self.command("build", module, "-o", rebuilt)
+        self.assertEqual(built.returncode, 0, built.stderr)
+        self.assertTrue(rebuilt.read_bytes() == self.image.read_bytes())
 
     def test_const_pointer_can_cross_an_ordinary_task(self):
         declarations = '''
@@ -248,6 +293,11 @@ let consume = func(view: ConstPointer<int64> = nil) {
         }
 ''', declarations))
                 self.run_modes(0, expected)
+
+    def test_mutable_pointer_and_view_move_through_join(self):
+        source = pathlib.Path(__file__).with_name("join-move.nra").read_text(encoding="utf-8")
+        self.build(source)
+        self.run_modes(0, "6 2\n9\n")
 
     def test_const_pointer_with_frozen_list_stays_in_its_task(self):
         declarations = '''
@@ -373,6 +423,14 @@ let reject = func(ptr: Pointer<int>) {
 ''', "ptr);"),
             ("E0403", "not a native value", FOREIGN + '''
 let invoke_generic = func<T>(value: T) {
+    native().invoke(value);
+};
+let reject = func(ptr: Pointer<int>) {
+    invoke_generic<Pointer<int>>(ptr);
+};
+''', "invoke(value)"),
+            ("E0403", "not a native value", FOREIGN + '''
+let invoke_generic = func<T: class>(value: T) {
     native().invoke(value);
 };
 let reject = func(ptr: Pointer<int>) {

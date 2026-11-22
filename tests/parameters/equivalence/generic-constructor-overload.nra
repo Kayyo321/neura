@@ -1,0 +1,23 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Box = class<T> (
+    export let value: T;
+    export let extra: int64 = 0;
+
+    export let init = func(value: T) {
+        instance.value = value;
+    } or func(value: T, extra: int64) {
+        instance.value = value;
+        instance.extra = extra;
+    };
+);
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let text_box = new Box<string>("a", 4);
+        let number_box = new Box<int64>(3);
+        console.println("{} {} {} {}", text_box.value, text_box.extra, number_box.value, number_box.extra);
+        return program.ExitCode.Ok;
+    };
+);

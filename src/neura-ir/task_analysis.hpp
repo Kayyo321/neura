@@ -54,8 +54,8 @@ public:
     };
     std::optional<Unsafe> unsafe(SymbolId function) const;
     // Why `function` cannot be the worker of a parallel map beyond being
-    // task-safe: it issues a host request, uses the scheduler, or uses an
-    // object's identity (section 12). Nothing when it can.
+    // task-safe: it reads an uncopyable global, issues a host request, uses
+    // the scheduler, or uses an object's identity (section 12).
     std::optional<Unsafe> not_isolated(SymbolId function) const;
 
     // Checks every spawn of the program and decision C15. Throws a
@@ -84,8 +84,8 @@ private:
     std::map<SymbolId, std::vector<SymbolId>> destructors_;
     std::map<SymbolId, Reason> unsafe_;
     // Why a function cannot run as an isolated item of a parallel map
-    // (section 12): it issues a host request, uses the scheduler, or performs
-    // an identity operation, itself or through a call.
+    // (section 12): it reads an uncopyable global, issues a host request,
+    // uses the scheduler, or performs an identity operation.
     std::map<SymbolId, Reason> impure_;
     std::optional<Reason> isolated_reason(const IrNode& node) const;
     std::optional<Unsafe> chain(const std::map<SymbolId, Reason>& reasons, SymbolId function) const;

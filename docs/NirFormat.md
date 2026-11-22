@@ -309,6 +309,8 @@ These facts describe source lowering in the compilation that produced the file. 
 
 ## Revision 1.17: managed pointer storage
 
-Operation 76, `retain_cell_storage`, takes a live `Std.Core.Cell<T>` operand and gives the trusted pointer implementation a private handle of the same type. The operation preserves storage identity and can fail on a nil operand or exhausted handle budget. Only code in the trusted pointer module may issue it. The same revision adds the trusted `fail` names `view-bounds` and `stale-list-view`, and preserves an internal marker on variadic foreign argument packing until specialization checks its type.
+Operation 76, `retain_cell_storage`, takes a live `Std.Core.Cell<T>` operand and gives the trusted pointer implementation a private handle of the same type. The operation preserves storage identity and can fail on a nil operand or exhausted handle budget. Only code in the trusted pointer module may issue it. The same revision adds the trusted `fail` names `view-bounds` and `stale-list-view`.
+
+Generic foreign variadic packing retains its origin in the existing text field of a value-text or scoped-value node until specialization checks the actual argument. This annotation uses the existing operation encoding.
 
 Array storage placement is recalculated after linking and specialization. No additional NeuraIR record is needed for allocation origins. The resulting image uses the managed heap for an original array allocation retained through a `ListPointer`.

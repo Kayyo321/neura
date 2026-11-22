@@ -3,6 +3,7 @@
 #include "frozen.hpp"
 #include "pointer_safety.hpp"
 #include "any.hpp"
+#include "reference_storage.hpp"
 
 #include "attributes.hpp"
 #include "type_of.hpp"
@@ -119,6 +120,26 @@ std::string display(const std::vector<IrType>& arguments) {
         result += (i == 0 ? "" : ", ") + display(arguments[i]);
     }
     return result + ">";
+}
+
+IrNode node_at(IrOp op, const IrType& type, const Span& span) {
+    IrNode result{};
+    result.op = op;
+    result.type = type;
+    result.span = span;
+    return result;
+}
+
+IrNode native_argument_failure(const IrType& type, const Span& span) {
+    auto message = node_at(IrOp::String, type, span);
+    message.text = "invalid argument: argument does not fit the native layout";
+    auto failure = node_at(IrOp::TrapMessage, {}, span);
+    failure.operands.push_back(std::move(message));
+
+    auto result = node_at(IrOp::ScopedValue, type, span);
+    result.body.push_back(std::move(failure));
+    result.body.push_back(node_at(IrOp::String, type, span));
+    return result;
 }
 
 class Specializer {
@@ -658,14 +679,28 @@ private:
         for (const auto& argument : node.type_arguments) {
             result.type_arguments.push_back(type(argument, context, node.span));
         }
-        if (node.op == IrOp::ValueText && node.text == native_argument_packing && !result.operands.empty()) {
-            if (contains_pointer_type(program_, result.operands.front().type)) {
+        const bool native_object_carrier = node.op == IrOp::ScopedValue && result.body.size() == 1;
+        const bool native_text_carrier = node.op == IrOp::ValueText && result.operands.size() == 1;
+        if (node.text == native_argument_packing && (native_object_carrier || native_text_carrier)) {
+            const auto& argument = (native_object_carrier ? result.body.front() : result.operands.front()).type;
+            if (contains_pointer_type(program_, argument)) {
                 auto error = Diagnostic(node.span, "a managed pointer is not a native value in Std.DynamicForeign")
                     .with_code("E0403");
                 if (!context.origin.span.file.empty()) error.label(context.origin.span, "instantiated here");
                 throw error;
             }
-            result.text.clear();
+            if (native_object_carrier) return std::move(result.body.front());
+            if (argument.kind == TypeKind::Any) {
+                // Keep evaluation of the erased operand, then fail before packing.
+                auto evaluated = node_at(IrOp::Discard, {}, node.span);
+                evaluated.operands.push_back(std::move(result.operands.front()));
+                auto failure = native_argument_failure(result.type, node.span);
+                failure.body.insert(failure.body.begin(), std::move(evaluated));
+                return failure;
+            }
+            // The late guard checks erased classes destined for Text.
+            if (argument.kind != TypeKind::Object || is_primitive_reference(argument))
+                result.text.clear();
         }
         // A function value has become an object layout of a callable type,
         // which an any does not take for a reference.
@@ -946,6 +981,98 @@ private:
     std::deque<Work> work_;
 };
 
+// Defer the native codec guard until after linking and specialization.
+// Loading Pointer's generic templates does not create a managed pointer.
+void guard_managed_pointers_in_native_packing(IrProgram& program) {
+    SymbolId marker = no_symbol;
+    SymbolId codec = no_symbol;
+    for (SymbolId id = 0; id < program.symbols.size(); ++id) {
+        const auto& symbol = program.symbols[id];
+        if (symbol.kind == SymbolKind::File && symbol.library_path == "std/dynamic-foreign/internal/codec.nra") {
+            codec = id;
+        } else if (symbol.kind == SymbolKind::Class && symbol.name == "ManagedPointer" &&
+                   trusted_pointer_declaration(program, id)) {
+            marker = id;
+        }
+    }
+    const auto makes_pointer = [&](const auto& self, const IrNode& node) -> bool {
+        if (node.op == IrOp::RetainCellStorage ||
+            (node.op == IrOp::Allocate && pointer_class(program, node.type.symbol) != PointerKind::None)) return true;
+        for (const auto* nodes : {&node.operands, &node.body, &node.alternative}) {
+            if (std::ranges::any_of(*nodes, [&](const IrNode& child) { return self(self, child); })) return true;
+        }
+        return false;
+    };
+    const bool used = marker != no_symbol && std::ranges::any_of(program.bodies, [&](const IrBody& body) {
+        return std::ranges::any_of(body.instructions, [&](const IrNode& node) { return makes_pointer(makes_pointer, node); });
+    });
+    const auto marker_type = used ? program.symbols[marker].type : IrType{};
+    const auto guard = [&](const auto& self, std::vector<IrNode>& region, SymbolId owner, bool in_codec) -> void {
+        for (auto& test : region) {
+            // Prerelease artifacts could already contain the codec guard.
+            if (in_codec && test.op == IrOp::ScopedValue && test.body.size() == 2 &&
+                test.body.front().op == IrOp::Initialize) {
+                const auto held = test.body.front().symbol;
+                if (held < program.symbols.size() && program.symbols[held].name == "$native_object") continue;
+            }
+            self(self, test.operands, owner, in_codec);
+            self(self, test.body, owner, in_codec);
+            self(self, test.alternative, owner, in_codec);
+            const bool generic = test.op == IrOp::ValueText && test.text == native_argument_packing;
+            if (generic) {
+                test.text.clear();
+                if (!used) continue;
+            } else {
+                if (!in_codec || test.op != IrOp::ClassIs || test.type_arguments.size() != 1 ||
+                    test.operands.size() != 1) continue;
+                const auto target = test.type_arguments.front().symbol;
+                if (target >= program.symbols.size() || program.symbols[target].name != "MemorySegment" ||
+                    !native_declaration(program, target)) continue;
+            }
+
+            auto receiver = std::move(test.operands.front());
+            IrSymbol local{};
+            local.kind = SymbolKind::Local;
+            local.name = "$native_object";
+            local.span = receiver.span;
+            local.owner = owner;
+            local.type = receiver.type;
+            local.constant = true;
+            const auto hold = static_cast<SymbolId>(program.symbols.size());
+            program.symbols.push_back(std::move(local));
+
+            auto save = node_at(IrOp::Initialize, {}, receiver.span);
+            save.symbol = hold;
+            auto load = node_at(IrOp::Load, receiver.type, receiver.span);
+            load.symbol = hold;
+            save.operands.push_back(std::move(receiver));
+
+            const IrType boolean{TypeKind::Bool, "bool", no_symbol, {}};
+            auto pointer_test = node_at(IrOp::ClassIs, boolean, test.span);
+            pointer_test.type_arguments.push_back(marker_type);
+            pointer_test.operands.push_back(load);
+            auto rejected = generic ? native_argument_failure(test.type, test.span)
+                                    : node_at(IrOp::Boolean, boolean, test.span);
+            if (!generic) rejected.text = "false";
+
+            auto selected = node_at(IrOp::SelectValue, test.type, test.span);
+            selected.operands.push_back(std::move(pointer_test));
+            selected.body.push_back(std::move(rejected));
+            test.operands.front() = std::move(load);
+            selected.alternative.push_back(std::move(test));
+
+            auto checked = node_at(IrOp::ScopedValue, selected.type, selected.span);
+            checked.body.push_back(std::move(save));
+            checked.body.push_back(std::move(selected));
+            test = std::move(checked);
+        }
+    };
+    for (auto& body : program.bodies) {
+        const bool in_codec = used && codec != no_symbol && source_file(program, body.owner) == codec;
+        guard(guard, body.instructions, body.owner, in_codec);
+    }
+}
+
 } // namespace
 
 void specialize(IrProgram& program, const SpecializationLimits& limits) {
@@ -954,6 +1081,7 @@ void specialize(IrProgram& program, const SpecializationLimits& limits) {
     // intrinsics become Reflect nodes, which specialization makes concrete.
     const bool reflects = prepare_reflection(program);
     Specializer(program, limits).run();
+    guard_managed_pointers_in_native_packing(program);
     // typeof (docs/design/Expressions030.md) needs the concrete types and
     // the program's classes, which exist only now.
     expand_type_of(program);

@@ -72,6 +72,8 @@ A value layout has a carrier: the Neura type that holds the value. `ValueLayout`
 | `Address` | A `MemorySegment`, `nil` for the null pointer, or a `string`, passed as a NUL-terminated copy that lives for the call |
 | A struct | A `MemorySegment` holding exactly the struct's bytes |
 
+Passing an argument whose static type is `any` to `invoke` or `invoke_with` is E0493. If a generic wrapper forwards an argument through a type parameter instantiated as `any`, the call traps before native entry. Passing a managed `Pointer`, `ConstPointer`, or `ListPointer` as a native argument is E0403 when the type is known, and an invalid-argument trap when erased to `class`.
+
 The result is a `ForeignValue`. A pointer result is an `Address` segment of size 0. A struct result is copied into the global arena, or into the arena given to `invoke_with`. For a variadic C function such as `printf`, `downcall_handle(symbol, descriptor, first_variadic)` names the first variadic argument. The descriptor lists the layouts of the call's actual arguments, and those from `first_variadic` on must already be promoted: `int` or a wider integer, `double`, or an address.
 
 ## C imports

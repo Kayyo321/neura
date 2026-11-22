@@ -2838,30 +2838,6 @@ IrNode Lowering::pack_argument(const Expr& expr, const IrType& argument, Context
     auto input = value(expr, context);
     if (native && contains_pointer_type(program_, input.type))
         throw Diagnostic(expr.span, "a managed pointer is not a native value in Std.DynamicForeign").with_code("E0403");
-    if (native && input.type.kind == TypeKind::Any) {
-        // The object carrier keeps the dynamic class until the native codec
-        // refuses a managed pointer. The non-reference any tags have no
-        // value coercion at this explicit boundary.
-        const auto erased = symbol(root_class()).type;
-        const auto held = hidden_local("$native_any", any_type, expr.span, context);
-        auto save = node(IrOp::Initialize, expr.span);
-        save.symbol = held;
-        save.operands.push_back(std::move(input));
-        auto selected = node(IrOp::SelectValue, expr.span, erased);
-        selected.operands.push_back(any_tag_is(held, *any_tag(erased), expr.span));
-        selected.body.push_back(any_unpack(held, erased, expr.span));
-        auto fail = node(IrOp::TrapMessage, expr.span);
-        auto message = node(IrOp::String, expr.span, string_type);
-        message.text = "invalid argument: argument does not fit the native layout";
-        fail.operands.push_back(std::move(message));
-        auto otherwise = node(IrOp::ScopedValue, expr.span, erased);
-        otherwise.body.push_back(std::move(fail));
-        otherwise.body.push_back(node(IrOp::Nil, expr.span, erased));
-        selected.alternative.push_back(std::move(otherwise));
-        input = node(IrOp::ScopedValue, expr.span, erased);
-        input.body.push_back(std::move(save));
-        input.body.push_back(std::move(selected));
-    }
     if (input.type == argument) return input;
     if (input.type.kind == TypeKind::Any)
         throw any_operation(expr.span, "formatting")
@@ -2881,6 +2857,14 @@ IrNode Lowering::pack_argument(const Expr& expr, const IrType& argument, Context
     } else if (class_reference(input.type)) {
         reject_erasure(input.type, symbol(root_class()).type, expr.span);
         variant_name = "Object";
+        if (native && input.type.kind == TypeKind::TypeParameter) {
+            // Preserve the origin of the object carrier until the actual
+            // argument type is available during specialization.
+            auto deferred = node(IrOp::ScopedValue, expr.span, input.type);
+            deferred.text = native_argument_packing;
+            deferred.body.push_back(std::move(input));
+            input = std::move(deferred);
+        }
     } else if (input.type != string_type) {
         if (!supports_value_members(program_, input.type))
             throw Diagnostic(expr.span, "cannot pack " + describe(input.type) +
@@ -4213,39 +4197,6 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
             if (!test) reject_erasure(source.type, target, expr.span);
             auto result = node(test ? IrOp::ClassIs : IrOp::ClassCast, expr.span, test ? bool_type : target);
             if (test) result.type_arguments.push_back(target);
-            const auto origin = source_file(program_, lexical_owner(context));
-            const auto pointers = library_files_.find("std/core/pointer.nra");
-            if (test && target.symbol != no_symbol && symbol(target.symbol).name == "MemorySegment" &&
-                origin != no_symbol && symbol(origin).library_path == "std/dynamic-foreign/internal/codec.nra" &&
-                pointers != library_files_.end()) {
-                // Preserve the codec's existing error path. A managed
-                // pointer fails this packing discriminator explicitly.
-                const auto module = own_member(pointers->second, "Pointer");
-                const auto marker = module == no_symbol ? no_symbol : own_member(module, "ManagedPointer");
-                if (marker == no_symbol)
-                    throw Diagnostic(expr.span, "missing managed pointer class marker").with_code("E0899");
-                resolve(marker);
-                const auto hold = hidden_local("$native_object", source.type, source.span, context);
-                auto save = node(IrOp::Initialize, source.span);
-                save.symbol = hold;
-                auto load = node(IrOp::Load, source.span, source.type);
-                load.symbol = hold;
-                save.operands.push_back(std::move(source));
-                auto pointer_test = node(IrOp::ClassIs, expr.span, bool_type);
-                pointer_test.type_arguments.push_back(symbol(marker).type);
-                pointer_test.operands.push_back(load);
-                auto selected = node(IrOp::SelectValue, expr.span, bool_type);
-                selected.operands.push_back(std::move(pointer_test));
-                auto no = node(IrOp::Boolean, expr.span, bool_type);
-                no.text = "false";
-                selected.body.push_back(std::move(no));
-                result.operands.push_back(std::move(load));
-                selected.alternative.push_back(std::move(result));
-                auto checked = node(IrOp::ScopedValue, expr.span, bool_type);
-                checked.body.push_back(std::move(save));
-                checked.body.push_back(std::move(selected));
-                return checked;
-            }
             result.operands.push_back(std::move(source));
             return result;
         }

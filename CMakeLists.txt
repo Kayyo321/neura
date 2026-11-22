@@ -1509,6 +1509,8 @@ if(BUILD_TESTING AND NEURA_SDK)
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/concurrency/monitors.cmake"
     )
 
+    add_test(NAME concurrency-parallel-globals COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/concurrency/parallel-globals.py" "$<TARGET_FILE:neura>")
     add_test(NAME concurrency-parallel COMMAND ${CMAKE_COMMAND}
         "-DNEURA=$<TARGET_FILE:neura>"
         "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
@@ -1754,6 +1756,8 @@ if(BUILD_TESTING AND NEURA_SDK)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/pointer/qualify.py" "$<TARGET_FILE:neura>"
         ${NEURA_POINTER_NATIVE_TEST})
     set_tests_properties(pointer-qualification PROPERTIES TIMEOUT 300)
+    add_test(NAME pointer-unused-import COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/pointer/unused-import.py" "$<TARGET_FILE:neura>")
 
     # The compile-time check of interpolated strings agrees with the
     # formatting library on a corpus of specifications (docs/design/Calls030.md).

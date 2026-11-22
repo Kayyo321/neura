@@ -426,6 +426,16 @@ std::optional<TaskAnalysis::Reason> TaskAnalysis::direct(const IrNode& node) con
 // What only a task of the run may do, and an isolated item may not.
 std::optional<TaskAnalysis::Reason> TaskAnalysis::isolated_reason(const IrNode& node) const {
     switch (node.op) {
+    case IrOp::Load:
+        if (valid(node.symbol) && symbol(node.symbol).kind == SymbolKind::Global) {
+            const auto& global = symbol(node.symbol);
+            // Workers see copies in another heap, like their arguments.
+            if (global.constant && !transferable_in(global.type, true)) {
+                return Reason{"uses the binding '" + global.name + "', whose type " + display(global.type) +
+                                  " cannot be copied into a parallel item", node.span, no_symbol};
+            }
+        }
+        return std::nullopt;
     case IrOp::ExternalCall:
         // A kernel runs inside the NVM like a heap operation: it reads its
         // arguments and writes only the storage it is given, so a task or an

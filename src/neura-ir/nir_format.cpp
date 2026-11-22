@@ -1,7 +1,5 @@
 #include "nir_format.hpp"
 
-#include "pointer_safety.hpp"
-
 #include "reference_storage.hpp"
 #include "lexer/lexer.hpp"
 #include "attributes.hpp"
@@ -166,8 +164,7 @@ std::uint16_t required_minor(const std::vector<IrNode>& nodes) {
     std::uint16_t version = 0;
     for (const auto& node : nodes) {
         const auto op = static_cast<std::uint8_t>(node.op);
-        if (node.op == IrOp::RetainCellStorage || (node.op == IrOp::Fail && node.text != "iteration") ||
-            (node.op == IrOp::ValueText && node.text == native_argument_packing))
+        if (node.op == IrOp::RetainCellStorage || (node.op == IrOp::Fail && node.text != "iteration"))
             return nir_pointer_minor;
         if (node.op == IrOp::ConcatText || node.op == IrOp::TypeOf)
             version = std::max(version, nir_expressions_minor);
@@ -1179,8 +1176,6 @@ private:
         value.text = text();
         if (minor_ < nir_pointer_minor && value.op == IrOp::Fail && value.text != "iteration")
             fail("collection view failures require NeuraIR format 1." + std::to_string(nir_pointer_minor));
-        if (minor_ < nir_pointer_minor && value.op == IrOp::ValueText && value.text == native_argument_packing)
-            fail("native pointer transport checking requires NeuraIR format 1." + std::to_string(nir_pointer_minor));
         if (value.op == IrOp::Field && value.text == retained_cell_field)
             fail("retained Cell field access is derived after linking");
         if (linked_argument_annotation(value)) fail("argument transport is derived after linking");

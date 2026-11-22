@@ -328,7 +328,7 @@ let current = p.read();   // 20
 - `clone()` cannot create a dangling reference.
 - `write()` accepts only values of the declared type.
 - A non-nil `Pointer<T>` always refers to valid managed storage.
-- References to mutable storage cannot cross task boundaries unless an explicitly permitted synchronization mechanism provides safe access.
+- Mutable pointers follow the [task transfer rules](#type-erasure-and-native-code), including moves through a join result.
 
 A `Pointer<T>` binding may itself be `nil` under Neura's existing class-reference rules. Dereferencing a nil pointer produces a defined runtime trap, never an unchecked memory access.
 
@@ -493,7 +493,7 @@ A list view and its subviews hold the structural version recorded at constructio
 
 Static use of a managed pointer at the `Std.DynamicForeign` boundary is an error. For an erased argument, native argument packing checks the object's runtime class and uses its existing argument-layout failure for a managed pointer before a foreign call.
 
-Mutable `Pointer<T>` and `ListPointer<T>` values stay in their creating task. A `ConstPointer<T>` with a deeply immutable transferable value may cross to another task on the scheduler. Isolated parallel work uses its own heap and cannot use a live view of the original storage.
+Mutable `Pointer<T>` and `ListPointer<T>` values are never shared between live tasks. A join result moves them from the finished task to the joining task. A `ConstPointer<T>` with a deeply immutable transferable value may cross to another task on the scheduler. Isolated parallel work uses its own heap and cannot use a live view of the original storage.
 
 `ConstPointer<FrozenList<T>>` can be used within a task. Sending it to another task produces E0602 because `FrozenList<T>` has private list backing that does not meet the task-transfer rules. Shared frozen backing across tasks is a proposed future extension.
 
@@ -992,11 +992,9 @@ No pointer operation may rely on an untracked external allocation's lifetime.
 
 ## 3.4 Concurrency
 
-The library must respect Neura's existing task-isolation model.
+The library follows Neura's task-isolation model and its [rules for sharing and join results](#type-erasure-and-native-code).
 
-Regular mutable pointers cannot cross task boundaries merely because they are wrapped in a pointer class.
-
-Safe cross-task mechanisms are limited to representations with enforceable synchronization and transferability rules.
+Sharing between live tasks requires a representation with enforceable synchronization and transferability rules.
 
 `AtomicPointer<T>` and `LockedPointer<T>` must integrate with those rules rather than circumvent them.
 

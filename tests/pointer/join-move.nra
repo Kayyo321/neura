@@ -1,0 +1,27 @@
+let cell = import:Std.Core.Cell;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let.promote _ = import:Std.Core.Pointer;
+
+let make_pointer = func(value: int64) -> Pointer<int64> => new(cell.of<int64>(value));
+
+let make_view = func -> ListPointer<int64> {
+    let backing: int64[] = [1, 2, 3];
+    return new(backing, 0, 3);
+};
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        scope {
+            last pointer_task = spawn make_pointer(5);
+            last view_task = spawn make_view();
+            let pointer = pointer_task.join();
+            pointer.write(6);
+            let view = view_task.join();
+            console.println("{} {}", pointer.read(), view.value_at(1));
+            view.set(1, 9);
+            console.println("{}", view.value_at(1));
+        }
+        return program.ExitCode.Ok;
+    };
+);
