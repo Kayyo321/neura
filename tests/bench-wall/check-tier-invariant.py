@@ -31,10 +31,26 @@ def execution(neura, image, mode, argument, limit):
     return process.returncode, process.stdout, process.stderr
 
 
+def verify_nil_inlining(neura, image, expected):
+    env = dict(os.environ, NEURA_TIER_EAGER="1", NEURA_TIER3="native", NEURA_TIER_DUMP="1",
+               NEURA_TIER3_VERIFY="1")
+    run = subprocess.run(
+        [str(neura), "run", "--runtime=off", "--gpu=off", "--tier=2", "--jit=on", str(image), "--", "0"],
+        cwd=ROOT, env=env, capture_output=True, check=True, timeout=120,
+    )
+    if re.search(rb"^tier 3 program \d+ of function ", run.stderr, re.M) is None:
+        raise SystemExit(f"{neura}: fixture did not build Tier 3 programs")
+    retyped = re.search(rb"^(?:entry \d+ )?pass inline\.result_nil [1-9]\d*$", run.stderr, re.M)
+    if bool(retyped) != expected:
+        raise SystemExit(f"{neura}: expected inline.result_nil to {'fire' if expected else 'stay absent'}")
+
+
 def verify(base, candidate, fixture, build):
     image = build / (fixture + ".nvr")
     source = ROOT / "tests" / "bench-wall" / "fixtures" / (fixture + ".nra")
     subprocess.run([str(base), "build", str(source), "-o", str(image)], cwd=ROOT, check=True)
+    verify_nil_inlining(base, image, expected=False)
+    verify_nil_inlining(candidate, image, expected=True)
     for argument, limit in CASES[fixture]:
         expected = execution(base, image, "Tier 0", argument, limit)
         expected_status = 0 if argument == "0" and limit is None else 1

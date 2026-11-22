@@ -23,33 +23,43 @@ let compute = func(item: Item, mode: int) -> Outcome {
     return Outcome.Found(item);
 };
 
+let run_cases = func(item: Item, mode: int, seed: int) -> int64 {
+    last values: int[] = [1, 2, 3];
+    let total: int64 = seed as int64;
+    for (let i = 0; i < 4000; i++) {
+        let index = i % 3;
+        if (i == 3999 && mode == 1) {
+            index = -1;
+        }
+        last input = values[index];
+        last output = compute(item, (i % 2) - 1);
+        if (i == 3999 && mode == 2) {
+            index = 3;
+        }
+        total += values[index] as int64;
+        match (output) {
+            Outcome.Error(message) => {
+                total += message.byte_length as int64;
+            },
+            Outcome.Found(found) => {
+                total += (found.value + input) as int64;
+            },
+        }
+    }
+    return total;
+};
+
 export let NilResult = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         last mode = result.value_or<int32>(int32s.parse(args[0]), 0);
         last item: Item = new(7);
-        last values: int[] = [1, 2, 3];
-        let total: int64 = 0;
-        for (let i = 0; i < 4000; i++) {
-            let index = i % 3;
-            if (i == 3999 && mode == 1) {
-                index = -1;
-            }
-            last input = values[index];
-            last output = compute(item, (i % 2) - 1);
-            if (i == 3999 && mode == 2) {
-                index = 3;
-            }
-            total += values[index] as int64;
-            match (output) {
-                Outcome.Error(message) => {
-                    total += message.byte_length as int64;
-                },
-                Outcome.Found(found) => {
-                    total += (found.value + input) as int64;
-                },
-            }
-        }
-        console.println("{}", total);
+        // Settle the callee before the separate loop function is compiled.
+        last primed = compute(item, mode);
+        last seed = match (primed) {
+            Outcome.Error(_) => 0,
+            Outcome.Found(found) => found.value,
+        };
+        console.println("{}", run_cases(item, mode, seed));
         return program.ExitCode.Ok;
     };
 );

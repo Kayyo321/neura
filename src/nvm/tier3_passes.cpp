@@ -1149,7 +1149,7 @@ bool passes_enabled() {
 
 void optimize(const nvr::Image& image, Function& f, bool verify_each) {
     using namespace detail;
-    Counts counts;
+    Counts counts = std::move(f.pass_counts);
     const auto check = [&](const char* pass) {
         if (!verify_each) return;
         const auto violations = verify(image, f);

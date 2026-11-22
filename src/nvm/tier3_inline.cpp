@@ -690,6 +690,7 @@ private:
                 constant.origin_block = f.insts[ret].origin_block;
                 constant.origin_function = f.insts[ret].origin_function;
                 constant.origin_seq = f.insts[ret].origin_seq;
+                if (slot.type == Type::Ref) ++f.pass_counts["inline.result_nil"];
                 made_here.push_back(add_inst(f, std::move(constant)));
                 return made_here.back();
             };
@@ -784,6 +785,9 @@ private:
         f.max_inline_depth = std::max(f.max_inline_depth, g.max_inline_depth + 1);
         f.uses_float = f.uses_float || g.uses_float;
         f.inlined_calls += 1 + g.inlined_calls;
+        if (const auto inherited = g.pass_counts.find("inline.result_nil"); inherited != g.pass_counts.end()) {
+            f.pass_counts["inline.result_nil"] += inherited->second;
+        }
         f.class_tested_dispatches += g.class_tested_dispatches;
     }
 
