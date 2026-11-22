@@ -1,0 +1,10 @@
+error[E1401]: reflexivity failed: true differs from false
+ --> $DIR/e1401-rejected.nra:5:18
+  |
+5 |         | proof: {==};
+  |                  ^^^^
+  |
+  = note: goal: { true == false : bool }
+  = note: first difference: true differs from false
+
+For more information about this error, try `neura explain E1401`.

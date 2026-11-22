@@ -1,0 +1,7 @@
+error[E1403]: a law must declare a claim
+ --> $DIR/law-empty.nra:2:21
+  |
+2 |     let Empty = law();
+  |                     ^
+
+For more information about this error, try `neura explain E1403`.

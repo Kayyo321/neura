@@ -1,0 +1,10 @@
+let Example = module (
+    let flag = true;
+
+    let reads_flag = func() -> bool => flag;
+
+    let Stable = law (
+        claim: { reads_flag() == true : bool };
+    );
+        | proof: {==};
+);

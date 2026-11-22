@@ -1,0 +1,18 @@
+let Proofs = module (
+    let Broken = law (
+        for flag bool;
+        claim: { flag == : bool };
+        holds: true;
+    );
+        | proof: {
+            have : { true == true : bool } = {==};
+            witness ;
+            {==}
+        };
+
+    let Next = law (
+        given : true;
+        holds: true;
+    );
+        | proof: {==};
+);

@@ -4,6 +4,8 @@
 #include "hook_arguments.hpp"
 #include "host_binding.hpp"
 #include "integer.hpp"
+#include "law_program.hpp"
+#include "verifier.hpp"
 
 #include <algorithm>
 #include <iterator>
@@ -17,6 +19,7 @@ namespace {
 
 constexpr std::string_view magic = "NEIR";
 constexpr std::string_view payload_names_tag = "PNAM";
+constexpr std::string_view laws_tag = "LAWS";
 constexpr std::uint32_t absent = 0xffffffffU;
 // Bounds the reader's recursion and that of the passes that later walk the
 // program, with room to spare under sanitizers.
@@ -269,6 +272,11 @@ public:
             }
         }
         for (const auto& constant : program.static_constants) paths(constant.value);
+        for (const auto& law : program.laws) {
+            law_paths(law.statement);
+            if (law.certificate) law_paths(*law.certificate);
+            for (const auto& abbreviation : law.abbreviations) law_paths(abbreviation.value);
+        }
     }
 
     std::vector<std::uint8_t> write(const IrProgram& program) {
@@ -322,6 +330,7 @@ public:
                 });
             }))
             version = std::max(version, nir_lifetime_minor);
+        if (!program.laws.empty()) version = nir_laws_minor;
         polls_ = version >= 9;
         u16(version);
         count(files_.size());
@@ -372,6 +381,25 @@ public:
                 }
             }
         }
+        if (version >= nir_laws_minor) {
+            for (const char letter : laws_tag) u8(letter);
+            count(program.laws.size());
+            for (const auto& law : program.laws) {
+                reference(law.law_symbol);
+                reference(law.owner);
+                u8(static_cast<std::uint8_t>(law.status));
+                u32(law.introductions);
+                term(law.statement);
+                references(law.footprint);
+                count(law.abbreviations.size());
+                for (const auto& abbreviation : law.abbreviations) {
+                    text(abbreviation.name);
+                    term(abbreviation.value);
+                }
+                u8(law.certificate.has_value());
+                if (law.certificate) proof(*law.certificate);
+            }
+        }
         return std::move(bytes_);
     }
 
@@ -389,6 +417,42 @@ private:
                 paths(child);
             }
         }
+    }
+
+    template<class Tree>
+    void law_paths(const Tree& tree) {
+        path(tree.span.file);
+        for (const auto& child : tree.terms) law_paths(child);
+        if constexpr (requires { tree.proofs; })
+            for (const auto& child : tree.proofs) law_paths(child);
+    }
+
+    void term(const LawTerm& value) {
+        u8(static_cast<std::uint8_t>(value.kind));
+        span(value.span);
+        type(value.type);
+        reference(value.symbol);
+        reference(value.receiver);
+        u32(value.index);
+        terms(value.terms);
+    }
+
+    void terms(const std::vector<LawTerm>& values) {
+        count(values.size());
+        for (const auto& value : values) term(value);
+    }
+
+    void proof(const LawProof& value) {
+        u8(static_cast<std::uint8_t>(value.kind));
+        span(value.span);
+        reference(value.symbol);
+        reference(value.receiver);
+        u32(value.index);
+        count(value.bindings.size());
+        for (const auto binding : value.bindings) u32(binding);
+        terms(value.terms);
+        count(value.proofs.size());
+        for (const auto& child : value.proofs) proof(child);
     }
 
     void u8(std::uint8_t value) { bytes_.push_back(value); }
@@ -572,7 +636,7 @@ public:
         constexpr std::uint8_t operation_limits[]{
             max_op_1_0, max_op_1_1, max_op_1_2, max_op_1_3, max_op_1_4, max_op_1_4, max_op_1_4, max_op_1_7,
             max_op_1_7, max_op_1_9, max_op_1_9, max_op_1_9, max_op_1_12, max_op_records, max_op_1_14,
-            max_op_expressions};
+            max_op_expressions, max_op_expressions};
         static_assert(std::size(operation_limits) == nir_minor_version + 1);
         max_op_ = operation_limits[minor_];
         latches_ = minor_ > 0;
@@ -635,6 +699,13 @@ public:
                 }
             }
         }
+        if (minor_ >= nir_laws_minor) {
+            if (remaining() < laws_tag.size() ||
+                !std::equal(laws_tag.begin(), laws_tag.end(), bytes_.begin() + position_))
+                fail("missing NeuraIR 1.16 law table");
+            position_ += laws_tag.size();
+            program.laws = laws();
+        }
         if (position_ != bytes_.size()) {
             fail(std::to_string(bytes_.size() - position_) + " unread bytes at the end of the file");
         }
@@ -643,6 +714,73 @@ public:
     }
 
 private:
+    std::vector<IrLawRecord> laws() {
+        const auto entries = count(18);
+        if (entries == 0) fail("empty law table");
+        std::vector<IrLawRecord> result;
+        result.reserve(entries);
+        for (std::uint32_t i = 0; i < entries; ++i) {
+            IrLawRecord law;
+            law.law_symbol = required_reference();
+            law.owner = required_reference();
+            law.status = static_cast<LawStatus>(tag(static_cast<std::uint8_t>(LawStatus::TrustedAxiom), "law status"));
+            law.introductions = u32();
+            law.statement = term(0);
+            const auto unfolded = count(4);
+            law.footprint.reserve(unfolded);
+            for (std::uint32_t j = 0; j < unfolded; ++j) law.footprint.push_back(required_reference());
+            const auto abbreviations = count(5);
+            law.abbreviations.reserve(abbreviations);
+            for (std::uint32_t j = 0; j < abbreviations; ++j) {
+                auto name = text();
+                if (!is_identifier(name)) fail("invalid law abbreviation name");
+                law.abbreviations.push_back({std::move(name), term(0)});
+            }
+            if (tag(1, "law certificate flag")) law.certificate = proof(0);
+            result.push_back(std::move(law));
+        }
+        return result;
+    }
+
+    LawTerm term(std::size_t depth) {
+        enter(depth);
+        LawTerm value;
+        value.kind = static_cast<LawTermKind>(tag(static_cast<std::uint8_t>(LawTermKind::Construct), "law term"));
+        value.span = span();
+        value.type = type(depth + 1);
+        value.symbol = reference();
+        value.receiver = reference();
+        value.index = u32();
+        value.terms = terms(depth + 1);
+        return value;
+    }
+
+    std::vector<LawTerm> terms(std::size_t depth) {
+        const auto size = count(1);
+        std::vector<LawTerm> result;
+        result.reserve(size);
+        for (std::uint32_t i = 0; i < size; ++i) result.push_back(term(depth));
+        return result;
+    }
+
+    LawProof proof(std::size_t depth) {
+        enter(depth);
+        LawProof value;
+        value.kind = static_cast<LawProofKind>(tag(static_cast<std::uint8_t>(LawProofKind::Local), "law proof"));
+        value.span = span();
+        value.symbol = reference();
+        value.receiver = reference();
+        value.index = u32();
+        const auto bindings = count(4);
+        value.bindings.reserve(bindings);
+        for (std::uint32_t i = 0; i < bindings; ++i) value.bindings.push_back(u32());
+        value.terms = terms(depth + 1);
+        const auto proofs = count(1);
+        value.proofs.reserve(proofs);
+        for (std::uint32_t i = 0; i < proofs; ++i) value.proofs.push_back(proof(depth + 1));
+        return value;
+    }
+
     [[noreturn]] void fail(const std::string& message) const {
         throw NirError(origin_ + ": " + message);
     }
@@ -773,7 +911,8 @@ private:
 
     IrSymbol symbol() {
         IrSymbol value{};
-        const auto max_kind = minor_ >= 3 ? SymbolKind::Interface : SymbolKind::Variant;
+        const auto max_kind = minor_ >= nir_laws_minor ? SymbolKind::Law
+            : minor_ >= 3 ? SymbolKind::Interface : SymbolKind::Variant;
         value.kind = static_cast<SymbolKind>(tag(static_cast<std::uint8_t>(max_kind), "symbol kind"));
         value.name = text();
         if (minor_ < 4 && is_static_scope(value)) fail("class static scopes require NeuraIR format 1.4");
@@ -965,8 +1104,14 @@ std::vector<std::uint8_t> write_nir(const IrProgram& program) {
 }
 
 IrProgram read_nir(std::span<const std::uint8_t> bytes, const std::string& origin,
-                   std::uint16_t* minor_version) {
-    return Reader(bytes, origin).read(minor_version);
+                   std::uint16_t* minor_version, std::size_t proof_fuel) {
+    auto program = Reader(bytes, origin).read(minor_version);
+    if (!program.laws.empty()) {
+        if (const auto issues = verify_ir(program); !issues.empty())
+            throw NirError(origin + ": invalid NeuraIR for law checking: " + issues.front().message);
+        check_program_laws(program, proof_fuel, LawCheckOrigin::Artifact);
+    }
+    return program;
 }
 
 } // namespace neura

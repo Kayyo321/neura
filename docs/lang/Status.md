@@ -4,6 +4,8 @@ This release carries the language below from source through NeuraIR, optimizatio
 
 ## Supported in this release
 
+[Phase 1 laws](Laws.md) are checked during compilation. Their records persist for separate compilation in NeuraIR 1.16, and the compiler erases them before circuit conversion.
+
 | Area | Supported | Specification |
 | --- | --- | --- |
 | Derived JSON codecs for records and enums | `derive json.Codec<T>` generates tree and text conversions, validates wire mappings and emits ordinary callable bodies. | [Types](Types.md#deriving-a-json-codec) |

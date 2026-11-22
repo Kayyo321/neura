@@ -14,7 +14,8 @@ sources and documents only, so it needs no build:
     (`Diagnostic::warning(...)`) have a name and take a `W....` code with
     `.with_code`, which is not checked.
   * Every code given in src/ is registered, and every registered code is
-    given somewhere in src/.
+    given somewhere in src/. An explicitly reserved code has a reference page
+    and no emitting site until the release that implements its condition.
   * The registry also lists warnings, `NEURA_WARNING(W...., "name", "title")`;
     they follow the same rules as errors below.
   * Every registered code has its explain page, docs/diagnostics/<CODE>.md,
@@ -43,6 +44,7 @@ import sys
 from pathlib import Path
 
 ENTRY = re.compile(r'^NEURA_(?:DIAGNOSTIC\((E\d{4})|WARNING\((W\d{4}), "[a-z0-9-]+"), "([^"]*)"\)', re.MULTILINE)
+RESERVED = re.compile(r'^NEURA_RESERVED_DIAGNOSTIC\((E\d{4}), "([^"]*)"\)', re.MULTILINE)
 CONSTRUCTION = re.compile(r"(?<![\w:.])(?:Diagnostic|MissingPrimitiveWrapper)\(")
 DECLARATION = re.compile(r"(?<![\w:.])(?:Diagnostic|MissingPrimitiveWrapper)\s+(\w+)\(")
 WITH_CODE = re.compile(r'\s*\.with_code\("(E\d{4})"\)')
@@ -154,11 +156,15 @@ def main() -> int:
     root = parser.parse_args().root.resolve()
 
     registry = root / "src/util/diagnostic_codes.def"
-    registered = {error or warning: title
-                  for error, warning, title in ENTRY.findall(registry.read_text(encoding="utf-8"))}
+    entries = registry.read_text(encoding="utf-8")
+    active = {error or warning: title for error, warning, title in ENTRY.findall(entries)}
+    reserved = dict(RESERVED.findall(entries))
+    registered = active | reserved
     problems, given = check_sources(root, registered)
-    for code in sorted(set(registered) - given):
+    for code in sorted(set(active) - given):
         problems.append(f"{registry.relative_to(root).as_posix()}:1: {code} is registered but no diagnostic uses it")
+    for code in sorted(set(reserved) & (set(active) | given)):
+        problems.append(f"{registry.relative_to(root).as_posix()}:1: {code} is reserved but is declared active or emitted")
 
     pages = root / "docs/diagnostics"
     exercised = set()

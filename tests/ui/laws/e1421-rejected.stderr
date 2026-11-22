@@ -1,0 +1,7 @@
+error[E1421]: generic laws are deferred to Phase 3
+ --> $DIR/e1421-rejected.nra:2:23
+  |
+2 |     let Generic = law<T> (
+  |                       ^
+
+For more information about this error, try `neura explain E1421`.

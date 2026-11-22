@@ -1,0 +1,12 @@
+error[E1402]: rewrite motive does not match the current goal
+ --> $DIR/e1402-rejected.nra:7:13
+  |
+7 |             rewrite identity in { _ == false : bool };
+  |             ^^^^^^^
+  |
+  = note: witness: { true == true : bool }
+  = note: instantiated motive: { true == false : bool }
+  = note: current goal: { true == true : bool }
+  = note: first difference: true differs from false
+
+For more information about this error, try `neura explain E1402`.

@@ -1,0 +1,7 @@
+let Example = module (
+    let Generic = law<T> (
+        for value: T;
+        claim: { value == value : T };
+    );
+        | proof: {==};
+);

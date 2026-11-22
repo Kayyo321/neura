@@ -1,0 +1,7 @@
+error[E1421]: rewrite without an explicit motive is deferred to a later phase
+ --> $DIR/motive-shorthand-deferred.nra:7:13
+  |
+7 |             rewrite evidence;
+  |             ^^^^^^^
+
+For more information about this error, try `neura explain E1421`.

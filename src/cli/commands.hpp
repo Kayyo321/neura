@@ -67,6 +67,7 @@ int inspect(const Options& options);
 neura::IrProgram load_source_program(const Options& options);
 neura::IrProgram load_program(const Options& options);
 int check(const Options& options);
+int prove(const Options& options);
 int emit_ir(const Options& options);
 int build(const Options& options);
 int docs(const Options& options);

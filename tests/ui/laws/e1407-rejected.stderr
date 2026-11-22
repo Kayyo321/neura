@@ -1,0 +1,7 @@
+error[E1407]: non-exhaustive proof match, missing false
+ --> $DIR/e1407-rejected.nra:7:13
+  |
+7 |             match (flag) {
+  |             ^^^^^
+
+For more information about this error, try `neura explain E1407`.

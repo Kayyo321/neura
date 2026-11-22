@@ -5,6 +5,7 @@
 #include "host_binding.hpp"
 #include "integer.hpp"
 #include "kernel_signature.hpp"
+#include "law_program.hpp"
 #include "attributes.hpp"
 #include "tags.hpp"
 
@@ -1437,6 +1438,7 @@ void check_pure_tags(const IrProgram& program, const std::function<bool(SymbolId
         if (item.kind == SymbolKind::Function && has_tag(item, TagId::Pure)) any = true;
     }
     if (!any) return;
+    const auto requirements = law_purity_requirements(program);
     const auto valid = [&](SymbolId id) { return id < program.symbols.size(); };
     // A generic declaration, or a member of one: after specialization only
     // its specializations run.
@@ -1462,6 +1464,9 @@ void check_pure_tags(const IrProgram& program, const std::function<bool(SymbolId
     for (SymbolId id = 0; id < program.symbols.size(); ++id) {
         const auto& item = program.symbols[id];
         if (item.kind != SymbolKind::Function || !has_tag(item, TagId::Pure)) continue;
+        // A law may state an obligation for a bodyless requirement. The
+        // proof kernel checks the concrete implementation on fulfillment.
+        if (requirements.contains(id)) continue;
         // A prebuilt module's tag was checked when the module was compiled.
         if (!specialized && opaque && opaque(id)) continue;
         if (specialized && in_template(id)) continue;

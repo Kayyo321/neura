@@ -16,6 +16,8 @@ int command(const Options& options) {
         return build(options);
     case Command::Check:
         return check(options);
+    case Command::Prove:
+        return prove(options);
     case Command::EmitIr:
         return emit_ir(options);
     default:

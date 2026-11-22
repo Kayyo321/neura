@@ -30,10 +30,12 @@ inline constexpr std::uint16_t nir_lifetime_minor = 14;
 // operations ConcatText (tag 73) and TypeOf (tag 74). A file uses it only
 // when its program does.
 inline constexpr std::uint16_t nir_expressions_minor = 15;
+// NeuraIR 1.16 adds proof-only law records and no executable operations.
+inline constexpr std::uint16_t nir_laws_minor = 16;
 // The highest minor version this code reads and writes. The writer emits the
 // lowest minor version that can represent the program, so a program that
 // uses no newer feature is written as 1.0.
-inline constexpr std::uint16_t nir_minor_version = nir_expressions_minor;
+inline constexpr std::uint16_t nir_minor_version = nir_laws_minor;
 
 // The minor version that adds class hooks (docs/design/Hooks030.md): the
 // attributes hook.get, hook.set and hook.of. A module that declares a clause
@@ -53,7 +55,7 @@ public:
 // Semantic checks belong to the NeuraIR verifier, which the build runs on
 // the result. Throws NirError naming `origin`.
 IrProgram read_nir(std::span<const std::uint8_t> bytes, const std::string& origin,
-                   std::uint16_t* minor_version = nullptr);
+                   std::uint16_t* minor_version = nullptr, std::size_t proof_fuel = default_proof_fuel);
 
 // True when `bytes` starts with the .nir magic.
 bool is_nir(std::span<const std::uint8_t> bytes);

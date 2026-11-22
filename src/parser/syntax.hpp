@@ -295,6 +295,77 @@ struct PatternSyntax {
     std::optional<TypeSyntax> type{};
 };
 
+// A proposition in a law statement or proof. The expression operands are
+// ordinary Neura syntax; lowering assigns their proof-domain types.
+struct PropositionSyntax {
+    enum class Kind { Equality, Boolean, All, Either, Not, NoTrap, Traps, Outcome, For, Given };
+
+    Kind kind;
+    Span span;
+    std::vector<Expr> expressions;
+    std::optional<TypeSyntax> type;
+    std::vector<PropositionSyntax> propositions;
+    std::optional<Token> trap_class;
+    std::vector<Parameter> parameters;
+};
+
+struct LawItemSyntax {
+    enum class Kind { For, Exists, Given, Last, Measure, Claim, Holds, NoTrap, Traps, Outcome, Refutes };
+
+    Kind kind;
+    Span span;
+    Span keyword;
+    std::vector<Parameter> parameters;
+    bool nullable{};
+    std::optional<Token> binding;
+    std::optional<TypeSyntax> type;
+    std::vector<Expr> expressions;
+    std::optional<PropositionSyntax> proposition;
+    std::optional<Token> trap_class;
+};
+
+struct ProofSyntax;
+
+struct ProofMatchArmSyntax {
+    Span span;
+    PatternSyntax pattern;
+    // One proof expression or block.
+    std::vector<ProofSyntax> body;
+};
+
+struct ProofSyntax {
+    enum class Kind {
+        Block, Reflexivity, Decide, Term, Rewrite, Have, Last, Witness, Intro, Inject,
+        Absurd, Contradiction, Calc, CalcStep, Split, LoopInduct, Match, If, ChooseLeft, ChooseRight,
+    };
+
+    Kind kind;
+    Span span;
+    Span keyword;
+    std::vector<ProofSyntax> children;
+    std::vector<ProofMatchArmSyntax> arms;
+    std::optional<Expr> expression;
+    std::optional<PropositionSyntax> proposition;
+    std::optional<TypeSyntax> type;
+    std::vector<Token> bindings;
+    bool reverse{};
+};
+
+struct LawSyntax {
+    std::vector<LawItemSyntax> items;
+    std::optional<ProofSyntax> proof;
+    std::optional<Span> axiom;
+    std::optional<Span> todo;
+    std::optional<Span> invariant;
+    std::optional<Span> override_word;
+    // The qualified target of `let.proof`, in source order.
+    std::vector<Token> target;
+    Span keyword;
+    Span open;
+    Span close;
+    std::optional<Span> attachment;
+};
+
 struct MatchArm {
     Span span;
     // An arm in the form of 0.2 (one level of bindings, no guard) also
@@ -402,7 +473,7 @@ struct HookClause {
 
 struct Declaration {
     // An enum's variants are its members. Their parameters describe the payload.
-    enum class Kind { Binding, Function, Class, Module, Enum, Interface };
+    enum class Kind { Binding, Function, Class, Module, Enum, Interface, Law, LawProof };
 
     Kind kind;
     Span span;
@@ -489,6 +560,8 @@ struct Declaration {
     // type as its argument, which lowering reads as Sequence<T>.
     bool generator{};
     std::optional<Span> generator_keyword{};
+    // A proposition and its attached proof, or a `let.proof` fulfillment.
+    std::shared_ptr<LawSyntax> law{};
 };
 
 struct ResolvedImport {

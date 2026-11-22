@@ -709,7 +709,7 @@ struct ArtifactInput {
     std::map<std::string, Span> selectors{};
 };
 
-ArtifactInput read_artifact(const fs::path& path, const Span& span) {
+ArtifactInput read_artifact(const fs::path& path, const Span& span, std::size_t proof_fuel) {
     std::ifstream input(path, std::ios::binary);
     if (!input) throw Diagnostic(span, "cannot read NeuraIR artifact '" + path_name(path) + "'")
         .with_code("E0706");
@@ -718,7 +718,7 @@ ArtifactInput read_artifact(const fs::path& path, const Span& span) {
         .with_code("E0706");
     try {
         ArtifactInput artifact{path, span, {}};
-        artifact.program = read_nir(bytes, path_name(path), &artifact.minor_version);
+        artifact.program = read_nir(bytes, path_name(path), &artifact.minor_version, proof_fuel);
         return artifact;
     } catch (const NirError& error) {
         throw Diagnostic(span, error.what()).with_code("E0706");
@@ -727,7 +727,7 @@ ArtifactInput read_artifact(const fs::path& path, const Span& span) {
 
 std::vector<ParsedFile> read_sources_impl(const std::vector<fs::path>& files, const std::vector<fs::path>& roots,
                                           const fs::path& library, std::vector<ArtifactInput>* artifacts,
-                                          CImports* c_imports = nullptr) {
+                                          CImports* c_imports = nullptr, std::size_t proof_fuel = default_proof_fuel) {
     const auto trusted = library.empty() ? fs::path{} : fs::canonical(library);
     std::vector<fs::path> pending;
     for (const auto& file : files) pending.push_back(source_canonical(file));
@@ -843,7 +843,7 @@ std::vector<ParsedFile> read_sources_impl(const std::vector<fs::path>& files, co
                         .with_code("E0706");
                 auto found = std::ranges::find(*artifacts, dependency, &ArtifactInput::path);
                 if (found == artifacts->end()) {
-                    artifacts->push_back(read_artifact(dependency, import->span));
+                    artifacts->push_back(read_artifact(dependency, import->span, proof_fuel));
                     found = artifacts->end() - 1;
                 }
                 auto selector = import->import_path ? import->text
@@ -903,7 +903,7 @@ SymbolId artifact_module(const ArtifactInput& artifact, std::string_view selecto
 }
 
 IrProgram lower_with_artifacts(std::vector<ParsedFile> parsed, std::vector<ArtifactInput> artifacts,
-                                const fs::path& library) {
+                                const fs::path& library, std::size_t proof_fuel) {
     // Rebuild embedded standard library files from the trusted tree. Linker
     // comparisons make sure an artifact cannot replace the installed definitions.
     std::vector<fs::path> trusted_files;
@@ -962,7 +962,7 @@ IrProgram lower_with_artifacts(std::vector<ParsedFile> parsed, std::vector<Artif
         for (const auto& [selector, site] : artifact.selectors)
             selectors.emplace(selector, artifact_module(artifact, selector, site));
         const auto remap = link_ir(linked.program, std::move(artifact.program), artifact.span,
-                                   artifact.minor_version < 6);
+                                   artifact.minor_version < 6, proof_fuel);
         for (const auto mapped : remap) {
             if (mapped == no_symbol) continue;
             const auto& item = linked.program.symbols[mapped];
@@ -984,7 +984,7 @@ IrProgram lower_with_artifacts(std::vector<ParsedFile> parsed, std::vector<Artif
                 .with_code("E0707");
     }
     std::erase_if(parsed, [](const ParsedFile& source) { return !source.library_path.empty(); });
-    return lower(parsed, std::move(linked));
+    return lower(parsed, std::move(linked), proof_fuel);
 }
 
 } // namespace
@@ -1040,13 +1040,14 @@ namespace {
 // One load and lowering of `inputs`. A use of a C declaration that the
 // importer could not map gets a note that names the reason.
 IrProgram lower_once(const std::vector<fs::path>& inputs, const std::vector<fs::path>& roots,
-                     const fs::path& trusted) {
+                     const fs::path& trusted, std::size_t proof_fuel) {
     CImports c_imports;
     try {
         std::vector<ArtifactInput> artifacts;
-        auto parsed = read_sources_impl(inputs, roots, trusted, &artifacts, &c_imports);
-        auto program = artifacts.empty() ? lower(parsed)
-                                         : lower_with_artifacts(std::move(parsed), std::move(artifacts), trusted);
+        auto parsed = read_sources_impl(inputs, roots, trusted, &artifacts, &c_imports, proof_fuel);
+        auto program = artifacts.empty()
+            ? lower(parsed, {}, proof_fuel)
+            : lower_with_artifacts(std::move(parsed), std::move(artifacts), trusted, proof_fuel);
         for (auto& unit : c_imports.units) program.native_units.push_back(std::move(unit));
         return program;
     } catch (const MissingPrimitiveWrapper&) {
@@ -1085,7 +1086,7 @@ IrProgram lower_once(const std::vector<fs::path>& inputs, const std::vector<fs::
 } // namespace
 
 IrProgram lower_sources(const std::vector<fs::path>& files, const std::vector<fs::path>& roots,
-                        const fs::path& library) {
+                        const fs::path& library, std::size_t proof_fuel) {
     auto inputs = files;
     const auto trusted = library.empty() ? fs::path{} : fs::canonical(library);
     std::set<std::string> wrappers;
@@ -1094,7 +1095,7 @@ IrProgram lower_sources(const std::vector<fs::path>& files, const std::vector<fs
         // again, so drop those of the abandoned attempt.
         SpeculativeDiagnostics attempt;
         try {
-            auto program = lower_once(inputs, roots, trusted);
+            auto program = lower_once(inputs, roots, trusted, proof_fuel);
             check_storage(program, StorageStage::Lowered);
             attempt.commit();
             return program;

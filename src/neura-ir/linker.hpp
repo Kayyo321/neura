@@ -22,9 +22,12 @@ struct LinkedImports {
 // identical identities must have compatible definitions after remapping.
 // The result maps every symbol in incoming to its symbol in destination.
 std::vector<SymbolId> link_ir(IrProgram& destination, IrProgram incoming, const Span& import_site,
-                              bool legacy_signatures = false);
+                              bool legacy_signatures = false, std::size_t proof_fuel = default_proof_fuel);
 
 // Older artifacts encode an extra overload branch's group in its name.
 SymbolId legacy_overload_group(std::string_view name);
+
+// Remove proof-only declarations and keep the order of executable symbols.
+void erase_laws(IrProgram& program);
 
 } // namespace neura

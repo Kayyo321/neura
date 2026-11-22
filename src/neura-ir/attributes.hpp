@@ -46,7 +46,7 @@ inline constexpr std::uint32_t on_declarations =
     symbol_kind_bit(SymbolKind::Parameter) | symbol_kind_bit(SymbolKind::Local) |
     symbol_kind_bit(SymbolKind::Global) | symbol_kind_bit(SymbolKind::TypeParameter) |
     symbol_kind_bit(SymbolKind::Enum) | symbol_kind_bit(SymbolKind::Variant) |
-    symbol_kind_bit(SymbolKind::Interface);
+    symbol_kind_bit(SymbolKind::Interface) | symbol_kind_bit(SymbolKind::Law);
 
 struct AttributeInfo {
     AttributeId id;

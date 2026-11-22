@@ -1,0 +1,7 @@
+error[E1409]: expected bool, got State
+ --> $DIR/e1409-rejected.nra:4:18
+  |
+4 |         claim: { State.Ready == true : bool };
+  |                  ^^^^^^^^^^^ expected bool, found State
+
+For more information about this error, try `neura explain E1409`.

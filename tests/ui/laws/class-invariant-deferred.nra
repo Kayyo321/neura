@@ -1,0 +1,7 @@
+let Counter = class (
+    export let ready: bool = false;
+    let Ready = law.invariant (
+        holds: true;
+    );
+        | proof: {==};
+);

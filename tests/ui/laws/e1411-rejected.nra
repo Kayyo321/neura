@@ -1,0 +1,15 @@
+let Example = module (
+    .Pure
+    let checked = func(flag: bool) -> bool {
+        if (not flag) {
+            trap_with_message("invalid flag");
+        }
+        return true;
+    };
+
+    let Total = law (
+        for flag: bool;
+        claim: { checked(flag) == true : bool };
+    );
+        | proof: {==};
+);

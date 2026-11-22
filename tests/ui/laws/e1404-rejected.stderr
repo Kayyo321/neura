@@ -1,0 +1,15 @@
+error[E1404]: missing proof for inherited law 'Base.AlwaysTrue'
+  --> $DIR/e1404-rejected.nra:10:22
+   |
+ 5 |     export let AlwaysTrue = law (
+   |     -----------------------------... abstract law declared here
+...
+10 | let Derived = module:Base (
+   |                      ^^^^
+   |
+help: insert a proof skeleton
+   |
+13 |     let.proof AlwaysTrue: { /* proof */ };
+   |     ++++++++++++++++++++++++++++++++++++++
+
+For more information about this error, try `neura explain E1404`.

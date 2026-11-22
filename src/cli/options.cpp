@@ -202,6 +202,8 @@ Options read_options(int argc, char** argv) {
     const std::string_view command = argv[1];
     if (command == "check") {
         options.command = Command::Check;
+    } else if (command == "prove") {
+        options.command = Command::Prove;
     } else if (command == "docs") {
         options.command = Command::Docs;
     } else if (command == "emit-ir") {
@@ -262,7 +264,8 @@ Options read_options(int argc, char** argv) {
         return options;
     }
     const bool runs = options.command == Command::Run || options.command == Command::Test;
-    const bool compiles = options.command == Command::Check || options.command == Command::EmitIr ||
+    const bool proving = options.command == Command::Prove;
+    const bool compiles = proving || options.command == Command::Check || options.command == Command::EmitIr ||
                           options.command == Command::Build || options.command == Command::Test ||
                           options.command == Command::CBindings;
     const bool single_input = options.command == Command::Run || options.command == Command::Disassemble ||
@@ -321,8 +324,8 @@ Options read_options(int argc, char** argv) {
             const auto reporter = arg.substr(11);
             if (reporter != "json" && reporter != "human") throw std::runtime_error("--reporter expects json or human");
             options.test_reporter_json = reporter == "json";
-        } else if (arg.starts_with("--error-format=")) {
-            const auto format = arg.substr(15);
+        } else if (arg.starts_with("--error-format=") || (proving && arg == "--error-format")) {
+            const auto format = arg == "--error-format" ? std::string_view(next()) : arg.substr(15);
             if (format == "human") options.diagnostics.format = neura::cli::ErrorFormat::Human;
             else if (format == "short") options.diagnostics.format = neura::cli::ErrorFormat::Short;
             else if (format == "json") options.diagnostics.format = neura::cli::ErrorFormat::Json;
@@ -335,7 +338,7 @@ Options read_options(int argc, char** argv) {
             else throw std::runtime_error("--color expects auto, always, or never");
         } else if (arg.starts_with("-W") || arg == "--warn-library") {
             if (!compiles || options.command == Command::CBindings)
-                throw std::runtime_error(std::string(arg) + " applies only to check, emit-ir, build, and test");
+                throw std::runtime_error(std::string(arg) + " applies only to check, prove, emit-ir, build, and test");
             if (arg == "--warn-library") {
                 options.diagnostics.library_warnings = true;
             } else if (arg == "-Werror") {
@@ -358,13 +361,28 @@ Options read_options(int argc, char** argv) {
                 options.diagnostics.warnings.insert_or_assign(std::string(warning), enable);
             }
         } else if (arg == "--max-errors" || arg.starts_with("--max-errors=")) {
-            if (!compiles) throw std::runtime_error("--max-errors applies only to check, emit-ir, build, and test");
+            if (!compiles) throw std::runtime_error("--max-errors applies only to check, prove, emit-ir, build, and test");
             const std::string_view text = arg == "--max-errors" ? std::string_view(next()) : arg.substr(13);
             std::size_t limit = 0;
             const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), limit);
             if (error != std::errc{} || end != text.data() + text.size() || limit == 0)
                 throw std::runtime_error("expected a positive integer after --max-errors");
             neura::error_limit() = limit;
+        } else if (arg == "--proof-fuel" || arg.starts_with("--proof-fuel=")) {
+            if (!proving) throw std::runtime_error("--proof-fuel applies only to prove");
+            const std::string_view digits = arg == "--proof-fuel" ? std::string_view(next()) : arg.substr(13);
+            std::size_t fuel = 0;
+            const auto [end, error] = std::from_chars(digits.data(), digits.data() + digits.size(), fuel);
+            if (error != std::errc{} || end != digits.data() + digits.size() || fuel == 0)
+                throw std::runtime_error("expected a positive integer after --proof-fuel");
+            options.proof_fuel = fuel;
+        } else if (proving && arg == "--allow-incomplete") {
+            throw std::runtime_error("proof checking with --allow-incomplete is planned for a later release");
+        } else if (proving && arg == "--verdict") {
+            throw std::runtime_error("the independent --verdict proof checker is planned for a later release");
+        } else if ((proving || builds || options.command == Command::Check) &&
+                   (arg == "--laws" || arg.starts_with("--laws="))) {
+            throw std::runtime_error("the project-wide --laws option is planned for a later release");
         } else if (arg == "--fix") {
             if (options.command != Command::Check) throw std::runtime_error("--fix applies only to check");
             options.fix = true;

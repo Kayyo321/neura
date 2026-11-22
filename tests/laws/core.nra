@@ -1,0 +1,116 @@
+.Immutable
+.Final
+let Flag = class (
+    export last enabled: bool = true;
+
+    .Pure
+    export let value = func() -> bool => enabled;
+);
+
+.Immutable
+.Final
+let Setting = class (
+    export last enabled: bool;
+
+    export let init = func(value: bool) {
+        enabled = value;
+    };
+);
+
+let Peano = module (
+    export let Nat = enum (Zero, Succ(Nat));
+    const enabled = true;
+
+    .Pure
+    export let add = func(a: Nat, b: Nat) -> Nat {
+        return match (a) {
+            Nat.Zero => b,
+            Nat.Succ(p) => Nat.Succ(add(p, b)),
+        };
+    };
+
+    .Pure
+    export let reads_constant = func() -> bool => enabled;
+
+    export let AddZeroLeft = law (
+        for x: Nat;
+        claim: { add(Nat.Zero, x) == x : Nat };
+    );
+        | proof: {==};
+
+    export let AddZeroRight = law (
+        for x: Nat;
+        claim: { add(x, Nat.Zero) == x : Nat };
+    );
+        | proof: {
+            match (x) {
+                Nat.Zero => {==},
+                Nat.Succ(p) => {
+                    rewrite AddZeroRight(p) in { Nat.Succ(_) == Nat.Succ(p) : Nat };
+                    {==}
+                },
+            }
+        };
+
+    export let ImmutableMethod = law (
+        for flag: Flag;
+        claim: { flag.value() == flag.enabled : bool };
+    );
+        | proof: {==};
+
+    export let ImmutableConstruction = law (
+        for value: bool;
+        last setting = new Setting(value);
+        claim: { setting.enabled == value : bool };
+    );
+        | proof: {==};
+
+    export let ImmutableDefault = law (
+        last flag = new Flag();
+        claim: { flag.enabled == true : bool };
+    );
+        | proof: {==};
+
+    export let NullableFlag = law (
+        for? flag: Flag;
+        claim: { flag == flag : Flag };
+    );
+        | proof: {==};
+
+    export let GuardedMethod = law (
+        for? flag: Flag;
+        claim: { (flag == nil ? false : flag.value()) == (flag == nil ? false : flag.enabled) : bool };
+    );
+        | proof: {==};
+
+    export let BooleanDecision = law (
+        for (left: bool, right: bool);
+        holds: (left && right) == (right && left);
+    );
+        | proof: decide;
+
+    export let ChoiceWitness = law (
+        exists value: bool;
+        claim: either ({ value == true : bool }, { value == false : bool });
+    );
+        | proof: {
+            witness true;
+            choose_left {==}
+        };
+
+    export let Calculated = law (
+        for x: bool;
+        claim: { !(!x) == x : bool };
+    );
+        | proof: {
+            calc {
+                !(!x) == x by {==};
+                == x by {==};
+            };
+        };
+
+    export let ConstantValue = law (
+        claim: { reads_constant() == enabled : bool };
+    );
+        | proof: {==};
+);

@@ -1,0 +1,32 @@
+error[E0202]: expected ':'
+ --> $DIR/law-recovery.nra:3:18
+  |
+3 |         for flag bool;
+  |                  ^^^^ expected ':', found 'bool'
+
+error[E0204]: expected an expression
+ --> $DIR/law-recovery.nra:4:26
+  |
+4 |         claim: { flag == : bool };
+  |                          ^ expected an expression, found ':'
+
+error[E0202]: expected an identifier
+ --> $DIR/law-recovery.nra:8:18
+  |
+8 |             have : { true == true : bool } = {==};
+  |                  ^ expected an identifier, found ':'
+
+error[E0204]: expected an expression
+ --> $DIR/law-recovery.nra:9:21
+  |
+9 |             witness ;
+  |                     ^ expected an expression, found ';'
+
+error[E0204]: expected an expression
+  --> $DIR/law-recovery.nra:14:15
+   |
+14 |         given : true;
+   |               ^ expected an expression, found ':'
+
+Some errors have detailed explanations: E0202, E0204.
+For more information about an error, try `neura explain E0202`.

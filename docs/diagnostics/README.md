@@ -396,6 +396,34 @@ Codes reported for `Std.Reflect` ([design](../design/Reflect030.md)).
 | [E1301](E1301.md) | a value a Std.Reflect dynamic value cannot hold |
 | [E1302](E1302.md) | a class with two reflection policies |
 
+## E14xx: Laws and proofs
+
+Errors reported by the law checker. Some codes are reserved for later phases of the [design](../design/Laws031.md).
+
+| Code | Error |
+| --- | --- |
+| [E1401](E1401.md) | reflexivity proof does not match its goal |
+| [E1402](E1402.md) | rewrite motive does not match its goal |
+| [E1403](E1403.md) | proof leaves a goal undischarged |
+| [E1404](E1404.md) | concrete module leaves an inherited law unproven |
+| [E1405](E1405.md) | law statement cannot be overridden |
+| [E1406](E1406.md) | override invalidates an inherited proof |
+| [E1407](E1407.md) | proof match does not cover every case |
+| [E1408](E1408.md) | invalid witness for a constructor or contradiction proof |
+| [E1409](E1409.md) | law or proof term has the wrong type |
+| [E1410](E1410.md) | law uses an impure or forbidden operation |
+| [E1411](E1411.md) | total equality uses an operation that can trap |
+| [E1412](E1412.md) | proof does not establish its trap claim |
+| [E1413](E1413.md) | recursive proof does not decrease |
+| [E1414](E1414.md) | law dependencies form a cycle |
+| [E1415](E1415.md) | proof normalization fuel exhausted |
+| [E1416](E1416.md) | closed unit contains an abstract law |
+| [E1417](E1417.md) | class invariant field is writable without its guard |
+| [E1418](E1418.md) | mutable reference escapes an invariant field |
+| [E1419](E1419.md) | independent proof checker disagrees with the compiler |
+| [E1420](E1420.md) | axiom declared outside the trusted standard library |
+| [E1421](E1421.md) | law feature unavailable |
+
 ## Warnings
 
 Warnings do not stop compilation unless `-Werror` or a `#Deny` tag makes them errors. Warnings in the standard library are hidden unless `--warn-library` is given.

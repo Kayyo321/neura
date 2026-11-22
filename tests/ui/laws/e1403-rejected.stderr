@@ -1,0 +1,9 @@
+error[E1403]: unproven goal at the end of the proof
+ --> $DIR/e1403-rejected.nra:5:18
+  |
+5 |         | proof: {};
+  |                  ^
+  |
+  = note: remaining goal: { true == true : bool }
+
+For more information about this error, try `neura explain E1403`.

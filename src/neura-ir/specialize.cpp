@@ -5,6 +5,7 @@
 #include "type_of.hpp"
 #include "reflect.hpp"
 #include "class_hooks.hpp"
+#include "linker.hpp"
 
 #include "monitors.hpp"
 #include "purity.hpp"
@@ -899,6 +900,7 @@ private:
 } // namespace
 
 void specialize(IrProgram& program, const SpecializationLimits& limits) {
+    erase_laws(program);
     // Std.Reflect (docs/design/Reflect030.md): calls of the trusted
     // intrinsics become Reflect nodes, which specialization makes concrete.
     const bool reflects = prepare_reflection(program);

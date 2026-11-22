@@ -26,7 +26,7 @@ namespace neura::tool {
 namespace {
 
 
-constexpr std::array<std::string_view, 3> compiler_words{"build", "check", "emit-ir"};
+constexpr std::array<std::string_view, 4> compiler_words{"build", "check", "prove", "emit-ir"};
 constexpr std::array<std::string_view, 3> run_words{"run", "runtime", "serve"};
 constexpr std::array<std::string_view, 1> test_words{"test"};
 constexpr std::array<std::string_view, 2> inspect_words{"inspect", "inspect-image"};
@@ -76,8 +76,9 @@ constexpr std::array<Tool, 21> tool_table{{
 
 // Every `neura` command that a tool serves. version, help and capabilities
 // are built into `neura` itself.
-constexpr std::array<Command, 27> command_table{{
+constexpr std::array<Command, 28> command_table{{
     {"check", "neurac", "check", Component::Sdk},
+    {"prove", "neurac", "prove", Component::Sdk},
     {"docs", "neura-doc", "docs", Component::Sdk},
     {"emit-ir", "neurac", "emit-ir", Component::Sdk},
     {"build", "neurac", "build", Component::Sdk},
@@ -294,6 +295,7 @@ const char* usage_text() {
            "       neura capabilities --json\n"
            "       neura rename [-I source-root] <file.nra> <line>:<column> <new-name>\n"
            "       neura check [-I source-root] [--task-safety | --fix | --show-derived[=Name]] <file.nra>...\n"
+           "       neura prove [-I source-root] [--proof-fuel N] <file.nra>... | <file.nir>\n"
            "       neura docs <file.nra>... [-o <file.json>]\n"
            "       neura docs --doxygen <file.nra>\n"
            "       neura emit-ir [-I source-root] [--no-optimize] <file.nra>... [-o <file.nir>]\n"
@@ -399,14 +401,14 @@ const char* usage_text() {
            "  --trace-events FILE      write one JSON line per scheduler event (run only)\n"
            "  --trace-wall-time        add wall-clock times to --trace-events\n"
            "\n"
-           "c-options: check, emit-ir, build, test, and c-bindings accept these for import:c(...)\n"
+           "c-options: check, prove, emit-ir, build, test, and c-bindings accept these for import:c(...)\n"
            "  --c-include <dir>        search a directory for C headers\n"
            "  --c-define <name[=value]> define a macro while reading C headers\n"
            "  --libclang <file>        the libclang library to load (default: NEURA_LIBCLANG, then a search)\n"
            "  --cc <compiler>          the C compiler that links the native library (default: $CC, then cc)\n"
            "  --c-link-arg <arg>       pass an argument to that link\n"
            "\n"
-           "diagnostics: every command accepts the first two; the others apply to check, emit-ir, build, and test\n"
+           "diagnostics: every command accepts the first two; the others apply to check, prove, emit-ir, build, and test\n"
            "  --error-format=human|short|json\n"
            "                           human (default) shows source snippets; short is one stable line\n"
            "                           per diagnostic, file:line:column: error[CODE]: message; json is one\n"

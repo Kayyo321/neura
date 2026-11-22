@@ -1,0 +1,5 @@
+let Counter = class (
+    let count: int32 = 0;
+
+    export let read = func() -> int32 => count;
+);

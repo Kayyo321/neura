@@ -7,6 +7,8 @@ between, by an HTML comment that says how the block is checked:
 
   <!-- example: check -->            The block is a complete source file;
                                      `neura check` accepts it.
+  <!-- example: check-file: <path> --> Checks a repository example file. The
+                                       block must match that file exactly.
   <!-- example: run -->              The block is a complete program. The next
                                      fenced ```text block is its exact standard
                                      output under `neura build` and `neura run
@@ -53,7 +55,7 @@ TIMEOUT_SECONDS = 60
 
 FENCE = re.compile(r"^( {0,3})(`{3,}|~{3,})\s*([^\s`]*)")
 DIRECTIVE = re.compile(r"^<!--\s*example:\s*(.*?)\s*-->$")
-KINDS = ("check", "run", "test", "rejected", "error", "warning", "fragment")
+KINDS = ("check", "check-file", "run", "test", "rejected", "error", "warning", "fragment")
 CODE = re.compile(r"^E\d{4}$")
 WARNING_CODE = re.compile(r"^W\d{4}$")
 FIRST_ERROR = re.compile(r"^.*?:\d+:\d+: error(?:\[(E\d{4})\])?: ", re.MULTILINE)
@@ -101,6 +103,8 @@ def parse_directive(text: str) -> tuple[str | None, str, str | None]:
         return None, "", f"unknown example directive `{text}`; expected one of {', '.join(KINDS)}"
     if kind in ("check", "run", "test") and argument:
         return None, "", f"`example: {kind}` takes no argument"
+    if kind == "check-file" and not argument:
+        return None, "", "`example: check-file` needs a repository-relative example path"
     if kind == "rejected" and not argument:
         return None, "", "`example: rejected` needs the diagnostic text it expects, as `rejected: <text>`"
     if kind == "error" and not CODE.match(argument):
@@ -157,14 +161,14 @@ def execute(neura: str, command: list[str], directory: Path) -> subprocess.Compl
                           timeout=TIMEOUT_SECONDS, check=False)
 
 
-def verify(neura: str, block: Block) -> list[str]:
+def verify(neura: str, block: Block, checked_file: Path | None = None) -> list[str]:
     """What is wrong with one block that has a valid directive."""
     with tempfile.TemporaryDirectory() as name:
         directory = Path(name)
         (directory / "example.nra").write_text(block.code, encoding="utf-8")
         try:
-            if block.kind == "check":
-                result = execute(neura, ["check", "example.nra"], directory)
+            if block.kind in ("check", "check-file"):
+                result = execute(neura, ["check", str(checked_file) if checked_file else "example.nra"], directory)
                 if result.returncode != 0:
                     return [f"`neura check` rejected the example:\n{indent(result.stdout + result.stderr)}"]
             elif block.kind == "rejected":
@@ -242,8 +246,16 @@ def main() -> int:
     counts: dict[str, int] = {}
     for block in blocks:
         messages = list(block.problems)
+        checked_file = None
+        if block.kind == "check-file":
+            checked_file = (root / block.argument).resolve()
+            if not checked_file.is_relative_to(root / "examples") or checked_file.suffix != ".nra" \
+                    or not checked_file.is_file():
+                messages.append("`example: check-file` must name an existing .nra file under examples/")
+            elif checked_file.read_text(encoding="utf-8") != block.code:
+                messages.append(f"the block differs from {block.argument}")
         if not messages and block.kind and block.kind != "fragment" and not arguments.directives_only:
-            messages = verify(neura, block)
+            messages = verify(neura, block, checked_file)
         for message in messages:
             print(f"{block.path}:{block.line}: {message}")
         problems += bool(messages)

@@ -1,0 +1,8 @@
+let law = func(value: int32) -> int32 => value;
+
+let answer = law(42);
+
+let proof = func(claim: bool, given: bool) -> bool {
+    last decide = claim && given;
+    return decide;
+};

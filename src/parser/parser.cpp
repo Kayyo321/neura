@@ -97,12 +97,16 @@ private:
         Span keyword;
     };
     std::vector<BodyKind> bodies_;
+    // A delimiter selected by a proof production, hidden from the ordinary
+    // expression parser until that production consumes it.
+    std::optional<std::size_t> proof_term_end_;
 
     const Token& current() const { return tokens_[cursor_]; }
     bool at_end() const { return current().kind == TokenKind::End; }
 
     bool at(std::string_view text) const {
-        return (current().kind == TokenKind::Keyword || current().kind == TokenKind::Symbol) &&
+        return proof_term_end_ != cursor_ &&
+               (current().kind == TokenKind::Keyword || current().kind == TokenKind::Symbol) &&
                current().text == text;
     }
 
@@ -954,6 +958,7 @@ private:
         const auto start = cursor_;
         bool expression_body = false;
         Declaration result{};
+        std::optional<Span> override_word;
         result.kind = Declaration::Kind::Binding;
         result.documentation = current().documentation;
         result.exported = match("export");
@@ -976,6 +981,11 @@ private:
             const auto malformed_extension = [&](const Span& word, const std::string& reason) {
                 return Diagnostic(word, "malformed extension declaration").with_code("E0228").label(reason);
             };
+            if (!result.constant && !result.static_member && at_contextual("proof")) {
+                law_fulfillment(result);
+                result.span = span_from(start);
+                return result;
+            }
             if (current().kind == TokenKind::Identifier &&
                 (current().text == "extension" || current().text == "extensions")) {
                 // `extension` and `extensions` are words only directly after
@@ -1007,6 +1017,7 @@ private:
                 result.name_span = name.span;
                 result.cast_target = type();
             } else {
+                override_word = current().span;
                 expect("override");
                 result.override_member = true;
             }
@@ -1200,6 +1211,9 @@ private:
                 result.initializer = stylesheet(initializer);
                 if (at("(") || at("[") || at(".") || at("as") || at("is") || at("?") || precedence() != 0)
                     throw misplaced_stylesheet(span_from(initializer));
+            } else if (at_law_initializer()) {
+                definition_has_no_annotation(result);
+                law_initializer(result, override_word);
             } else if (!result.type && !result.last && record_initializer(result)) {
                 // A record (parser_records.inc).
             } else {
@@ -1239,7 +1253,14 @@ private:
             expect(";");
         }
         if (result.overloads.empty()) result.span = span_from(start);
-        if (owner) accessor_clauses(result, *owner);
+        if (result.kind == Declaration::Kind::Law) {
+            law_attachment(result);
+            result.span = span_from(start);
+        } else if (owner) {
+            accessor_clauses(result, *owner);
+        } else if (at_law_attachment()) {
+            misplaced_law_attachment();
+        }
         return result;
     }
 
@@ -1535,6 +1556,10 @@ private:
     // which members may have them.
     void accessor_clauses(Declaration& member, Declaration::Kind owner = Declaration::Kind::Class) {
         while (at("|")) {
+            if (at_law_attachment()) {
+                misplaced_law_attachment();
+                continue;
+            }
             const auto start = cursor_;
             advance();
             const auto& keyword = current();
@@ -1601,6 +1626,7 @@ private:
     }
 
 #include "parser_records.inc"
+#include "parser_laws.inc"
 
     static void definition_has_no_annotation(const Declaration& declaration) {
         if (declaration.type) {
@@ -2016,28 +2042,31 @@ private:
     // The whole pattern of a `match` arm (docs/design/Matching030.md): `_`,
     // a tuple pattern, or a name read as a variant, with or without a
     // payload. A single name stays a variant here, as in 0.2.
-    PatternSyntax whole_pattern() {
-        if (at("[")) return tuple_pattern();
+    PatternSyntax whole_pattern(bool proof = false) {
+        if (proof && (at("true") || at("false"))) return proof_boolean_pattern();
+        if (at("[")) return tuple_pattern(proof);
         if (current().kind == TokenKind::Identifier && current().text == "_") {
             PatternSyntax result{};
             result.span = advance().span;
             return result;
         }
         if (current().kind != TokenKind::Identifier) unsupported_pattern();
-        return variant_pattern();
+        return variant_pattern(proof);
     }
 
     // A payload or element position: `_`, a binding, a variant pattern
     // (a dotted name), or a tuple pattern.
-    PatternSyntax sub_pattern(bool positional) {
-        if (at("[")) return tuple_pattern();
+    PatternSyntax sub_pattern(bool positional, bool proof) {
+        if (proof && (at("true") || at("false"))) return proof_boolean_pattern();
+        if (at("[")) return tuple_pattern(proof);
         if (current().kind != TokenKind::Identifier) unsupported_pattern();
         if (current().text == "_") {
             PatternSyntax result{};
             result.span = advance().span;
             return result;
         }
-        if (next_is(1, ".")) return variant_pattern();
+        if (next_is(1, ".") || (proof && (next_is(1, "(") || next_is(1, "{"))))
+            return variant_pattern(proof);
         if (positional && next_is(1, ":")) {
             // `name: Type` is a type pattern, which only a `match.is` arm has.
             const auto start = cursor_;
@@ -2057,7 +2086,7 @@ private:
         return result;
     }
 
-    PatternSyntax variant_pattern() {
+    PatternSyntax variant_pattern(bool proof) {
         const auto start = cursor_;
         PatternSyntax result{};
         result.kind = PatternSyntax::Kind::Variant;
@@ -2073,7 +2102,7 @@ private:
                     result.fields.push_back(field.text);
                     result.field_spans.push_back(field.span);
                     if (match(":")) {
-                        result.elements.push_back(sub_pattern(false));
+                        result.elements.push_back(sub_pattern(false, proof));
                     } else {
                         // `{ label }` binds the field to its own name.
                         PatternSyntax binding{};
@@ -2085,7 +2114,7 @@ private:
                         result.elements.push_back(std::move(binding));
                     }
                 } else {
-                    result.elements.push_back(sub_pattern(true));
+                    result.elements.push_back(sub_pattern(true, proof));
                 }
                 if (!match(",")) break;
             }
@@ -2095,13 +2124,13 @@ private:
         return result;
     }
 
-    PatternSyntax tuple_pattern() {
+    PatternSyntax tuple_pattern(bool proof) {
         const auto start = cursor_;
         expect("[");
         PatternSyntax result{};
         result.kind = PatternSyntax::Kind::Tuple;
         while (!at("]")) {
-            result.elements.push_back(sub_pattern(true));
+            result.elements.push_back(sub_pattern(true, proof));
             if (!match(",")) break;
         }
         expect("]");

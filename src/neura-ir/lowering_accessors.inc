@@ -32,6 +32,8 @@ inline std::string member_kind(const Declaration& decl) {
     case DeclKind::Module: return "a module";
     case DeclKind::Enum: return "an enum";
     case DeclKind::Interface: return "an interface";
+    case DeclKind::Law: return "a law";
+    case DeclKind::LawProof: return "a law fulfillment";
     case DeclKind::Binding: break;
     }
     return "a field";

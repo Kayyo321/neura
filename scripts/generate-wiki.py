@@ -56,6 +56,7 @@ GENERATED: dict[str, str] = {
     "docs/lang/ForeignInterop.md": "ForeignInterop",
     "docs/lang/GpuExecution.md": "GpuExecution",
     "docs/lang/Modules.md": "Modules",
+    "docs/lang/Laws.md": "Laws",
     "docs/lang/Numbers.md": "Numbers",
     "docs/lang/ObjectLifecycle.md": "ObjectLifecycle",
     "docs/lang/Overview.md": "Overview",

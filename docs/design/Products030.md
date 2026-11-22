@@ -31,7 +31,7 @@ Each row is one executable in `bin/`. A tool is a small `main` that loads the sh
 | `neura-update` | core | `update` | `neura-update [update] ...` | `libneura-core` |
 | `neura-uninstall` | core | `uninstall` | `neura-uninstall [uninstall] ...` | `libneura-core` |
 | `neura-server-host` | core | none: `neura serve` builds the image and starts it | `neura-server-host [options] <image.nvr>`, `neura-server-host migrate ...`; `--version` prints the line of `neura --version`, and `--help` begins `neura-server-host: the host that neura serve starts` | `libneura-core`; built on Linux and macOS ([Server host](../runtime/ServerHost.md)) |
-| `neurac` | sdk | `build`, `check`, `emit-ir` | `neurac [build] ...`, `neurac check ...`, `neurac emit-ir ...` | `libneura-sdk`, `libneura-core` |
+| `neurac` | sdk | `build`, `check`, `prove`, `emit-ir` | `neurac [build] ...`, `neurac check ...`, `neurac prove ...`, `neurac emit-ir ...` | `libneura-sdk`, `libneura-core` |
 | `neura-test` | sdk | `test` | `neura-test [test] ...` | `libneura-sdk`, `libneura-core`: it compiles and runs each test in one process, as 0.2 does |
 | `neura-doc` | sdk | `docs` | `neura-doc [docs] ...` | `libneura-sdk`, `libneura-core` |
 | `neura-cbind` | sdk | `c-bindings` | `neura-cbind [c-bindings] ...` | `libneura-sdk`, `libneura-core` |
@@ -96,7 +96,7 @@ These are the exact texts. `<bin>` is the directory of the real `neura`; each is
 | `neura_cli_registry` | `tool_registry.cpp`: the registry, the version line and the usage text, with no stream or file-system code | the generated version header only |
 | `neura_cli_tool` | `tool.cpp`: a tool's start, the dispatch token, `--help`, `--version`, the executable's real path | `neura_cli_registry` |
 | `neura_cli_core` | the option reader, `run` and `--each`, `inspect`, `inspect-image`, `doctor`, `update`, `uninstall`, the update notice, and the driver without a diagnostic renderer | `neura_runner`, `neura_lifecycle`, `neura_gpu` when built |
-| `neura_cli_sdk` | `check`, `emit-ir`, `build` and `--native` packaging, `docs`, `c-bindings`, `test`, and the driver with the diagnostic renderer | `neura_cli_core`, `neura_compiler` |
+| `neura_cli_sdk` | `check`, `prove`, `emit-ir`, `build` and `--native` packaging, `docs`, `c-bindings`, `test`, and the driver with the diagnostic renderer | `neura_cli_core`, `neura_compiler` |
 | `neura_cli_artifact`, `neura_cli_explain`, `neura_cli_tags`, `neura_cli_debug` | `disassemble`, `assemble`, `decompile`; `explain` with the embedded pages; `tags`; the debug adapter | `neura_cli_sdk`, and `neura_decompiler` for the first |
 
 The tools do not link these archives. Two shared libraries hold every object of them, and of the libraries below them, once:

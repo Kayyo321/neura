@@ -1,0 +1,9 @@
+let Example = module (
+    export let Reflexive = law (
+        given identity: { true == true : bool };
+        claim: { true == true : bool };
+    );
+        | proof: {
+            absurd identity;
+        };
+);

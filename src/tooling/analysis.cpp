@@ -199,7 +199,14 @@ std::string documentation_markdown(std::string_view text) {
     if (code) result += "\n```";
     return result;
 }
-std::string signature(const Declaration &d) {
+std::string signature(const Declaration &d, std::string_view source = {}) {
+    if (d.kind == Declaration::Kind::Law && d.law) {
+        const auto& close = d.law->close;
+        const auto end = close.offset + close.length;
+        if (d.span.offset < end && end <= source.size())
+            return std::string(source.substr(d.span.offset, end - d.span.offset)) + ";";
+        return "law " + d.name;
+    }
     std::string text = d.exported ? "export " : "";
     if (d.static_member)
         text += "static ";
@@ -310,6 +317,8 @@ int symbol_kind(SymbolKind kind) {
         return 12;
     case SymbolKind::TypeParameter:
         return 26;
+    case SymbolKind::Law:
+        return 14; // LSP Constant
     case SymbolKind::Alias:
         return 5;
     default:
@@ -866,6 +875,7 @@ void AnalysisSession::index_syntax(EditorDocument &doc) {
         }
     };
     declaration = [&](const Declaration &d, std::size_t parent, const Span &scope, bool variant) {
+        if (d.kind == Declaration::Kind::LawProof) return;
         int kind = 13, type = 7;
         switch (d.kind) {
         case Declaration::Kind::Class:
@@ -883,6 +893,9 @@ void AnalysisSession::index_syntax(EditorDocument &doc) {
         case Declaration::Kind::Interface:
             kind = 11;
             type = 4;
+            break;
+        case Declaration::Kind::Law:
+            kind = 14;
             break;
         case Declaration::Kind::Function:
             kind = parent != none && symbols[parent].kind == 5 ? 6 : 12;
@@ -907,6 +920,10 @@ void AnalysisSession::index_syntax(EditorDocument &doc) {
                         (d.constant ? modifier("readonly") : 0) | (d.exported ? modifier("exported") : 0) |
                         (d.static_member ? modifier("static") : 0) | (d.override_member ? modifier("override") : 0) |
                         (d.last && !d.initializer ? modifier("deferred") : 0);
+        if (d.kind == Declaration::Kind::Law) {
+            mods |= modifier("readonly");
+            if (d.law && !d.law->proof && !d.law->axiom && !d.law->todo) mods |= modifier("abstract");
+        }
         for (const auto &tag : d.tags) {
             if (tag.name == "Deprecated")
                 mods |= modifier("deprecated");
@@ -916,7 +933,7 @@ void AnalysisSession::index_syntax(EditorDocument &doc) {
                 mods |= modifier("readonly");
         }
         const auto selected = d.name_span ? *d.name_span : named_span(doc, d.span, d.name);
-        const auto id = add(d.name, selected, d.span, scope, parent, kind, type, mods, signature(d),
+        const auto id = add(d.name, selected, d.span, scope, parent, kind, type, mods, signature(d, doc.source),
                             d.type ? syntax_type(*d.type) : "", &d);
         for (const auto &generic : d.generics)
             add(generic.name, named_span(doc, generic.span, generic.name), generic.span, d.span, id, 26, 5,
@@ -925,6 +942,21 @@ void AnalysisSession::index_syntax(EditorDocument &doc) {
             add(parameter.name, named_span(doc, parameter.span, parameter.name), parameter.span, d.span, id, 13, 6,
                 modifier("declaration"), parameter.name + ": " + syntax_type(parameter.type),
                 syntax_type(parameter.type));
+        if (d.kind == Declaration::Kind::Law && d.law) {
+            for (const auto& item : d.law->items) {
+                for (const auto& parameter : item.parameters)
+                    add(parameter.name, named_span(doc, parameter.span, parameter.name), parameter.span,
+                        d.span, id, 13, 6, modifier("declaration") | modifier("readonly"),
+                        parameter.name + ": " + syntax_type(parameter.type), syntax_type(parameter.type));
+                if (item.binding) {
+                    const auto& name = *item.binding;
+                    add(name.text, name.span, name.span, d.span, id, 13, 7,
+                        modifier("declaration") | modifier("readonly"),
+                        item.type ? name.text + ": " + syntax_type(*item.type) : name.text,
+                        item.type ? syntax_type(*item.type) : "");
+                }
+            }
+        }
         for (const auto &member : d.members)
             declaration(member, id, d.span, d.kind == Declaration::Kind::Enum);
         for (const auto &overload : d.overloads)

@@ -1,0 +1,7 @@
+error[E1421]: incomplete law proofs are deferred to a later phase
+ --> $DIR/incomplete-deferred.nra:5:11
+  |
+5 |         | todo;
+  |           ^^^^
+
+For more information about this error, try `neura explain E1421`.

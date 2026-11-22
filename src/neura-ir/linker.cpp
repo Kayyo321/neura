@@ -2,12 +2,15 @@
 
 #include "attributes.hpp"
 #include "host_binding.hpp"
+#include "law_program.hpp"
+#include "tags.hpp"
 #include "verifier.hpp"
 
 #include <algorithm>
 #include <charconv>
 #include <map>
 #include <numeric>
+#include <set>
 #include <tuple>
 
 namespace neura {
@@ -250,6 +253,7 @@ public:
 
     void symbol(IrSymbol& value, SymbolId id) const;
     void node(IrNode& value) const;
+    void law(IrLawRecord& value) const;
     SymbolId reference(SymbolId id) const { return id == no_symbol ? id : mapping_.at(id); }
 
 private:
@@ -260,6 +264,8 @@ private:
 
     void span(Span& value) const;
     void type(IrType& value) const;
+    void term(LawTerm& value) const;
+    void proof(LawProof& value) const;
 };
 
 Remapping::Remapping(const IrProgram& destination, const IrProgram& incoming,
@@ -328,6 +334,32 @@ void Remapping::node(IrNode& value) const {
         for (auto& child : *region) node(child);
 }
 
+void Remapping::term(LawTerm& value) const {
+    span(value.span);
+    type(value.type);
+    value.symbol = reference(value.symbol);
+    value.receiver = reference(value.receiver);
+    for (auto& child : value.terms) term(child);
+}
+
+void Remapping::proof(LawProof& value) const {
+    span(value.span);
+    value.symbol = reference(value.symbol);
+    value.receiver = reference(value.receiver);
+    for (auto& child : value.terms) term(child);
+    for (auto& child : value.proofs) proof(child);
+}
+
+void Remapping::law(IrLawRecord& value) const {
+    value.law_symbol = reference(value.law_symbol);
+    value.owner = reference(value.owner);
+    term(value.statement);
+    for (auto& dependency : value.footprint) dependency = reference(dependency);
+    std::ranges::sort(value.footprint);
+    for (auto& abbreviation : value.abbreviations) term(abbreviation.value);
+    if (value.certificate) proof(*value.certificate);
+}
+
 RenamedSymbols lexical_names(const IrProgram& destination, const IrProgram& incoming,
                              const std::vector<SymbolId>& mapping) {
     RenamedSymbols renamed;
@@ -355,6 +387,7 @@ void apply_lexical_names(IrProgram& destination, const RenamedSymbols& renamed) 
     for (auto& body : destination.bodies)
         for (auto& node : body.instructions) names.node(node);
     for (auto& constant : destination.static_constants) names.node(constant.value);
+    for (auto& law : destination.laws) names.law(law);
 }
 
 } // namespace
@@ -369,7 +402,7 @@ SymbolId legacy_overload_group(std::string_view name) {
 }
 
 std::vector<SymbolId> link_ir(IrProgram& destination, IrProgram incoming, const Span& import_site,
-                              bool legacy_signatures) {
+                              bool legacy_signatures, std::size_t proof_fuel) {
     // One image holds one native library: an imported artifact may bring
     // one only when the program has none or the same one.
     if (incoming.native_library) {
@@ -382,6 +415,7 @@ std::vector<SymbolId> link_ir(IrProgram& destination, IrProgram incoming, const 
     const auto imported = index(incoming, import_site);
     if (const auto issues = verify_ir(incoming); !issues.empty())
         throw Diagnostic(import_site, "invalid imported NeuraIR: " + issues.front().message).with_code("E0706");
+    check_program_laws(incoming, proof_fuel, LawCheckOrigin::Artifact);
     const auto indexed = index(destination, import_site);
     std::vector<SymbolId> mapping(incoming.symbols.size(), no_symbol);
     for (const auto& [key, current] : imported.files) {
@@ -461,6 +495,26 @@ std::vector<SymbolId> link_ir(IrProgram& destination, IrProgram incoming, const 
         }
     }
 
+    std::map<std::pair<SymbolId, SymbolId>, const IrLawRecord*> old_laws;
+    for (const auto& law : destination.laws) old_laws.emplace(std::pair{law.law_symbol, law.owner}, &law);
+    for (auto& law : incoming.laws) {
+        remapping.law(law);
+        if (law.owner >= existing) continue;
+        const auto previous = old_laws.find({law.law_symbol, law.owner});
+        if (previous == old_laws.end() || !same_law_record(*previous->second, law)) {
+            const auto& item = destination.symbols[law.owner];
+            conflict(import_site, item.span.file, item.name);
+        }
+        old_laws.erase(previous);
+    }
+    const std::set<SymbolId> mapped_ids(mapping.begin(), mapping.end());
+    for (const auto& entry : old_laws) {
+        if (mapped_ids.contains(entry.first.second)) {
+            const auto& item = destination.symbols[entry.first.second];
+            conflict(import_site, item.span.file, item.name);
+        }
+    }
+
     destination.symbols.reserve(next);
     destination.bodies.reserve(destination.bodies.size() + incoming.bodies.size());
     destination.static_constants.reserve(destination.static_constants.size() + incoming.static_constants.size());
@@ -470,8 +524,60 @@ std::vector<SymbolId> link_ir(IrProgram& destination, IrProgram incoming, const 
         if (body.owner >= existing) destination.bodies.push_back(std::move(body));
     for (auto& entry : incoming.static_constants)
         if (entry.field >= existing) destination.static_constants.push_back(std::move(entry));
+    for (auto& law : incoming.laws)
+        if (law.owner >= existing) destination.laws.push_back(std::move(law));
     apply_lexical_names(destination, renamed);
     return mapping;
+}
+
+void erase_laws(IrProgram& program) {
+    if (program.laws.empty()) return;
+    std::vector<SymbolId> mapping(program.symbols.size(), no_symbol);
+    SymbolId count = 0;
+    for (SymbolId id = 0; id < program.symbols.size(); ++id) {
+        const auto owner = program.symbols[id].owner;
+        if (program.symbols[id].kind != SymbolKind::Law &&
+            (owner == no_symbol || program.symbols[owner].kind != SymbolKind::Law))
+            mapping[id] = count++;
+    }
+    const Remapping remapping(IrProgram{}, program, mapping);
+    const auto purity_requirements = law_purity_requirements(program);
+    std::vector<IrSymbol> symbols;
+    symbols.reserve(count);
+    for (SymbolId id = 0; id < program.symbols.size(); ++id) {
+        if (mapping[id] == no_symbol) continue;
+        auto& entry = program.symbols[id];
+        if (purity_requirements.contains(id)) {
+            std::erase_if(entry.attributes, [](const IrAttribute& attribute) {
+                return attribute.id == AttributeId::Tag && !attribute.value.items.empty() &&
+                       attribute.value.items.front().integer == static_cast<std::uint16_t>(TagId::Pure);
+            });
+        }
+        remapping.symbol(entry, id);
+        symbols.push_back(std::move(entry));
+    }
+    program.symbols = std::move(symbols);
+    program.laws.clear();
+    for (auto& body : program.bodies) {
+        body.owner = remapping.reference(body.owner);
+        for (auto& instruction : body.instructions) remapping.node(instruction);
+    }
+    for (auto& entry : program.static_constants) {
+        entry.field = remapping.reference(entry.field);
+        remapping.node(entry.value);
+    }
+    for (auto& site : program.inline_sites) {
+        site.callee = remapping.reference(site.callee);
+        site.caller = remapping.reference(site.caller);
+    }
+    std::erase_if(program.name_uses, [&](const auto& use) {
+        return remapping.reference(use.second) == no_symbol;
+    });
+    for (auto& use : program.name_uses) use.second = remapping.reference(use.second);
+    for (auto& codec : program.derived_codecs) {
+        codec.module = remapping.reference(codec.module);
+        for (auto& member : codec.members) member.symbol = remapping.reference(member.symbol);
+    }
 }
 
 } // namespace neura

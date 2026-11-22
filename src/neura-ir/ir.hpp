@@ -36,6 +36,10 @@ struct IrType {
     bool operator==(const IrType&) const = default;
 };
 
+#include "law_records.inc"
+
+inline constexpr std::size_t default_proof_fuel = 1000000;
+
 // Callable references to named declarations and built-in methods have no
 // structural signature. Function values list parameter types then the result.
 inline bool is_function_value(const IrType& type) {
@@ -44,7 +48,7 @@ inline bool is_function_value(const IrType& type) {
 
 enum class SymbolKind {
     File, Module, Class, Alias, Import, Field, Function, Parameter, Local, Global,
-    TypeParameter, Enum, Variant, Interface
+    TypeParameter, Enum, Variant, Interface, Law
 };
 
 struct IrHostBinding {
@@ -367,6 +371,8 @@ struct IrProgram {
     // part of a .nir file: a build from source writes them.
     std::vector<IrBundleFile> bundle_files{};
     std::vector<std::string> stylesheet_links{};
+    // Checked in lowering and on artifact input, then removed before execution.
+    std::vector<IrLawRecord> laws{};
 };
 
 // The source loader can supply this trusted library file and retry lowering.
@@ -391,7 +397,8 @@ bool uses_tasks(const IrProgram& program);
 void insert_polls(IrProgram& program);
 
 IrProgram lower(const std::vector<ParsedFile>& files);
-IrProgram lower(const std::vector<ParsedFile>& files, LinkedImports linked);
+IrProgram lower(const std::vector<ParsedFile>& files, LinkedImports linked,
+                std::size_t proof_fuel = default_proof_fuel);
 IrProgram builtin_class_ir();
 IrProgram builtin_reference_ir(const std::string& name, const Span& span);
 void print_ir(std::ostream& output, const IrProgram& program);

@@ -171,8 +171,9 @@ neura::IrProgram load_source_program(const Options& options) {
         roots.push_back(file.parent_path());
     }
     neura::set_c_import_options(options.c_import);
-    auto program = neura::lower_sources(options.files, roots, options.library);
-    if (options.command != Command::Check) link_native(program, options);
+    auto program = options.proof_fuel ? neura::lower_sources(options.files, roots, options.library, *options.proof_fuel)
+                                      : neura::lower_sources(options.files, roots, options.library);
+    if (options.command != Command::Check && options.command != Command::Prove) link_native(program, options);
     return program;
 }
 
@@ -195,7 +196,8 @@ neura::IrProgram load_program(const Options& options) {
     const auto bytes = read_file(options.files.front());
     neura::IrProgram program;
     try {
-        program = neura::read_nir(bytes, options.files.front().string());
+        program = options.proof_fuel ? neura::read_nir(bytes, options.files.front().string(), nullptr, *options.proof_fuel)
+                                     : neura::read_nir(bytes, options.files.front().string());
     } catch (const neura::NirError& error) {
         throw std::runtime_error(error.what());
     }
@@ -567,6 +569,62 @@ int check_fix(const Options& options) {
 }
 
 } // namespace
+
+int prove(const Options& options) {
+    using neura::tooling::Json;
+    const auto format = options.diagnostics.format;
+    try {
+        const auto program = load_program(options);
+        neura::require_valid_ir(program, "after proof checking");
+        Json::Array verdicts;
+        std::int64_t proven = 0;
+        std::int64_t abstract = 0;
+        std::int64_t axioms = 0;
+        for (const auto& law : program.laws) {
+            const auto& symbol = program.symbols[law.law_symbol];
+            std::string name = symbol.name;
+            for (auto owner = law.owner; owner != neura::no_symbol; owner = program.symbols[owner].owner) {
+                const auto& parent = program.symbols[owner];
+                if (parent.kind == neura::SymbolKind::File) break;
+                name = parent.name + "." + name;
+            }
+            const char* status = "ABSTRACT";
+            switch (law.status) {
+            case neura::LawStatus::Abstract: ++abstract; break;
+            case neura::LawStatus::Proven: status = "PROVEN"; ++proven; break;
+            case neura::LawStatus::TrustedAxiom: status = "TRUSTED_AXIOM"; ++axioms; break;
+            }
+            if (format == ErrorFormat::Json) {
+                verdicts.emplace_back(Json::Object{{"name", name}, {"status", status}});
+            } else if (format == ErrorFormat::Short) {
+                std::cout << status << ' ' << name << '\n';
+            } else {
+                std::cout << "  " << status << "   " << name << '\n';
+            }
+        }
+        if (format == ErrorFormat::Json) {
+            std::cout << Json(Json::Object{{"status", "ok"}, {"laws", std::move(verdicts)}, {"proven", proven},
+                                           {"abstract", abstract}, {"axioms", axioms}}).dump() << '\n';
+        } else if (format == ErrorFormat::Human) {
+            std::cout << "Verdict: " << proven << " proven, " << abstract << " abstract";
+            if (axioms != 0) std::cout << ", " << axioms << " trusted axioms";
+            std::cout << '\n';
+        }
+    } catch (const neura::Diagnostic& error) {
+        // The common SDK driver prints the error and its source location.
+        const auto* name = error.argument("law");
+        if (format == ErrorFormat::Json) {
+            Json::Object verdict{{"status", "failed"}, {"code", std::string(error.code())}};
+            if (name) verdict.emplace("law", *name);
+            std::cout << Json(std::move(verdict)).dump() << '\n';
+        } else {
+            if (name) std::cout << "  FAILED   " << *name << '\n';
+            if (format == ErrorFormat::Human) std::cout << "Verdict: proof checking failed\n";
+        }
+        throw;
+    }
+    return 0;
+}
 
 int check(const Options& options) {
     if (options.fix) return check_fix(options);

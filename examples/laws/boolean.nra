@@ -1,0 +1,17 @@
+let BooleanLaws = module (
+    .Pure
+    let invert = func(flag: bool) -> bool => not flag;
+
+    /// Two inversions preserve every Boolean.
+    .Since("0.3.1")
+    export let DoubleInversion = law (
+        for flag: bool;
+        claim: { invert(invert(flag)) == flag : bool };
+    );
+        | proof: {
+            match (flag) {
+                false => {==},
+                true => {==},
+            }
+        };
+);

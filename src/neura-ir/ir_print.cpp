@@ -23,6 +23,7 @@ std::string_view spelling(SymbolKind kind) {
     case SymbolKind::Enum: return "enum";
     case SymbolKind::Variant: return "variant";
     case SymbolKind::Interface: return "interface";
+    case SymbolKind::Law: return "law";
     }
     return "<invalid>";
 }

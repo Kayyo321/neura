@@ -1,0 +1,7 @@
+error[E1408]: absurd requires Empty, found { true == true : bool }
+ --> $DIR/e1408-rejected.nra:7:13
+  |
+7 |             absurd identity;
+  |             ^^^^^^
+
+For more information about this error, try `neura explain E1408`.

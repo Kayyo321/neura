@@ -29,7 +29,7 @@ namespace fs = std::filesystem;
 using neura::tool::usage;
 
 enum class Command {
-    Check, Docs, EmitIr, Build, Inspect, Run, Test, Disassemble, Assemble, Decompile, CBindings,
+    Check, Prove, Docs, EmitIr, Build, Inspect, Run, Test, Disassemble, Assemble, Decompile, CBindings,
     Version, Help, Doctor, Update, Uninstall, Explain, Tags
 };
 
@@ -79,6 +79,8 @@ struct Options {
     std::optional<std::string> show_derived;
     // check --fix: apply machine-applicable suggestions in place.
     bool fix = false;
+    // prove: deterministic normalization steps allowed per law.
+    std::optional<std::size_t> proof_fuel;
     // Editor test discovery and execution. Human terminal output is the default.
     bool list_tests = false;
     bool test_format_json = false;

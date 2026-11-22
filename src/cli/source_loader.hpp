@@ -1,6 +1,7 @@
 #pragma once
 
 #include "c-import/c_import.hpp"
+#include "neura-ir/ir.hpp"
 #include "parser/syntax.hpp"
 
 #include <filesystem>
@@ -10,8 +11,6 @@
 #include <vector>
 
 namespace neura {
-
-struct IrProgram;
 
 // An editor compilation reads open documents before disk, including new files.
 // Scope is thread-local; ordinary CLI invocations retain strict disk behavior.
@@ -49,6 +48,7 @@ std::string c_import_source(const std::filesystem::path& header, const std::vect
 
 IrProgram lower_sources(const std::vector<std::filesystem::path>& files,
                         const std::vector<std::filesystem::path>& roots,
-                        const std::filesystem::path& library);
+                        const std::filesystem::path& library,
+                        std::size_t proof_fuel = default_proof_fuel);
 
 } // namespace neura

@@ -1,0 +1,7 @@
+let Example = module (
+    let State = enum ( Ready );
+    let Bad = law (
+        claim: { State.Ready == true : bool };
+    );
+        | proof: {==};
+);

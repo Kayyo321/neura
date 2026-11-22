@@ -1,0 +1,6 @@
+let Example = module (
+    export let.override Reflexive = law (
+        claim: { true == true : bool };
+    );
+        | proof: {==};
+);

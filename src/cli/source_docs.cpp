@@ -194,6 +194,8 @@ std::string_view kind_name(const Declaration& declaration, bool variant) {
     case DeclKind::Module: return "module";
     case DeclKind::Enum: return "enum";
     case DeclKind::Interface: return "interface";
+    case DeclKind::Law: return "law";
+    case DeclKind::LawProof: return "proof";
     }
     return {};
 }
@@ -273,6 +275,11 @@ private:
     }
 
     std::string signature(const Declaration& declaration, std::string_view kind) const {
+        if (declaration.kind == DeclKind::Law && declaration.law) {
+            const auto& close = declaration.law->close;
+            const auto start = declaration.span.offset;
+            return std::string(source_.substr(start, close.offset + close.length - start)) + ";";
+        }
         std::string result;
         if (kind == "variant") {
             result = declaration.name;
@@ -449,7 +456,7 @@ private:
 
     void declaration(const Declaration& declaration, bool variant = false) {
         // #Hidden leaves the declaration and everything in it out.
-        if (hidden(declaration)) return;
+        if (hidden(declaration) || declaration.kind == DeclKind::LawProof) return;
         if (declaration.documentation && declaration.name_span && declaration.name != "_") {
             const auto kind = kind_name(declaration, variant);
             symbol(declaration.name, kind, signature(declaration, kind), declaration.span,
@@ -627,7 +634,8 @@ private:
     }
 
     void declaration(const Declaration& decl, bool in_class = false, std::string_view enumeration = {}) {
-        if (decl.name == "_" || (decl.initializer && decl.initializer->kind == Expr::Kind::Import)) return;
+        if (decl.name == "_" || decl.kind == DeclKind::LawProof ||
+            (decl.initializer && decl.initializer->kind == Expr::Kind::Import)) return;
         // An overload's syntax span starts after `or`, which can be on
         // its own line. Put its stub at the connector so the docs stay adjacent.
         const auto line = decl.documentation
@@ -645,6 +653,10 @@ private:
             stub += ' ' + decl.name;
             if (!decl.parameters.empty()) stub += doxygen_parameters(decl);
             append(line, stub + ';');
+            return;
+        }
+        if (decl.kind == DeclKind::Law) {
+            append(line, stub + "struct " + decl.name + ";");
             return;
         }
         if (decl.kind == DeclKind::Binding) {

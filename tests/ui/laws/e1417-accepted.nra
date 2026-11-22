@@ -1,0 +1,5 @@
+let Switch = class (
+    let enabled: bool = false;
+
+    export let is_enabled = func() -> bool => enabled;
+);

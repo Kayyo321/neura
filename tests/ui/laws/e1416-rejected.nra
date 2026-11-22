@@ -1,0 +1,5 @@
+const Example = module (
+    export let Reflexive = law (
+        claim: { true == true : bool };
+    );
+);

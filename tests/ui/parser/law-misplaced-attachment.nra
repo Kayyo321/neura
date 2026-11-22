@@ -1,0 +1,9 @@
+let Proofs = module (
+    let Ordinary = true;
+        | proof: {==};
+
+    let Statement = law (
+        holds: true;
+    );
+        | get: true;
+);

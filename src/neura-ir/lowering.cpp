@@ -15,6 +15,7 @@
 #include "integer.hpp"
 #include "ir.hpp"
 #include "lifetime.hpp"
+#include "law_program.hpp"
 #include "linker.hpp"
 #include "monitors.hpp"
 #include "frozen.hpp"
@@ -229,7 +230,7 @@ SymbolId closure_owner(const Context& context) {
 
 class Lowering {
 public:
-    IrProgram run(const std::vector<ParsedFile>& files, LinkedImports linked);
+    IrProgram run(const std::vector<ParsedFile>& files, LinkedImports linked, std::size_t proof_fuel);
     IrProgram builtins() {
         root_class();
         return std::move(program_);
@@ -298,6 +299,24 @@ private:
     SymbolId root_class_ = no_symbol;
     // Trusted library functions bound to a scheduler operation, by name.
     std::map<SymbolId, std::string> scheduler_bindings_;
+    std::map<SymbolId, const Declaration*> law_declarations_;
+    std::vector<std::pair<SymbolId, const Declaration*>> law_fulfillments_;
+
+    struct LawEnvironment;
+    std::map<SymbolId, std::shared_ptr<LawEnvironment>> law_environments_;
+    std::set<SymbolId> resolving_law_statements_;
+    void lower_laws(std::size_t proof_fuel);
+    const IrLawRecord& resolve_law_statement(SymbolId id, const Span& use);
+    LawTerm law_term(const Expr& syntax, LawEnvironment& env, const IrType* expected = nullptr);
+    LawTerm law_term(const IrNode& value, LawEnvironment& env);
+    LawTerm law_proposition(const PropositionSyntax& syntax, LawEnvironment& env);
+    std::uint32_t law_value_binding(LawEnvironment& env, std::string name, const Span& span, const IrType& type);
+    LawEnvironment law_statement(IrLawRecord& law, const Declaration& decl);
+    LawEnvironment inherited_law_environment(const IrLawRecord& law, SymbolId module);
+    LawProof law_proof(const ProofSyntax& syntax, LawEnvironment& env, const LawTerm* goal = nullptr);
+    LawProof law_evidence(const Expr& syntax, LawEnvironment& env);
+    std::optional<LawTerm> law_evidence_type(const LawProof& evidence, const LawEnvironment& env);
+    SymbolId law_name(const Expr& syntax, LawEnvironment& env, SymbolId* receiver = nullptr);
 
     // Source positions that only diagnostics use: the name of a declared
     // symbol, the `const` keyword of a constant binding, and the declared
@@ -1013,6 +1032,23 @@ Declaration named_factory(const Declaration& binding, const Expr& expression, bo
 }
 
 SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind kind) {
+    if (decl.kind == DeclKind::Law || decl.kind == DeclKind::LawProof) {
+        const auto& syntax = *decl.law;
+        if (syntax.override_word || decl.override_member)
+            throw Diagnostic(syntax.override_word.value_or(decl.span), "a law statement cannot be overridden")
+                .with_code("E1405").help("supply a proof with 'let.proof'");
+        if (syntax.invariant)
+            throw Diagnostic(*syntax.invariant, "law.invariant is deferred to Phase 3").with_code("E1421");
+        if (symbol(owner).kind != SymbolKind::Module)
+            throw Diagnostic(syntax.keyword, "Phase 1 supports laws inside modules; class, interface and file laws are deferred")
+                .with_code("E1421");
+        if (!decl.generics.empty())
+            throw Diagnostic(decl.generics.front().span, "generic laws are deferred to Phase 3").with_code("E1421");
+        if (decl.kind == DeclKind::LawProof) {
+            law_fulfillments_.emplace_back(owner, &decl);
+            return no_symbol;
+        }
+    }
     if (accessor_override_syntax(decl) && symbol(owner).kind == SymbolKind::Class)
         return declare_accessor_override(decl, owner);
     if (decl.static_member && decl.kind == DeclKind::Function && !decl.has_body &&
@@ -1039,6 +1075,8 @@ SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind k
     case DeclKind::Interface: kind = SymbolKind::Interface; break;
     case DeclKind::Function: kind = SymbolKind::Function; break;
     case DeclKind::Enum: kind = SymbolKind::Enum; break;
+    case DeclKind::Law: kind = SymbolKind::Law; break;
+    case DeclKind::LawProof: return no_symbol;
     case DeclKind::Binding: break;
     }
     if (decl.kind == DeclKind::Class || decl.kind == DeclKind::Interface || decl.kind == DeclKind::Enum ||
@@ -1079,7 +1117,7 @@ SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind k
     }
     entries_[id].declaration = &decl;
     entries_[id].resolution = Resolution::Pending;
-    symbol(id).constant = decl.constant ||
+    symbol(id).constant = kind == SymbolKind::Law || decl.constant ||
         (decl.static_member && kind == SymbolKind::Global && symbol(lexical).kind == SymbolKind::Interface);
     symbol(id).exported = decl.exported || symbol(lexical).kind == SymbolKind::Interface;
     symbol(id).has_body = decl.has_body;
@@ -1124,6 +1162,10 @@ SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind k
     if (!decl.hooks.empty() && kind == SymbolKind::Class) declare_hooks(decl, id);
     attach_tags(program_, id, tag_target(program_, id), decl.record ? record_tags(decl) : decl.tags,
                 decl.name_span.value_or(decl.span), entries_[id].overloads);
+    if (kind == SymbolKind::Law) {
+        entries_[id].resolution = Resolution::Resolved;
+        law_declarations_.emplace(id, &decl);
+    }
     auto member_kind = kind == SymbolKind::Class ? SymbolKind::Field
                      : kind == SymbolKind::Enum ? SymbolKind::Variant
                                                 : SymbolKind::Global;
@@ -2289,6 +2331,10 @@ void Lowering::check_override(SymbolId id, const Declaration& decl) {
     auto owner = decl.static_member ? symbol(symbol(id).owner).owner : symbol(id).owner;
     auto base = symbol(owner).base;
     auto inherited = base == no_symbol ? no_symbol : member(base, decl.name, true);
+    if (inherited != no_symbol && symbol(inherited).kind == SymbolKind::Law)
+        throw Diagnostic(decl.name_span.value_or(decl.span), "inherited law '" + decl.name +
+                         "' cannot be overridden or shadowed").with_code("E1405")
+            .label(name_span(inherited), "inherited law declaration").help("supply a proof with 'let.proof'");
     if (symbol(owner).kind != SymbolKind::Class || decl.name != "init") {
         for (auto scope = base; scope != no_symbol; scope = symbol(scope).base) {
             const auto ancestor = own_member(scope, decl.name);
@@ -2445,6 +2491,8 @@ void Lowering::check_interfaces(SymbolId id) {
 
 IrNode Lowering::reference(SymbolId id, const Span& span, Context& context, bool implicit_receiver) {
     resolve(id);
+    if (symbol(id).kind == SymbolKind::Law)
+        throw Diagnostic(span, "law '" + symbol(id).name + "' can only be used in a proof").with_code("E1409");
     check_tagged_use(program_, id, span, lexical_owner(context), [&](std::string_view name) {
         SpeculativeDiagnostics lookup;
         try { return find(name, context, span); } catch (const Diagnostic&) { return no_symbol; }
@@ -5636,6 +5684,7 @@ void Lowering::lower_declaration(SymbolId id) {
     resolve(id);
     const auto& declaration = *entries_[id].declaration;
     check_override(id, declaration);
+    if (declaration.kind == DeclKind::Law) return;
     check_constructor(id, declaration);
     if (declaration.kind == DeclKind::Function) {
         check_overloads(id);
@@ -5728,7 +5777,8 @@ void Lowering::lower_declaration(SymbolId id) {
         std::vector<IrNode> initializers;
         std::vector<IrNode> static_initializers;
         for (const auto& member : declaration.members) {
-            if (member.cast_target || (symbol(id).kind == SymbolKind::Class && accessor_override_syntax(member)))
+            if (member.kind == DeclKind::LawProof || member.cast_target ||
+                (symbol(id).kind == SymbolKind::Class && accessor_override_syntax(member)))
                 continue;
             if (member.name == "_") {
                 if (member.initializer->kind != ExprKind::Import) {
@@ -5863,7 +5913,7 @@ void Lowering::seed(LinkedImports linked) {
     }
 }
 
-IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports linked) {
+IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports linked, std::size_t proof_fuel) {
     files_ = &files;
     const auto* warnings = DiagnosticSink::current();
     const auto warning_mark = warnings ? warnings->size() : 0;
@@ -5987,6 +6037,7 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
         }
     }
     const auto prebuilt = [&](SymbolId id) { return artifact_files.contains(source_file(program_, id)); };
+    lower_laws(proof_fuel);
     check_pure_tags(program_, prebuilt);
     // A `using` resource does not escape its block (Lifetime030.md), judged
     // with the retention summaries of the linked program.
@@ -6009,6 +6060,7 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
 #include "lowering_startup.inc"
 #include "lowering_hooks.inc"
 #include "lowering_lifetime.inc"
+#include "lowering_laws.inc"
 
 // Anonymous classes and target-typed `new` (Types.md, Anonymous classes;
 // ObjectLifecycle.md, Target-typed new).
@@ -6459,8 +6511,8 @@ IrProgram lower(const std::vector<ParsedFile>& files) {
     return lower(files, {});
 }
 
-IrProgram lower(const std::vector<ParsedFile>& files, LinkedImports linked) {
-    auto program = Lowering{}.run(files, std::move(linked));
+IrProgram lower(const std::vector<ParsedFile>& files, LinkedImports linked, std::size_t proof_fuel) {
+    auto program = Lowering{}.run(files, std::move(linked), proof_fuel);
     insert_polls(program);
     return program;
 }

@@ -1,0 +1,7 @@
+error[E1413]: recursive law application does not decrease to a structural subterm
+ --> $DIR/e1413-rejected.nra:6:18
+  |
+6 |         | proof: Reflexive(flag);
+  |                  ^^^^^^^^^^^^^^^ a quantified enum argument must be a matched payload subterm
+
+For more information about this error, try `neura explain E1413`.

@@ -172,6 +172,8 @@ CASES: list[tuple[list[str], bytes | None, list[str]]] = [
     (["check", "--error-format=json", "{BAD}"], None, []),
     (["check", "--error-format=short", "{BAD}"], None, []),
     (["check", "--task-safety", "{ARGS}"], None, []),
+    (["prove", "{HELLO}"], None, []),
+    (["prove", "--error-format=json", "{BAD}"], None, []),
     (["emit-ir", "{HELLO}"], None, []),
     (["emit-ir", "{HELLO}", "-o", "out.nir"], None, ["out.nir"]),
     (["emit-ir", "--no-optimize", "{BAD}"], None, []),
@@ -331,7 +333,7 @@ def parity(bin_dir: Path) -> None:
               (1, b"", b"neura: error: unknown option for --version: -x\n"), "neura --version -x")
         status, _, err = run([str(neura)], work, None)
         check(status == 1 and err.startswith(b"usage: neura lsp --stdio\n"), "neura without arguments")
-        check(run([str(neura), "frobnicate"], work, None)[2].startswith(b"neura: error: expected check, docs,"),
+        check(run([str(neura), "frobnicate"], work, None)[2].startswith(b"neura: error: expected check, prove, docs,"),
               "neura with an unknown command")
         capabilities = run([str(neura), "capabilities", "--json"], work, None)
         check(capabilities[0] == 0 and json.loads(capabilities[1])["features"] == {

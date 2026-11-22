@@ -30,6 +30,8 @@ Lowering also validates the [tags](Tags) written before declarations against the
 
 When source imports prebuilt NeuraIR, the linker verifies each artifact and remaps its symbol and type references before source lowering. Compatible shared dependency files are merged. Source calls, initializers, and type references then resolve against the combined program. Linked classes keep their compiled layouts and initialization guards. Optimization, circuit conversion, and execution consume the same resolved operations as an all-source build.
 
+[Laws](Laws) are declared and checked in NeuraIR. The parser preserves the spans and syntax of statements and proofs. Lowering resolves them to typed proof terms, and the proof checker verifies certificates against the typed program. The NeuraIR reader rechecks serialized certificates and the linker remaps their references. The compiler removes law symbols and records before specialization so optimization and circuit conversion receive only the executable program.
+
 Primitive reference bindings name a mutable location in typed NeuraIR. After linkage and before specialization, the compiler moves address-taken storage into heap cells and rewrites ordinary accesses and aliases to use the same cell. Constructors prepare addressed fields and startup prepares addressed global storage. Calls and layout access use the existing object operations. The NVM traces the cell for as long as any alias can reach it.
 
 The compiler derives [class hook](Types#class-hooks) events after specialization. The [task-safety](Concurrency#52-task-safe-calls) check includes the calls introduced by those events before optimization or conversion.

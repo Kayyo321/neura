@@ -1,0 +1,7 @@
+error[E1410]: law uses an impure or forbidden operation: calls 'reads_flag' without a checked .Pure declaration
+ --> $DIR/e1410-rejected.nra:7:18
+  |
+7 |         claim: { reads_flag() == true : bool };
+  |                  ^^^^^^^^^^^^
+
+For more information about this error, try `neura explain E1410`.

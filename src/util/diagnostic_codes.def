@@ -350,6 +350,32 @@ NEURA_DIAGNOSTIC(E1031, "unknown or incompatible provider")
 NEURA_DIAGNOSTIC(E1032, "dependency not pinned or not found")
 NEURA_DIAGNOSTIC(E1033, "package cannot be built here")
 
+// Laws and proofs (docs/design/Laws031.md). Reserved codes have explain
+// entries now and become active when their phase implements the diagnostic.
+#define NEURA_RESERVED_DIAGNOSTIC(code, title) NEURA_DIAGNOSTIC(code, title)
+NEURA_DIAGNOSTIC(E1401, "reflexivity proof does not match its goal")
+NEURA_DIAGNOSTIC(E1402, "rewrite motive does not match its goal")
+NEURA_DIAGNOSTIC(E1403, "proof leaves a goal undischarged")
+NEURA_DIAGNOSTIC(E1404, "concrete module leaves an inherited law unproven")
+NEURA_DIAGNOSTIC(E1405, "law statement cannot be overridden")
+NEURA_DIAGNOSTIC(E1406, "override invalidates an inherited proof")
+NEURA_DIAGNOSTIC(E1407, "proof match does not cover every case")
+NEURA_DIAGNOSTIC(E1408, "invalid witness for a constructor or contradiction proof")
+NEURA_DIAGNOSTIC(E1409, "law or proof term has the wrong type")
+NEURA_DIAGNOSTIC(E1410, "law uses an impure or forbidden operation")
+NEURA_DIAGNOSTIC(E1411, "total equality uses an operation that can trap")
+NEURA_RESERVED_DIAGNOSTIC(E1412, "proof does not establish its trap claim")
+NEURA_DIAGNOSTIC(E1413, "recursive proof does not decrease")
+NEURA_DIAGNOSTIC(E1414, "law dependencies form a cycle")
+NEURA_DIAGNOSTIC(E1415, "proof normalization fuel exhausted")
+NEURA_DIAGNOSTIC(E1416, "closed unit contains an abstract law")
+NEURA_RESERVED_DIAGNOSTIC(E1417, "class invariant field is writable without its guard")
+NEURA_RESERVED_DIAGNOSTIC(E1418, "mutable reference escapes an invariant field")
+NEURA_RESERVED_DIAGNOSTIC(E1419, "independent proof checker disagrees with the compiler")
+NEURA_DIAGNOSTIC(E1420, "axiom declared outside the trusted standard library")
+NEURA_DIAGNOSTIC(E1421, "law feature unavailable")
+#undef NEURA_RESERVED_DIAGNOSTIC
+
 // Warnings, NEURA_WARNING(code, name, title). The name is what -W<name>,
 // -Wno-<name>, #Allow, and #Deny accept. W0006-W0009 stay free for later
 // warnings. An includer that defines only NEURA_DIAGNOSTIC sees them as codes.

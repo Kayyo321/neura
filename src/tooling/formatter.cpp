@@ -87,6 +87,8 @@ struct Hints {
     // which stays on the line of a '}' before it.
     std::set<std::size_t> guards;
     std::set<std::size_t> inline_braces;
+    // Braced propositions can be followed by a motive delimiter or a proof.
+    std::set<std::size_t> proposition_closes;
     std::set<std::size_t> angles;
     std::set<std::size_t> prefix;
     std::set<std::size_t> postfix;
@@ -130,7 +132,7 @@ struct Hints {
     // The '(' of a `using` statement, spaced like the one after `scope`;
     // `using` is a contextual word, so its calls keep no space.
     std::set<std::size_t> control_parens;
-    // The '(' that begins the value of a `yield`, which keeps its space.
+    // The '(' of a keyword operand or clause group, which keeps its space.
     std::set<std::size_t> keyword_operands;
     // The first token of a `defer` statement's call, which never begins a
     // wrapped line: `defer` and its call are joined when split.
@@ -216,6 +218,8 @@ private:
             return false;
         case Declaration::Kind::Enum:
             return false;
+        case Declaration::Kind::Law:
+            return value.law && (!value.law->items.empty() || value.law->attachment);
         default:
             break;
         }
@@ -397,7 +401,7 @@ private:
         const Token* previous_token = nullptr;
         const bool single_line = source_.substr(value.span.offset, value.span.length).find_first_of("\r\n") ==
                                  std::string_view::npos;
-        in_span(value.span, [&](const Token& token) {
+        if (!value.law) in_span(value.span, [&](const Token& token) {
             if (!head && (token.text == "class" || token.text == "module" || token.text == "interface" ||
                           token.text == "enum" || token.text == "singleton" || token.text == "func" ||
                           (value.record && token.span.offset == value.record->keyword.offset) ||
@@ -465,6 +469,7 @@ private:
             }
             declaration(member, value.kind == Declaration::Kind::Enum || value.record != nullptr);
         }
+        if (value.law) law(*value.law, value.kind, value.span);
         for (const auto& body : value.body) statement(body);
         for (const auto& block : value.startup_blocks) statement(block);
         for (const auto& overload : value.overloads) declaration(overload);
@@ -483,6 +488,79 @@ private:
                 hints_.before.insert(*sigil);
             if (!value.tags.empty()) hints_.before.insert(value.span.offset);
         }
+    }
+
+    void proposition(const PropositionSyntax& value) {
+        if (value.kind == PropositionSyntax::Kind::Equality) {
+            hints_.inline_braces.insert(value.span.offset);
+            const auto [open, close] = delimited(value.span.offset, "{", "}");
+            if (close) hints_.proposition_closes.insert(close->span.offset);
+            if (value.type && value.expressions.size() == 2) {
+                const auto& right = value.expressions.back().span;
+                const auto index = index_at(right.offset + right.length);
+                if (index < tokens_.size() && tokens_[index].text == ":")
+                    hints_.spaced_colons.insert(tokens_[index].span.offset);
+            }
+        }
+        if (value.kind == PropositionSyntax::Kind::All || value.kind == PropositionSyntax::Kind::Either) {
+            const auto index = index_at(value.span.offset) + 1;
+            if (index < tokens_.size() && tokens_[index].text == "(")
+                hints_.keyword_operands.insert(tokens_[index].span.offset);
+        }
+        if (value.type) type(*value.type);
+        for (const auto& parameter : value.parameters) type(parameter.type);
+        for (const auto& child : value.propositions) proposition(child);
+        for (const auto& term : value.expressions) expression(term);
+    }
+
+    void proof(const ProofSyntax& value) {
+        if (value.kind == ProofSyntax::Kind::Reflexivity) {
+            hints_.inline_braces.insert(value.span.offset);
+            hints_.tight_braces.insert(value.span.offset);
+        }
+        if (value.kind == ProofSyntax::Kind::Match && value.expression) {
+            const auto& target = value.expression->span;
+            const auto [open, close] = delimited(target.offset + target.length, "{", "}");
+            if (open) hints_.comma_lists.insert(open->span.offset);
+        }
+        if (value.type) type(*value.type);
+        if (value.expression) expression(*value.expression);
+        if (value.proposition) proposition(*value.proposition);
+        for (const auto& child : value.children) proof(child);
+        for (const auto& arm : value.arms) {
+            pattern(arm.pattern);
+            for (const auto& child : arm.body) proof(child);
+        }
+    }
+
+    void law(const LawSyntax& value, Declaration::Kind kind, const Span& declaration) {
+        if (kind == Declaration::Kind::Law) {
+            hints_.container_opens.insert(value.open.offset);
+            hints_.bodies.insert(value.open.offset);
+            auto head = value.keyword;
+            head.length = value.open.offset - head.offset;
+            angle_span(head);
+        }
+        if (value.attachment) {
+            const auto start = value.attachment->offset;
+            hints_.accessors.insert(start);
+            hints_.accessor_ends.insert_or_assign(declaration.offset + declaration.length, start);
+        }
+        for (const auto& item : value.items) {
+            auto index = index_at(item.keyword.offset + item.keyword.length);
+            if (item.nullable && index < tokens_.size() && tokens_[index].text == "?") {
+                hints_.postfix.insert(tokens_[index].span.offset);
+                ++index;
+            }
+            if ((item.kind == LawItemSyntax::Kind::For || item.kind == LawItemSyntax::Kind::Exists) &&
+                index < tokens_.size() && tokens_[index].text == "(")
+                hints_.keyword_operands.insert(tokens_[index].span.offset);
+            if (item.type) type(*item.type);
+            for (const auto& parameter : item.parameters) type(parameter.type);
+            for (const auto& term : item.expressions) expression(term);
+            if (item.proposition) proposition(*item.proposition);
+        }
+        if (value.proof) proof(*value.proof);
     }
 
     void pattern(const PatternSyntax& value) {
@@ -1140,7 +1218,7 @@ std::string render(std::string_view source, const std::vector<Token>& tokens, co
             }
             const bool do_close = text == "}" && hints.do_closes.contains(item.offset);
             const bool next_is_member = next == "." && !hints.tag_sigils.contains(items[i + 1].offset);
-            if (text == "}" && next != ";" && next != "," && next != ")" && next != "]" && !next_is_member &&
+            if (text == "}" && !hints.proposition_closes.contains(item.offset) && next != ";" && next != "," && next != ")" && next != "]" && !next_is_member &&
                 next != "(" && next != "}" && next != "else" && !(next == "while" && do_close) && next != "or" && next != "callback" &&
                 next != "=>" && next != "+" && next != "-" && next != "*" && next != "/" && next != "==" && next != "?" && next != ":" &&
                 !(i + 1 < items.size() && hints.guards.contains(items[i + 1].offset))) out.line();

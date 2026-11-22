@@ -1,0 +1,11 @@
+let Example = module (
+    let First = law (
+        claim: { true == true : bool };
+    );
+        | proof: Second();
+
+    let Second = law (
+        claim: { true == true : bool };
+    );
+        | proof: First();
+);

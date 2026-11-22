@@ -752,6 +752,14 @@ def main() -> int:
         "docs/diagnostics/E0101.md": "# E0101: invalid character\n\n<!-- diagnostic: not reproducible: bytes -->\n\n"
                                      "<!-- example: check -->\n```neura\nlet x = 1;\n```\n",
         "tests/ui/lexer/a.stderr": "error[E0101]: invalid character\n"}, None)
+    reserved = {
+        "src/util/diagnostic_codes.def": DIAGNOSTIC_FILES["src/util/diagnostic_codes.def"]
+                                     .replace("NEURA_DIAGNOSTIC", "NEURA_RESERVED_DIAGNOSTIC"),
+        "docs/diagnostics/E0101.md": DIAGNOSTIC_FILES["docs/diagnostics/E0101.md"]
+                                   .replace("<!-- example: error: E0101 -->", "<!-- diagnostic: not reproducible: later phase -->"),
+    }
+    diagnostics("a reserved code with an explain page", {**reserved, "src/lexer.cpp": None}, None)
+    diagnostics("a reserved code that an active diagnostic uses", reserved, "E0101 is reserved but is declared active or emitted")
     examples("a run without expected output", {"docs/A.md": block("run")}, "must be followed by a ```text block")
     examples("a run followed by another kind of block", {"docs/A.md": block("run") + "\n```sh\nls\n```\n"},
              "must be followed by a ```text block")

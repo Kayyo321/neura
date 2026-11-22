@@ -1,0 +1,4 @@
+let Theorems = module (
+    let Empty = law();
+        | proof: {==};
+);

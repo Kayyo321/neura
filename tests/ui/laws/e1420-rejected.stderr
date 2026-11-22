@@ -1,0 +1,7 @@
+error[E1420]: '| axiom;' is reserved for trusted Std source
+ --> $DIR/e1420-rejected.nra:5:11
+  |
+5 |         | axiom;
+  |           ^^^^^
+
+For more information about this error, try `neura explain E1420`.

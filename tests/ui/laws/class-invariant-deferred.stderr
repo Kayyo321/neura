@@ -1,0 +1,7 @@
+error[E1421]: law.invariant is deferred to Phase 3
+ --> $DIR/class-invariant-deferred.nra:3:21
+  |
+3 |     let Ready = law.invariant (
+  |                     ^^^^^^^^^
+
+For more information about this error, try `neura explain E1421`.

@@ -1,0 +1,13 @@
+let Base = module (
+    .Pure
+    export let value = func() -> bool;
+
+    export let AlwaysTrue = law (
+        claim: { value() == true : bool };
+    );
+);
+
+let Derived = module:Base (
+    .Pure
+    export let.override value = func() -> bool => true;
+);

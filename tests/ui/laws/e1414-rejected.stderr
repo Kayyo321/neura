@@ -1,0 +1,7 @@
+error[E1414]: cyclic law dependency: First -> Second -> First
+  --> $DIR/e1414-rejected.nra:10:18
+   |
+10 |         | proof: First();
+   |                  ^^^^^^^
+
+For more information about this error, try `neura explain E1414`.

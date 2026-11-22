@@ -534,6 +534,8 @@ add_library(neura_compiler STATIC
     src/neura-ir/kernel_signature.cpp
     src/neura-ir/verifier.cpp
     src/neura-ir/nir_format.cpp
+    src/neura-ir/law_core.cpp
+    src/neura-ir/law_program.cpp
     src/neura-ir/attributes.cpp
     src/neura-ir/tags.cpp
     src/neura-ir/linker.cpp
@@ -1596,7 +1598,7 @@ if(BUILD_TESTING AND NEURA_SDK)
             set_tests_properties(server-host-h2c PROPERTIES TIMEOUT 300)
         endif()
     endif()
-    foreach(suite IN ITEMS formatter_tests lsp_format_regressions test_protocol lsp_protocol lsp_editor_regressions lsp_parameters lsp_hooks lsp_scaling refactor_protocol debug_protocol coverage release_gate image_inspection)
+    foreach(suite IN ITEMS formatter_tests lsp_format_regressions test_protocol lsp_protocol lsp_editor_regressions lsp_parameters lsp_hooks lsp_scaling laws refactor_protocol debug_protocol coverage release_gate image_inspection)
         if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/tooling/${suite}.py")
             add_test(NAME tooling-${suite} COMMAND "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/tooling/${suite}.py" "$<TARGET_FILE:neura>")
@@ -1811,6 +1813,10 @@ if(BUILD_TESTING AND NEURA_SDK)
                 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/ui-test.py" --neura "$<TARGET_FILE:neura>" "${area_dir}")
         endif()
     endforeach()
+    add_test(NAME laws-qualification COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/laws/qualification.py" "$<TARGET_FILE:neura>")
+    add_test(NAME laws-proof-core COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/laws/proof-core.py" "$<TARGET_FILE:neura>")
 
     add_executable(neura_ir_tests
         tests/ir-optimization/behavior_tests.cpp

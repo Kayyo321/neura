@@ -1,0 +1,15 @@
+error[E1406]: override of 'value' invalidated the proof of 'Base.AlwaysTrue'
+  --> $DIR/e1406-rejected.nra:13:25
+   |
+ 5 |     export let AlwaysTrue = law (
+   |     -----------------------------... inherited law declared here
+...
+ 8 |         | proof: {==};
+   |                  ---- reflexivity failed: false differs from true
+...
+13 |     export let.override value = func() -> bool => false;
+   |                         ^^^^^
+   |
+   = help: prove the unchanged statement with 'let.proof'
+
+For more information about this error, try `neura explain E1406`.

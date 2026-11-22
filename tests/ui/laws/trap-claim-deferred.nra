@@ -1,0 +1,6 @@
+let Safety = module (
+    let Total = law (
+        no_trap: true;
+    );
+        | proof: {==};
+);

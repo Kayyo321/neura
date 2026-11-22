@@ -1,0 +1,9 @@
+error[E1405]: a law statement cannot be overridden
+ --> $DIR/e1405-rejected.nra:2:16
+  |
+2 |     export let.override Reflexive = law (
+  |                ^^^^^^^^
+  |
+  = help: supply a proof with 'let.proof'
+
+For more information about this error, try `neura explain E1405`.

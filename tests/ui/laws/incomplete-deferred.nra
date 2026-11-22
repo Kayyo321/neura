@@ -1,0 +1,6 @@
+let BooleanLaws = module (
+    let Reflexive = law (
+        claim: { true == true : bool };
+    );
+        | todo;
+);

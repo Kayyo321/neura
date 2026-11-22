@@ -1,0 +1,13 @@
+error[E0202]: a law attachment must follow a law declaration
+ --> $DIR/law-misplaced-attachment.nra:3:11
+  |
+3 |         | proof: {==};
+  |           ^^^^^ this attachment belongs to a law
+
+error[E0202]: expected 'proof', 'axiom' or 'todo' after '|' in a law
+ --> $DIR/law-misplaced-attachment.nra:8:11
+  |
+8 |         | get: true;
+  |           ^^^ expected 'proof', 'axiom' or 'todo' after '|' in a law, found 'get'
+
+For more information about this error, try `neura explain E0202`.

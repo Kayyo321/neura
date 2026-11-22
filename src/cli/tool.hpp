@@ -50,7 +50,7 @@ inline constexpr std::string_view service_executable = "neurad";
 
 // The 0.2 message for a missing or unknown command.
 inline constexpr const char* command_list =
-    "expected check, docs, emit-ir, build, inspect, run, test, disassemble, assemble, decompile, c-bindings, "
+    "expected check, prove, docs, emit-ir, build, inspect, run, test, disassemble, assemble, decompile, c-bindings, "
     "doctor, update, uninstall, explain, tags, version, or help";
 
 // The line `neura --version` prints, without the newline.

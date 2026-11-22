@@ -1,0 +1,7 @@
+error[E1416]: closed module cannot declare abstract law 'Example.Reflexive'
+ --> $DIR/e1416-rejected.nra:2:5
+  |
+2 |     export let Reflexive = law (
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^...
+
+For more information about this error, try `neura explain E1416`.

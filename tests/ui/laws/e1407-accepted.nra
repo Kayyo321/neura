@@ -1,0 +1,12 @@
+let Example = module (
+    export let Reflexive = law (
+        for flag: bool;
+        claim: { flag == flag : bool };
+    );
+        | proof: {
+            match (flag) {
+                true => {==},
+                false => {==},
+            }
+        };
+);

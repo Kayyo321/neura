@@ -1,0 +1,9 @@
+error[E1411]: a total law cannot use a checked memory, conversion, or explicit trap operation because it may trap
+ --> $DIR/e1411-rejected.nra:5:13
+  |
+5 |             trap_with_message("invalid flag");
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = help: use an expression that cannot trap; outcome proofs are deferred to Phase 2
+
+For more information about this error, try `neura explain E1411`.

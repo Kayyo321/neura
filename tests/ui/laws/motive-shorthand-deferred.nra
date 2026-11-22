@@ -1,0 +1,10 @@
+let BooleanLaws = module (
+    let Rewrite = law (
+        given evidence: { true == true : bool };
+        claim: { true == true : bool };
+    );
+        | proof: {
+            rewrite evidence;
+            {==}
+        };
+);
