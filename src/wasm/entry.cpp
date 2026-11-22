@@ -178,6 +178,9 @@ std::vector<BrowserService> browser_services() {
         {signature("neura.http.fetch", {text(), text(), text_list(), byte_list(), int64(), uint32()},
                    tuple({uint32(), text_list(), byte_list()})),
          true, true},
+        {v2(signature("neura.http.fetch", {text(), text(), text_list(), byte_list(), int64(), uint32()},
+                      tuple({uint32(), text_list(), byte_list(), text()}))),
+         true, true},
     };
 }
 

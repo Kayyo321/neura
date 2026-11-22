@@ -348,6 +348,12 @@ void package_native(const Options& options, std::span<const std::uint8_t> bytes)
         (!options.launcher && (descriptor->triple != triple || descriptor->flavor != unsigned{options.static_launcher}))) {
         throw std::runtime_error("--native: " + file.string() + " is not a Neura launcher");
     }
+    const auto policy_version = options.capabilities.http_client_origins
+        ? neura::launcher::container_version : neura::launcher::unscoped_container_version;
+    if (descriptor->container_version < policy_version) {
+        throw std::runtime_error("--native: this launcher does not support executable policy version " +
+                                 std::to_string(policy_version));
+    }
     if (options.native_target && descriptor->triple != triple) {
         throw std::runtime_error("--target: launcher is for " + descriptor->triple + ", expected " + triple);
     }

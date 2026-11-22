@@ -46,7 +46,8 @@ std::optional<Descriptor> read_descriptor(std::span<const std::uint8_t> bytes) {
         !take_integer(fields, descriptor.flavor) || descriptor.flavor > 1 ||
         !take_integer(fields, descriptor.nvr_major) || descriptor.nvr_major == 0 ||
         !take_integer(fields, descriptor.nvr_minor) ||
-        !take_integer(fields, descriptor.container_version) || descriptor.container_version != container_version ||
+        !take_integer(fields, descriptor.container_version) || descriptor.container_version == 0 ||
+        descriptor.container_version > container_version ||
         !take_text(fields, toolchain_version)) {
         return std::nullopt;
     }

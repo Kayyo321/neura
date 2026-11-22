@@ -24,12 +24,18 @@ entry = "Ui.Main"
 styles = ["ui/base.css"]
 capabilities = ["ui"]
 
+[targets.web.origins]
+connect = ["https://api.example:8443"]
+
 [targets.server]
 kind = "server"
 package = "server"
 entry = "Server.Main"
-capabilities = ["http_server", "app", "sql"]
+capabilities = ["http_server", "app", "sql", "http_client"]
 providers = ["sqlite"]
+
+[targets.server.origins]
+connect = []
 
 [targets.server.http]
 listen = "127.0.0.1:8080"
@@ -44,7 +50,7 @@ kind = "desktop"
 package = "desktop"
 ui = "web"
 entry = "Desktop.Main"
-capabilities = ["desktop"]
+capabilities = ["desktop", "http_client"]
 
 [targets.desktop.bridge]
 operations = ["counter.rename"]

@@ -103,7 +103,26 @@ int round_trips() {
     CHECK(read.environment == envelope.environment);
     CHECK(read.mode == envelope.mode);
     CHECK(read.fs && !read.net && !read.env && read.clock && !read.entropy && read.native && read.raw);
-    CHECK(read.http_client);
+    CHECK(read.http_client && !read.http_client_origins);
+    const auto scope_round_trip = [&prepare](const Envelope& scoped) {
+        Message launch;
+        launch.kind = prepare.kind;
+        launch.add(Tag::RequestId, prepare.get(Tag::RequestId));
+        put_envelope(launch, scoped);
+        return read_envelope(decode(bytes_of(encode(launch)), 0));
+    };
+    auto scoped = envelope;
+    scoped.http_client_origins.emplace();
+    CHECK(scope_round_trip(scoped).http_client_origins == scoped.http_client_origins);
+    scoped.http_client_origins = std::vector<std::string>{"https://api.example:8443", "http://[::1]"};
+    CHECK(scope_round_trip(scoped).http_client_origins == scoped.http_client_origins);
+    auto orphan = prepare;
+    orphan.add(Tag::HttpClientOrigin, "https://api.example");
+    try {
+        (void)read_envelope(decode(bytes_of(encode(orphan)), 0));
+        CHECK(false);
+    } catch (const ProtocolError&) {
+    }
     CHECK(read.fs_prefixes == envelope.fs_prefixes);
     CHECK(read.limits == envelope.limits);
     CHECK(read.flag("stats") && read.flag("tier-stats") && !read.flag("profile"));

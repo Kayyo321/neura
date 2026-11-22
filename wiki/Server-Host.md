@@ -122,7 +122,7 @@ neura-server-host [options] <image.nvr>
 | `--worker-tier 0\|1\|2`, `--worker-jit off\|on\|auto` | The highest execution tier and the native compilation of each worker, as `neura run --tier` and `--jit` | 2, auto |
 | `--worker-start zygote\|exec` | How workers start (below): forked from a zygote that loaded the image once, or each with `exec` | `zygote` on Linux, `exec` elsewhere |
 | `--admin-listen <address>:<port>` | The admin listener (below). Repeatable; give it a loopback address | none |
-| `--allow-fs[=prefix,...]`, `--allow-net`, `--allow-http-client`, `--allow-env` | Grant the workers the named group. HTTP client access enables outgoing `neura.http.fetch` requests | denied |
+| `--allow-fs[=prefix,...]`, `--allow-net`, `--allow-http-client[=origin,...]`, `--deny-http-client`, `--allow-env` | Grant the workers the named group. HTTP client access enables outgoing `neura.http.fetch` requests, to the listed origins only when a list is given ([HTTP client origins](NVM#http-client-services)) | denied |
 | `--record-dir <directory>` | Record each request's host requests to `<request id>.trace` | |
 | `--no-startup-check` | Listen without running the startup check | |
 | `--sql-pool <name>=<url>` | An SQL pool for `Std.Data.Sql`: `sqlite:<path>`, `sqlite::memory:`, or a `postgresql://` URL without a password. Its settings and password are `sql.<name>.*` configuration keys ([SQL](Sql#configuring-pools)). Repeatable | |

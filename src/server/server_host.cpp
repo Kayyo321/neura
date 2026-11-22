@@ -3,6 +3,7 @@
 // HTTP wire and the request workers, and runs no application code: every
 // request is executed by a fresh worker process that runs the whole image.
 
+#include "cli/http_client_options.hpp"
 #include "cli/tool.hpp"
 #include "nvr/format.hpp"
 #include "platform/text.hpp"
@@ -115,7 +116,8 @@ constexpr std::string_view usage =
     "  --worker-jit off|on|auto       native compilation of a worker's tier-2 regions (default auto)\n"
     "  --worker-start zygote|exec     fork workers from a process that loaded the image once (zygote,\n"
     "                                 the default on Linux), or start each with exec\n"
-    "  --allow-fs[=prefix,...], --allow-net, --allow-http-client, --allow-env\n"
+    "  --allow-fs[=prefix,...], --allow-net, --allow-env\n"
+    "  --allow-http-client[=origin,...], --deny-http-client\n"
     "                                 grant the workers that group (default: none)\n"
     "  --record-dir <directory>       record each request's host requests to <id>.trace\n"
     "  --sql-pool <name>=<url>        an SQL pool: sqlite:<path> or postgresql://... (repeatable);\n"
@@ -297,8 +299,8 @@ HostOptions read_options(int argc, char** argv) {
             }
         } else if (arg == "--allow-net") {
             options.capabilities.net = true;
-        } else if (arg == "--allow-http-client") {
-            options.capabilities.http_client = true;
+        } else if (neura::cli::parse_http_client_option(arg, options.capabilities)) {
+            continue;
         } else if (arg == "--allow-env") {
             options.capabilities.env = true;
         } else if (is(arg, "--record-dir")) {
@@ -820,7 +822,10 @@ private:
             arguments.push_back(option);
         }
         if (caps.net) arguments.emplace_back("--allow-net");
-        if (caps.http_client) arguments.emplace_back("--allow-http-client");
+        if (caps.http_client) {
+            arguments.push_back(neura::cli::http_client_option(
+                caps.http_client_origins ? &*caps.http_client_origins : nullptr));
+        }
         if (caps.env) arguments.emplace_back("--allow-env");
         if (caps.sql) arguments.emplace_back("--allow-sql");
         if (options_.record_directory) arguments.push_back("--record-dir=" + argument_path(*options_.record_directory));
@@ -2005,8 +2010,8 @@ WorkerOptions read_worker_options(int argc, char** argv) {
             }
         } else if (arg == "--allow-net") {
             options.capabilities.net = true;
-        } else if (arg == "--allow-http-client") {
-            options.capabilities.http_client = true;
+        } else if (neura::cli::parse_http_client_option(arg, options.capabilities)) {
+            continue;
         } else if (arg == "--allow-env") {
             options.capabilities.env = true;
         } else if (arg == "--allow-sql") {

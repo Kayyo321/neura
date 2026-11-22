@@ -65,7 +65,8 @@ struct Origin {
 };
 
 struct Origins {
-    std::vector<Located<Origin>> connect, load, style, external;
+    std::optional<std::vector<Located<Origin>>> connect;
+    std::vector<Located<Origin>> load, style, external;
 };
 
 enum class Routing { Hash, History };
@@ -94,6 +95,7 @@ struct ConfigSettings {
 
 struct ServerSettings {
     HttpSettings http;
+    std::optional<std::vector<Located<Origin>>> connect_origins;
     Named<SqlPool> sql;
     ConfigSettings config;
     std::vector<Text> providers;

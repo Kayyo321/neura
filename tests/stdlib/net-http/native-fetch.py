@@ -458,6 +458,41 @@ def redirect_cases(invoke, api, cert, key):
                 expect_no_connection(unused, "HTTPS-to-HTTP redirect")
 
 
+def origin_cases(invoke):
+    """An http_client grant limited to listed origins, end to end through `neura run`."""
+    def only(*origins):
+        return ("--allow-http-client=" + ",".join(origins),)
+    for api in ("fetch", "client"):
+        with Peer("fixed") as peer:
+            base = f"http://127.0.0.1:{peer.port}"
+            expect(invoke(api, base + "/fixed", extra=only(base)), "Ok:200:hello", f"{api}-origin-listed")
+        with socket.socket() as unused:
+            unused.bind(("127.0.0.1", 0))
+            unused.listen(1)
+            unused.setblocking(False)
+            other = f"http://127.0.0.1:{unused.getsockname()[1]}"
+            with Peer("fixed") as peer:
+                base = f"http://127.0.0.1:{peer.port}"
+                expect(invoke(api, other + "/", extra=only(base)), f"Io:CapabilityDenied:{other}",
+                       f"{api}-origin-unlisted-port")
+                expect(invoke(api, base + "/", extra=("--allow-http-client=",)), f"Io:CapabilityDenied:{base}",
+                       f"{api}-origin-empty-list")
+            with Peer("redirect-downgrade", target=(other + "/landed").encode()) as peer:
+                base = f"http://127.0.0.1:{peer.port}"
+                expect(invoke(api, base + "/fixed", extra=only(base)), f"Io:CapabilityDenied:{other}",
+                       f"{api}-origin-redirect-unlisted")
+            expect_no_connection(unused, "a request outside the origin list")
+            # localhost is a name with loopback answers: they need the numeric origin as well.
+            port = unused.getsockname()[1]
+            expect(invoke(api, f"http://localhost:{port}/", extra=only(f"http://localhost:{port}")),
+                   f"Io:CapabilityDenied:http://localhost:{port}", f"{api}-origin-localhost-loopback")
+            expect_no_connection(unused, "a name resolving to an unlisted loopback address")
+        with Peer("fixed") as peer:
+            expect(invoke(api, f"http://localhost:{peer.port}/fixed",
+                          extra=only(f"http://localhost:{peer.port}", f"http://127.0.0.1:{peer.port}")),
+                   "Ok:200:hello", f"{api}-origin-localhost-with-numeric")
+
+
 def native_cases(args, root, cert, key, other_cert, other_key):
     image = root / "native-fetch.nvr"
     command([args.neura, "build", HERE / "loopback/native-fetch.nra", "-o", image])
@@ -488,6 +523,7 @@ def native_cases(args, root, cert, key, other_cert, other_key):
              ("timeout", "Io:TimedOut", "short"), ("absolute-deadline", "Io:TimedOut", "deadline"),
              ("absolute-deadline", "Ok:200:hello", "get"),
              ("non-reading", "Io:TimedOut", "post-blocked")]
+    origin_cases(invoke)
     for api in ("fetch", "client"):
         for case, expected, mode in cases:
             with Peer(case) as peer:

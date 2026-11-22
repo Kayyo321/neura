@@ -59,7 +59,7 @@ constexpr std::uint16_t list_tags[] = {
     static_cast<std::uint16_t>(Tag::Argument),     static_cast<std::uint16_t>(Tag::Environment),
     static_cast<std::uint16_t>(Tag::Mode),         static_cast<std::uint16_t>(Tag::FsPrefix),
     static_cast<std::uint16_t>(Tag::RunLimit),     static_cast<std::uint16_t>(Tag::RunFlag),
-    static_cast<std::uint16_t>(Tag::ResourceLimit),
+    static_cast<std::uint16_t>(Tag::ResourceLimit), static_cast<std::uint16_t>(Tag::HttpClientOrigin),
 };
 
 std::uint16_t get_u16(const std::uint8_t* p) { return static_cast<std::uint16_t>(p[0] | (p[1] << 8)); }
@@ -91,7 +91,7 @@ std::size_t descriptors_of(Kind kind) {
 }
 
 bool known_tag(std::uint16_t tag) {
-    return (tag >= 1 && tag <= 32) || (tag >= 40 && tag <= 59);
+    return (tag >= 1 && tag <= 32) || (tag >= 40 && tag <= 61);
 }
 
 bool list_tag(std::uint16_t tag) { return std::ranges::find(list_tags, tag) != std::end(list_tags); }
@@ -411,6 +411,11 @@ void put_envelope(Message& message, const Envelope& envelope) {
                                 (envelope.raw ? 64 : 0) | (envelope.http_client ? 128 : 0);
     message.add_u8(Tag::Policy, policy);
     for (const auto& prefix : envelope.fs_prefixes) message.add(Tag::FsPrefix, prefix);
+    if (envelope.http_client_origins) {
+        if (!envelope.http_client) throw ProtocolError("HTTP client origins require the HTTP client capability");
+        message.add(Tag::HttpClientScoped, "");
+        for (const auto& origin : *envelope.http_client_origins) message.add(Tag::HttpClientOrigin, origin);
+    }
     for (const auto& [name, value] : envelope.limits) message.add(Tag::RunLimit, named_value(name, value));
     for (const auto& flag : envelope.flags) message.add(Tag::RunFlag, flag);
     message.add_u8(Tag::TaskDump, envelope.task_dump);
@@ -454,6 +459,14 @@ Envelope read_envelope(const Message& message) {
     envelope.raw = policy & 64;
     envelope.http_client = policy & 128;
     for (const auto value : message.all(Tag::FsPrefix)) envelope.fs_prefixes.emplace_back(value);
+    if (const auto* scoped = message.find(Tag::HttpClientScoped)) {
+        if (!envelope.http_client || !scoped->bytes.empty()) throw ProtocolError("invalid scoped HTTP client grant");
+        envelope.http_client_origins.emplace();
+    }
+    for (const auto value : message.all(Tag::HttpClientOrigin)) {
+        if (!envelope.http_client_origins) throw ProtocolError("HTTP client origins require a scoped grant");
+        envelope.http_client_origins->emplace_back(value);
+    }
     for (const auto value : message.all(Tag::RunLimit)) {
         auto [name, number] = read_named_value(value);
         if (!envelope.limits.emplace(std::move(name), number).second) throw ProtocolError("a run limit is repeated");

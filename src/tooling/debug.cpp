@@ -15,6 +15,7 @@
 #include "neura-ir/specialize.hpp"
 #include "neura-ir/storage.hpp"
 #include "neura-ir/verifier.hpp"
+#include "nvm/http_fetch_provider.hpp"
 #include "nvm/driver.hpp"
 #include "nvm/machine.hpp"
 #include "nvm/app_services.hpp"
@@ -299,6 +300,7 @@ private:
     std::map<int, FrameRef> frames_;
     std::map<int, Variables> variables_;
     Json launch_arguments_;
+    nvm::Capabilities capabilities_;
 
     void response(const Json& request, Json body = Json::Object{}, std::string error = {}) {
         Json message{{"seq", sequence_.fetch_add(1)}, {"type", "response"},
@@ -570,6 +572,37 @@ void Adapter::launch(const Json& arguments) {
         throw std::runtime_error("the launch setting \"runtime\" asks for the runtime service; debug sessions run "
                                  "directly in this version, so remove the setting or set it to \"off\"");
     }
+    nvm::Capabilities capabilities;
+    capabilities.fs = capabilities.net = capabilities.env = capabilities.clock = capabilities.entropy = true;
+    // Native code can write the adapter's transport descriptors and is
+    // not inspectable by this source debugger. Keep it explicitly denied.
+    capabilities.native = false;
+    const auto& cap = arguments["capabilities"];
+    if (cap.is_object()) {
+        capabilities.fs = cap["fs"].boolean(true); capabilities.net = cap["net"].boolean(true);
+        capabilities.env = cap["env"].boolean(true); capabilities.clock = cap["clock"].boolean(true);
+        capabilities.entropy = cap["entropy"].boolean(true);
+        capabilities.raw = cap["raw"].boolean(false);
+        if (cap.contains("http_client")) {
+            const auto& grant = cap["http_client"];
+            if (grant.is_bool()) {
+                capabilities.http_client = grant.boolean();
+            } else if (grant.is_array()) {
+                capabilities.http_client = true;
+                auto& origins = capabilities.http_client_origins.emplace();
+                for (const auto& origin : grant.items()) {
+                    if (!origin.is_string())
+                        throw std::runtime_error("capabilities.http_client must be a boolean or an array of origin strings");
+                    if (!nvm::provider::valid_http_client_origin(origin.string()))
+                        throw std::runtime_error("capabilities.http_client: '" + origin.string() +
+                                                 "' is not an http or https origin");
+                    origins.push_back(origin.string());
+                }
+            } else {
+                throw std::runtime_error("capabilities.http_client must be a boolean or an array of origin strings");
+            }
+        }
+    }
     cwd_ = arguments["cwd"].string(fs::current_path().string());
     cwd_ = path_key(cwd_);
     if (!fs::is_directory(cwd_)) throw std::runtime_error("debug working directory does not exist");
@@ -659,6 +692,7 @@ void Adapter::launch(const Json& arguments) {
     }
     program_input_ = std::make_unique<ProgramInput>();
     launch_arguments_ = arguments;
+    capabilities_ = std::move(capabilities);
     stop_on_entry_ = arguments["stopOnEntry"].boolean(false);
     launched_ = true;
     // Breakpoints often arrive before launch. Revalidate them against the
@@ -855,19 +889,7 @@ void Adapter::execute() {
     try {
         EventSink output(*this, "stdout"), error(*this, "stderr");
         nvm::DescriptorSource input(program_input_->descriptor());
-        nvm::Capabilities capabilities;
-        capabilities.fs = capabilities.net = capabilities.env = capabilities.clock = capabilities.entropy = true;
-        // Native code can write the adapter's transport descriptors and is
-        // not inspectable by this source debugger. Keep it explicitly denied.
-        capabilities.native = false;
-        const auto& cap = launch_arguments_["capabilities"];
-        if (cap.is_object()) {
-            capabilities.fs = cap["fs"].boolean(true); capabilities.net = cap["net"].boolean(true);
-            capabilities.env = cap["env"].boolean(true); capabilities.clock = cap["clock"].boolean(true);
-            capabilities.entropy = cap["entropy"].boolean(true);
-            capabilities.raw = cap["raw"].boolean(false);
-            capabilities.http_client = cap["http_client"].boolean(false);
-        }
+        const auto& capabilities = capabilities_;
         nvm::ConsoleWriteLine console(output);
         nvm::StandardServices services(output, error, input, capabilities);
         // A server image binds here too; without a server host its

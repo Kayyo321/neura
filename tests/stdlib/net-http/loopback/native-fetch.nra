@@ -36,7 +36,11 @@ let NativeFetch = module:program.Entry (
             },
             result.Result.Err(problem) => {
                 match (problem) {
-                    errors.Error.Io { kind, message: _, path: _ } => {
+                    errors.Error.Io { kind, message: _, path } => {
+                        // An origin outside the grant is the error's path.
+                        if (kind == errors.IoErrorKind.CapabilityDenied && not strings.contains(path, " ")) {
+                            return "Io:" .. kind.to_string() .. ":" .. path;
+                        }
                         return "Io:" .. kind.to_string();
                     },
                     errors.Error.Custom(detail) => {

@@ -101,6 +101,7 @@ Envelope make_envelope(const cli::Options& options, std::span<const std::uint8_t
     envelope.net = policy.net;
     envelope.raw = policy.raw;
     envelope.http_client = policy.http_client;
+    envelope.http_client_origins = policy.http_client_origins;
     envelope.env = policy.env;
     envelope.clock = policy.clock;
     envelope.entropy = policy.entropy;
@@ -143,6 +144,7 @@ cli::Options options_of(const Envelope& envelope) {
     policy.net = envelope.net;
     policy.raw = envelope.raw;
     policy.http_client = envelope.http_client;
+    policy.http_client_origins = envelope.http_client_origins;
     policy.env = envelope.env;
     policy.clock = envelope.clock;
     policy.entropy = envelope.entropy;

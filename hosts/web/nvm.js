@@ -133,6 +133,11 @@ const result = {
         });
         return { elements: [{ bits: BigInt(value.status) }, { elements: headers }, { bytes: value.body }] };
     },
+    responseWithOrigin: value => {
+        const reply = result.response(value);
+        reply.elements.push(result.text(''));
+        return reply;
+    },
     stats: value => {
         if (!Array.isArray(value) || value.length !== 4) throw new TypeError('UI stats are four counts');
         return { elements: value.map(count => ({ bits: BigInt.asUintN(64, int64(BigInt(count))) })) };
@@ -174,9 +179,11 @@ service('neura.history.push/1', 'history', ['text'], 'text', (host, [path], c) =
 service('neura.history.replace/1', 'history', ['text'], 'text', (host, [path], c) => host.history.replace(path, c));
 service('neura.history.next/1', 'history', [], 'text', (host, _, c) => host.history.next(c));
 service('neura.history.link/1', 'history', ['text'], 'text', (host, [path], c) => host.history.link(path, c));
-service('neura.http.fetch/1', 'http', ['text', 'text', 'pairs', 'bytes', 'int64', 'uint32'], 'response',
-    (host, [method, url, headers, body, timeout, credentials], c) =>
-        host.http.fetch({ method, url, headers, body, timeout, credentials }, c));
+const fetch = (host, [method, url, headers, body, timeout, credentials], context) =>
+    host.http.fetch({ method, url, headers, body, timeout, credentials }, context);
+const fetchParameters = ['text', 'text', 'pairs', 'bytes', 'int64', 'uint32'];
+service('neura.http.fetch/1', 'http', fetchParameters, 'response', fetch);
+service('neura.http.fetch/2', 'http', fetchParameters, 'responseWithOrigin', fetch);
 
 function completionFor(adapter, value) {
     if (value && typeof value === 'object' && 'error' in value && Object.keys(value).length === 1) {

@@ -5,7 +5,7 @@ let result = import:Std.Core.Result;
 let strings = import:Std.Text.Strings;
 let.promote _ = import:Std.Time.Duration;
 
-/// @brief HTTP requests through the host's `neura.http.fetch` service, version 1 (docs/runtime/Providers.md,
+/// @brief HTTP requests through the host's `neura.http.fetch` service, version 2 (docs/runtime/Providers.md,
 /// "HTTP fetch"). In a browser the request is the browser's own `fetch`, so the browser decides origins, CORS,
 /// cookies, redirects and caching; the host checks the request and enforces the limits W-3 (8 MiB for a request
 /// or response body) and W-4 (16 fetches in flight).
@@ -14,7 +14,9 @@ let.promote _ = import:Std.Time.Duration;
 /// It verifies the peer and its name against the runner's configured trust store, applies a single deadline
 /// across redirects, and uses no ambient cookie jar or authentication state. A redirect to another origin keeps
 /// only the caller's Accept, Accept-Language and Content-Language fields. A redirect from HTTPS to HTTP, and a
-/// redirect to another origin that would resend the request body, fail with `http.RedirectDenied`.
+/// redirect to another origin that would resend the request body, fail with `http.RedirectDenied`. A grant
+/// limited to listed origins refuses any other origin, at every redirect, with CapabilityDenied; the error's path
+/// is the refused origin.
 ///
 /// A response with any status, 404 and 500 included, is `Ok`: the status is the server's answer. `Err` means
 /// there is no answer. Its I/O kind is InvalidInput for a malformed request, TimedOut when the timeout passed,
@@ -26,7 +28,8 @@ let.promote _ = import:Std.Time.Duration;
 /// NotProcessed means an HTTP/2 peer stated that it did not process the request, so it is safe to retry.
 ///
 /// `send` overlaps in a program with tasks: the calling task waits and the others run. Without tasks the
-/// program waits for the answer. Native runs grant the group with `--allow-http-client`.
+/// program waits for the answer. Native runs grant the group with `--allow-http-client`, or only some origins
+/// with `--allow-http-client=origin,...`.
 .Since("0.3.0")
 export let Fetch = module (
     /// @brief Whether the browser sends cookies and HTTP authentication with the request.
@@ -40,13 +43,13 @@ export let Fetch = module (
         RedirectDenied, NotProcessed
     );
 
-    /// @brief The host's answer: status, headers as alternating names and values, and body, or a host error
-    /// code.
-    let FetchOutcome = enum (Ok([uint32, string[list], uint8[list]]), Error(uint32));
+    /// @brief The host's answer: status, headers as alternating names and values, body, and an origin outside the
+    /// grant (empty for a response), or a host error code.
+    let FetchOutcome = enum (Ok([uint32, string[list], uint8[list], string]), Error(uint32));
     /// @brief Sends one request. Arguments: method, URL, headers as alternating names and values, body, timeout
     /// in nanoseconds (0 selects the native 30-second default), credentials mode (0 omit, 1 same-origin, 2 include).
     let fetch = func(method: string, url: string, headers: string[list], body: uint8[list], timeout: int64,
-        credentials: uint32) -> FetchOutcome host("neura.http.fetch", 1);
+        credentials: uint32) -> FetchOutcome host("neura.http.fetch", 2);
 
     /// @brief The default timeout of a request, 30 seconds, as for generated clients.
     export const DefaultTimeoutSeconds: int64 = 30;
@@ -169,8 +172,10 @@ export let Fetch = module (
         export let send = func -> result.Result<Response> {
             last nanos = timeout.to_nanos();
             return match (fetch(method, url, flatten(pairs), body, nanos < 0 ? 0 : nanos, mode_code(credentials))) {
-                FetchOutcome.Ok(answer) =>
-                    result.Result<Response>.Ok(new Response(answer[0] as int, pair_up(answer[1]), answer[2])),
+                FetchOutcome.Ok(answer) => answer[3] == ""
+                    ? result.Result<Response>.Ok(new Response(answer[0] as int, pair_up(answer[1]), answer[2]))
+                    : result.Result<Response>.Err(host_error.io(14, "the origin is outside the http_client grant",
+                        answer[3])),
                 FetchOutcome.Error(code) => result.Result<Response>.Err(error_of(code, method .. " " .. url)),
             };
         };

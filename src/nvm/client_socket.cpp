@@ -214,7 +214,7 @@ std::shared_ptr<Resolution> resolve(const std::string& host, std::int32_t port, 
 }
 
 NativeSocket connect(const std::string& host, std::int32_t port, Clock::time_point deadline, std::uint32_t& error,
-                     const std::atomic<bool>* cancelled) {
+                     const std::atomic<bool>* cancelled, const AddressFilter& allowed_address) {
     if (const auto start = platform::ensure_sockets()) {
         error = error_code(start.value());
         return invalid_native_socket;
@@ -264,6 +264,7 @@ NativeSocket connect(const std::string& host, std::int32_t port, Clock::time_poi
 #endif
     }
     error = host_error::connection_refused;
+    bool rejected_address = false, allowed_candidate = false;
     for (const auto* entry = found; entry; entry = entry->ai_next) {
         if (cancelled && cancelled->load()) {
             error = host_error::cancelled;
@@ -272,6 +273,21 @@ NativeSocket connect(const std::string& host, std::int32_t port, Clock::time_poi
         if (Clock::now() >= deadline) {
             error = host_error::timed_out;
             break;
+        }
+        if (allowed_address) {
+            char numeric[INET6_ADDRSTRLEN];
+            const void* address = nullptr;
+            if (entry->ai_family == AF_INET && entry->ai_addrlen >= sizeof(sockaddr_in)) {
+                address = &reinterpret_cast<const sockaddr_in*>(entry->ai_addr)->sin_addr;
+            } else if (entry->ai_family == AF_INET6 && entry->ai_addrlen >= sizeof(sockaddr_in6)) {
+                address = &reinterpret_cast<const sockaddr_in6*>(entry->ai_addr)->sin6_addr;
+            }
+            if (!address || !::inet_ntop(entry->ai_family, address, numeric, sizeof numeric) ||
+                !allowed_address(numeric)) {
+                rejected_address = true;
+                continue;
+            }
+            allowed_candidate = true;
         }
         const auto descriptor = ::socket(entry->ai_family, SOCK_STREAM, 0);
         if (descriptor == invalid_native_socket) {
@@ -303,6 +319,8 @@ NativeSocket connect(const std::string& host, std::int32_t port, Clock::time_poi
         platform::close_socket(descriptor);
         if (error == host_error::timed_out || error == host_error::cancelled) break;
     }
+    if (rejected_address && !allowed_candidate && error == host_error::connection_refused)
+        error = host_error::permission_denied;
     return invalid_native_socket;
 }
 
