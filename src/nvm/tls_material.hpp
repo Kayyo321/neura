@@ -23,6 +23,13 @@
 #if defined(__FreeBSD__) && defined(F_KINFO)
 #include <sys/user.h>
 #endif
+#if defined(__linux__)
+#include <string>
+#include <sys/syscall.h>
+#if __has_include(<linux/openat2.h>)
+#include <linux/openat2.h>
+#endif
+#endif
 #endif
 #include <openssl/err.h>
 #include <openssl/pem.h>
@@ -195,6 +202,28 @@ inline std::uint32_t opened_path_error(platform::native_file file, const std::ve
 #endif
 }
 
+#if defined(__linux__)
+// Opens `candidate`, a name resolve_path gave, as an O_PATH handle. The
+// handle names the object without opening it, so a FIFO or device is not
+// opened. The name has no symbolic link once resolved, and openat2 with
+// RESOLVE_NO_SYMLINKS refuses one in any component (ELOOP): a directory
+// swapped for a link after the check cannot redirect the open. Without
+// openat2 (ENOSYS before Linux 5.6, or EPERM from a seccomp filter) the
+// O_PATH open follows such a link in a directory component, and the
+// descriptor-to-path check of the handle rejects where it leads before
+// anything is opened for reading.
+inline platform::native_file open_name(const std::string& candidate) {
+#if defined(SYS_openat2) && defined(RESOLVE_NO_SYMLINKS)
+    open_how how{};
+    how.flags = O_PATH | O_CLOEXEC;
+    how.resolve = RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS;
+    const auto opened = ::syscall(SYS_openat2, AT_FDCWD, candidate.c_str(), &how, sizeof how);
+    if (opened >= 0 || (errno != ENOSYS && errno != EPERM)) return static_cast<platform::native_file>(opened);
+#endif
+    return ::open(candidate.c_str(), O_PATH | O_CLOEXEC | O_NOFOLLOW);
+}
+#endif
+
 inline std::uint32_t read(const Capabilities& capabilities, const std::vector<ResolvedPath>& prefixes,
                           std::string& path) {
     if (path.empty()) return 0;
@@ -241,14 +270,53 @@ inline std::uint32_t read(const Capabilities& capabilities, const std::vector<Re
         candidate = resolved.text();
 #endif
     }
-    // Check the kind before opening, so a FIFO or device is never opened.
+    // Check the kind before opening, so a FIFO or device is not opened.
     // This also preserves lookup failures such as a trailing slash on a file.
     struct stat before{};
     if (::stat(path.c_str(), &before) != 0) return host_error::from_errno(errno);
     if (!S_ISREG(before.st_mode)) return host_error::invalid_input;
-    const auto nofollow = prefixes.empty() ? 0 : O_NOFOLLOW;
-    const platform::UniqueFile file(::open(candidate.c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK | nofollow));
-    if (!file) return host_error::from_errno(errno);
+    platform::UniqueFile file;
+#if defined(__linux__)
+    if (!prefixes.empty()) {
+        // docs/runtime/NVM.md, "TLS credential files": check the object the
+        // resolved name leads to now, through a handle that opens nothing,
+        // and only then open that same object for reading.
+        const platform::UniqueFile name(open_name(candidate));
+        if (!name) return errno == ELOOP ? host_error::capability_denied : host_error::from_errno(errno);
+        struct stat named{};
+        if (::fstat(name.get(), &named) != 0) return host_error::from_errno(errno);
+        if (!S_ISREG(named.st_mode)) return host_error::invalid_input;
+        if (named.st_nlink == 0) return host_error::capability_denied;
+        if (const auto error = opened_path_error(name.get(), prefixes)) return error;
+        const auto handle = "/proc/self/fd/" + std::to_string(name.get());
+        file = platform::UniqueFile(::open(handle.c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK));
+        if (!file) return host_error::from_errno(errno);
+        struct stat info{};
+        if (::fstat(file.get(), &info) != 0) return host_error::from_errno(errno);
+        if (info.st_dev != named.st_dev || info.st_ino != named.st_ino) return host_error::capability_denied;
+    } else
+#else
+    if (!prefixes.empty()) {
+        // Without an open that refuses links in every component, check the
+        // resolved name itself. A directory swapped between this check and
+        // the open can still redirect it; the descriptor check below then
+        // rejects the object, but it has been opened (docs/runtime/NVM.md).
+        struct stat resolved{};
+        if (::stat(candidate.c_str(), &resolved) != 0) return host_error::from_errno(errno);
+        if (!S_ISREG(resolved.st_mode)) return host_error::invalid_input;
+    }
+#endif
+    {
+        auto flags = O_RDONLY | O_CLOEXEC | O_NONBLOCK;
+        if (!prefixes.empty()) {
+            flags |= O_NOFOLLOW;
+#ifdef O_NOFOLLOW_ANY
+            flags |= O_NOFOLLOW_ANY; // macOS 11: no link in any component.
+#endif
+        }
+        file = platform::UniqueFile(::open(candidate.c_str(), flags));
+        if (!file) return host_error::from_errno(errno);
+    }
     struct stat info{};
     if (::fstat(file.get(), &info) != 0) return host_error::from_errno(errno);
     if (!S_ISREG(info.st_mode)) return host_error::invalid_input;
