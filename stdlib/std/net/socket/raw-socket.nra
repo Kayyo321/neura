@@ -12,7 +12,7 @@ let support = import:Std.Net.Socket.Internal.Support;
 let.promote _ = import:Std.Core.Unit;
 
 /// @brief A raw IP socket (`SOCK_RAW`) for one IP protocol number: a `DatagramSocket` of `Std.Net.Core.IpAddr`
-/// that sends and receives whole IP payloads (ICMP echo, for example). Needs the net capability and, on most
+/// that sends and receives whole IP payloads (ICMP echo, for example). Needs the net and raw capabilities and, on most
 /// systems, privileges the runtime does not grant on its own.
 ///
 /// Opening a raw socket is subject to host privilege and protocol checks. On IPv4 a received payload starts
@@ -45,7 +45,7 @@ export let RawSocket = module (
         .NoDiscard
         export let local_address = func -> Result<ips.IpAddr> {
             return Result<ips.IpAddr>.Err(bytes.closed("socket", to_string())) unless open_now;
-            return match (host.local_address(id)) {
+            return match (host.raw_local_address(id)) {
                 host.AddressOutcome.Ok(reported) => ip_of(reported),
                 host.AddressOutcome.Error(code) => Result<ips.IpAddr>.Err(
                     host_error.io(code, "local address failed", to_string())),

@@ -84,8 +84,8 @@ inline constexpr std::int32_t max_entropy_bytes = 1 << 20;
 //
 // The library default is all-denied: an embedder grants each group
 // explicitly. Only the command-line tools (neura run, neura test, and the
-// policy that neura build --native records) start from "every group
-// granted" and take --deny-* options away.
+// policy that neura build --native records) grant the ordinary groups by
+// default. Raw sockets and application groups require explicit grants.
 struct Capabilities {
     bool fs = false;
     // With fs granted and this empty, every path is allowed. Otherwise a
@@ -93,6 +93,8 @@ struct Capabilities {
     // one of these prefixes (see resolve_path).
     std::vector<std::string> fs_prefixes;
     bool net = false;
+    // The raw IP socket boundary also requires net.
+    bool raw = false;
     bool env = false;
     bool clock = false;
     bool entropy = false;

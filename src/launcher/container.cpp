@@ -46,7 +46,8 @@ constexpr std::uint32_t environment = 1U << 2;
 constexpr std::uint32_t clock = 1U << 3;
 constexpr std::uint32_t entropy = 1U << 4;
 constexpr std::uint32_t native = 1U << 5;
-constexpr std::uint32_t capabilities_mask = files | network | environment | clock | entropy | native;
+constexpr std::uint32_t raw = 1U << 6;
+constexpr std::uint32_t capabilities_mask = files | network | environment | clock | entropy | native | raw;
 
 constexpr auto crc_table = [] {
     std::array<std::uint32_t, 256> table{};
@@ -177,6 +178,7 @@ Container read_payload(PayloadReader& input, const Footer& footer) {
     if ((caps & ~capabilities_mask) != 0) malformed("reserved capability bits");
     policy.capabilities.fs = (caps & files) != 0;
     policy.capabilities.net = (caps & network) != 0;
+    policy.capabilities.raw = (caps & raw) != 0;
     policy.capabilities.env = (caps & environment) != 0;
     policy.capabilities.clock = (caps & clock) != 0;
     policy.capabilities.entropy = (caps & entropy) != 0;
@@ -242,7 +244,7 @@ std::vector<std::uint8_t> encode_policy(const Policy& policy, std::uint32_t imag
     append_integer(bytes, policy.sealed ? sealed : 0U);
     append_integer(bytes, (caps.fs ? files : 0U) | (caps.net ? network : 0U) |
                           (caps.env ? environment : 0U) | (caps.clock ? clock : 0U) |
-                          (caps.entropy ? entropy : 0U) | (caps.native ? native : 0U));
+                          (caps.entropy ? entropy : 0U) | (caps.native ? native : 0U) | (caps.raw ? raw : 0U));
     append_integer(bytes, static_cast<std::uint32_t>(caps.fs_prefixes.size()));
     for (const auto& prefix : caps.fs_prefixes) {
         if (prefix.empty()) malformed("file-system prefix is empty");

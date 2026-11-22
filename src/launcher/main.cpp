@@ -111,6 +111,8 @@ neura::runner::RunOptions run_options(const neura::launcher::Policy& policy, neu
             capabilities.fs_prefixes.clear();
         } else if (flag == "--deny-net") {
             capabilities.net = false;
+        } else if (flag == "--deny-raw") {
+            capabilities.raw = false;
         } else if (flag == "--deny-env") {
             capabilities.env = false;
         } else if (flag == "--deny-clock") {

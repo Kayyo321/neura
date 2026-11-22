@@ -396,7 +396,7 @@ void add_socket_transport_services(const Adder& add, StandardServices::Tables& t
     };
     const auto find = [sockets](const HostValue& id) -> StandardServices::Tables::Socket* {
         const auto found = sockets->sockets.find(as_int64(id));
-        return found == sockets->sockets.end() ? nullptr : &found->second;
+        return found == sockets->sockets.end() || found->second.raw ? nullptr : &found->second;
     };
     const auto full = [sockets] { return sockets->sockets.size() >= max_open_ids; };
     const auto unsupported = [granted](const HostRequest&) {
@@ -974,7 +974,7 @@ void add_socket_transport_services(const Adder& add, StandardServices::Tables& t
     };
     const auto find = [sockets](const HostValue& id) -> StandardServices::Tables::Socket* {
         const auto found = sockets->sockets.find(as_int64(id));
-        return found == sockets->sockets.end() ? nullptr : &found->second;
+        return found == sockets->sockets.end() || found->second.raw ? nullptr : &found->second;
     };
     const auto full = [sockets] { return sockets->sockets.size() >= max_open_ids; };
 
@@ -1976,9 +1976,9 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
     add_socket_transport_services(add, tables, capabilities);
     auto* table = &tables;
     const auto* granted = &capabilities;
-    const auto find = [table](const HostValue& id) -> StandardServices::Tables::Socket* {
+    const auto find = [table](const HostValue& id, bool raw = false) -> StandardServices::Tables::Socket* {
         const auto found = table->sockets.find(as_int64(id));
-        return found == table->sockets.end() ? nullptr : &found->second;
+        return found == table->sockets.end() || found->second.raw != raw ? nullptr : &found->second;
     };
 
     add(signature("neura.net.shutdown", {int64(), int32()}, void_type()), [=](const HostRequest& request) {
@@ -1995,9 +1995,9 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
         return HostCompletion::ok();
     });
 
-    add(signature("neura.net.local_address", {int64()}, tuple({text(), int32()})), [=](const HostRequest& request) {
-        if (!granted->net) return denied();
-        const auto* socket = find(request.arguments.at(0));
+    const auto local_address = [=](const HostRequest& request, bool raw) {
+        if (!granted->net || (raw && !granted->raw)) return denied();
+        const auto* socket = find(request.arguments.at(0), raw);
         if (!socket || socket->pipe) return fail(host_error::invalid_input);
         sockaddr_storage bound{};
         AddressLength length = sizeof bound;
@@ -2020,20 +2020,24 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
             return fail(host_error::other);
         }
         return HostCompletion::ok(tuple_value({bytes_value(address), int32_value(std::atoi(port))}));
-    });
+    };
+    add(signature("neura.net.local_address", {int64()}, tuple({text(), int32()})),
+        [=](const HostRequest& request) { return local_address(request, false); });
+    add(signature("neura.net.raw.local_address", {int64()}, tuple({text(), int32()})),
+        [=](const HostRequest& request) { return local_address(request, true); });
 
     add(signature("neura.net.raw.open", {int32(), int32()}, int64()), [=](const HostRequest& request) {
-        if (!granted->net) return denied();
+        if (!granted->net || !granted->raw) return denied();
         return raw_open(*table, as_int32(request.arguments.at(0)), as_int32(request.arguments.at(1)));
     });
     add(signature("neura.net.raw.send_to", {int64(), text(), byte_list()}, int32()), [=](const HostRequest& request) {
-        if (!granted->net) return denied();
-        const auto* socket = find(request.arguments.at(0));
+        if (!granted->net || !granted->raw) return denied();
+        const auto* socket = find(request.arguments.at(0), true);
         const auto& text = request.arguments.at(1).bytes;
         const auto& bytes = request.arguments.at(2).bytes;
         sockaddr_storage to{};
         AddressLength length = 0;
-        if (!socket || !socket->raw || !usable_text(text) || !numeric_address(text, 0, to, length) ||
+        if (!socket || !usable_text(text) || !numeric_address(text, 0, to, length) ||
             bytes.size() > 65535) {
             return fail(host_error::invalid_input);
         }
@@ -2046,11 +2050,11 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
     });
     add(signature("neura.net.raw.receive_from", {int64(), int32(), int64()}, address_result()),
         [=](const HostRequest& request) {
-            if (!granted->net) return denied();
-            const auto* socket = find(request.arguments.at(0));
+            if (!granted->net || !granted->raw) return denied();
+            const auto* socket = find(request.arguments.at(0), true);
             const auto max = as_int32(request.arguments.at(1));
             const auto timeout = as_int64(request.arguments.at(2));
-            if (!socket || !socket->raw || max < 1 || timeout < 0) return fail(host_error::invalid_input);
+            if (!socket || max < 1 || timeout < 0) return fail(host_error::invalid_input);
             return read_datagram(socket->descriptor, std::min<std::size_t>(max, max_read_bytes), timeout);
         });
 

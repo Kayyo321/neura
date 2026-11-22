@@ -296,7 +296,7 @@ struct Envelope {
     std::vector<std::string> environment;
     std::vector<std::string> mode;
     // The resolved capability policy.
-    bool fs = false, net = false, env = false, clock = false, entropy = false, native = false;
+    bool fs = false, net = false, env = false, clock = false, entropy = false, native = false, raw = false;
     std::vector<std::string> fs_prefixes;
     // Every limit an option sets, by option name without its dashes, and
     // the runner's flags (stats, tier-stats, profile, trace-wall-time,

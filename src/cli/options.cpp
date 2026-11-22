@@ -98,6 +98,8 @@ bool parse_policy_option(Options& options, std::string_view arg, Next next) {
         capabilities.fs_prefixes.insert(capabilities.fs_prefixes.end(), prefixes.begin(), prefixes.end());
     } else if (arg == "--allow-net") {
         options.capabilities.net = true;
+    } else if (arg == "--allow-raw") {
+        options.capabilities.raw = true;
     } else if (arg == "--allow-env") {
         options.capabilities.env = true;
     } else if (arg == "--allow-clock") {
@@ -112,6 +114,8 @@ bool parse_policy_option(Options& options, std::string_view arg, Next next) {
         options.capabilities.fs_prefixes.clear();
     } else if (arg == "--deny-net") {
         options.capabilities.net = false;
+    } else if (arg == "--deny-raw") {
+        options.capabilities.raw = false;
     } else if (arg == "--deny-env") {
         options.capabilities.env = false;
     } else if (arg == "--deny-clock") {

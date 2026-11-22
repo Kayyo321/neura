@@ -56,6 +56,7 @@ int inspect(const Options& options) {
         }
     }
     if (caps.net) std::cout << ", network";
+    if (caps.raw) std::cout << ", raw";
     if (caps.env) std::cout << ", environment";
     if (caps.clock) std::cout << ", clock";
     if (caps.entropy) std::cout << ", entropy";

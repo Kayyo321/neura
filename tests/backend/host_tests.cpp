@@ -82,6 +82,7 @@ struct Host {
 nvm::Capabilities everything() {
     nvm::Capabilities capabilities;
     capabilities.fs = capabilities.net = capabilities.env = capabilities.clock = capabilities.entropy = true;
+    capabilities.raw = true;
     return capabilities;
 }
 
@@ -1073,6 +1074,27 @@ NEURA_TEST(host, event_loop_probes_requested_backends) {
 #else
     expect_error(host.call("neura.runtime.event_loop", {i32(2)}), host_error::unsupported, "epoll requires Linux");
 #endif
+}
+
+NEURA_TEST(raw_socket, generic_network_calls_reject_raw_ids) {
+    Host host(everything());
+    auto net_only = everything();
+    net_only.raw = false;
+    Host denied(net_only);
+    expect_error(denied.call("neura.net.raw.open", {i32(4), i32(IPPROTO_ICMP)}), host_error::capability_denied,
+                 "ordinary network access cannot open a raw socket");
+    const auto raw = host.call("neura.net.raw.open", {i32(4), i32(IPPROTO_ICMP)});
+    expect_ok(raw, "the precondition admits an ICMP socket");
+    expect_error(host.call("neura.net.read", {raw.value, i32(8), i64(1)}), host_error::invalid_input,
+                 "generic read cannot use a raw ID");
+    expect_error(host.call("neura.net.write", {raw.value, bytes("data")}), host_error::invalid_input,
+                 "generic write cannot use a raw ID");
+    expect_error(host.call("neura.net.option.set", {raw.value, i32(1), i64(1)}), host_error::invalid_input,
+                 "generic option set cannot use a raw ID");
+    expect_error(host.call("neura.net.local_address", {raw.value}), host_error::invalid_input,
+                 "generic address cannot use a raw ID");
+    expect_ok(host.call("neura.net.raw.local_address", {raw.value}), "raw local address");
+    expect_ok(host.call("neura.net.close", {raw.value}), "close with the raw capability");
 }
 
 NEURA_TEST(host, socket_extensions_reject_bad_requests) {

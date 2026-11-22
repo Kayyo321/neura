@@ -368,7 +368,7 @@ void add_net_services(const Adder& add, const OverlapAdder& overlap, StandardSer
     const auto* granted = &capabilities;
     const auto lookup = [sockets](const HostValue& id, bool listener) -> StandardServices::Tables::Socket* {
         const auto found = sockets->sockets.find(as_int64(id));
-        if (found == sockets->sockets.end() || found->second.listener != listener) return nullptr;
+        if (found == sockets->sockets.end() || found->second.raw || found->second.listener != listener) return nullptr;
         return &found->second;
     };
     const auto remember = [sockets](NativeSocket socket, bool listener) {
@@ -443,7 +443,7 @@ void add_net_services(const Adder& add, const OverlapAdder& overlap, StandardSer
     add(signature("neura.net.local_port", {int64()}, int32()), [=](const HostRequest& request) {
         if (!granted->net) return denied();
         const auto found = sockets->sockets.find(as_int64(request.arguments.at(0)));
-        if (found == sockets->sockets.end()) return fail(host_error::invalid_input);
+        if (found == sockets->sockets.end() || found->second.raw) return fail(host_error::invalid_input);
         sockaddr_storage address{};
         int length = sizeof address;
         if (::getsockname(found->second.descriptor, reinterpret_cast<sockaddr*>(&address), &length) != 0) {
@@ -718,6 +718,7 @@ void add_net_services(const Adder& add, const OverlapAdder& overlap, StandardSer
         if (!granted->net) return denied();
         const auto found = sockets->sockets.find(as_int64(request.arguments.at(0)));
         if (found == sockets->sockets.end()) return fail(host_error::invalid_input);
+        if (found->second.raw && !granted->raw) return denied();
         const auto socket = found->second.descriptor;
         sockets->sockets.erase(found);
         if (!SocketHolds::instance().close(socket)) return wsa_failure();
@@ -996,7 +997,7 @@ void add_net_services(const Adder& add, const OverlapAdder& overlap, StandardSer
     const auto* granted = &capabilities;
     const auto lookup = [sockets](const HostValue& id, bool listener) -> StandardServices::Tables::Socket* {
         const auto found = sockets->sockets.find(as_int64(id));
-        if (found == sockets->sockets.end() || found->second.listener != listener) return nullptr;
+        if (found == sockets->sockets.end() || found->second.raw || found->second.listener != listener) return nullptr;
         return &found->second;
     };
     const auto remember = [sockets](int descriptor, bool listener) {
@@ -1065,7 +1066,7 @@ void add_net_services(const Adder& add, const OverlapAdder& overlap, StandardSer
     add(signature("neura.net.local_port", {int64()}, int32()), [=](const HostRequest& request) {
         if (!granted->net) return denied();
         const auto found = sockets->sockets.find(as_int64(request.arguments.at(0)));
-        if (found == sockets->sockets.end()) return fail(host_error::invalid_input);
+        if (found == sockets->sockets.end() || found->second.raw) return fail(host_error::invalid_input);
         sockaddr_storage address{};
         socklen_t length = sizeof address;
         if (::getsockname(found->second.descriptor, reinterpret_cast<sockaddr*>(&address), &length) != 0) {
@@ -1360,6 +1361,7 @@ void add_net_services(const Adder& add, const OverlapAdder& overlap, StandardSer
         if (!granted->net) return denied();
         const auto found = sockets->sockets.find(as_int64(request.arguments.at(0)));
         if (found == sockets->sockets.end()) return fail(host_error::invalid_input);
+        if (found->second.raw && !granted->raw) return denied();
         const int descriptor = found->second.descriptor;
         sockets->sockets.erase(found);
         if (::close(descriptor) != 0 && errno != EINTR) return errno_failure();

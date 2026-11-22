@@ -1966,6 +1966,17 @@ if(BUILD_TESTING AND NEURA_SDK)
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/backend/each.cmake"
     )
 
+    foreach(feature IN ITEMS raw mptcp udp-coalescing)
+        set(socket_feature_arguments)
+        if(feature STREQUAL "raw" AND NOT WIN32)
+            list(APPEND socket_feature_arguments --backend-tests "$<TARGET_FILE:neura_backend_tests>")
+        endif()
+        add_test(NAME stdlib-net-socket-${feature} COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/net-socket/loopback/optional.py"
+            --neura "$<TARGET_FILE:neura>" --feature "${feature}" ${socket_feature_arguments})
+        set_tests_properties(stdlib-net-socket-${feature} PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 120)
+    endforeach()
+
     # Standard library tests under the reference evaluator and NVM.
     add_test(NAME backend-reference COMMAND neura_backend_tests reference "${CMAKE_CURRENT_SOURCE_DIR}")
     # The suite takes about 1470 seconds on GitHub's Intel macOS runners, which

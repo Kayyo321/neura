@@ -1,0 +1,112 @@
+let datagrams = import:Std.Net.Socket.DatagramSocket;
+let duration = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let ip = import:Std.Net.Core.IpAddr;
+let net_address = import:Std.Net.Core.NetAddress;
+let options = import:Std.Net.Socket.SocketOptions;
+let raw = import:Std.Net.Socket.RawSocket;
+let socket_addr = import:Std.Net.Core.SocketAddr;
+let tcp = import:Std.Net.Socket.TcpSocket;
+let server = import:Std.Net.Socket.TcpServer;
+let test = import:Std.Test;
+let udp = import:Std.Net.Socket.UdpSocket;
+let unit = import:Std.Core.Unit;
+
+let OptionalSocketFeatures = module (
+    let loopback = func -> socket_addr.SocketAddr =>
+        test.assert_ok<socket_addr.SocketAddr>(socket_addr.parse("127.0.0.1:0"));
+
+    let kind_of = func(error: errors.Error) -> errors.IoErrorKind => match (error) {
+        errors.Error.Io { kind, message, path } => kind,
+        _ => errors.IoErrorKind.Other,
+    };
+
+    let check_bytes = func(expected: uint8[list], actual: uint8[list]) {
+        test.assert_equal<int>(expected.length, actual.length);
+        for (let i = 0; i < expected.length; i++) {
+            test.assert_equal<uint8>(expected[i], actual[i]);
+        }
+    };
+
+    let read_exact = func(socket: tcp.TcpSocket, count: int) -> uint8[list] {
+        let bytes: uint8[list] = new;
+        while (bytes.length < count) {
+            last next = test.assert_ok<uint8[list]>(socket.read(count - bytes.length));
+            test.assert(next.length > 0);
+            for (let byte in next) {
+                bytes.append(byte);
+            }
+        }
+        return bytes;
+    };
+
+    export let test_mptcp_loopback = func {
+        last mptcp = options.builder();
+        mptcp.set_multipath(true);
+        mptcp.set_reuse_address(true);
+        last listener_options = test.assert_ok<options.SocketOptions>(mptcp.build(options.SocketKind.TcpListener));
+        last listener = test.assert_ok<server.TcpServer>(server.bind_with(loopback(), listener_options));
+        last client_builder = options.builder();
+        client_builder.set_multipath(true);
+        last client_options =
+            test.assert_ok<options.SocketOptions>(client_builder.build(options.SocketKind.TcpStream));
+        last client = test.assert_ok<tcp.TcpSocket>(tcp.connect_with(listener.address(), duration.of_seconds(2),
+            client_options));
+        last accepted = test.assert_ok<tcp.TcpSocket>(listener.accept());
+        test.assert(client.multipath && accepted.multipath);
+        test.assert_ok<unit.Unit>(client.write(new([127])));
+        accepted.set_read_timeout(duration.of_seconds(2));
+        check_bytes(new([127]), read_exact(accepted, 1));
+        test.assert_ok<unit.Unit>(accepted.close());
+        test.assert_ok<unit.Unit>(client.close());
+        test.assert_ok<unit.Unit>(listener.close());
+    };
+
+    export let test_udp_segmentation_and_coalescing = func {
+        last builder = options.builder();
+        builder.set_reuse_address(true);
+        last settings = test.assert_ok<options.SocketOptions>(builder.build(options.SocketKind.Udp));
+        last receiver = test.assert_ok<udp.UdpSocket>(udp.bind_with(loopback(), settings));
+        last sender = test.assert_ok<udp.UdpSocket>(udp.bind(loopback()));
+        last address = test.assert_ok<socket_addr.SocketAddr>(receiver.local_address());
+        receiver.set_read_timeout(duration.of_millis(200));
+        test.assert_ok<unit.Unit>(receiver.set_receive_coalescing(true));
+        test.assert_equal<int>(5, test.assert_ok<int>(sender.send_segmented(new([2, 3, 4, 5, 6]), 2, address)));
+        let seen = 0;
+        for (let wave = 0; wave < 3 && seen < 3; wave++) {
+            for (let packet in test.assert_ok<uint8[list][list]>(receiver.receive_coalesced(64))) {
+                if (seen == 0) {
+                    check_bytes(new([2, 3]), packet);
+                } else if (seen == 1) {
+                    check_bytes(new([4, 5]), packet);
+                } else {
+                    check_bytes(new([6]), packet);
+                }
+                seen++;
+            }
+        }
+        test.assert_equal<int>(3, seen);
+        test.assert_equal<int>(0, test.assert_ok<int>(sender.send_to(new, address)));
+        last received = test.assert_ok<uint8[list][list]>(receiver.receive_coalesced(64));
+        test.assert_equal<int>(1, received.length);
+        test.assert_equal<int>(0, received[0].length);
+        test.assert(kind_of(test.assert_err<uint8[list][list]>(receiver.receive_coalesced(64)))
+            == errors.IoErrorKind.TimedOut);
+        test.assert_ok<unit.Unit>(receiver.close());
+        test.assert_ok<unit.Unit>(sender.close());
+    };
+
+    export let test_raw_loopback = func {
+        last socket = test.assert_ok<raw.RawSocket>(raw.open(net_address.AddressFamily.Ipv4, 1));
+        last loop = test.assert_ok<ip.IpAddr>(ip.parse("127.0.0.1"));
+        last echo: uint8[list] = new([8, 0, 247, 254, 0, 1, 0, 0]);
+        socket.set_read_timeout(duration.of_seconds(2));
+        test.assert_equal<int>(8, test.assert_ok<int>(socket.send_to(echo, loop)));
+        last received = test.assert_ok<datagrams.Datagram<ip.IpAddr>>(socket.receive_from(64));
+        test.assert(received.data.length >= 8);
+        test.assert_ok<ip.IpAddr>(socket.local_address());
+        test.assert_ok<unit.Unit>(socket.close());
+        test.assert(kind_of(test.assert_err<datagrams.Datagram<ip.IpAddr>>(socket.receive_from(64)))
+            == errors.IoErrorKind.Closed);
+    };
+);

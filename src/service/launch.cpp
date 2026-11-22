@@ -99,6 +99,7 @@ Envelope make_envelope(const cli::Options& options, std::span<const std::uint8_t
     const auto& policy = options.capabilities;
     envelope.fs = policy.fs;
     envelope.net = policy.net;
+    envelope.raw = policy.raw;
     envelope.env = policy.env;
     envelope.clock = policy.clock;
     envelope.entropy = policy.entropy;
@@ -139,6 +140,7 @@ cli::Options options_of(const Envelope& envelope) {
     auto& policy = options.capabilities;
     policy.fs = envelope.fs;
     policy.net = envelope.net;
+    policy.raw = envelope.raw;
     policy.env = envelope.env;
     policy.clock = envelope.clock;
     policy.entropy = envelope.entropy;
