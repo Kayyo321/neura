@@ -13,9 +13,10 @@
 namespace neura::launcher {
 
 // Version 2 added the task settings to the policy, version 3 the stack cell
-// limit (NVR 1.7 storage regions). A reader accepts every version; a writer
-// writes the current one.
-inline constexpr std::uint32_t container_version = 3;
+// limit (NVR 1.7 storage regions), and version 4 a scoped HTTP client grant.
+// An executable without an origin list still uses version 3.
+inline constexpr std::uint32_t unscoped_container_version = 3;
+inline constexpr std::uint32_t container_version = 4;
 inline constexpr std::uint32_t max_parallel_workers = 1'024;
 
 struct Policy {

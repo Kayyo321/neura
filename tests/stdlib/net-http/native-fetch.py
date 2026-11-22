@@ -61,11 +61,17 @@ def fixed(body=b"hello", status=b"200 OK"):
     return b"HTTP/1.1 " + status + b"\r\nContent-Length: " + str(len(body)).encode() + b"\r\nConnection: close\r\n\r\n" + body
 
 
+def redirect(status, target):
+    return b"HTTP/1.1 " + status + b"\r\nLocation: " + target + b"\r\nContent-Length: 0\r\n\r\n"
+
+
 class Peer:
     """A finite server. The stop event also releases intentionally quiet peers."""
-    def __init__(self, case, context=None):
+    def __init__(self, case, context=None, *, target=None):
         self.case = case
         self.context = context
+        self.target = target
+        self.paths = []
         self.stop = threading.Event()
         self.errors = queue.Queue()
         self.listener = socket.socket()
@@ -139,16 +145,20 @@ class Peer:
 
     def respond(self, connection):
         head = receive_head(connection)
+        method, path, _ = head.split(b"\r\n", 1)[0].split(b" ")
+        self.paths.append(path)
         if self.case == "closed":
             return
         if self.case == "timeout":
             self.stop.wait(timeout=2)
             return
         if self.case == "absolute-deadline":
-            time.sleep(0.12)
-            connection.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n")
-            if not self.stop.wait(timeout=0.18):
-                connection.sendall(b"hello")
+            # Each pause is shorter than the 400 ms request budget. A
+            # timeout renewed by each read would allow the entire response.
+            for piece in (b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n", b"he", b"l", b"lo"):
+                if self.stop.wait(timeout=0.13):
+                    break
+                connection.sendall(piece)
             return
         if self.case == "echo":
             body = receive_body(connection, head)
@@ -158,10 +168,59 @@ class Peer:
         elif self.case == "chunked":
             connection.sendall(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
                                b"2\r\nhe\r\n3\r\nllo\r\n0\r\nX-End: yes\r\n\r\n")
+        elif self.case == "many-chunks":
+            chunk = b"64\r\n" + b"x" * 100 + b"\r\n"
+            connection.sendall(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n" +
+                               chunk * 3000 + b"0\r\nX-End: yes\r\n\r\n")
         elif self.case == "redirect" and head.startswith(b"GET /start "):
             connection.sendall(b"HTTP/1.1 302 Found\r\nLocation: /fixed\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+        elif self.case == "redirect-303-same-url":
+            body = receive_body(connection, head)
+            if head.startswith(b"POST /fixed ") and body == b"ping":
+                connection.sendall(redirect(b"303 See Other", b"/fixed"))
+            elif head.startswith(b"GET /fixed ") and not body:
+                connection.sendall(fixed())
+            else:
+                raise AssertionError(f"303 fixture received unexpected method, path, or body: {head!r} {body!r}")
+        elif self.case in {"redirect-307", "redirect-308"}:
+            body = receive_body(connection, head)
+            if method != b"POST" or body != b"ping":
+                raise AssertionError(f"307/308 fixture received unexpected method or body: {method!r} {body!r}")
+            if path == b"/fixed":
+                status = b"307 Temporary Redirect" if self.case == "redirect-307" else b"308 Permanent Redirect"
+                connection.sendall(redirect(status, self.target or b"/landed"))
+            elif path == b"/landed" and self.target is None:
+                connection.sendall(fixed(body))
+            else:
+                raise AssertionError(f"307/308 fixture received unexpected path: {path!r}")
+        elif self.case in {"redirect-ten-hops", "redirect-eleven-hops"}:
+            hop = int(path[1:])
+            if hop == (10 if self.case == "redirect-ten-hops" else 11):
+                connection.sendall(fixed())
+            else:
+                connection.sendall(redirect(b"302 Found", f"/{hop + 1}".encode()))
+        elif self.case in {"redirect-headers", "redirected-headers"}:
+            fields = dict(line.lower().split(b": ", 1) for line in head.split(b"\r\n")[1:] if line)
+            if fields.get(b"accept") != b"text/plain" or fields.get(b"accept-language") != b"en":
+                raise AssertionError(f"safe request headers missing: {fields!r}")
+            supplied = {b"authorization", b"cookie", b"x-api-key", b"content-type"}
+            if self.case == "redirect-headers":
+                if not supplied <= fields.keys():
+                    raise AssertionError(f"initial request headers missing: {fields!r}")
+                connection.sendall(redirect(b"302 Found", self.target))
+            else:
+                allowed = {b"accept", b"accept-language", b"host", b"connection", b"content-length"}
+                if fields.keys() != allowed:
+                    raise AssertionError(f"caller headers crossed the origin: {fields!r}")
+                connection.sendall(fixed())
+        elif self.case == "redirect-downgrade":
+            connection.sendall(redirect(b"302 Found", self.target))
         elif self.case == "redirect-loop":
             connection.sendall(b"HTTP/1.1 302 Found\r\nLocation: /loop\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+        elif self.case in {"duplicate-location", "redirect-duplicate-location"}:
+            status = b"200 OK" if self.case == "duplicate-location" else b"302 Found"
+            connection.sendall(b"HTTP/1.1 " + status + b"\r\nLocation: /one\r\nLocation: /two\r\n"
+                               b"Content-Length: 5\r\n\r\nhello")
         elif self.case == "truncated":
             connection.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\nabc")
         elif self.case == "bad-chunk":
@@ -355,6 +414,85 @@ def expect(actual, expected, name):
     print(f"PASS {name}", flush=True)
 
 
+def expect_no_connection(listener, reason):
+    try:
+        unexpected, _ = listener.accept()
+    except BlockingIOError:
+        return
+    unexpected.close()
+    raise AssertionError(f"{reason}: unexpectedly opened a TCP connection")
+
+
+def redirect_cases(invoke, api, cert, key):
+    for case, expected in (("redirect-ten-hops", "Ok:200:hello"),
+                           ("redirect-eleven-hops", "Custom:http.OutcomeUnknown")):
+        with Peer(case) as peer:
+            expect(invoke(api, f"http://127.0.0.1:{peer.port}/0"), expected, f"{api}-{case}")
+        if peer.paths != [f"/{hop}".encode() for hop in range(11)]:
+            raise AssertionError(f"{case}: unexpected redirect path sequence: {peer.paths!r}")
+    with Peer("redirect-307") as peer:
+        expect(invoke(api, f"http://127.0.0.1:{peer.port}/fixed", "post"), "Ok:200:ping", f"{api}-307-same-origin")
+    with Peer("redirected-headers") as destination:
+        target = f"http://127.0.0.1:{destination.port}/landed".encode()
+        with Peer("redirect-headers", target=target) as peer:
+            expect(invoke(api, f"http://127.0.0.1:{peer.port}/fixed", "redirect-headers"), "Ok:200:hello",
+                   f"{api}-redirect-strips-unsafe-fields")
+    with socket.socket() as unused:
+        unused.bind(("127.0.0.1", 0))
+        unused.listen(1)
+        unused.setblocking(False)
+        target = f"http://127.0.0.1:{unused.getsockname()[1]}/landed".encode()
+        for status in (307, 308):
+            with Peer(f"redirect-{status}", target=target) as peer:
+                url = f"http://127.0.0.1:{peer.port}/fixed"
+                expect(invoke(api, url, "post"),
+                       f"Custom:http.RedirectDenied:POST {url}: a redirect to another origin would resend the body",
+                       f"{api}-{status}-cross-origin-body-refused")
+                expect_no_connection(unused, f"HTTP {status} redirect across origins")
+        if cert is not None:
+            with Peer("redirect-downgrade", server_context(cert, key), target=target) as peer:
+                url = f"https://localhost:{peer.port}/fixed"
+                expect(invoke(api, url),
+                       f"Custom:http.RedirectDenied:GET {url}: a redirect from HTTPS to HTTP was refused",
+                       f"{api}-https-to-http-refused")
+                expect_no_connection(unused, "HTTPS-to-HTTP redirect")
+
+
+def origin_cases(invoke):
+    """An http_client grant limited to listed origins, end to end through `neura run`."""
+    def only(*origins):
+        return ("--allow-http-client=" + ",".join(origins),)
+    for api in ("fetch", "client"):
+        with Peer("fixed") as peer:
+            base = f"http://127.0.0.1:{peer.port}"
+            expect(invoke(api, base + "/fixed", extra=only(base)), "Ok:200:hello", f"{api}-origin-listed")
+        with socket.socket() as unused:
+            unused.bind(("127.0.0.1", 0))
+            unused.listen(1)
+            unused.setblocking(False)
+            other = f"http://127.0.0.1:{unused.getsockname()[1]}"
+            with Peer("fixed") as peer:
+                base = f"http://127.0.0.1:{peer.port}"
+                expect(invoke(api, other + "/", extra=only(base)), f"Io:CapabilityDenied:{other}",
+                       f"{api}-origin-unlisted-port")
+                expect(invoke(api, base + "/", extra=("--allow-http-client=",)), f"Io:CapabilityDenied:{base}",
+                       f"{api}-origin-empty-list")
+            with Peer("redirect-downgrade", target=(other + "/landed").encode()) as peer:
+                base = f"http://127.0.0.1:{peer.port}"
+                expect(invoke(api, base + "/fixed", extra=only(base)), f"Io:CapabilityDenied:{other}",
+                       f"{api}-origin-redirect-unlisted")
+            expect_no_connection(unused, "a request outside the origin list")
+            # localhost is a name with loopback answers: they need the numeric origin as well.
+            port = unused.getsockname()[1]
+            expect(invoke(api, f"http://localhost:{port}/", extra=only(f"http://localhost:{port}")),
+                   f"Io:CapabilityDenied:http://localhost:{port}", f"{api}-origin-localhost-loopback")
+            expect_no_connection(unused, "a name resolving to an unlisted loopback address")
+        with Peer("fixed") as peer:
+            expect(invoke(api, f"http://localhost:{peer.port}/fixed",
+                          extra=only(f"http://localhost:{peer.port}", f"http://127.0.0.1:{peer.port}")),
+                   "Ok:200:hello", f"{api}-origin-localhost-with-numeric")
+
+
 def native_cases(args, root, cert, key, other_cert, other_key):
     image = root / "native-fetch.nvr"
     command([args.neura, "build", HERE / "loopback/native-fetch.nra", "-o", image])
@@ -370,22 +508,29 @@ def native_cases(args, root, cert, key, other_cert, other_key):
                         *policy, *extra, "--", api, url, mode], env=env)
 
     cases = [("fixed", "Ok:200:hello", "get"), ("chunked", "Ok:200:hello", "get"),
+             ("many-chunks", "Ok:200:300000:120:120", "body-size"),
              ("redirect", "Ok:200:hello", "get"), ("not-found", "Ok:404:missing", "get"),
+             ("redirect-303-same-url", "Ok:200:hello", "post"),
              ("echo", "Ok:200:ping", "post"), ("closed", "Custom:http.OutcomeUnknown", "get"),
              ("truncated", "Custom:http.OutcomeUnknown", "get"), ("bad-chunk", "Custom:http.OutcomeUnknown", "get"),
              ("oversized-header", "Custom:http.TooLarge", "get"),
              ("oversized-body", "Custom:http.TooLarge", "get"),
              ("duplicate-length", "Custom:http.OutcomeUnknown", "get"),
+             ("duplicate-location", "Ok:200:hello", "get"),
+             ("redirect-duplicate-location", "Custom:http.OutcomeUnknown", "get"),
              ("length-and-transfer", "Custom:http.OutcomeUnknown", "get"),
              ("redirect-loop", "Custom:http.OutcomeUnknown", "get"),
-             ("timeout", "Io:TimedOut", "short"), ("absolute-deadline", "Io:TimedOut", "short"),
+             ("timeout", "Io:TimedOut", "short"), ("absolute-deadline", "Io:TimedOut", "deadline"),
+             ("absolute-deadline", "Ok:200:hello", "get"),
              ("non-reading", "Io:TimedOut", "post-blocked")]
+    origin_cases(invoke)
     for api in ("fetch", "client"):
         for case, expected, mode in cases:
             with Peer(case) as peer:
                 path = "/start" if case == "redirect" else "/loop" if case == "redirect-loop" else "/fixed"
                 url = f"http://127.0.0.1:{peer.port}{path}"
                 expect(invoke(api, url, mode), expected, f"{api}-{case}")
+        redirect_cases(invoke, api, cert, key)
         # Bound but deliberately not listening, so refusal has no port-reuse race.
         with socket.socket() as reserved:
             reserved.bind(("127.0.0.1", 0))
@@ -399,13 +544,13 @@ def native_cases(args, root, cert, key, other_cert, other_key):
             url = f"http://127.0.0.1:{unused.getsockname()[1]}/"
             for shape in ("duplicate-request-length", "request-length-and-transfer"):
                 expect(invoke(api, url, shape), "Io:InvalidInput", f"{api}-{shape}")
-            try:
-                unexpected, _ = unused.accept()
-            except BlockingIOError:
-                pass
-            else:
-                unexpected.close()
-                raise AssertionError("rejected outgoing framing opened a TCP connection")
+            expect_no_connection(unused, "rejected outgoing framing")
+            schemes = ("http", "https") if cert is not None else ("http",)
+            for scheme in schemes:
+                url = f"{scheme}://localhost:{unused.getsockname()[1]}/"
+                for field in ("Keep-Alive", "Connection", "Upgrade", "Proxy-Connection", "TE", "HTTP2-Settings"):
+                    expect(invoke(api, url, f"header:{field}"), "Io:InvalidInput", f"{api}-{scheme}-reject-{field}")
+                expect_no_connection(unused, f"rejected {scheme} connection-specific fields")
         trace = root / f"{api}.trace"
         with Peer("fixed") as peer:
             url = f"http://127.0.0.1:{peer.port}/fixed"
@@ -440,8 +585,149 @@ def native_cases(args, root, cert, key, other_cert, other_key):
         expect(invoke("fetch", f"http://127.0.0.1:{reserved.getsockname()[1]}/", "invalid-header"),
                "Io:InvalidInput", "fetch-invalid-request-header")
     task_cases(invoke)
+    if cert is not None:
+        # Exit while a fetch waits in a TLS handshake: prompt, clean status 0.
+        with Peer("handshake-timeout", server_context(cert, key)) as peer:
+            started = time.monotonic()
+            expect(invoke("fetch", f"https://localhost:{peer.port}/fixed", "exit-pending"), "Exiting",
+                   "fetch-exit-joins-pending-worker")
+            if time.monotonic() - started > 2.5:
+                raise AssertionError("exit waited for the pending fetch's own deadline")
     if args.http2:
         h2_case(args, root, cert, key, invoke)
+        h2_peer_cases(cert, key, invoke)
+
+
+def receive_exact(connection, size):
+    data = bytearray()
+    while len(data) < size:
+        portion = connection.recv(size - len(data))
+        if not portion:
+            raise AssertionError("HTTP/2 fixture received incomplete input")
+        data.extend(portion)
+    return bytes(data)
+
+
+def h2_frame(kind, flags=0, stream=0, payload=b""):
+    return len(payload).to_bytes(3, "big") + bytes((kind, flags)) + stream.to_bytes(4, "big") + payload
+
+
+def hpack_literal(text):
+    if len(text) < 127:
+        return bytes((len(text),)) + text
+    size = len(text) - 127
+    prefix = bytearray((127,))
+    while size >= 128:
+        prefix.append((size & 127) | 128)
+        size >>= 7
+    prefix.append(size)
+    return bytes(prefix) + text
+
+
+def h2_read_frame(connection):
+    header = receive_exact(connection, 9)
+    size = int.from_bytes(header[:3], "big")
+    if size > 16384:
+        raise AssertionError("HTTP/2 fixture received an oversized frame")
+    return header[3], header[4], int.from_bytes(header[5:], "big") & 0x7fffffff, receive_exact(connection, size)
+
+
+class H2Peer(Peer):
+    """An authenticated loopback peer for bounded HTTP/2 outcomes."""
+    def __init__(self, case, cert, key, compressed_head):
+        super().__init__(case, server_context(cert, key, ("h2",)))
+        self.compressed_head = compressed_head
+
+    def respond(self, connection):
+        # Without this, each flow-control window's last short frame waits for
+        # a delayed acknowledgement, and the 8 MiB body takes many seconds.
+        connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        if connection.selected_alpn_protocol() != "h2":
+            raise AssertionError("native fetch did not negotiate h2 with the fixture")
+        if receive_exact(connection, 24) != b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n":
+            raise AssertionError("HTTP/2 fixture received an invalid preface")
+        kind, _, stream, _ = h2_read_frame(connection)
+        if (kind, stream) != (4, 0):
+            raise AssertionError("HTTP/2 client preface did not start with SETTINGS")
+        connection.sendall(h2_frame(4))  # SETTINGS
+        for _ in range(16):
+            kind, flags, stream, _ = h2_read_frame(connection)
+            if (kind, flags, stream) == (1, 5, 1):  # HEADERS, END_HEADERS | END_STREAM
+                break
+        else:
+            raise AssertionError("HTTP/2 fixture did not receive a complete GET on stream 1")
+        self.respond_h2(connection)
+        if self.case == "h2-goaway-mid-body":
+            return
+        with contextlib.suppress(ssl.SSLEOFError, ConnectionResetError):
+            while connection.recv(16384):
+                pass
+
+    def respond_h2(self, connection):
+        head = h2_frame(1, 4, 1, b"\x88")  # HEADERS, :status=200
+        if self.case == "h2-reset":
+            connection.sendall(head + h2_frame(3, stream=1, payload=(8).to_bytes(4, "big")))  # CANCEL
+            return
+        if self.case == "h2-refused-stream":
+            connection.sendall(h2_frame(3, stream=1, payload=(7).to_bytes(4, "big")))  # REFUSED_STREAM
+            return
+        if self.case == "h2-goaway-mid-body":
+            data = h2_frame(0, stream=1, payload=b"partial body")
+            goaway = h2_frame(7, payload=(1).to_bytes(4, "big") + bytes(4))
+            connection.sendall(head + data + goaway)
+            return
+        if self.case == "h2-oversized-head":
+            fields = b"\x88\x00" + hpack_literal(b"x-test-description") + hpack_literal(b"v" * 20000)
+            connection.sendall(h2_frame(1, 1, 1, fields[:16384]) + h2_frame(9, 4, 1, fields[16384:]))
+            return
+        if self.case == "h2-decoded-head-limit":
+            connection.sendall(h2_frame(1, 5, 1, self.compressed_head))
+            return
+        if self.case == "h2-oversized-body":
+            connection.sendall(head)
+            credit = {0: 65535, 1: 65535}
+            remaining = 8 * 1024 * 1024 + 1
+            payload = b"v" * 16384
+            while remaining:
+                size = min(len(payload), remaining, *credit.values())
+                if size == 0:
+                    kind, _, stream, update = h2_read_frame(connection)
+                    if kind == 8 and stream in credit:  # WINDOW_UPDATE
+                        credit[stream] += int.from_bytes(update, "big") & 0x7fffffff
+                    continue
+                remaining -= size
+                connection.sendall(h2_frame(0, int(remaining == 0), 1, payload[:size]))
+                for stream in credit:
+                    credit[stream] -= size
+            return
+        early_head = h2_frame(1, 4, 1, b"\x08\x03103")  # HEADERS, :status=103
+        goaway = h2_frame(7, payload=bytes(8))  # GOAWAY, last-stream-id=0, NO_ERROR
+        connection.sendall((early_head if self.case == "h2-goaway-after-early-head" else b"") + goaway)
+
+
+def hpack_expansion():
+    """A small field section that decodes past the 16 KiB bound: one 4 KB field
+    entered in the dynamic table, then one-byte references to it."""
+    section = b"\x88" + b"\x40" + hpack_literal(b"x-a") + hpack_literal(b"v" * 4000) + b"\xbe" * 8
+    if len(section) > 4200:
+        raise AssertionError("the HPACK expansion input must stay small")
+    return section
+
+
+def h2_peer_cases(cert, key, invoke):
+    packed = hpack_expansion()
+    cases = (("h2-goaway-unprocessed", "Custom:http.NotProcessed:NotProcessed"),
+             ("h2-refused-stream", "Custom:http.NotProcessed:NotProcessed"),
+             ("h2-goaway-after-early-head", "Custom:http.OutcomeUnknown"),
+             ("h2-goaway-mid-body", "Custom:http.OutcomeUnknown"),
+             ("h2-reset", "Custom:http.OutcomeUnknown"),
+             ("h2-oversized-head", "Custom:http.TooLarge"),
+             ("h2-decoded-head-limit", "Custom:http.TooLarge"),
+             ("h2-oversized-body", "Custom:http.TooLarge"))
+    for api in ("fetch", "client"):
+        for case, expected in cases:
+            with H2Peer(case, cert, key, packed) as peer:
+                expect(invoke(api, f"https://localhost:{peer.port}/"), expected, f"{api}-{case}")
 
 
 class H2Relay:

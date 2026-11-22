@@ -100,7 +100,7 @@ void documented_manifest(const char* path) {
     const auto& web_target = app.targets.at("web");
     const auto& browser = std::get<WebSettings>(web_target.settings);
     check(browser.routing->value == Routing::Hash && browser.styles.front().value == "ui/styles/base.css", "web settings");
-    check(browser.origins.connect.front().value.host == "api.stock.example" &&
+    check(browser.origins.connect->front().value.host == "api.stock.example" &&
               web_target.capabilities.back().value == Capability::Bridge, "web origin and capability");
     const auto& server_target = app.targets.at("server");
     const auto& host = std::get<ServerSettings>(server_target.settings);
@@ -183,10 +183,24 @@ style = ["https://a.example."]
     const auto& server_target = app.targets.at("server");
     const auto& back = std::get<ServerSettings>(server_target.settings);
     const auto& native = std::get<DesktopSettings>(app.targets.at("desktop").settings);
-    check(front.origins.connect.front().value.port == 8443 &&
-              front.origins.connect.at(2).value.scheme == "app.v1+test" &&
-              front.origins.connect.at(2).value.host == "[2001:db8::ffff:192.0.2.4]" &&
-              front.origins.connect.at(2).value.port == 0, "origin shape and typed port");
+    check(front.origins.connect->front().value.port == 8443 &&
+              front.origins.connect->at(2).value.scheme == "app.v1+test" &&
+              front.origins.connect->at(2).value.host == "[2001:db8::ffff:192.0.2.4]" &&
+              front.origins.connect->at(2).value.port == 0, "origin shape and typed port");
+    check(!back.connect_origins && !native.origins.connect, "no native origin list by default");
+    const auto scoped = parse_manifest(whole + R"(
+[targets.server.origins]
+connect = ["https://api.example:8443"]
+[targets.desktop.origins]
+connect = []
+)", "neura.toml");
+    const auto& scoped_server = std::get<ServerSettings>(scoped.targets.at("server").settings);
+    const auto& scoped_desktop = std::get<DesktopSettings>(scoped.targets.at("desktop").settings);
+    check(scoped_server.connect_origins && scoped_server.connect_origins->size() == 1 &&
+              scoped_server.connect_origins->front().value.text == "https://api.example:8443",
+          "a server preserves a configured connect origin");
+    check(scoped_desktop.origins.connect && scoped_desktop.origins.connect->empty(),
+          "a desktop distinguishes an explicit empty connect list from an omitted list");
     check(back.http.trusted_proxies.size() == 2 && back.config.prefix->value == "STOCK_" &&
               back.sql.at("remote").migrate->value == MigrationMode::OnStart, "typed server configuration");
     check(native.packaging.sign_identity->value == "Vendor" &&

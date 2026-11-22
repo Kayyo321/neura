@@ -4,12 +4,14 @@
 #include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 #ifdef _WIN32
 #include "platform/windows.hpp"
 #else
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <net/if.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <sys/socket.h>
@@ -63,10 +65,42 @@ struct NumericAddress {
     sockaddr_storage storage{};
 };
 
+// An IPv6 zone: a decimal index, or on POSIX an interface name.
+bool zone_index(const std::string& zone, std::uint32_t& index) {
+    if (zone.empty()) return false;
+    if (zone.find_first_not_of("0123456789") == std::string::npos) {
+        if (zone.size() > 10) return false;
+        const auto value = std::stoull(zone);
+        if (value > 0xffffffffULL) return false;
+        index = static_cast<std::uint32_t>(value);
+        return true;
+    }
+#ifdef _WIN32
+    return false;
+#else
+    index = ::if_nametoindex(zone.c_str());
+    return index != 0;
+#endif
+}
+
+// Numeric hosts are parsed here, never by getaddrinfo, so that no part of a
+// caller's deadline is spent in the system resolver on them.
 bool numeric_address(NumericAddress& address, const char* host, std::int32_t port) {
     auto* v4 = reinterpret_cast<sockaddr_in*>(&address.storage);
     auto* v6 = reinterpret_cast<sockaddr_in6*>(&address.storage);
-    if (::inet_pton(AF_INET, host, &v4->sin_addr) == 1) {
+    const std::string text(host);
+    const auto percent = text.find('%');
+    if (percent != std::string::npos) {
+        std::uint32_t scope = 0;
+        if (::inet_pton(AF_INET6, text.substr(0, percent).c_str(), &v6->sin6_addr) != 1 ||
+            !zone_index(text.substr(percent + 1), scope))
+            return false;
+        v6->sin6_family = AF_INET6;
+        v6->sin6_port = htons(static_cast<std::uint16_t>(port));
+        v6->sin6_scope_id = scope;
+        address.info.ai_family = AF_INET6;
+        address.info.ai_addrlen = sizeof(sockaddr_in6);
+    } else if (::inet_pton(AF_INET, host, &v4->sin_addr) == 1) {
         v4->sin_family = AF_INET;
         v4->sin_port = htons(static_cast<std::uint16_t>(port));
         address.info.ai_family = AF_INET;
@@ -214,7 +248,7 @@ std::shared_ptr<Resolution> resolve(const std::string& host, std::int32_t port, 
 }
 
 NativeSocket connect(const std::string& host, std::int32_t port, Clock::time_point deadline, std::uint32_t& error,
-                     const std::atomic<bool>* cancelled) {
+                     const std::atomic<bool>* cancelled, const AddressFilter& allowed_address) {
     if (const auto start = platform::ensure_sockets()) {
         error = error_code(start.value());
         return invalid_native_socket;
@@ -231,7 +265,6 @@ NativeSocket connect(const std::string& host, std::int32_t port, Clock::time_poi
     const addrinfo* found = nullptr;
 #ifndef NEURA_NUMERIC_ADDRESSES_ONLY
     std::shared_ptr<Resolution> resolution;
-    std::unique_ptr<addrinfo, decltype(&::freeaddrinfo)> numeric(nullptr, ::freeaddrinfo);
 #endif
     if (host == "localhost") {
         numeric_address(ip, "127.0.0.1", port);
@@ -246,24 +279,13 @@ NativeSocket connect(const std::string& host, std::int32_t port, Clock::time_poi
         error = host_error::unsupported;
         return invalid_native_socket;
 #else
-        // Native numeric syntax also includes addresses with a scope ID on
-        // supported platforms. AI_NUMERICHOST keeps this parse out of DNS.
-        addrinfo hints{};
-        hints.ai_family = AF_UNSPEC;
-        hints.ai_socktype = SOCK_STREAM;
-        hints.ai_flags = AI_NUMERICHOST;
-        addrinfo* address = nullptr;
-        if (::getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &address) == 0) {
-            numeric.reset(address);
-            found = numeric.get();
-        } else {
-            resolution = resolve(host, port, deadline, error, cancelled);
-            if (!resolution) return invalid_native_socket;
-            found = resolution->addresses;
-        }
+        resolution = resolve(host, port, deadline, error, cancelled);
+        if (!resolution) return invalid_native_socket;
+        found = resolution->addresses;
 #endif
     }
     error = host_error::connection_refused;
+    bool rejected_address = false, allowed_candidate = false;
     for (const auto* entry = found; entry; entry = entry->ai_next) {
         if (cancelled && cancelled->load()) {
             error = host_error::cancelled;
@@ -272,6 +294,21 @@ NativeSocket connect(const std::string& host, std::int32_t port, Clock::time_poi
         if (Clock::now() >= deadline) {
             error = host_error::timed_out;
             break;
+        }
+        if (allowed_address) {
+            char numeric[INET6_ADDRSTRLEN];
+            const void* address = nullptr;
+            if (entry->ai_family == AF_INET && entry->ai_addrlen >= sizeof(sockaddr_in)) {
+                address = &reinterpret_cast<const sockaddr_in*>(entry->ai_addr)->sin_addr;
+            } else if (entry->ai_family == AF_INET6 && entry->ai_addrlen >= sizeof(sockaddr_in6)) {
+                address = &reinterpret_cast<const sockaddr_in6*>(entry->ai_addr)->sin6_addr;
+            }
+            if (!address || !::inet_ntop(entry->ai_family, address, numeric, sizeof numeric) ||
+                !allowed_address(numeric)) {
+                rejected_address = true;
+                continue;
+            }
+            allowed_candidate = true;
         }
         const auto descriptor = ::socket(entry->ai_family, SOCK_STREAM, 0);
         if (descriptor == invalid_native_socket) {
@@ -303,6 +340,8 @@ NativeSocket connect(const std::string& host, std::int32_t port, Clock::time_poi
         platform::close_socket(descriptor);
         if (error == host_error::timed_out || error == host_error::cancelled) break;
     }
+    if (rejected_address && !allowed_candidate && error == host_error::connection_refused)
+        error = host_error::permission_denied;
     return invalid_native_socket;
 }
 

@@ -6,6 +6,8 @@ let http = import:Std.Net.Http;
 let lists = import:Std.Collections.Lists;
 let program = import:Std.Program;
 let result = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let system_clock = import:Std.Time.SystemClock;
 
 // The Python fixture supplies only loopback URLs. Both public clients must
 // preserve the host's typed errors and finish within the request deadline.
@@ -14,6 +16,10 @@ let NativeFetch = module:program.Entry (
         if (args[2] == "overlap") {
             console.print_line(overlap(args[1]));
             return program.ExitCode.Ok;
+        }
+        if (args[2] == "exit-pending") {
+            exit_pending(args[1]);
+            return program.ExitCode.Failure;
         }
         if (args[2] == "cancel-scope") {
             console.print_line(cancel_scope(args[1]));
@@ -30,10 +36,20 @@ let NativeFetch = module:program.Entry (
             },
             result.Result.Err(problem) => {
                 match (problem) {
-                    errors.Error.Io { kind, message: _, path: _ } => {
+                    errors.Error.Io { kind, message: _, path } => {
+                        // An origin outside the grant is the error's path.
+                        if (kind == errors.IoErrorKind.CapabilityDenied && not strings.contains(path, " ")) {
+                            return "Io:" .. kind.to_string() .. ":" .. path;
+                        }
                         return "Io:" .. kind.to_string();
                     },
                     errors.Error.Custom(detail) => {
+                        if (fetch.failure_of(problem) == fetch.FetchFailure.RedirectDenied) {
+                            return "Custom:" .. detail.code() .. ":" .. detail.message();
+                        }
+                        if (fetch.failure_of(problem) == fetch.FetchFailure.NotProcessed) {
+                            return "Custom:" .. detail.code() .. ":NotProcessed";
+                        }
                         return "Custom:" .. detail.code();
                     },
                     _ => {
@@ -54,6 +70,24 @@ let NativeFetch = module:program.Entry (
             reply = first.join() .. "|" .. second.join();
         }
         return "Overlap:" .. reply;
+    };
+
+    // Ends the process while a task's fetch is parked at a stalled peer. The
+    // host cancels and joins the worker before the TLS library's teardown.
+    let exit_pending = func(url: string) {
+        scope {
+            last pending = spawn fetch_one(url);
+            match (system_clock.create().sleep(duration.of_millis(300))) {
+                result.Result.Ok(_) => {
+                    console.print_line("Exiting");
+                },
+                result.Result.Err(_) => {
+                    console.print_line("sleep failed");
+                },
+            }
+            program.Process.exit(0);
+            console.print_line("Joined:" .. pending.join());
+        }
     };
 
     let cancel_scope = func(base: string) -> string {
@@ -78,7 +112,8 @@ let NativeFetch = module:program.Entry (
     };
 
     let send = func(api: string, url: string, mode: string) -> result.Result<string> {
-        last limit = mode == "short" || mode == "post-blocked" ? duration.of_millis(200) : duration.of_seconds(3);
+        last limit = mode == "deadline" ? duration.of_millis(400)
+            : mode == "short" || mode == "post-blocked" ? duration.of_millis(200) : duration.of_seconds(3);
         last method = mode == "post-blocked" || mode == "post" ? "POST" : "GET";
         let body: uint8[list] = new;
         if (mode == "post-blocked") {
@@ -91,8 +126,23 @@ let NativeFetch = module:program.Entry (
             body.append(110);
             body.append(103);
         }
+        last fields: [string, string][list] = new;
+        if (strings.starts_with(mode, "header:")) {
+            fields.append([strings.slice_from(mode, 7), "test"]);
+        }
+        if (mode == "redirect-headers") {
+            fields.append(["Accept", "text/plain"]);
+            fields.append(["Accept-Language", "en"]);
+            fields.append(["Authorization", "Bearer loopback-test"]);
+            fields.append(["Cookie", "test=1"]);
+            fields.append(["X-Api-Key", "loopback-test"]);
+            fields.append(["Content-Type", "application/octet-stream"]);
+        }
         if (api == "fetch") {
             let request = fetch.request(method, url).with_timeout(limit).with_body(body);
+            for (let field in fields) {
+                request = request.with_header(field[0], field[1]);
+            }
             if (mode == "invalid-header") {
                 request = request.with_header("X-Test", "bad\r\nvalue");
             }
@@ -102,12 +152,18 @@ let NativeFetch = module:program.Entry (
                 request = request.with_header("Content-Length", "0").with_header("Transfer-Encoding", "chunked");
             }
             last response = request.send()?;
+            if (mode == "body-size") {
+                return result.Result<string>.Ok(body_summary(response.status, response.body));
+            }
             last text = response.text()?;
             return result.Result<string>.Ok(response.status.to_string() .. ":" .. text);
         }
         last request = new http.ClientRequest(method, url);
         request.set_deadline(limit);
         request.set_body(body);
+        for (let field in fields) {
+            request.headers.add(field[0], field[1]);
+        }
         if (mode == "duplicate-request-length") {
             request.headers.add("Content-Length", "0");
             request.headers.add("Content-Length", "0");
@@ -116,6 +172,13 @@ let NativeFetch = module:program.Entry (
             request.headers.add("Transfer-Encoding", "chunked");
         }
         last response = new http.Client().send(request)?;
+        if (mode == "body-size") {
+            return result.Result<string>.Ok(body_summary(response.status, response.body()));
+        }
         return result.Result<string>.Ok(response.status.to_string() .. ":" .. response.body_text());
     };
+
+    let body_summary = func(status: int, body: uint8[list]) -> string =>
+        status.to_string() .. ":" .. body.length.to_string() .. ":" .. body[0].to_string() .. ":" ..
+            body[body.length - 1].to_string();
 );

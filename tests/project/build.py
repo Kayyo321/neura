@@ -156,6 +156,9 @@ def main():
     check(html.unescape(page).count(web['csp']) == 1 and "default-src 'none'" in web['csp'] and 'form-action' in web['csp'],
           'index.html carries the content-security policy of bundle.json')
     check(page.index('styles/') < page.index('neura-boot'), 'global stylesheet linked before the boot script')
+    server = json.loads((first / 'dist/server/bundle.json').read_text())
+    check(server['requires'].get('http_client_origins') == 1 and server['origins'].get('connect') == [],
+          'a server bundle preserves an explicit empty HTTP origin list')
     if native:
         desktop = json.loads((first / 'dist/desktop/bundle.json').read_text())
         import hashlib
@@ -163,6 +166,13 @@ def main():
               'desktop bundle embeds the web bundle with the same digest')
         check((first / 'dist/desktop/web/bundle.json').read_bytes() == (first / 'dist/web/bundle.json').read_bytes(),
               'embedded web bundle unchanged')
+        check(desktop['requires'].get('http_client_origins') == 1 and
+              desktop['origins'].get('connect') == ['https://api.example:8443'],
+              'desktop bundle inherits the embedded web target connect list')
+        child = first / 'dist/desktop' / desktop['image']['path']
+        policy = run('inspect', child)
+        check(policy.returncode == 0 and 'http_client (https://api.example:8443)' in policy.stdout,
+              'the desktop native child records its HTTP origin list')
 
     # Case 12: history routing writes 404.html and says what the host must do.
     routed = copy_project('routed')
@@ -244,7 +254,8 @@ def main():
         edit(project / 'ui/main.nra', 'let web = import:Std.Web;', 'let web = import:Std.Web;\nlet files = import:Std.Fs.Fs;\nlet paths = import:Std.Fs.Path;')
         edit(project / 'ui/main.nra', 'last counter = make_counter();', 'last counter = make_counter();\n        last found = files.exists(paths.of("x"));')
     variant('fs', fs_use, 'web', 'E1027', 'neura.fs.', 'a web target that reaches the file system (case 28)')
-    variant('unlisted', lambda p: edit(p / 'neura.toml', 'capabilities = ["http_server", "app", "sql"]', 'capabilities = ["sql"]'),
+    variant('unlisted', lambda p: edit(p / 'neura.toml', 'capabilities = ["http_server", "app", "sql", "http_client"]',
+                                       'capabilities = ["sql"]'),
             'server', 'E1027', "group 'app', not listed", 'a server image using a group it does not list')
 
     if failures:

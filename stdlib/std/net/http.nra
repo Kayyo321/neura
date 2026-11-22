@@ -1710,7 +1710,7 @@ export let Http = module (
         let fetch = func(request: ClientRequest) -> Result<Response>;
     );
 
-    /// @brief The host transport through `neura.http.fetch` version 1. Requires the `http_client` capability.
+    /// @brief The host transport through `neura.http.fetch` version 2. Requires the `http_client` capability.
     .[Final, NotThreadSafe]
     export let HostTransport = class implements Transport (
         /// @brief The host transport.

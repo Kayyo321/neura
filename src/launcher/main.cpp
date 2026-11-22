@@ -115,6 +115,7 @@ neura::runner::RunOptions run_options(const neura::launcher::Policy& policy, neu
             capabilities.raw = false;
         } else if (flag == "--deny-http-client") {
             capabilities.http_client = false;
+            capabilities.http_client_origins.reset();
         } else if (flag == "--deny-env") {
             capabilities.env = false;
         } else if (flag == "--deny-clock") {

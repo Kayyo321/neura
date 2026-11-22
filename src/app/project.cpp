@@ -1,5 +1,6 @@
 #include "app/project.hpp"
 
+#include "cli/http_client_options.hpp"
 #include "cli/module_path.hpp"
 #include "cli/tool.hpp"
 #include "neura/version.hpp"
@@ -62,7 +63,7 @@ using tooling::Json;
 // (Apps030.md, "Version axes"). The browser adapter and UI host are those of
 // the browser runtime; the server host and the desktop host have their own.
 constexpr std::pair<std::string_view, std::uint32_t> host_axes[] = {
-    {"browser_adapter", 1}, {"ui_host", 1}, {"server_host", 1}, {"desktop_host", 1},
+    {"browser_adapter", 1}, {"ui_host", 1}, {"server_host", 1}, {"desktop_host", 1}, {"http_client_origins", 1},
 };
 
 // The provider components of a server or desktop target and the version of
@@ -414,7 +415,7 @@ struct Compiled {
 };
 
 Compiled compile(const Project& project, const Target& target, const BuildOptions& options, const fs::path& scratch,
-                 bool native, const std::string& output_name) {
+                 bool native, const std::string& output_name, const std::vector<std::string>* http_origins = nullptr) {
     const auto source = entry_file(project, target);
     std::vector<std::string> command{argument_path(options.neura), "build"};
     if (native) {
@@ -422,7 +423,7 @@ Compiled compile(const Project& project, const Target& target, const BuildOption
         for (const auto* arg : {"--native", "--deny-all", "--max-steps", "18446744073709551615", "--allow-clock"})
             command.emplace_back(arg);
         if (std::ranges::any_of(target.capabilities, [](const auto& cap) { return cap.value == Capability::HttpClient; }))
-            command.emplace_back("--allow-http-client");
+            command.push_back(cli::http_client_option(http_origins));
     } else {
         command.emplace_back("--no-source-map");
     }
@@ -491,6 +492,14 @@ std::vector<std::string> origin_texts(const std::vector<Located<Origin>>& origin
     for (const auto& o : origins) texts.push_back(o.value.text);
     std::ranges::sort(texts);
     texts.erase(std::unique(texts.begin(), texts.end()), texts.end());
+    return texts;
+}
+
+// The origins of a connect list that an http_client grant can name: only
+// http and https; a web view's other schemes do not reach the native fetch.
+std::vector<std::string> http_origin_texts(const std::vector<Located<Origin>>& origins) {
+    auto texts = origin_texts(origins);
+    std::erase_if(texts, [](const std::string& text) { return !text.starts_with("http://") && !text.starts_with("https://"); });
     return texts;
 }
 
@@ -729,7 +738,7 @@ BuildResult build_web(Project& project, const std::string& name, const Target& t
 
     bool http_client = false;
     for (const auto& cap : target.capabilities) http_client |= cap.value == Capability::HttpClient;
-    const auto connect = origin_texts(web.origins.connect);
+    const auto connect = web.origins.connect ? origin_texts(*web.origins.connect) : std::vector<std::string>{};
     Json boot{{"base", base},
               {"image", Json{{"digest", std::string(sha256_of(compiled.image).hex())}, {"path", image_path}}},
               {"routing", history ? "history" : "hash"},
@@ -749,7 +758,7 @@ BuildResult build_web(Project& project, const std::string& name, const Target& t
     const auto csp = "default-src 'none'; script-src 'self' 'wasm-unsafe-eval' '" + sri(import_text) +
                      "'; style-src 'self'" + join_origins(web.origins.style) + "; img-src 'self'" +
                      join_origins(web.origins.load) + "; font-src 'self'; connect-src 'self'" +
-                     join_origins(web.origins.connect) + "; base-uri 'none'; form-action 'none'";
+                     (web.origins.connect ? join_origins(*web.origins.connect) : std::string{}) + "; base-uri 'none'; form-action 'none'";
     std::string dev_script;
     if (options.dev_reload) {
         assembly.add("neura-dev.js", *options.dev_reload);
@@ -776,7 +785,7 @@ BuildResult build_web(Project& project, const std::string& name, const Target& t
     bundle.csp = csp;
     bundle.routing = history ? "history" : "hash";
     bundle.base = base;
-    if (!web.origins.connect.empty()) bundle.origins["connect"] = connect;
+    if (!connect.empty()) bundle.origins["connect"] = connect;
     if (!web.origins.load.empty()) bundle.origins["load"] = origin_texts(web.origins.load);
     if (!web.origins.style.empty()) bundle.origins["style"] = origin_texts(web.origins.style);
     if (options.dev) bundle.dev = true;
@@ -804,6 +813,10 @@ BuildResult build_server(Project& project, const std::string& name, const Target
                                                       "', which this SDK does not install");
     }
     bundle.requirements.emplace("server_host", 1);
+    if (server.connect_origins && std::ranges::find(bundle.capabilities, Capability::HttpClient) != bundle.capabilities.end()) {
+        bundle.requirements.emplace("http_client_origins", 1);
+        bundle.origins["connect"] = http_origin_texts(*server.connect_origins);
+    }
     const auto staging = staging_for(out);
     const auto scratch = out.parent_path() / (out.filename().string() + ".neura-image");
     const auto compiled = compile(project, target, options, scratch, false, "app.nvr");
@@ -869,7 +882,15 @@ BuildResult build_desktop(Project& project, const std::string& name, const Targe
     // The native child is built for this system. A Windows child is a PE
     // file, which CreateProcess starts only by its .exe name (W31).
     const auto suffix = tool::executable_file("");
-    const auto compiled = compile(project, target, options, scratch, true, "app-child" + suffix);
+    const auto& web_settings = std::get<WebSettings>(project.manifest.targets.at(desktop.ui.value).settings);
+    const auto& configured_origins = desktop.origins.connect ? desktop.origins.connect : web_settings.origins.connect;
+    const auto http_origins = configured_origins ? http_origin_texts(*configured_origins) : std::vector<std::string>{};
+    const auto compiled = compile(project, target, options, scratch, true, "app-child" + suffix,
+                                  configured_origins ? &http_origins : nullptr);
+    if (configured_origins && std::ranges::find(bundle.capabilities, Capability::HttpClient) != bundle.capabilities.end()) {
+        bundle.requirements.emplace("http_client_origins", 1);
+        bundle.origins["connect"] = http_origins;
+    }
     fs::remove_all(scratch);
     Assembly assembly(staging, std::numeric_limits<std::uint64_t>::max(), target.span);
     assembly.embed(web.directory, "web/");

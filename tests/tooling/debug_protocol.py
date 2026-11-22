@@ -936,6 +936,24 @@ let App = module:program.Entry (
                                              success=False)
                 self.assertIn(message, failed['message'])
 
+    def test_http_client_scope(self):
+        path = self.source('http-scope.nra', """let program = import:Std.Program;
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        return program.ExitCode.Ok;
+    };
+);
+""")
+        for grant in ({}, [True], "http://127.0.0.1"):
+            with self.subTest(grant=grant):
+                result = self.client.request('launch', {'program': str(path), 'cwd': str(self.root),
+                                                        'capabilities': {'http_client': grant}}, success=False)
+                self.assertIn('capabilities.http_client must be a boolean or an array of origin strings', result['message'])
+        self.launch(path, capabilities={'http_client': []})
+        self.client.request('configurationDone')
+        self.assertEqual(self.client.event('exited')['exitCode'], 0)
+        self.client.event('terminated')
+
     def test_pause_and_disconnect_in_running_loop(self):
         path = self.source('loop.nra', '''let program = import:Std.Program;
 let App = module:program.Entry (

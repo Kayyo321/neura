@@ -191,7 +191,7 @@ int main(int argc, char** argv) try {
     rejects(altered, directory, "wrong checksum", "checksum");
     changed = bytes;
     check(number(bytes, footer + 20, 4) == 3, "the toolchain writes container version 3");
-    for (const std::uint8_t version : {0, 4}) {
+    for (const std::uint8_t version : {0, 5}) {
         changed = bytes;
         changed[footer + 20] = version;
         write(altered, changed);
@@ -263,6 +263,16 @@ int main(int argc, char** argv) try {
     rejects(altered, directory, "version 2 policy under a version 3 footer");
     craft(assemble(launcher_bytes, policy_payload(0, 0, {}, image, image_size, 3), 0, 0, 2));
     rejects(altered, directory, "version 3 policy under a version 2 footer");
+
+    auto missing_grant = policy_payload(0, 0, {}, image, image_size);
+    missing_grant.insert(missing_grant.begin() + 12, 4, 0);
+    craft(assemble(launcher_bytes, missing_grant, 0, 0, 4));
+    rejects(altered, directory, "v4 without the HTTP client capability", "require the HTTP client capability");
+    constexpr std::uint32_t http_client_capability = 1U << 7;
+    auto invalid_origins = policy_payload(http_client_capability, 0, {}, image, image_size);
+    invalid_origins.insert(invalid_origins.begin() + 12, 4, 0xff);
+    craft(assemble(launcher_bytes, invalid_origins, 0, 0, 4));
+    rejects(altered, directory, "origin count beyond the payload", "invalid HTTP client origin count");
 
     for (const auto& settings : {TaskSettings{.max_tasks = 0}, TaskSettings{.quantum = 0},
                                  TaskSettings{.queued_messages = 0}, TaskSettings{.pending_requests = 0},

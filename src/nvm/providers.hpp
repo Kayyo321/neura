@@ -113,6 +113,9 @@ struct Capabilities {
     bool sql = false;
     // HTTP(S) client requests have their own grant, independent of sockets.
     bool http_client = false;
+    // With an HTTP client grant, no list allows all origins and an empty
+    // list allows none. The provider normalizes the configured origins.
+    std::optional<std::vector<std::string>> http_client_origins;
 };
 
 // The target triple of this runner, such as x86_64-linux-gnu; an image's

@@ -399,7 +399,7 @@ The following public declarations are taken from the module source; each links t
 - **Http** · [`export let Transport = interface`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http.nra#L1708)
   What carries a client request: the host's `neura.http.fetch`, or a test double.
 - **Http** · [`export let HostTransport = class implements Transport`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http.nra#L1715)
-  The host transport through `neura.http.fetch` version 1. Requires the `http_client` capability. Tagged `#Final`, `#NotThreadSafe`.
+  The host transport through `neura.http.fetch` version 2. Requires the `http_client` capability. Tagged `#Final`, `#NotThreadSafe`.
 - **Http.HostTransport** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http.nra#L1717)
   The host transport.
 - **Http.HostTransport** · [`export let fetch = func(request: ClientRequest) -> Result<Response>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http.nra#L1721)

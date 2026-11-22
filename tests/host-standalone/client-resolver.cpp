@@ -20,11 +20,15 @@ using namespace std::chrono_literals;
 namespace {
 std::atomic<unsigned> stalled{0};
 std::atomic<bool> release_lookup{false};
+std::atomic<unsigned> numeric_lookups{0};
 }
 
 extern "C" int __real_getaddrinfo(const char*, const char*, const addrinfo*, addrinfo**);
 extern "C" int __wrap_getaddrinfo(const char* host, const char* service, const addrinfo* hints, addrinfo** result) {
-    if ((hints->ai_flags & AI_NUMERICHOST) != 0) return __real_getaddrinfo(host, service, hints, result);
+    if ((hints->ai_flags & AI_NUMERICHOST) != 0) {
+        ++numeric_lookups;
+        return __real_getaddrinfo(host, service, hints, result);
+    }
     if (std::string_view(host) == "stall.test") {
         ++stalled;
         while (!release_lookup.load()) std::this_thread::sleep_for(1ms);
@@ -70,6 +74,17 @@ int main() {
     assert(stalled.load() == 4);
     success("127.0.0.1");
     success("localhost");
+    // Numeric hosts, a zone included, never enter getaddrinfo, so a stalled
+    // resolver cannot spend their deadline. Nothing listens on ::1 here.
+    {
+        std::uint32_t refused = 0;
+        const auto before = client_socket::Clock::now();
+        assert(lookup("::1%lo", 1s, refused) == invalid_native_socket);
+        assert(lookup("::1%1", 1s, refused) == invalid_native_socket);
+        assert(refused != neura::nvm::host_error::timed_out);
+        assert(client_socket::Clock::now() - before < 500ms);
+    }
+    assert(numeric_lookups.load() == 0);
     std::uint32_t error = 0;
     const auto before = client_socket::Clock::now();
     assert(lookup("loopback.test", 30ms, error) == invalid_native_socket);

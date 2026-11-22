@@ -5,6 +5,7 @@
 
 #include "app/project.hpp"
 
+#include "cli/http_client_options.hpp"
 #include "cli/tool.hpp"
 #include "project/files.hpp"
 #include "tooling/json.hpp"
@@ -175,7 +176,12 @@ std::optional<std::vector<std::string>> server_command(const VerifiedBundle& bun
         switch (capability) {
         case Capability::Fs: command.emplace_back("--allow-fs"); break;
         case Capability::Net: command.emplace_back("--allow-net"); break;
-        case Capability::HttpClient: command.emplace_back("--allow-http-client"); break;
+        case Capability::HttpClient: {
+            const auto& origins = bundle.manifest().origins;
+            const auto connect = origins.find("connect");
+            command.push_back(cli::http_client_option(connect == origins.end() ? nullptr : &connect->second));
+            break;
+        }
         case Capability::Env: command.emplace_back("--allow-env"); break;
         default: break;
         }
