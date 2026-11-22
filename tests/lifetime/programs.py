@@ -31,6 +31,13 @@ whose provenance name ends with the text in that file, such as `.$resume`.
 A program may list modes in `<name>.skip`, one per line after a line that
 says why; the reason is printed.
 
+With NEURA_TEST_SANITIZERS=1 (Tier 2's sanitizer job) the images are not
+decompiled, except for a program with `<name>.deopt-in`, whose check needs
+the provenance names: seven of the programs take about 20 s to decompile in a
+Release build, which with eight decompiles each does not fit the job's six
+hours when sanitized. The decompiler runs under the sanitizers in the
+decompiler-* entries, and this check runs in full everywhere else.
+
 Then each program's `.nir` is checked: a program that uses `defer`,
 `using` or a generator is written as NeuraIR 1.14 (nir_lifetime_minor),
 and the same file marked as an older minor is rejected by the reader. A
@@ -61,6 +68,7 @@ BASE = {'NEURA_GPU': 'off', 'PATH': '/usr/bin:/bin'}
 if os.name == 'nt':
     BASE.update({name: os.environ[name] for name in ('PATH', 'SystemRoot') if name in os.environ})
 TIMEOUT = 300 * int(os.environ.get('NEURA_TEST_TIMEOUT_SCALE', '1'))
+SANITIZERS = os.environ.get('NEURA_TEST_SANITIZERS') == '1'
 # (name, environment, run options)
 MODES = [
     ('tier0', {}, ['--tier=0']),
@@ -94,6 +102,9 @@ def main():
     failures = []
     if os.name == 'nt':
         print('NOT RUN: lifetime execution modes that require --jit=on; Windows has no JIT in 0.3.0')
+    if SANITIZERS:
+        print('NOT RUN: decompiling programs without a .deopt-in check; under the sanitizers it does not fit '
+              'the job (the decompiler-* entries run it there)')
     programs = sorted(DIRECTORY.glob('*.expected'))
     if not programs:
         sys.exit('no programs')
@@ -145,7 +156,7 @@ def main():
                 if again.exists() and again.read_bytes() != image.read_bytes():
                     failures.append(f'{source.name} {build}: assemble did not give back the image')
                 functions = {}
-                for flags in ([], ['--no-provenance']):
+                for flags in ([], ['--no-provenance']) if within or not SANITIZERS else ():
                     result = run(['decompile', *flags, str(image)])
                     if not flags:
                         functions = {int(number): name for number, name in FUNCTION.findall(result.stdout)}

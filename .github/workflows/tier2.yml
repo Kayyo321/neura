@@ -188,9 +188,9 @@ jobs:
       # the 0.3.0 suite ran out of time here without a sanitizer report. With
       # the scale, backend-reference gets 5.5 hours (it ran for more than 3),
       # decompiler-behavior 3 hours (it took 2.6), program-fuzz 2 hours
-      # (it took 1) and lifetime-programs 5 hours (3 were not enough: every
-      # image is decompiled, and events-owned's decompile takes 18 s in a
-      # Release build and minutes when sanitized).
+      # (it took 1) and lifetime-programs 5 hours (3 were not enough while it
+      # decompiled every image; with NEURA_TEST_SANITIZERS it decompiles only
+      # where a check needs the names).
       - name: Configure
         run: >
           cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
