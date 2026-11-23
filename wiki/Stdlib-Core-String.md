@@ -251,7 +251,7 @@ All of `Strings` needs T1. String operations are functions that take the string 
 | `split(s, separator)` | A built-in list of strings: every piece between occurrences, left to right without overlap. Empty pieces are kept, so `a,,b,` gives four pieces and the empty string gives one. An empty separator traps. |
 | `split_limit(s, separator, limit)` | At most `limit` pieces; the last holds the remainder. `limit` below 1 traps. |
 | `lines(s)` | Splits at LF; a CR immediately before an LF is removed; a final empty piece after a trailing LF is dropped. |
-| `join(parts: string[list], separator) → string` | |
+| `join(parts: string[list], separator) → string` | Joins the parts in order. When the accumulated bytes exceed 2,147,483,647, it traps with `joined text exceeds the maximum text length`. |
 | `repeat(s, count) → string` | A negative count traps. |
 | `trim(s)`, `trim_start(s)`, `trim_end(s)` | Remove space, tab, LF, vertical tab, form feed, and CR. |
 | `strip_prefix(s, prefix)`, `strip_suffix(s, suffix)` `→ Optional<string>` | The remainder when the affix is present. |

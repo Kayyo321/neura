@@ -40,7 +40,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ### Changed
 
-- `Std.Text.Strings.join` reports when the accumulated byte count exceeds the maximum text length.
+- `Std.Text.Strings.join` accepts parts and separators up to the maximum text length and reports when the accumulated byte count exceeds that limit.
 - In a `let` or `const` initializer, bare `law()` starts a law declaration and requires a claim. Parenthesize the callee as `(law)()` to call a zero-argument function named `law`.
 - Empty tag groups (`#[]` and `.[]`) are now rejected with `E0910`.
 - `E0105` now reads "unknown numeric suffix".

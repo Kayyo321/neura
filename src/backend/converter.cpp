@@ -2745,17 +2745,23 @@ void FunctionCompiler::batch_list_run(const IrNode& node, std::uint32_t head, st
     const auto local = [&](const IrNode& value) {
         return value.op == IrOp::Load && slots_.contains(value.symbol);
     };
-    const auto plus = [&](const IrNode& value, std::string_view number) {
-        return value.op == IrOp::Binary && value.text == "+" && local(value.operands[0]) &&
+    const auto offset = [&](const IrNode& value, std::string_view op, std::string_view number) {
+        return value.op == IrOp::Binary && value.text == op && local(value.operands[0]) &&
             value.operands[1].op == IrOp::Integer && value.operands[1].text == number;
     };
+    const auto plus = [&](const IrNode& value, std::string_view number) { return offset(value, "+", number); };
     const auto& test = node.operands.front();
-    const bool quad = join && test.op == IrOp::Binary && test.text == "<=" && plus(test.operands[0], "4");
-    if (test.op != IrOp::Binary || (!quad && test.text != "<") || !local(test.operands[1])) return;
-    const auto& cursor = quad ? test.operands[0].operands[0] : test.operands[0];
-    if (!local(cursor)) return;
+    if (test.op != IrOp::Binary) return;
+    const bool quad_test = join && test.text == "<=";
+    const bool advanced_index = quad_test && plus(test.operands[0], "4");
+    const bool reduced_end = quad_test && offset(test.operands[1], "-", "4");
+    const bool quad = advanced_index || reduced_end;
+    if (!quad && test.text != "<") return;
+    const auto& cursor = advanced_index ? test.operands[0].operands[0] : test.operands[0];
+    const auto& limit_operand = reduced_end ? test.operands[1].operands[0] : test.operands[1];
+    if (!local(cursor) || !local(limit_operand)) return;
     const auto cursor_slot = slots_.at(cursor.symbol);
-    const auto end_slot = slots_.at(test.operands[1].symbol);
+    const auto end_slot = slots_.at(limit_operand.symbol);
     const auto i32 = c_.scalar(nvr::TypeKind::Signed, 32);
     if (cursor_slot == end_slot || function_.frame_types[cursor_slot] != i32 ||
         function_.frame_types[end_slot] != i32) return;

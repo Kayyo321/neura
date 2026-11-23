@@ -504,7 +504,8 @@ export let Strings = module (
     /// @brief Appends the bytes of s from `start` up to `end`, four at a time where possible.
     let append_bytes = func(bytes: uint8[list], s: string, start: int, end: int) {
         let i = start;
-        while (i + 4 <= end) {
+        // end is a nonnegative byte offset, even for the longest text.
+        while (i <= end - 4) {
             bytes.append(s.byte_at(i));
             bytes.append(s.byte_at(i + 1));
             bytes.append(s.byte_at(i + 2));
