@@ -8,6 +8,7 @@
 #include "fixtures.hpp"
 
 #include <algorithm>
+#include <array>
 #include <fstream>
 #include <functional>
 #include <stdexcept>
@@ -135,6 +136,72 @@ NEURA_TEST(format, message_trap_requires_version_1_2_and_text) {
     auto& exit = image.functions.front().blocks.front().exits.front();
     exit.arguments = {{nvr::ValueKind::Constant, 2, 0}};
     expect_invalid(image, "a message trap requires one text argument");
+}
+
+NEURA_TEST(format, malformed_non_nil_receiver_hints_are_dropped_as_a_section) {
+    const auto path = environment.source_dir / "tests" / "expressions" / "nil-elision" / "positive.nra";
+    const auto hinted = build_program({path});
+    auto checked = hinted;
+    std::vector<std::array<std::uint32_t, 3>> sites;
+    for (std::uint32_t fi = 0; fi < checked.functions.size(); ++fi) {
+        auto& blocks = checked.functions[fi].blocks;
+        for (std::uint32_t bi = 0; bi < blocks.size(); ++bi) {
+            auto& exits = blocks[bi].exits;
+            for (std::uint32_t ei = 0; ei < exits.size(); ++ei) {
+                if (!exits[ei].receiver_non_nil) continue;
+                sites.push_back({fi, bi, ei});
+                exits[ei].receiver_non_nil = false;
+            }
+        }
+    }
+    check(!sites.empty(), "the positive fixture has a non-nil receiver hint");
+    const auto [function, block, exit] = sites.front();
+    const auto drop = [&](Bytes payload) {
+        auto image = checked;
+        image.other_sections.push_back({{'N', 'I', 'L', 'P'}, std::move(payload)});
+        const auto loaded = nvr::load(nvr::encode(image));
+        check(loaded == checked, "malformed hints leave the original checked image intact");
+    };
+    drop(Out().u32(0).bytes);
+    drop(Out().u32(0xfffffffeU).bytes);
+    drop(Out().u32(1).u32(function).u32(block).u32(exit).u8(1).bytes);
+    drop(Out().u32(2).u32(function).u32(block).u32(exit).u32(function).u32(block).u32(exit).bytes);
+    drop(Out().u32(2).u32(function).u32(block).u32(exit)
+              .u32(static_cast<std::uint32_t>(checked.functions.size())).u32(0).u32(0).bytes);
+    const auto result = run_captured(checked);
+    check(result.result.completed && result.output == "17 0 17\n", "the checked image runs as expected");
+
+    auto legacy = hello_sections();
+    legacy.insert(legacy.end() - 1, {"NILP", 0, {0x01, 0x02}});
+    const auto opaque = assemble(legacy);
+    check(nvr::encode(nvr::load(opaque)) == opaque, "a pre-1.2 optional NILP tag stays opaque");
+}
+
+NEURA_TEST(format, assembly_rejects_non_nil_receiver_for_non_object_values) {
+    const auto path = environment.source_dir / "tests" / "expressions" / "nil-elision" / "positive.nra";
+    const auto good = build_program({path});
+    const auto assemble_roundtrip = [&](const nvr::Image& image) {
+        return decompiler::assemble(decompiler::disassemble(image));
+    };
+    check(nvr::encode(assemble_roundtrip(good)) == nvr::encode(good), "object receiver hints round-trip");
+    auto bad = good;
+    for (auto& function : bad.functions) {
+        for (auto& block : function.blocks) {
+            for (auto& exit : block.exits) {
+                if (!exit.receiver_non_nil) continue;
+                exit.arguments.front().type = good.functions[good.entry].result_type;
+                try {
+                    assemble_roundtrip(bad);
+                } catch (const decompiler::AssemblyError& error) {
+                    check(std::string_view(error.what()).find("non-nil-receiver requires an object receiver") !=
+                              std::string_view::npos, "assembler identifies the invalid receiver");
+                    return;
+                }
+                fail("assembler accepted a non-object receiver hint");
+            }
+        }
+    }
+    fail("the fixture emitted no receiver hints");
 }
 
 NEURA_TEST(format, kernel_exits_and_table) {

@@ -2127,9 +2127,10 @@ Image load(std::span<const std::uint8_t> bytes, const LoadLimits& limits) {
         }
         expected += entry.size;
         const bool required = (entry.flags & 1U) != 0;
-        // Before 1.5, an optional TRNS tag was opaque and round-trips as such,
-        // and so was an optional KERN tag before 1.6.
-        const bool opaque = (name == "TRNS" && minor < 5) || (name == "KERN" && minor < 6);
+        // Optional tags before their defining minor version round-trip as
+        // opaque sections.
+        const bool opaque = (name == "NILP" && minor < 2) || (name == "TRNS" && minor < 5) ||
+                            (name == "KERN" && minor < 6);
         const auto* section = opaque && !required ? nullptr : known(entry.tag);
         if (section == nullptr) {
             if (required) {
@@ -2211,9 +2212,12 @@ Image load(std::span<const std::uint8_t> bytes, const LoadLimits& limits) {
     section("FUNC", [&](Reader& in) { image.functions = read_functions(in, image.types, minor); });
     section("META", [&](Reader& in) { image.entry = in.u32(); });
     if (sections.contains("NILP")) {
-        section("NILP", [&](Reader& in) {
-            const auto locations = in.vector(12, "non-nil receiver hints", [](Reader& r) {
-                return std::array{r.u32(), r.u32(), r.u32()};
+        try {
+            std::vector<std::array<std::uint32_t, 3>> locations;
+            section("NILP", [&](Reader& in) {
+                locations = in.vector(12, "non-nil receiver hints", [](Reader& r) {
+                    return std::array{r.u32(), r.u32(), r.u32()};
+                });
             });
             if (locations.empty() || !std::ranges::is_sorted(locations) ||
                 std::ranges::adjacent_find(locations) != locations.end()) {
@@ -2224,15 +2228,19 @@ Image load(std::span<const std::uint8_t> bytes, const LoadLimits& limits) {
                     ei >= image.functions[fi].blocks[bi].exits.size()) {
                     fail(Kind::Malformed, "NILP: receiver hint exit is out of range");
                 }
-                auto& exit = image.functions[fi].blocks[bi].exits[ei];
-                if (minor < 2 || exit.kind != ExitKind::State || !has_nil_checked_receiver(exit.operation) ||
+                const auto& exit = image.functions[fi].blocks[bi].exits[ei];
+                if (exit.kind != ExitKind::State || !has_nil_checked_receiver(exit.operation) ||
                     exit.arguments.empty() || exit.arguments.front().type >= image.types.size() ||
                     image.types[exit.arguments.front().type].kind != TypeKind::Object) {
                     fail(Kind::Malformed, "NILP: receiver hint requires a nil-checked object state operation");
                 }
-                exit.receiver_non_nil = true;
             }
-        });
+            for (const auto& [fi, bi, ei] : locations) image.functions[fi].blocks[bi].exits[ei].receiver_non_nil = true;
+        } catch (const LoadError& error) {
+            // A hint section is all-or-nothing. Executable records have
+            // the same validation and meaning without it.
+            if (error.kind != Kind::Malformed && error.kind != Kind::LimitExceeded) throw;
+        }
     }
     if (sections.contains("CALB")) {
         section("CALB", [&](Reader& in) {

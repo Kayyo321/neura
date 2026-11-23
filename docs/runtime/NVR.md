@@ -428,7 +428,7 @@ A value names the first output lane an exit reads and the node that computes it,
 
 `NILP` holds a nonempty vector of `function:u32, block:u32, exit:u32` triples in strictly ascending order. Each triple names a `ReadTag`, `ReadField`, or `WriteField` state exit with an object receiver in an image of version 1.2 or later. Assembly spells the hint `non-nil-receiver` after the state operation. The section has no effect on the required format version.
 
-The hint lets the runtime use the heap lookup in place of a separate nil test on the success path. An absent heap entry still goes through the original failure path, which distinguishes a nil receiver from an invalid or released handle. Reference type and field initialization checks still apply. A runtime can ignore the section without changing execution, and an incorrect hint cannot turn a nil access into a successful one. `--no-nil-check-elision` omits the section.
+The reference interpreter and Tier 3 can use the heap lookup in place of a separate nil test on the success path. An absent heap entry still goes through the original failure path, which distinguishes a nil receiver from an invalid or released handle. Reference type and field initialization checks still apply. Tier 2 keeps its full receiver checks. The loader drops the entire hint section when any record or the section encoding is malformed, or when its record count exceeds the load limit. Before version 1.2 an optional section with this tag is preserved as opaque data. A runtime can ignore the section without changing execution, and an incorrect hint cannot turn a nil access into a successful one. `--no-nil-check-elision` omits the section.
 
 ## Writer and loader requirements
 

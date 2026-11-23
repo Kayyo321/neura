@@ -8,6 +8,7 @@
 #include <limits>
 #include <optional>
 #include <sstream>
+#include <utility>
 #include <vector>
 
 namespace neura::decompiler {
@@ -505,6 +506,7 @@ std::string disassemble(const nvr::Image& image) {
 
 nvr::Image assemble(std::string_view text) {
     nvr::Image image;
+    std::vector<std::pair<std::size_t, std::uint32_t>> receiver_hint_types;
     bool header = false;
     bool entry = false;
     std::size_t number = 0;
@@ -766,6 +768,10 @@ nvr::Image assemble(std::string_view text) {
                 in.keyword("immediate");
                 exit.immediate = in.index("immediate");
                 arguments();
+                if (exit.receiver_non_nil) {
+                    if (exit.arguments.empty()) in.error("non-nil-receiver requires an object receiver");
+                    receiver_hint_types.emplace_back(number, exit.arguments.front().type);
+                }
                 result();
                 resume();
                 break;
@@ -866,6 +872,11 @@ nvr::Image assemble(std::string_view text) {
     }
     if (!entry) {
         throw AssemblyError(number, "the text has no entry");
+    }
+    for (const auto& [line, type] : receiver_hint_types) {
+        if (type >= image.types.size() || image.types[type].kind != nvr::TypeKind::Object) {
+            throw AssemblyError(line, "non-nil-receiver requires an object receiver");
+        }
     }
     return image;
 }

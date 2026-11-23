@@ -245,7 +245,7 @@
             for (unsigned i = 0; i < op.width; ++i) {
                 arguments.push_back(context->registers[region.operands[op.other + i]]);
             }
-            const auto result = self.state(*region.exits[op.index], arguments);
+            const auto result = self.state(*region.exits[op.index], arguments, ReceiverChecks::Full);
             context->status = 0;
             return result;
         } catch (const Fault&) {
@@ -400,7 +400,7 @@
                 arguments.clear();
                 for (unsigned i = 0; i < op.width; ++i) arguments.push_back(regs[region.operands[op.other + i]]);
                 try {
-                    const auto result = state(*region.exits[op.index], arguments);
+                    const auto result = state(*region.exits[op.index], arguments, ReceiverChecks::Full);
                     if (op.dst != nvr::absent) regs[op.dst] = result;
                 } catch (const Fault&) {
                     deopt(op.block, region_counts_.state_traps);
@@ -670,7 +670,7 @@
                 arguments.clear();
                 for (unsigned i = 0; i < op.width; ++i) arguments.push_back(reg(program->operands[op.other + i]));
                 try {
-                    const auto result = state(*program->exits[op.index], arguments);
+                    const auto result = state(*program->exits[op.index], arguments, ReceiverChecks::Full);
                     if (op.dst != nvr::absent) reg(op.dst) = result;
                 } catch (const Fault&) {
                     return end(op.block, true, region_counts_.state_traps);
@@ -760,7 +760,7 @@
                 ++blocks;
                 flush();
                 try {
-                    const auto result = state(exit, arguments);
+                    const auto result = state(exit, arguments, ReceiverChecks::Full);
                     if (op.dst != nvr::absent) {
                         slots[op.dst] = result;
                         init[op.dst] = 1;
