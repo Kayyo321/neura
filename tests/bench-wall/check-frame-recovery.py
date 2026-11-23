@@ -5,6 +5,8 @@ The corpus mode consumes a prepared manifest of unchanged NVR images and
 frozen held-out sources with their existing gate receipts. Fixture mode uses
 one small checked-in program to exercise both optimized and diagnostic modes.
 The runner uses the same candidate SDK for both arms and keeps raw output.
+With --audit-live-slots, the test build independently checks the omissions
+of every sparse function-entry graph formed during one corpus run.
 """
 
 import argparse
@@ -23,6 +25,7 @@ RUN_STATS = re.compile(rb"^stats: steps (\d+), peak heap cells (\d+)", re.M)
 TEST_STATS = re.compile(rb"^(PASS .+?) \(steps (\d+), peak heap cells (\d+)(?:, peak stack cells \d+)?\)$", re.M)
 RECOVERY = b"frame-recovery "
 SUMMARY = b"frame-recovery-summary "
+LIVENESS_AUDIT = b"frame-liveness-audit "
 NATIVE = ("--gpu=off", "--tier=2", "--jit=on", "--stats")
 SEEDS = (277, 70123, 8675309)
 STANDARD, PROFILE, CHECKABLE, SPARSE_FRAMES = range(4)
@@ -231,13 +234,18 @@ def pair(args, case, seed):
     return sparse, trace, summaries
 
 
-def corpus(args, seeds):
+def corpus_cases(args):
     prepared = read_json(args.inputs)
     cases = gate_cases(prepared, args.gate_size, args.out_dir) + held_cases(prepared)
     if args.case:
         names = set(args.case)
         require(names <= {case.name for case in cases}, "--case names an unknown workload")
         cases = [case for case in cases if case.name in names]
+    return cases
+
+
+def corpus(args, seeds):
+    cases = corpus_cases(args)
     evidence = []
     for case in cases:
         print(case.name, flush=True)
@@ -257,6 +265,35 @@ def corpus(args, seeds):
     require(any(row["omitted_in_captures"] for row in evidence), "corpus did not exercise compact frame recovery")
     print(f"{len(cases)} workloads, {len(evidence)} pairs, {sum(row['captured'] for row in evidence)} matched frames")
 
+
+
+def audit_corpus(args):
+    cases = corpus_cases(args)
+    evidence = []
+    for case in cases:
+        log = args.out_dir / f"{case.name}-audit"
+        result = invoke(args, case.command, case.cwd, log, env={"NEURA_TIER3_TEST_FRAME_AUDIT": "1"})
+        check_corpus_result(case, (result.returncode, result.stdout, result.stderr))
+        programs = []
+        for line in result.stderr.splitlines():
+            if not line.startswith(LIVENESS_AUDIT):
+                continue
+            row = json.loads(line[len(LIVENESS_AUDIT):])
+            require(all(number(row[field]) for field in ("function", "checked_states", "checked_slots")) and
+                    row["checked_states"] <= row["checked_slots"] and
+                    bool(row["checked_states"]) == bool(row["checked_slots"]), f"{log}: invalid liveness audit record")
+            programs.append(row)
+        require(programs or case.name in {"held-fan-out", "held-worker-group"},
+                f"{log}: no sparse function-entry audit records")
+        states = sum(row["checked_states"] for row in programs)
+        slots = sum(row["checked_slots"] for row in programs)
+        evidence.append({"case": case.name, "argv": list(map(str, case.command)), "cwd": str(case.cwd),
+                         "programs": programs, "checked_states": states, "checked_slots": slots})
+        (args.out_dir / "audit.json").write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
+        print(f"{case.name}: {len(programs)} sparse graphs, {states} states, {slots} omissions checked", flush=True)
+    slots = sum(row["checked_slots"] for row in evidence)
+    require(args.case or slots > 0, "corpus audit did not check any omitted slots")
+    print(f"{len(cases)} workloads, {sum(row['checked_states'] for row in evidence)} states and {slots} omissions checked")
 
 
 def diagnostic_outcome(outcome):
@@ -399,6 +436,8 @@ def main():
     workload = parser.add_mutually_exclusive_group(required=True)
     workload.add_argument("--inputs", type=Path, help="prepared corpus manifest with pinned receipts and images")
     workload.add_argument("--fixture", action="store_true", help="check diagnostic modes and traps on a tracked fixture")
+    parser.add_argument("--audit-live-slots", action="store_true",
+                        help="run the test build's independent image-based liveness check over the corpus")
     parser.add_argument("--out-dir", required=True, type=Path)
     parser.add_argument("--gate-size", choices=("quick", "full", "long"), default="long")
     parser.add_argument("--seed", type=int, action="append", help="repeatable uint64 seed")
@@ -406,6 +445,8 @@ def main():
     parser.add_argument("--timeout", type=int, default=600)
     parser.add_argument("--stop-file", type=Path)
     args = parser.parse_args()
+    if args.audit_live_slots and (args.inputs is None or args.seed):
+        parser.error("--audit-live-slots requires --inputs and runs without forced-deoptimization seeds")
     seeds = args.seed or SEEDS
     if len(seeds) != len(set(seeds)) or any(not 0 <= seed < 2**64 for seed in seeds):
         parser.error("seeds must be distinct uint64 values")
@@ -415,8 +456,11 @@ def main():
     args.out_dir = args.out_dir.resolve()
     args.out_dir.mkdir(parents=True)
     try:
-        run = diagnostics if args.fixture else corpus
-        run(args, seeds)
+        if args.audit_live_slots:
+            audit_corpus(args)
+        else:
+            run = diagnostics if args.fixture else corpus
+            run(args, seeds)
     except (KeyError, OSError, TypeError, ValueError, subprocess.TimeoutExpired) as error:
         parser.exit(1, f"frame recovery: {error}; raw logs in {args.out_dir}\n")
 

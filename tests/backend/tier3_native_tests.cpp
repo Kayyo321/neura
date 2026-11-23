@@ -17,7 +17,9 @@
 
 #include <cfenv>
 #include <cstdlib>
+#include <fstream>
 #include <functional>
+#include <iterator>
 
 namespace neura::testing {
 namespace {
@@ -336,6 +338,76 @@ NEURA_TEST(tier3, the_affine_heap_guard_runs_at_the_int16_limit_and_replays_widt
         if (mode != "ok") {
             check(stats.native_deopts.contains({grid, header->block}) && header->block != actual.result.trap.block,
                   "native code fails at the preheader and replays the original trap inside grid");
+        }
+    }
+}
+
+NEURA_TEST(tier3, natural_checks_recover_sparse_frames_at_the_original_loop_traps) {
+    std::ifstream fixture(backend_dir(environment) / "tier3" / "sparse-guard-recovery.nvra");
+    const std::string source((std::istreambuf_iterator<char>(fixture)), std::istreambuf_iterator<char>());
+    const auto prototype = decompiler::assemble(source);
+    constexpr std::uint32_t loop_function = 1;
+    constexpr std::uint32_t previous_index_slot = 8;
+    struct Case {
+        const char* label;
+        nvr::Value final_object;
+        std::uint32_t trap_block;
+        nvm::TrapKind trap;
+        t3::Op check_op;
+        std::uint64_t nvm::NativeCounts::*deopt_count;
+    };
+    const Case cases[] = {
+        {"reference type", {nvr::ValueKind::Slot, 4, 1}, 2, nvm::TrapKind::ReferenceType,
+         t3::Op::CheckKind, &nvm::NativeCounts::references},
+        {"class kind", {nvr::ValueKind::Slot, 5, 2}, 3, nvm::TrapKind::InvalidCast,
+         t3::Op::CheckKind, &nvm::NativeCounts::state_traps},
+        {"switch selector", {nvr::ValueKind::Slot, 6, 3}, 5, nvm::TrapKind::InvalidSelector,
+         t3::Op::SwitchCheck, &nvm::NativeCounts::selectors},
+    };
+    auto options = machine_options();
+    options.native_inlining = false;
+    const auto serial = [](nvm::RunLimits& limits) { limits.profile = false; };
+    const bool sparse = machine_code_runs() && t3::passes_enabled() && !t3::verify_enabled() &&
+                        !nvm::tier_check_enabled() && !nvm::tier_shadow_enabled() &&
+                        std::getenv("NEURA_TIER3_TEST_FULL_FRAMES") == nullptr;
+
+    for (const auto& scenario : cases) {
+        auto model = prototype;
+        model.functions[0].blocks[7].exits[0].arguments.back() = scenario.final_object;
+        const auto image = nvr::load(nvr::encode(model));
+        const auto expected = run_at(image, 0, nullptr, {}, serial);
+        const auto label = std::string(scenario.label);
+        check(!expected.result.completed && expected.result.trap.kind == scenario.trap &&
+                  expected.result.trap.function == loop_function && expected.result.trap.block == scenario.trap_block,
+              label + ": the reference faults at the requested check");
+
+        nvm::TierCache cache(image, options);
+        const auto actual = run_at(image, 2, &cache, {}, serial);
+        check_same(actual, expected, label);
+        if (sparse) {
+            const auto stats = cache.statistics();
+            check(stats.native_mode == "native" && stats.native.steps != 0, label + ": machine code ran");
+            check_equal(stats.native.*scenario.deopt_count, std::uint64_t{1}, label + ": natural deoptimization");
+            check(stats.native_deopts.contains({loop_function, scenario.trap_block}), label + ": original recovery block");
+
+            const auto resolved = cache.program(loop_function, std::uint64_t{1} << 40);
+            check(resolved.region != nullptr, label + ": the loop has a function program");
+            const auto* code = cache.native_code(*resolved.region, t3::Variant::SparseFrames);
+            check(code && code->function_entry && code->function_entry->machine, label + ": made sparse entry code");
+            const auto& ir = code->function_entry->ir;
+            const bool reference = scenario.trap == nvm::TrapKind::ReferenceType;
+            const auto checked_sparse_state = [&](const t3::Inst& in) {
+                return in.op == scenario.check_op && in.state != t3::none &&
+                       ((in.flags & t3::ReferenceCheck) != 0) == reference &&
+                       ir.states[in.state].block == scenario.trap_block &&
+                       ir.states[in.state].slots[previous_index_slot].kind == t3::StateSlot::Kind::Dead;
+            };
+            check(std::ranges::any_of(ir.insts, checked_sparse_state), label + ": the failed check omitted the dead scalar");
+        }
+        const auto steps = expected.result.steps;
+        for (const auto limit : {std::uint64_t{1}, steps / 2, steps - 2, steps - 1, steps, steps + 1}) {
+            compare(image, cache, label + " with " + std::to_string(limit) + " steps", {},
+                    [&](nvm::RunLimits& limits) { serial(limits); limits.max_steps = limit; });
         }
     }
 }
