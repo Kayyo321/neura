@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-"""Refresh source-linked public declaration lists on the standard-library wiki.
+"""Refresh source-linked public declaration lists and mirrored contracts on the standard-library wiki.
 
 Run from any directory with `python3 scripts/update-stdlib-wiki-api.py`.
 Use `--check` to report pages that would change without writing them.
-Only the marked SOURCE API block is changed; surrounding prose is maintained
-by hand. Internal modules, members of non-exported classes, and declarations
+The numbered sections under a page's "Detailed contracts" heading are copies of the
+sections of docs/lang/Stdlib.md with the same number; they are refreshed too, with links
+rewritten as scripts/generate-wiki.py rewrites them (a same-page link points at the
+Stdlib-Design page). Every other part of a page is maintained by hand. Internal modules, members of non-exported classes, and declarations
 tagged `#Hidden` are omitted; `#Deprecated` and `#Since` tags, and the tags that
 constrain callers, such as `#NoDiscard` and `#Final`, are shown in the notes.
 """
 
 import argparse
+import importlib.util
 import re
 from pathlib import Path
 
@@ -18,6 +21,10 @@ STDLIB = ROOT / "stdlib" / "std"
 WIKI = ROOT / "wiki"
 BEGIN = "<!-- BEGIN SOURCE API -->"
 END = "<!-- END SOURCE API -->"
+SPEC = "docs/lang/Stdlib.md"
+CONTRACTS = "Detailed contracts"
+HEADING = re.compile(r"^(#{1,6}) (.*)$")
+NUMBERED = re.compile(r"^(\d+(?:\.\d+)*)\.?\s")
 TAG_OPEN = re.compile(r"[#.][ \t]*(?=[A-Za-z_\[])")
 
 
@@ -301,12 +308,111 @@ def render(path, module):
     return "\n".join(output)
 
 
+def load_generator():
+    """scripts/generate-wiki.py, whose link rewriting the mirrored sections reuse."""
+    path = Path(__file__).resolve().parent / "generate-wiki.py"
+    spec = importlib.util.spec_from_file_location("generate_wiki", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def headings(lines, generator):
+    """(index, level, text) of each heading outside fenced code blocks."""
+    found = []
+    fence = None
+    for index, line in enumerate(lines):
+        match = generator.FENCE.match(line)
+        if match:
+            if fence is None:
+                fence = match.group(1)
+            elif match.group(1)[0] == fence[0] and len(match.group(1)) >= len(fence) and line.strip() == match.group(1):
+                fence = None
+            continue
+        if fence is None and (heading := HEADING.match(line)):
+            found.append((index, len(heading.group(1)), heading.group(2)))
+    return found
+
+
+def section_bounds(lines, found, position):
+    """The line range of the section at `found[position]`, without its trailing blank lines: it runs
+    to the next heading of the same or a higher level."""
+    start, level, _ = found[position]
+    end = next((index for index, other, _ in found[position + 1:] if other <= level), len(lines))
+    while end > start + 1 and not lines[end - 1].strip():
+        end -= 1
+    return start, end
+
+
+def spec_sections(text, generator, root):
+    """The numbered sections of the specification, by number, as the wiki spells them: links
+    rewritten, and a `##` section demoted to `###` because it sits under "## Detailed contracts"."""
+    lines = text.split("\n")
+    found = headings(lines, generator)
+    sections = {}
+    for position, (start, level, title) in enumerate(found):
+        number = NUMBERED.match(title)
+        if not number:
+            continue
+        first, end = section_bounds(lines, found, position)
+        shift = max(level, 3) - level
+        body = list(lines[first:end])
+        for index, inner, inner_title in found[position:]:
+            if index >= end:
+                break
+            body[index - first] = "#" * (inner + shift) + " " + inner_title
+        rewritten = generator.rewrite_links("\n".join(body), SPEC, root, generator.REPOSITORY,
+                                            generator.GENERATED[SPEC])
+        sections[number.group(1)] = rewritten.split("\n")
+    return sections
+
+
+def mirror_sections(name, text, spec, generator, root=ROOT):
+    """The page `text` with its mirrored sections refreshed from the specification text `spec`,
+    and one problem line per section that differed or has no counterpart."""
+    sections = spec_sections(spec, generator, root)
+    lines = text.split("\n")
+    found = headings(lines, generator)
+    contracts = next((position for position, (_, level, title) in enumerate(found)
+                      if level == 2 and title == CONTRACTS), None)
+    if contracts is None:
+        return text, []
+    problems = []
+    edits = []
+    for position in range(contracts + 1, len(found)):
+        start, level, title = found[position]
+        if level <= 2:
+            break
+        number = NUMBERED.match(title)
+        if not number:
+            continue
+        _, end = section_bounds(lines, found, position)
+        wanted = sections.get(number.group(1))
+        if wanted is None:
+            problems.append(f"wiki/{name}: section \"{'#' * level} {title}\" has no counterpart in {SPEC}")
+            continue
+        current = lines[start:end]
+        if current != wanted:
+            line = next((i for i in range(min(len(current), len(wanted))) if current[i] != wanted[i]),
+                        min(len(current), len(wanted)))
+            have = current[line] if line < len(current) else "(end of section)"
+            want = wanted[line] if line < len(wanted) else "(end of section)"
+            problems.append(f"wiki/{name}: section \"{'#' * level} {title}\" differs from {SPEC} at page line "
+                            f"{start + line + 1}: page has \"{have[:70]}\", specification has \"{want[:70]}\"")
+            edits.append((start, end, wanted))
+    for start, end, wanted in reversed(edits):
+        lines[start:end] = wanted
+    return "\n".join(lines), problems
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="report stale API blocks without writing")
     args = parser.parse_args()
     stale = []
     errors = []
+    generator = load_generator()
+    spec = (ROOT / SPEC).read_text(encoding="utf-8")
     expected = set()
     areas = set()
     count = 0
@@ -337,6 +443,10 @@ def main():
         start = text.index(BEGIN)
         end = text.index(END) + len(END)
         updated = text[:start] + render(source, module) + text[end:]
+        updated, problems = mirror_sections(name, updated, spec, generator)
+        for problem in problems:
+            if args.check or "has no counterpart" in problem:
+                errors.append(problem)
         count += 1
         if updated != text:
             stale.append(page.relative_to(ROOT))
