@@ -815,7 +815,9 @@ expect_failure("--no-source-map on run" "--no-source-map applies only to build" 
 expect_failure("-I with .nir" "-I applies only to source inputs" build -I "${SOURCE_DIR}" "${TEST_DIR}/hello.nir" -o "${TEST_DIR}/x.nvr")
 expect_failure("bad step limit" "expected a positive integer after --max-steps" run --max-steps 0 "${TEST_DIR}/hello.nvr")
 neura(help "${TEST_DIR}" --help)
-if(NOT help_stdout MATCHES "neura build [^\n]*-o <file[.]nvr>" OR NOT help_stdout MATCHES "neura run [^\n]*-- args")
+# The build options can continue on an indented line.
+if(NOT help_stdout MATCHES "neura build [^\n]*(\n[ \t]+\\[[^\n]*)*-o <file[.]nvr>" OR
+   NOT help_stdout MATCHES "neura run [^\n]*-- args")
     message(FATAL_ERROR "usage should document build and run\n${help_stdout}")
 endif()
 if(NOT help_stdout MATCHES "neura explain <code> [|] --explain <code> [|] explain --list" OR
