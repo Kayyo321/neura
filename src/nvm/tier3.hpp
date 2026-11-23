@@ -367,6 +367,8 @@ struct Function {
     // sites given class tests from recorded tags.
     std::uint64_t inlined_calls = 0;
     std::uint64_t class_tested_dispatches = 0;
+    // AppendRun edges lowered to precommit exits for inlining.
+    std::uint64_t outlined_helper_exits = 0;
     // The variant it is built for. Machine code of the standard variant
     // pushes and pops the frames of its calls itself where there is room;
     // the profile variant leaves them to the helpers, which add the steps
@@ -503,6 +505,10 @@ struct BuildResult {
 // when `verify` is set (NEURA_TIER3_VERIFY=1, and debug builds).
 BuildResult build(const nvr::Image& image, const tier2::Region& program, bool verify,
                   Variant variant = Variant::Standard);
+
+// Builds the standard IR for a callee clone. Its outlined helper edges
+// replay the original image block with the frame chain supplied by inlining.
+BuildResult build_inline_callee(const nvr::Image& image, const tier2::Region& program);
 
 // The violations of the verifier's rules (V1-V10) in `function`; empty when
 // it is well formed. Each message starts with the rule's name.

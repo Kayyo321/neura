@@ -1,0 +1,35 @@
+let builders = import:Std.Core.StringBuilder;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let GuardedStringAppend = module:program.Entry (
+    let append_many = func(builder: builders.StringBuilder, piece: string) {
+        for (let i = 0; i < 12; i++) {
+            builder.append(piece);
+        }
+    };
+
+    let append_nested = func(builder: builders.StringBuilder, piece: string) {
+        append_many(builder, piece);
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last mode = args[0];
+        last piece = args[1];
+        console.print_line("before");
+        if (mode == "nil") {
+            let missing: builders.StringBuilder = nil;
+            append_many(missing, piece);
+            return program.ExitCode.Ok;
+        }
+
+        last builder = builders.create();
+        if (mode == "nested") {
+            append_nested(builder, piece);
+        } else {
+            append_many(builder, piece);
+        }
+        console.print_line(builder.to_string());
+        return program.ExitCode.Ok;
+    };
+);

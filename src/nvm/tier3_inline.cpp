@@ -37,7 +37,9 @@
 // have their calls inlined, and a chain of class tests, one per recorded tag
 // in recording order, jumps to the exit's code before the generic Dispatch,
 // which every other tag reaches as before: a miss never deoptimizes. A table
-// with exactly one entry has its call inlined without records or tests.
+// with exactly one entry can use the direct-call limit. It still selects
+// the inlined call through the original dispatch. Wider calls and callees
+// with outlined helpers also pay separate caller and program growth limits.
 #include "tier3.hpp"
 
 #include "tier3_passes.hpp"
@@ -87,11 +89,14 @@ constexpr std::uint64_t max_dispatch_blocks = 8;
 constexpr std::size_t max_class_exits = 6;
 constexpr std::uint64_t max_total_ops = 20000;
 constexpr std::uint64_t max_growth = 8;
+constexpr std::uint64_t max_extended_caller_cost = 6000;
+constexpr std::uint64_t max_extended_program_cost = 12000;
 
 // A function program's size in the units of the limits.
 struct Size {
     std::uint64_t blocks = 0;
     std::uint64_t ops = 0;
+    std::uint64_t extended = 0;
 };
 
 Size size_of(const tier2::Region& program) { return {program.blocks.size(), program.code.size()}; }
@@ -147,6 +152,7 @@ void replace_pred(Block& block, std::uint32_t from, std::uint32_t to) {
 struct Callee {
     std::shared_ptr<const Function> ir;
     Size size;
+    bool outlines_helper = false;
 };
 
 struct PreparedCallee {
@@ -167,6 +173,32 @@ struct CallSite {
     // The words after the first of a multi-word callee (NVR 1.7), by word - 1.
     std::vector<std::uint32_t> words;
 };
+
+struct Growth {
+    std::uint64_t caller = 0;
+    std::uint64_t program = 0;
+};
+
+std::uint64_t frame_cost(const Function& f, std::uint32_t state) {
+    std::uint64_t words = 0;
+    while (state != none) {
+        const auto& frame = f.states[state];
+        words += 2 + frame.slots.size() + frame.flags.size();
+        state = frame.caller;
+    }
+    return words;
+}
+
+// Estimate extra native work before cloning. A single frame state can have
+// several machine stubs with different locations, so count it at each use.
+std::uint64_t clone_cost(const Function& caller, const CallSite& site, const Function& ir) {
+    const auto caller_frame = frame_cost(caller, caller.insts[site.call].state);
+    std::uint64_t cost = 8 + 2 * ir.blocks.size() + ir.insts.size() + ir.extras.size();
+    for (const auto& inst : ir.insts) {
+        if (inst.state != none) cost += caller_frame + frame_cost(ir, inst.state);
+    }
+    return cost;
+}
 
 std::optional<CallSite> call_site(const Function& f, std::uint32_t block, bool* has_call = nullptr) {
     const auto& insts = f.blocks[block].insts;
@@ -248,14 +280,33 @@ private:
             if (sites != 0) source_.refusals["inline depth limit"] += sites;
             return own;
         }
-        // The root keeps within the total; a callee within its own limits.
-        const auto room = [&](const Size& add) {
-            if (level == 0) return total_ + add.ops <= limit_;
-            return own.ops + add.ops <= max_callee_ops && own.blocks + add.blocks <= max_callee_blocks;
+        // Keep existing limits and bound the expansion enabled by the wider
+        // dispatch rule or outline. Cloning a prepared callee charges again,
+        // including its nested expansion, in each native program using it.
+        std::uint64_t caller_growth = 0;
+        const auto room = [&](const Size& add, const Growth& growth) {
+            const bool fits_legacy = level == 0 ? total_ + add.ops <= limit_
+                                               : own.ops + add.ops <= max_callee_ops &&
+                                                     own.blocks + add.blocks <= max_callee_blocks;
+            if (!fits_legacy) {
+                refuse("caller growth limit");
+                return false;
+            }
+            if (caller_growth + growth.caller > max_extended_caller_cost) {
+                refuse("extended caller growth limit");
+                return false;
+            }
+            if (own.extended + growth.program > max_extended_program_cost) {
+                refuse("extended program growth limit");
+                return false;
+            }
+            return true;
         };
-        const auto grow = [&](const Size& add) {
+        const auto grow = [&](const Size& add, const Growth& growth) {
             own.ops += add.ops;
             own.blocks += add.blocks;
+            own.extended += growth.program;
+            caller_growth += growth.caller;
             if (level == 0) total_ += add.ops;
         };
         for (const auto b : calls) {
@@ -263,16 +314,16 @@ private:
             const auto& call = f.insts[site.call];
             const auto callee = prepare(static_cast<std::uint32_t>(call.imm), chain, level + 1, max_callee_blocks);
             if (!callee) continue;
-            if (!room(callee->size)) {
-                refuse("caller growth limit");
-                continue;
-            }
+            const auto cost = callee->outlines_helper || callee->size.extended != 0
+                                  ? clone_cost(f, site, *callee->ir) : 0;
+            const Growth growth{callee->outlines_helper ? cost : 0, cost};
+            if (!room(callee->size, growth)) continue;
             if (!compatible(f, site, *callee->ir)) {
                 refuse("arguments or results do not fit");
                 continue;
             }
             splice(f, site, *callee->ir);
-            grow(callee->size);
+            grow(callee->size, growth);
         }
         for (const auto d : dispatches) inline_dispatch(f, d, chain, level, room, grow);
         return own;
@@ -290,7 +341,8 @@ private:
         // The exits to inline, and the class tests (tag, exit) to make.
         std::vector<std::uint32_t> exits;
         std::vector<std::pair<std::uint64_t, std::uint32_t>> tests;
-        if (table.exits.size() == 1) {
+        const bool monomorphic = table.exits.size() == 1;
+        if (monomorphic) {
             exits.push_back(table.exits.front().second);
         } else {
             const auto [program, index] = f.dispatch_origins[table_index];
@@ -311,6 +363,9 @@ private:
         // Every exit's callee must pass, or nothing is inlined here.
         std::vector<std::pair<CallSite, Callee>> chosen;
         Size added;
+        bool extends_caller = false;
+        bool extends_program = false;
+        const auto block_limit = monomorphic ? max_callee_blocks : max_dispatch_blocks;
         for (const auto exit : exits) {
             if (exit == table.fallback || exit >= f.blocks[d].succs.size()) {
                 return refuse("unsupported dispatch exit");
@@ -321,18 +376,26 @@ private:
                 return refuse("unsupported dispatch exit");
             }
             const auto callee =
-                prepare(static_cast<std::uint32_t>(f.insts[site->call].imm), chain, level + 1, max_dispatch_blocks);
+                prepare(static_cast<std::uint32_t>(f.insts[site->call].imm), chain, level + 1, block_limit);
             if (!callee) return;
             if (!compatible(f, *site, *callee->ir)) return refuse("arguments or results do not fit");
             added.ops += callee->size.ops;
             added.blocks += callee->size.blocks;
+            extends_caller |= callee->outlines_helper || callee->size.blocks > max_dispatch_blocks;
+            extends_program |= callee->size.extended != 0;
             chosen.emplace_back(*site, *callee);
         }
-        if (!room(added)) return refuse("caller growth limit");
-        for (const auto& [site, callee] : chosen) {
-            splice(f, site, *callee.ir);
-            grow(callee.size);
+        // A dispatch is accepted as a group. If an extension enables one
+        // arm, charge the whole group and its additional class tests.
+        Growth growth;
+        if (extends_caller || extends_program) {
+            growth.program = 4 + 4 * tests.size();
+            for (const auto& [site, callee] : chosen) growth.program += clone_cost(f, site, *callee.ir);
+            if (extends_caller) growth.caller = growth.program;
         }
+        if (!room(added, growth)) return;
+        for (const auto& [site, callee] : chosen) splice(f, site, *callee.ir);
+        grow(added, growth);
         if (!tests.empty()) {
             class_tests(f, d, tests);
             ++f.class_tested_dispatches;
@@ -369,21 +432,35 @@ private:
         const auto [found, inserted] = prepared_.try_emplace(std::move(key));
         auto& prepared = found->second;
         if (inserted) {
-            auto built = build(image_, *program, false);
+            auto built = build_inline_callee(image_, *program);
             if (!built.program) {
                 prepared.refusal = "callee could not be lowered";
             } else {
                 auto& ir = built.program->ir;
+                // An inlined call always starts at entry 0. Discard the
+                // other entries before counting or admitting new clones.
+                ir.entries.resize(1);
+                detail::remove_unreachable(ir);
+                detail::compact(ir);
+                ir.outlined_helper_exits = static_cast<std::uint64_t>(
+                    std::ranges::count_if(ir.insts, [](const Inst& inst) {
+                        return inst.op == Op::Deopt && (inst.flags & Checked) != 0;
+                    }));
+                const bool outlines_helper = ir.outlined_helper_exits != 0;
+                if (outlines_helper) {
+                    // After entry pruning, loop phis can be aliases of
+                    // arguments already held in the reconstructed frame.
+                    detail::copy_phis(ir, ir.pass_counts);
+                    detail::compact(ir);
+                }
                 chain.push_back(function);
                 const auto own = inline_into(ir, chain, level, base);
                 chain.pop_back();
                 prepared.refusal = inlining_refusal(ir, own);
                 if (!prepared.refusal) {
-                    // Only entry 0 is ever entered in a caller.
-                    ir.entries.resize(1);
                     detail::remove_unreachable(ir);
                     detail::compact(ir);
-                    prepared.callee = Callee{std::make_shared<const Function>(std::move(ir)), own};
+                    prepared.callee = Callee{std::make_shared<const Function>(std::move(ir)), own, outlines_helper};
                 }
             }
         }
@@ -505,6 +582,7 @@ private:
 
     // Copies `g` into `f` in place of the call at `site`.
     void splice(Function& f, const CallSite& site, const Function& g) {
+        f.outlined_helper_exits += g.outlined_helper_exits;
         const auto x = site.block;
         const auto resume = f.blocks[x].succs.front();
         const auto call_state = f.insts[site.call].state;

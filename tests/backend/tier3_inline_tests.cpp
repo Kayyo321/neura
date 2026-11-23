@@ -413,6 +413,165 @@ NEURA_TEST(tier3, the_statistics_line_counts_inlined_calls_and_dispatch_sites_wi
           "the native line counts nothing without inlining: " + none);
 }
 
+NEURA_TEST(tier3, a_guarded_append_run_inlines_its_short_arm_and_replays_its_long_arm) {
+    if (!programs_run()) return;
+    const auto image = build_program({backend_dir(environment) / "tier" / "guarded-string-append.nra"});
+    const auto append = function_named(image, "StringBuilder.append");
+    const auto caller = function_named(image, "append_many");
+    const auto& blocks = image.functions[append].blocks;
+    const auto guarded = std::find_if(blocks.begin(), blocks.end(), [](const nvr::Block& block) {
+        return block.exits.size() == 2 &&
+               std::any_of(block.exits.begin(), block.exits.end(), [](const nvr::Exit& exit) {
+                   return exit.kind == nvr::ExitKind::State && exit.operation == nvr::StateOp::AppendRun;
+               }) &&
+               std::any_of(block.exits.begin(), block.exits.end(), [](const nvr::Exit& exit) {
+                   return exit.kind == nvr::ExitKind::State && exit.operation == nvr::StateOp::AppendElement;
+               });
+    });
+    check(guarded != blocks.end(), "the exported image has a guarded AppendRun and AppendElement");
+    if (guarded == blocks.end()) return;
+    const auto append_block = static_cast<std::uint32_t>(guarded - blocks.begin());
+
+    auto options = inline_options();
+    nvm::TierCache cache(image, options);
+    options.native_inlining = false;
+    nvm::TierCache plain(image, options);
+    const auto compare = [&](const std::vector<std::string>& args, const Captured& expected,
+                             const std::string& label, const Adjust& adjust = {}) {
+        for (auto* current : {&cache, &plain}) {
+            auto limits = limits_at(2, current);
+            if (adjust) adjust(limits);
+            const auto outcome = run_captured(image, limits, std::nullopt, args);
+            const auto mode = label + (current == &cache ? " with inlining" : " without inlining");
+            check_same(outcome, expected, mode);
+            check_equal(outcome.requests.size(), expected.requests.size(), mode + " captured requests");
+            for (std::size_t i = 0; i < std::min(outcome.requests.size(), expected.requests.size()); ++i) {
+                check_same_request(outcome.requests[i], expected.requests[i], mode);
+            }
+        }
+    };
+    const auto append_deopts = [&] {
+        const auto stats = cache.statistics();
+        const auto count = stats.native_deopts.find({append, append_block});
+        return count == stats.native_deopts.end() ? std::uint64_t{0} : count->second;
+    };
+
+    const std::vector<std::string> short_args{"direct", std::string(15, 's')};
+    const std::vector<std::string> long_args{"direct", std::string(16, 'l')};
+    const auto short_reference = run_captured(image, limits_at(0), std::nullopt, short_args);
+    // Make the caller and callee hot before distinguishing their two arms.
+    for (int run = 0; run < 3; ++run) compare(short_args, short_reference, "warm append sites");
+    const auto before = append_deopts();
+    compare(short_args, short_reference, "15 bytes");
+    const auto after_short = append_deopts();
+    const auto long_reference = run_captured(image, limits_at(0), std::nullopt, long_args);
+    compare(long_args, long_reference, "16 bytes");
+
+    if (thresholds_kept() && cache.machine_code()) {
+        const auto* ir = native_ir(cache, caller);
+        check(ir != nullptr, "the dispatch caller has a native program");
+        if (ir != nullptr) {
+            const bool keeps_dispatch = std::any_of(ir->insts.begin(), ir->insts.end(), [&](const t3::Inst& inst) {
+                return inst.op == t3::Op::Dispatch && inst.origin_function == caller &&
+                       inst.imm < ir->dispatch_tables.size() && ir->dispatch_tables[inst.imm].exits.size() == 1;
+            });
+            check(keeps_dispatch, "the widened clone stays behind a monomorphic dispatch");
+            check(ir->outlined_helper_exits > 0, "the caller contains an outlined helper");
+            const auto has_arm = [&](t3::Op op, bool resumes_in_append) {
+                return std::any_of(ir->insts.begin(), ir->insts.end(), [&](const t3::Inst& inst) {
+                    if (inst.op != op || inst.origin_function != append || inst.origin_block != append_block ||
+                        inst.state >= ir->states.size()) return false;
+                    const auto& state = ir->states[inst.state];
+                    return state.function == append && state.caller < ir->states.size() &&
+                           ir->states[state.caller].function == caller &&
+                           (!resumes_in_append || state.block == append_block);
+                });
+            };
+            check(has_arm(t3::Op::Append, false), "the inlined short arm appends in native code");
+            check(has_arm(t3::Op::Deopt, true), "the inlined long arm deoptimizes to the original selector");
+        }
+        const auto* standalone = native_ir(plain, append);
+        check(standalone != nullptr && standalone->region->blocks.size() > 8,
+              "the real dispatch callee exceeds the original eight-block limit");
+        if (standalone != nullptr) {
+            const bool kept_helper = std::any_of(standalone->insts.begin(), standalone->insts.end(), [&](const t3::Inst& inst) {
+                return inst.op == t3::Op::Helper && inst.aux < standalone->exits.size() &&
+                       standalone->exits[inst.aux]->operation == nvr::StateOp::AppendRun;
+            });
+            check(kept_helper, "native code for the standalone callee keeps the helper");
+        }
+        check_equal(after_short, before, "15-byte appends do not take the outlined arm");
+        check(append_deopts() > after_short, "16-byte appends reach the outlined arm from machine code");
+    }
+
+    const std::string utf8 = "A\xc3\xa9\xf0\x9f\x99\x82"
+                             "abcdefghijklmno";
+    for (const auto& args : std::vector<std::vector<std::string>>{
+             {"direct", ""}, {"direct", "x"}, {"direct", std::string(17, 'x')}, {"nested", utf8}}) {
+        const auto label = args[0] + " " + std::to_string(args[1].size()) + " bytes";
+        const auto reference = run_captured(image, limits_at(0), std::nullopt, args);
+        std::string output = "before\n";
+        for (int i = 0; i < 12; ++i) output += args[1];
+        output += '\n';
+        check(reference.result.completed, label + " completes");
+        check_equal(reference.output, output, label + " output at tier 0");
+        compare(args, reference, label);
+    }
+    const std::vector<std::string> nil_args{"nil", long_args[1]};
+    const auto nil = run_captured(image, limits_at(0), std::nullopt, nil_args);
+    check(nil.result.trap.kind == nvm::TrapKind::NilReference, "a nil receiver traps before append");
+    check_equal(nil.output, std::string{"before\n"}, "the preceding host write is visible on the nil trap");
+    compare(nil_args, nil, "nil receiver");
+
+    // The block observer runs only at tier 0 here. It visits the first
+    // scalar append before the helper can charge any additional steps.
+    auto observed = limits_at(0);
+    std::uint64_t steps = 0;
+    std::uint64_t first_append = 0;
+    observed.block_observer = [&](std::uint32_t function, std::uint32_t block) {
+        ++steps;
+        if (function == append && block == append_block && first_append == 0) first_append = steps;
+    };
+    run_captured(image, observed, std::nullopt, long_args);
+    check(first_append > 1, "tier 0 reaches the guarded append block");
+    if (first_append <= 1) return;
+    for (const auto budget : {first_append - 1, first_append, first_append + 1, long_reference.result.steps - 1}) {
+        const auto adjust = [&](nvm::RunLimits& limits) { limits.max_steps = budget; };
+        auto limited = limits_at(0);
+        adjust(limited);
+        const auto expected = run_captured(image, limited, std::nullopt, long_args);
+        check(expected.result.trap.kind == nvm::TrapKind::StepLimit, "append reaches its step limit");
+        compare(long_args, expected, "step limit " + std::to_string(budget), adjust);
+    }
+
+    bool first_failure = false;
+    bool later_failure = false;
+    for (std::uint64_t cells = 1; cells < long_reference.result.peak_heap_cells && !later_failure; ++cells) {
+        auto limited = limits_at(0);
+        limited.max_heap_cells = cells;
+        const auto expected = run_captured(image, limited, std::nullopt, long_args);
+        const auto& trap = expected.result.trap;
+        if (trap.kind != nvm::TrapKind::HeapLimit || trap.function != append || trap.block != append_block) continue;
+        const bool first = expected.result.steps == first_append;
+        if (first && first_failure) continue;
+        compare(long_args, expected, "heap limit " + std::to_string(cells),
+                [&](nvm::RunLimits& limits) { limits.max_heap_cells = cells; });
+        first_failure |= first;
+        later_failure |= !first;
+    }
+    check(first_failure && later_failure, "heap pressure traps on the first append and after a successful append");
+
+    nvm::TierShadowHooks hooks;
+    std::vector<std::string> reports;
+    hooks.report = [&](const std::string& report) { reports.push_back(report); };
+    hooks.notice = hooks.report;
+    hooks.every_heap = true;
+    auto checked = limits_at(2, &cache);
+    checked.tier_shadow = &hooks;
+    check_same(run_captured(image, checked, std::nullopt, long_args), long_reference, "outlined append under the oracle");
+    check(reports.empty(), "the oracle saw no difference" + (reports.empty() ? "" : ": " + reports.front()));
+}
+
 NEURA_TEST(tier3, a_deep_recursion_through_inlined_calls_matches_tier_0) {
     if (!programs_run()) return;
     const auto image = inline_image(environment);

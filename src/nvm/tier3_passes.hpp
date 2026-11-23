@@ -137,6 +137,8 @@ void compute_budgets(Function& f);
 
 // Constant folding, trivial phis, and unreachable blocks, to a fixed point.
 bool simplify(Function& f, Counts& counts);
+// Trivial SSA aliases and phis that join identical constants.
+bool copy_phis(Function& f, Counts& counts);
 // Value numbering over pure ops and identical checks.
 bool number_values(Function& f, Counts& counts);
 // Pure values nothing reads.

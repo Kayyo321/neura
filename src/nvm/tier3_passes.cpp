@@ -567,6 +567,8 @@ bool fold_control(Function& f, Counts& counts) {
     return changed;
 }
 
+} // namespace
+
 // A phi that joins one value (and itself) is that value; one that joins one
 // constant everywhere is a constant of the block. Returns whether any phi
 // went.
@@ -656,8 +658,6 @@ bool copy_phis(Function& f, Counts& counts) {
     }
     return true;
 }
-
-} // namespace
 
 bool simplify(Function& f, Counts& counts) {
     bool any = false;

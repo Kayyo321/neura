@@ -174,6 +174,25 @@ bool control(Code code) {
     }
 }
 
+// The graph and its checks can run again when an exit replays its image block.
+bool replayable_prefix(Code code) {
+    switch (code) {
+    case Code::Budget:
+    case Code::Lift:
+    case Code::Mask:
+    case Code::Move:
+    case Code::Gather:
+    case Code::CheckRef: return true;
+    default: return false;
+    }
+}
+
+bool scalar_append(const nvr::Image& image, const nvr::Exit& exit) {
+    return exit.operation == nvr::StateOp::AppendElement && exit.arguments.size() == 2 &&
+           image.types[exit.arguments[0].type].kind == nvr::TypeKind::List &&
+           nvr::collection_components(image, exit.arguments[0].type) == nullptr;
+}
+
 // Whether `exit` is the kernel exit that native code computes itself (design
 // 7.3): the KERN entry neura.math.sqrt at ABI version 1, whose kernel takes
 // one binary64 argument, charges the constant formula 1 and returns a
@@ -205,8 +224,8 @@ constexpr std::size_t max_instructions = std::size_t{1} << 21;
 
 class Builder {
 public:
-    Builder(const nvr::Image& image, const tier2::Region& region, Variant variant)
-        : image_(image), region_(region), variant_(variant) {}
+    Builder(const nvr::Image& image, const tier2::Region& region, Variant variant, bool inline_callee = false)
+        : image_(image), region_(region), variant_(variant), inline_callee_(inline_callee) {}
 
     BuildResult run(bool check) {
         BuildResult result;
@@ -313,6 +332,70 @@ private:
         assigned_.assign(slots_, 0);
     }
 
+    // Follow graph work to a selector or the terminal operation of an arm.
+    const tier2::Op* after_replayable_prefix(std::size_t label, std::size_t end) const {
+        for (auto pc = label; pc < end; ++pc) {
+            if (!replayable_prefix(region_.code[pc].code)) return &region_.code[pc];
+        }
+        return nullptr;
+    }
+
+    bool outline_append_run(const tier2::Op& op) const {
+        if (!inline_callee_ || op.index >= region_.exits.size()) return false;
+        const auto& run = *region_.exits[op.index];
+        if (run.kind != nvr::ExitKind::State || run.operation != nvr::StateOp::AppendRun ||
+            run.arguments.size() < 4 || run.poll || !run.assignments.empty()) {
+            return false;
+        }
+        const auto& blocks = image_.functions[region_.function].blocks;
+        if (op.block >= blocks.size() || op.block >= region_.block_labels.size()) return false;
+        const auto& block = blocks[op.block];
+        if (block.exits.size() != 2) return false;
+        const auto& first = block.exits.front();
+        const auto& second = block.exits.back();
+        if (&run != &first && &run != &second) return false;
+        const auto& ordinary = &run == &first ? second : first;
+        if (ordinary.kind != nvr::ExitKind::State || !scalar_append(image_, ordinary) ||
+            ordinary.poll || !ordinary.assignments.empty() || ordinary.resume != run.resume ||
+            ordinary.arguments[0] != run.arguments[0] || ordinary.arguments[1] != run.arguments[3]) {
+            return false;
+        }
+
+        // Both helper arms must follow the actual selector from the original
+        // image block's label, with only graph evaluation and checks before
+        // the helpers. This excludes an earlier commit on either arm.
+        const auto begin = region_.block_labels[op.block];
+        const auto next_block = static_cast<std::size_t>(op.block) + 1;
+        const auto end = next_block < region_.block_labels.size() ? region_.block_labels[next_block] : region_.code.size();
+        if (begin >= end || end > region_.code.size()) return false;
+        const auto* selector = after_replayable_prefix(begin, end);
+        if (selector == nullptr || selector->block != op.block) return false;
+        std::uint32_t left;
+        std::uint32_t right;
+        if (selector->code == Code::Branch) {
+            left = selector->target;
+            right = selector->other;
+        } else if (selector->code == Code::Switch && selector->width == 2) {
+            const std::size_t first_arm = selector->index;
+            if (first_arm >= region_.operands.size() || region_.operands.size() - first_arm < 2) return false;
+            left = region_.operands[first_arm];
+            right = region_.operands[first_arm + 1];
+        } else {
+            return false;
+        }
+        const auto first_label = std::min(left, right);
+        const auto second_label = std::max(left, right);
+        const auto selector_pc = static_cast<std::size_t>(selector - region_.code.data());
+        if (first_label <= selector_pc || first_label == second_label || second_label >= end) return false;
+        const auto* earlier_arm = after_replayable_prefix(first_label, second_label);
+        const auto* later_arm = after_replayable_prefix(second_label, end);
+        if (earlier_arm != &op && later_arm != &op) return false;
+        const auto* append = earlier_arm == &op ? later_arm : earlier_arm;
+        return append != nullptr && append->code == Code::Helper && append->block == op.block &&
+               append->target == op.target && append->index < region_.exits.size() &&
+               region_.exits[append->index] == &ordinary;
+    }
+
     // --- The control-flow graph of the program's code --------------------------
 
     std::vector<std::uint32_t> successors(std::uint32_t pc) const {
@@ -329,9 +412,11 @@ private:
             for (unsigned i = 0; i < op.width; ++i) next.push_back(region_.operands[op.other + i]);
             return next;
         }
+        case Code::Helper:
+            if (outline_append_run(op)) return {};
+            return {op.target};
         case Code::Jump:
-        case Code::Call:
-        case Code::Helper: return {op.target};
+        case Code::Call: return {op.target};
         case Code::Leave:
         case Code::Return:
         case Code::Deopt: return {};
@@ -1067,9 +1152,7 @@ private:
         if (!standard_variant(variant_)) return false;
         const bool allocates = exit.operation == nvr::StateOp::AllocateObject && arguments.empty() &&
                                exit.immediate < image_.layouts.size();
-        const bool appends = exit.operation == nvr::StateOp::AppendElement && arguments.size() == 2 &&
-                             exit.arguments.size() == 2 && image_.types[exit.arguments[0].type].kind == nvr::TypeKind::List &&
-                             nvr::collection_components(image_, exit.arguments[0].type) == nullptr;
+        const bool appends = arguments.size() == 2 && scalar_append(image_, exit);
         if (!allocates && !appends) return false;
         std::uint32_t entry = none;
         if (appends) entry = typed_entry(arguments[0], exit.arguments[0].type, entry_state(op.block));
@@ -1239,6 +1322,16 @@ private:
         case Code::Call:
         case Code::Helper: {
             const bool call = op.code == Code::Call;
+            if (!call && outline_append_run(op)) {
+                Inst in;
+                in.op = Op::Deopt;
+                in.operands[0] = read(c_var(), cur_);
+                in.flags = Effect | Checked;
+                in.state = entry_state(op.block);
+                emit(std::move(in));
+                ++f_->outlined_helper_exits;
+                return true;
+            }
             const auto& exit = *region_.exits[op.index];
             const auto arguments = values(op.other, op.width);
             if (!call && inline_sqrt(image_, exit) && arguments.size() == 1) {
@@ -1772,6 +1865,7 @@ private:
     const nvr::Image& image_;
     const tier2::Region& region_;
     const Variant variant_;
+    const bool inline_callee_;
     nvr::TypeSystem types_{image_};
     Function* f_ = nullptr;
     std::string error_;
@@ -1806,6 +1900,10 @@ private:
 
 BuildResult build(const nvr::Image& image, const tier2::Region& program, bool check, Variant variant) {
     return Builder(image, program, variant).run(check);
+}
+
+BuildResult build_inline_callee(const nvr::Image& image, const tier2::Region& program) {
+    return Builder(image, program, Variant::Standard, true).run(false);
 }
 
 namespace {
