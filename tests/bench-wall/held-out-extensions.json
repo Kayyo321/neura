@@ -41,6 +41,176 @@
         }
       },
       "output_sha256": "7233e0a6e01776f4d89d79439197360a55085abbef0cbf055884f24aea226c9e"
+    },
+    {
+      "row": 13,
+      "label": "row 13, warmed application outside the pooled ten-row geomean",
+      "warmed": true,
+      "pooled_ten_row_geomean": false,
+      "fixture": {
+        "name": "order-ledger",
+        "mode": "run",
+        "source": "tests/bench-wall/fixtures/order-ledger.nra",
+        "purpose": "Construct orders, apply polymorphic pricing rules, aggregate by region and category, and format a ranked ledger.",
+        "options": [
+          "--parallel-workers",
+          "1"
+        ],
+        "arguments": [
+          "470000"
+        ],
+        "sha256": {
+          "tests/bench-wall/fixtures/order-ledger.nra": "42e6ba5843812a282225d1bcfcfee3228c683ce7b746baf00d06a11a13436eea"
+        }
+      },
+      "steps": 644333371,
+      "output_sha256": "9e444e2a26fae8814e8fe4225701fff4c15ce4dad75d0a869316002ffaf4c770",
+      "twins": {
+        "java": {
+          "source": "tests/bench-wall/held-out/java/OrderLedger.java",
+          "sha256": "9a9701d38a31322bef9d2174670ddd2c8d83405eedfa0493bba889472c504b3e"
+        },
+        "csharp": {
+          "source": "tests/bench-wall/held-out/csharp/OrderLedger.cs",
+          "sha256": "82038055c806580a5194ae7bd748610f2492b7eadd29a83013a7a2e5c97e2675"
+        }
+      }
+    },
+    {
+      "row": 14,
+      "label": "row 14, warmed application outside the pooled ten-row geomean",
+      "warmed": true,
+      "pooled_ten_row_geomean": false,
+      "fixture": {
+        "name": "expression-interpreter",
+        "mode": "run",
+        "source": "tests/bench-wall/fixtures/expression-interpreter.nra",
+        "purpose": "Parse and evaluate a seeded expression language with 15 concrete node types, a 32-addition recursive chain, repeated parsing and rendering.",
+        "options": [
+          "--parallel-workers",
+          "1"
+        ],
+        "arguments": [
+          "5500"
+        ],
+        "sha256": {
+          "tests/bench-wall/fixtures/expression-interpreter.nra": "a1d268445aae6f8f43067ea337c8d83b354f1e42587de70212df3cde5a384244"
+        }
+      },
+      "steps": 1622905094,
+      "output_sha256": "545ae353f9a8e708d492c762e3afbad963de4788328c1ad789794bdb8c03ff06",
+      "twins": {
+        "java": {
+          "source": "tests/bench-wall/held-out/java/ExpressionInterpreter.java",
+          "sha256": "eaa8b1c829392851b51152a4c6f658138940cd8ac6966e6c87ad50c3ccacd565"
+        },
+        "csharp": {
+          "source": "tests/bench-wall/held-out/csharp/ExpressionInterpreter.cs",
+          "sha256": "3ff6f1514876800f2f6ebd587631411590d8069c318d0dd9802debf87df51002"
+        }
+      }
+    },
+    {
+      "row": 15,
+      "label": "row 15, warmed application outside the pooled ten-row geomean",
+      "warmed": true,
+      "pooled_ten_row_geomean": false,
+      "fixture": {
+        "name": "route-planner",
+        "mode": "run",
+        "source": "tests/bench-wall/fixtures/route-planner.nra",
+        "purpose": "Search a changing road network with Dijkstra's algorithm, a binary heap and path reconstruction.",
+        "options": [
+          "--parallel-workers",
+          "1"
+        ],
+        "arguments": [
+          "800"
+        ],
+        "sha256": {
+          "tests/bench-wall/fixtures/route-planner.nra": "f6f35e96745ebda829f91afb70e756be5d557dcb904de1f70acdf3817c7d2900"
+        }
+      },
+      "steps": 2260655070,
+      "output_sha256": "44a506317b53965b808b8d3c18c24b52550f3924e427223f1a8bc8bbef7fc43d",
+      "twins": {
+        "java": {
+          "source": "tests/bench-wall/held-out/java/RoutePlanner.java",
+          "sha256": "75aee9cc21923927a1a462c63273214e69cffb7d1d5e3e69b48a7eac0e5a12dc"
+        },
+        "csharp": {
+          "source": "tests/bench-wall/held-out/csharp/RoutePlanner.cs",
+          "sha256": "0674d571ef0bae6c45c82de8a67640638f734e06a1374fc75a6ab4ac73209343"
+        }
+      }
+    },
+    {
+      "row": 16,
+      "label": "row 16, warmed application outside the pooled ten-row geomean",
+      "warmed": true,
+      "pooled_ten_row_geomean": false,
+      "fixture": {
+        "name": "log-analytics",
+        "mode": "run",
+        "source": "tests/bench-wall/fixtures/log-analytics.nra",
+        "purpose": "Generate and parse access logs in batches, normalize paths, aggregate request statistics and render a sorted report.",
+        "options": [
+          "--parallel-workers",
+          "1"
+        ],
+        "arguments": [
+          "425000"
+        ],
+        "sha256": {
+          "tests/bench-wall/fixtures/log-analytics.nra": "e72d0c41ec55cb402205ba60d8d8886c00f3eee3023d34b6498f3b92668dae60"
+        }
+      },
+      "steps": 755225164,
+      "output_sha256": "21dc10980a87af2190aff29a137e8eb7dfabf1e946324ea4741226a7354567e4",
+      "twins": {
+        "java": {
+          "source": "tests/bench-wall/held-out/java/LogAnalytics.java",
+          "sha256": "a15439c269b06a7cb75205bbc3af5eb04faa4c06f7ce9ca16d6d569f2b0f2db8"
+        },
+        "csharp": {
+          "source": "tests/bench-wall/held-out/csharp/LogAnalytics.cs",
+          "sha256": "b4dd7312317922070b620a3845579f0f3252d9a97575f8b4169fdbc75c36ea6d"
+        }
+      }
+    },
+    {
+      "row": 17,
+      "label": "row 17, warmed application outside the pooled ten-row geomean",
+      "warmed": true,
+      "pooled_ten_row_geomean": false,
+      "fixture": {
+        "name": "mixed-lifetime",
+        "mode": "run",
+        "source": "tests/bench-wall/fixtures/mixed-lifetime.nra",
+        "purpose": "Update a long-lived LRU cache and its linked recency list while allocating and retiring request snapshots.",
+        "options": [
+          "--parallel-workers",
+          "1"
+        ],
+        "arguments": [
+          "26000000"
+        ],
+        "sha256": {
+          "tests/bench-wall/fixtures/mixed-lifetime.nra": "2e65cf809aae100ce9b26a43de354eb59664ce3b6ccb80fa267817bd0527cf57"
+        }
+      },
+      "steps": 1195896334,
+      "output_sha256": "43be88e0cd3d50f286b6097f7e22715549c418478d50dd01006ee223feb955fd",
+      "twins": {
+        "java": {
+          "source": "tests/bench-wall/held-out/java/MixedLifetime.java",
+          "sha256": "fb9bb2566ab163d74fd50e0347e816356da4aebc15a0c38a1dbaf7622d0a2988"
+        },
+        "csharp": {
+          "source": "tests/bench-wall/held-out/csharp/MixedLifetime.cs",
+          "sha256": "0549fe2d945d8e03d31d29032c0bc876e4750ea40e5518fa49c4b6e6c20349db"
+        }
+      }
     }
   ]
 }

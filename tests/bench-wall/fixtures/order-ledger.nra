@@ -1,0 +1,265 @@
+// Row 13, a warmed application row added before performance round 1. The
+// argument is the number of orders. A catalogue and a customer list are
+// generated, every order is priced through a list of discount rules, and the
+// totals are grouped by region, by category and by region and category in
+// hash maps. The customers are ranked by spend and the grouped totals are
+// sorted by key into a formatted text report, which is folded into a
+// checksum. held-out/java/OrderLedger.java and held-out/csharp/OrderLedger.cs
+// print the same line.
+let builders = import:Std.Core.StringBuilder;
+let console = import:Std.Io.Console;
+let hash_map = import:Std.Collections.HashMap;
+let int32s = import:Std.Core.Int32;
+let int64s = import:Std.Core.Int64;
+let lists = import:Std.Collections.Lists;
+let ordering = import:Std.Core.Ordering;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let sorting = import:Std.Collections.Sorting;
+let strings = import:Std.Text.Strings;
+
+export let OrderLedger = module:program.Entry (
+    const CustomerCount = 4000;
+    const ProductCount = 600;
+    const TopCustomers = 40;
+    const Mask: int64 = 1073741823;
+
+    let Regions: string[] = ["north", "south", "east", "west", "central", "coast", "valley", "highland"];
+    let Categories: string[] = [
+        "tools", "garden", "kitchen", "books", "toys", "audio", "office", "sport", "paint", "lighting"
+    ];
+
+    let Random = class (
+        let state: int64;
+
+        export let init = func(seed: int64) {
+            state = seed;
+        };
+
+        // A value in [0, bound).
+        export let next = func(bound: int) -> int {
+            state = (state * 1103515245 + 12345) & 2147483647;
+            return ((state >> 4) % (bound as int64)) as int;
+        };
+    );
+
+    let Product = class (
+        export last sku: string;
+        export last category: string;
+        export last unit_cents: int64;
+
+        export let init = func(sku, category: string, unit_cents: int64) => set;
+    );
+
+    let Customer = class (
+        export last id: int;
+        export last region: string;
+        export last tier: int;
+        export let spent_cents: int64 = 0;
+        export let order_count: int = 0;
+
+        export let init = func(id: int, region: string, tier: int) => set;
+    );
+
+    let OrderLine = class (
+        export last product: Product;
+        export last quantity: int;
+
+        export let init = func(product: Product, quantity: int) => set;
+    );
+
+    let Order = class (
+        export last id: int;
+        export last customer: Customer;
+        export last day: int;
+        export last lines: OrderLine[list] = new;
+
+        export let init = func(id: int, customer: Customer, day: int) => set;
+
+        export let subtotal = func() -> int64 {
+            let sum: int64 = 0;
+            for (let line in lines) {
+                sum += line.product.unit_cents * (line.quantity as int64);
+            }
+            return sum;
+        };
+
+        export let units = func() -> int {
+            let count = 0;
+            for (let line in lines) {
+                count += line.quantity;
+            }
+            return count;
+        };
+    );
+
+    let PricingRule = interface (
+        // The discount in cents; a negative value is a surcharge.
+        let discount = func(order: Order, subtotal: int64) -> int64;
+    );
+
+    let TierDiscount = class implements PricingRule (
+        export let discount = func(order: Order, subtotal: int64) -> int64 =>
+            subtotal * (order.customer.tier as int64) * 2 / 100;
+    );
+
+    let BulkDiscount = class implements PricingRule (
+        export last threshold: int;
+
+        export let init = func(threshold: int) => set;
+
+        export let discount = func(order: Order, subtotal: int64) -> int64 {
+            if (order.units() >= threshold) {
+                return subtotal / 20;
+            }
+            return 0;
+        };
+    );
+
+    let WeekendSurcharge = class implements PricingRule (
+        export let discount = func(order: Order, subtotal: int64) -> int64 {
+            last weekday = order.day % 7;
+            if (weekday == 5 || weekday == 6) {
+                return -(subtotal / 50);
+            }
+            return 0;
+        };
+    );
+
+    let Totals = class (
+        export last key: string;
+        export let orders: int = 0;
+        export let units: int64 = 0;
+        export let revenue_cents: int64 = 0;
+        export let discount_cents: int64 = 0;
+
+        export let init = func(key: string) => set;
+
+        export let add = func(order_units: int64, revenue: int64, discount: int64) {
+            orders += 1;
+            units += order_units;
+            revenue_cents += revenue;
+            discount_cents += discount;
+        };
+    );
+
+    let totals_for = func(table: hash_map.HashMap<string, Totals>, key: string) -> Totals =>
+        table.get_or_put(key, func() -> Totals => new Totals(key));
+
+    let by_key = func(a: Totals, b: Totals) -> ordering.Ordering => strings.compare(a.key, b.key);
+
+    let by_spend = func(a: Customer, b: Customer) -> ordering.Ordering =>
+        ordering.then(int64s.compare(b.spent_cents, a.spent_cents), int32s.compare(a.id, b.id));
+
+    let catalogue = func(random: Random) -> Product[list] {
+        last products: Product[list] = new;
+        for (let i = 0; i < ProductCount; i++) {
+            last category = Categories[random.next(Categories.length)];
+            last sku = $"{strings.to_ascii_upper(category.slice(0, 3))}-{1000 + i}";
+            products.append(new Product(sku, category, 199 + (random.next(4800) as int64) * 10));
+        }
+        return products;
+    };
+
+    let customers = func(random: Random) -> Customer[list] {
+        last people: Customer[list] = new;
+        for (let i = 0; i < CustomerCount; i++) {
+            people.append(new Customer(i, Regions[random.next(Regions.length)], random.next(4)));
+        }
+        return people;
+    };
+
+    let place_orders = func(random: Random, count: int, buyers: Customer[list], products: Product[list]) -> Order[list] {
+        last orders: Order[list] = new;
+        for (let i = 0; i < count; i++) {
+            last order = new Order(i, buyers[random.next(buyers.length)], i / 500);
+            last line_count = 1 + random.next(6);
+            for (let j = 0; j < line_count; j++) {
+                order.lines.append(new OrderLine(products[random.next(products.length)], 1 + random.next(9)));
+            }
+            orders.append(order);
+        }
+        return orders;
+    };
+
+    let sorted_totals = func(table: hash_map.HashMap<string, Totals>) -> Totals[list] {
+        last values = table.values();
+        sorting.sort<Totals>(values, by_key);
+        return values;
+    };
+
+    let report_section = func(report: builders.StringBuilder, title: string, rows: Totals[list]) {
+        report.append_line($"== {title} ({rows.length})");
+        for (let row in rows) {
+            last average = row.revenue_cents / (row.orders as int64);
+            report.append_line(
+                $"{row.key:<20}{row.orders:>8}{row.units:>10}{row.revenue_cents:>14}{row.discount_cents:>12}{average:>10}"
+            );
+        }
+    };
+
+    let fold = func(checksum: int64, text: string) -> int64 {
+        let value = checksum;
+        for (let i = 0; i < text.byte_length; i++) {
+            value = (value * 31 + (text.byte_at(i) as int64)) & Mask;
+        }
+        return value;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        if (args.length != 1) {
+            return program.ExitCode.Failure;
+        }
+        last order_count = result.value_or<int32>(int32s.parse(args[0]), -1);
+        if (order_count < 0) {
+            return program.ExitCode.Failure;
+        }
+        last random = new Random(20261123);
+        last products = catalogue(random);
+        last buyers = customers(random);
+        last orders = place_orders(random, order_count, buyers, products);
+        last rules: PricingRule[list] = new([new TierDiscount(), new BulkDiscount(24), new WeekendSurcharge()]);
+
+        last by_region = hash_map.create<string, Totals>();
+        last by_category = hash_map.create<string, Totals>();
+        last by_pair = hash_map.create<string, Totals>();
+        let ledger_cents: int64 = 0;
+        for (let order in orders) {
+            last subtotal = order.subtotal();
+            let discount: int64 = 0;
+            for (let rule in rules) {
+                discount += rule.discount(order, subtotal);
+            }
+            last total = subtotal - discount;
+            last customer = order.customer;
+            customer.spent_cents += total;
+            customer.order_count += 1;
+            ledger_cents += total;
+            totals_for(by_region, customer.region).add(order.units() as int64, total, discount);
+            for (let line in order.lines) {
+                last revenue = line.product.unit_cents * (line.quantity as int64);
+                last category = line.product.category;
+                totals_for(by_category, category).add(line.quantity as int64, revenue, 0);
+                totals_for(by_pair, customer.region + "/" + category).add(line.quantity as int64, revenue, 0);
+            }
+        }
+
+        last ranked = lists.copy<Customer>(buyers);
+        sorting.sort<Customer>(ranked, by_spend);
+        last report = builders.create();
+        report.append_line($"ledger {orders.length} orders {ledger_cents} cents");
+        report.append_line($"== top {TopCustomers} customers");
+        for (let i = 0; i < TopCustomers && i < ranked.length; i++) {
+            last customer = ranked[i];
+            report.append_line(
+                $"{i + 1:>4} C{customer.id:0>5} {customer.region:<10}{customer.order_count:>6}{customer.spent_cents:>14}"
+            );
+        }
+        report_section(report, "region", sorted_totals(by_region));
+        report_section(report, "category", sorted_totals(by_category));
+        report_section(report, "region/category", sorted_totals(by_pair));
+        last text = report.to_string();
+        console.println("order-ledger {} {} {}", order_count, text.byte_length, fold(0, text));
+        return program.ExitCode.Ok;
+    };
+);

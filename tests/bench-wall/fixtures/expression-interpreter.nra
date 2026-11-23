@@ -1,0 +1,629 @@
+// Row 14, a warmed application row added before performance round 1. The
+// argument is the number of rounds. A generated script of assignments is
+// tokenized and parsed by recursive descent into a tree of node classes, then
+// run once per round against an environment in a hash map. Each statement
+// evaluates its expression through virtual calls and stores the result. The
+// script is parsed again every eighth round, and the trees are rendered back
+// to text at the end. Fifteen concrete node types implement evaluation.
+// The first expression has 32 nested additions. Values stay in [0, Modulus).
+// held-out/java/ExpressionInterpreter.java and
+// held-out/csharp/ExpressionInterpreter.cs print the same line.
+let builders = import:Std.Core.StringBuilder;
+let console = import:Std.Io.Console;
+let hash_map = import:Std.Collections.HashMap;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+export let ExpressionInterpreter = module:program.Entry (
+    const StatementCount = 240;
+    const MaxDepth = 5;
+    const ChainDepth = 32;
+    const ReparseInterval = 8;
+    const Modulus: int64 = 1000003;
+    const Mask: int64 = 1073741823;
+
+    let Names: string[] = ["rate", "count", "base", "limit", "delta", "scale", "width", "depth", "x", "y"];
+    let Operators: string[] = [" + ", " - ", "*", " / ", " % ", " > "];
+
+    let Random = class (
+        let state: int64;
+
+        export let init = func(seed: int64) {
+            state = seed;
+        };
+
+        // A value in [0, bound).
+        export let next = func(bound: int) -> int {
+            state = (state * 1103515245 + 12345) & 2147483647;
+            return ((state >> 4) % (bound as int64)) as int;
+        };
+    );
+
+    let TokenKind = enum (
+        Number, Name, Plus, Minus, Star, Slash, Percent, Less, Greater, EqualEqual, Assign, LeftParen,
+        RightParen, Comma, Semicolon, End
+    );
+
+    let Token = class (
+        export last kind: TokenKind;
+        export last text: string;
+        export last value: int64;
+
+        export let init = func(kind: TokenKind, text: string, value: int64) => set;
+    );
+
+    let Environment = class (
+        export last variables = hash_map.create<string, int64>();
+
+        export let read = func(name: string) -> int64 => variables.get_or(name, 0);
+
+        export let write = func(name: string, value: int64) {
+            variables.set(name, value);
+        };
+    );
+
+    let Node = class (
+        export let evaluate = func(env: Environment) -> int64;
+
+        export let render = func(out: builders.StringBuilder);
+
+        export let size = func() -> int;
+    );
+
+    let NumberNode = class:Node (
+        export last value: int64;
+
+        export let init = func(value: int64) => set;
+
+        export let.override evaluate = func(env: Environment) -> int64 => value;
+
+        export let.override render = func(out: builders.StringBuilder) {
+            out.append_int(value);
+        };
+
+        export let.override size = func() -> int => 1;
+    );
+
+    let VariableNode = class:Node (
+        export last name: string;
+
+        export let init = func(name: string) => set;
+
+        export let.override evaluate = func(env: Environment) -> int64 => env.read(name);
+
+        export let.override render = func(out: builders.StringBuilder) {
+            out.append(name);
+        };
+
+        export let.override size = func() -> int => 1;
+    );
+
+    let NegateNode = class:Node (
+        export last operand: Node;
+
+        export let init = func(operand: Node) => set;
+
+        export let.override evaluate = func(env: Environment) -> int64 =>
+            (Modulus - operand.evaluate(env)) % Modulus;
+
+        export let.override render = func(out: builders.StringBuilder) {
+            out.append("(-");
+            operand.render(out);
+            out.append(")");
+        };
+
+        export let.override size = func() -> int => 1 + operand.size();
+    );
+
+    let BinaryNode = class:Node (
+        export last operator: string;
+        export last left: Node;
+        export last right: Node;
+
+        export let init = func(operator: string, left: Node, right: Node) => set;
+
+        export let.override render = func(out: builders.StringBuilder) {
+            out.append("(");
+            left.render(out);
+            out.append(" ");
+            out.append(operator);
+            out.append(" ");
+            right.render(out);
+            out.append(")");
+        };
+
+        export let.override size = func() -> int => 1 + left.size() + right.size();
+    );
+
+    let AddNode = class:BinaryNode (
+        export let init = func(left: Node, right: Node) {
+            super.init("+", left, right);
+        };
+
+        export let.override evaluate = func(env: Environment) -> int64 {
+            last a = left.evaluate(env);
+            last b = right.evaluate(env);
+            return (a + b) % Modulus;
+        };
+    );
+
+    let SubtractNode = class:BinaryNode (
+        export let init = func(left: Node, right: Node) {
+            super.init("-", left, right);
+        };
+
+        export let.override evaluate = func(env: Environment) -> int64 {
+            last a = left.evaluate(env);
+            last b = right.evaluate(env);
+            return (a - b + Modulus) % Modulus;
+        };
+    );
+
+    let MultiplyNode = class:BinaryNode (
+        export let init = func(left: Node, right: Node) {
+            super.init("*", left, right);
+        };
+
+        export let.override evaluate = func(env: Environment) -> int64 {
+            last a = left.evaluate(env);
+            last b = right.evaluate(env);
+            return a * b % Modulus;
+        };
+    );
+
+    let DivideNode = class:BinaryNode (
+        export let init = func(left: Node, right: Node) {
+            super.init("/", left, right);
+        };
+
+        export let.override evaluate = func(env: Environment) -> int64 {
+            last a = left.evaluate(env);
+            last b = right.evaluate(env);
+            return a / (b + 1);
+        };
+    );
+
+    let RemainderNode = class:BinaryNode (
+        export let init = func(left: Node, right: Node) {
+            super.init("%", left, right);
+        };
+
+        export let.override evaluate = func(env: Environment) -> int64 {
+            last a = left.evaluate(env);
+            last b = right.evaluate(env);
+            return a % (b + 1);
+        };
+    );
+
+    let LessNode = class:BinaryNode (
+        export let init = func(left: Node, right: Node) {
+            super.init("<", left, right);
+        };
+
+        export let.override evaluate = func(env: Environment) -> int64 {
+            last a = left.evaluate(env);
+            last b = right.evaluate(env);
+            return a < b ? 1 : 0;
+        };
+    );
+
+    let GreaterNode = class:BinaryNode (
+        export let init = func(left: Node, right: Node) {
+            super.init(">", left, right);
+        };
+
+        export let.override evaluate = func(env: Environment) -> int64 {
+            last a = left.evaluate(env);
+            last b = right.evaluate(env);
+            return a > b ? 1 : 0;
+        };
+    );
+
+    let EqualNode = class:BinaryNode (
+        export let init = func(left: Node, right: Node) {
+            super.init("==", left, right);
+        };
+
+        export let.override evaluate = func(env: Environment) -> int64 {
+            last a = left.evaluate(env);
+            last b = right.evaluate(env);
+            return a == b ? 1 : 0;
+        };
+    );
+
+    let CallNode = class:Node (
+        export last name: string;
+        export last arguments: Node[list];
+
+        export let init = func(name: string, arguments: Node[list]) => set;
+
+        export let.override render = func(out: builders.StringBuilder) {
+            out.append(name);
+            out.append("(");
+            for (let i = 0; i < arguments.length; i++) {
+                if (i > 0) {
+                    out.append(", ");
+                }
+                arguments[i].render(out);
+            }
+            out.append(")");
+        };
+
+        export let.override size = func() -> int {
+            let total = 1;
+            for (let argument in arguments) {
+                total += argument.size();
+            }
+            return total;
+        };
+    );
+
+    let MinNode = class:CallNode (
+        export let init = func(arguments: Node[list]) {
+            super.init("min", arguments);
+        };
+
+        export let.override evaluate = func(env: Environment) -> int64 {
+            last a = arguments[0].evaluate(env);
+            last b = arguments[1].evaluate(env);
+            return a < b ? a : b;
+        };
+    );
+
+    let MaxNode = class:CallNode (
+        export let init = func(arguments: Node[list]) {
+            super.init("max", arguments);
+        };
+
+        export let.override evaluate = func(env: Environment) -> int64 {
+            last a = arguments[0].evaluate(env);
+            last b = arguments[1].evaluate(env);
+            return a > b ? a : b;
+        };
+    );
+
+    let IfNode = class:CallNode (
+        export let init = func(arguments: Node[list]) {
+            super.init("if", arguments);
+        };
+
+        export let.override evaluate = func(env: Environment) -> int64 {
+            if (arguments[0].evaluate(env) != 0) {
+                return arguments[1].evaluate(env);
+            }
+            return arguments[2].evaluate(env);
+        };
+    );
+
+    let SquareNode = class:CallNode (
+        export let init = func(arguments: Node[list]) {
+            super.init("square", arguments);
+        };
+
+        export let.override evaluate = func(env: Environment) -> int64 {
+            last value = arguments[0].evaluate(env);
+            return value * value % Modulus;
+        };
+    );
+
+    let Statement = class (
+        export last target: string;
+        export last expression: Node;
+
+        export let init = func(target: string, expression: Node) => set;
+    );
+
+    let binary = func(kind: TokenKind, left: Node, right: Node) -> Node {
+        if (kind == TokenKind.Plus) {
+            return new AddNode(left, right);
+        }
+        if (kind == TokenKind.Minus) {
+            return new SubtractNode(left, right);
+        }
+        if (kind == TokenKind.Star) {
+            return new MultiplyNode(left, right);
+        }
+        if (kind == TokenKind.Slash) {
+            return new DivideNode(left, right);
+        }
+        if (kind == TokenKind.Percent) {
+            return new RemainderNode(left, right);
+        }
+        if (kind == TokenKind.Less) {
+            return new LessNode(left, right);
+        }
+        if (kind == TokenKind.Greater) {
+            return new GreaterNode(left, right);
+        }
+        if (kind == TokenKind.EqualEqual) {
+            return new EqualNode(left, right);
+        }
+        trap_with_message("expression interpreter: unknown binary operator");
+    };
+
+    let is_digit = func(c: uint8) -> bool => c >= '0' && c <= '9';
+
+    let is_letter = func(c: uint8) -> bool => (c >= 'a' && c <= 'z') || c == '_';
+
+    let tokenize = func(source: string) -> Token[list] {
+        last tokens: Token[list] = new;
+        let at = 0;
+        while (at < source.byte_length) {
+            last c = source.byte_at(at);
+            if (c == ' ' || c == '\n') {
+                at += 1;
+            } else if (is_digit(c)) {
+                last start = at;
+                let value: int64 = 0;
+                while (at < source.byte_length && is_digit(source.byte_at(at))) {
+                    value = value * 10 + ((source.byte_at(at) - '0') as int64);
+                    at += 1;
+                }
+                tokens.append(new Token(TokenKind.Number, source.slice(start, at), value));
+            } else if (is_letter(c)) {
+                last start = at;
+                while (at < source.byte_length && is_letter(source.byte_at(at))) {
+                    at += 1;
+                }
+                tokens.append(new Token(TokenKind.Name, source.slice(start, at), 0));
+            } else {
+                last start = at;
+                last kind: TokenKind;
+                if (c == '=' && at + 1 < source.byte_length && source.byte_at(at + 1) == '=') {
+                    kind = TokenKind.EqualEqual;
+                    at += 2;
+                } else {
+                    at += 1;
+                    if (c == '+') {
+                        kind = TokenKind.Plus;
+                    } else if (c == '-') {
+                        kind = TokenKind.Minus;
+                    } else if (c == '*') {
+                        kind = TokenKind.Star;
+                    } else if (c == '/') {
+                        kind = TokenKind.Slash;
+                    } else if (c == '%') {
+                        kind = TokenKind.Percent;
+                    } else if (c == '<') {
+                        kind = TokenKind.Less;
+                    } else if (c == '>') {
+                        kind = TokenKind.Greater;
+                    } else if (c == '=') {
+                        kind = TokenKind.Assign;
+                    } else if (c == '(') {
+                        kind = TokenKind.LeftParen;
+                    } else if (c == ')') {
+                        kind = TokenKind.RightParen;
+                    } else if (c == ',') {
+                        kind = TokenKind.Comma;
+                    } else if (c == ';') {
+                        kind = TokenKind.Semicolon;
+                    } else {
+                        trap_with_message("expression interpreter: unexpected character");
+                    }
+                }
+                tokens.append(new Token(kind, source.slice(start, at), 0));
+            }
+        }
+        tokens.append(new Token(TokenKind.End, "", 0));
+        return tokens;
+    };
+
+    let Parser = class (
+        last tokens: Token[list];
+        let position: int = 0;
+
+        export let init = func(source: Token[list]) {
+            tokens = source;
+        };
+
+        let peek = func() -> TokenKind => tokens[position].kind;
+
+        let advance = func() -> Token {
+            last token = tokens[position];
+            position += 1;
+            return token;
+        };
+
+        let expect = func(kind: TokenKind) -> Token {
+            if (peek() != kind) {
+                trap_with_message("expression interpreter: unexpected token " + tokens[position].text);
+            }
+            return advance();
+        };
+
+        export let script = func() -> Statement[list] {
+            last statements: Statement[list] = new;
+            while (peek() != TokenKind.End) {
+                last target = expect(TokenKind.Name).text;
+                expect(TokenKind.Assign);
+                last expression = comparison();
+                expect(TokenKind.Semicolon);
+                statements.append(new Statement(target, expression));
+            }
+            return statements;
+        };
+
+        let comparison = func() -> Node {
+            last left = additive();
+            last kind = peek();
+            if (kind == TokenKind.Less || kind == TokenKind.Greater || kind == TokenKind.EqualEqual) {
+                advance();
+                return binary(kind, left, additive());
+            }
+            return left;
+        };
+
+        let additive = func() -> Node {
+            let node = term();
+            while (peek() == TokenKind.Plus || peek() == TokenKind.Minus) {
+                last kind = advance().kind;
+                node = binary(kind, node, term());
+            }
+            return node;
+        };
+
+        let term = func() -> Node {
+            let node = unary();
+            while (peek() == TokenKind.Star || peek() == TokenKind.Slash || peek() == TokenKind.Percent) {
+                last kind = advance().kind;
+                node = binary(kind, node, unary());
+            }
+            return node;
+        };
+
+        let unary = func() -> Node {
+            if (peek() == TokenKind.Minus) {
+                advance();
+                return new NegateNode(unary());
+            }
+            return primary();
+        };
+
+        let primary = func() -> Node {
+            last token = advance();
+            if (token.kind == TokenKind.Number) {
+                return new NumberNode(token.value);
+            }
+            if (token.kind == TokenKind.LeftParen) {
+                last inner = comparison();
+                expect(TokenKind.RightParen);
+                return inner;
+            }
+            if (token.kind != TokenKind.Name) {
+                trap_with_message("expression interpreter: unexpected token " + token.text);
+            }
+            if (peek() != TokenKind.LeftParen) {
+                return new VariableNode(token.text);
+            }
+            advance();
+            last arguments: Node[list] = new;
+            arguments.append(comparison());
+            while (peek() == TokenKind.Comma) {
+                advance();
+                arguments.append(comparison());
+            }
+            expect(TokenKind.RightParen);
+            if (token.text == "square" && arguments.length == 1) {
+                return new SquareNode(arguments);
+            }
+            if (token.text == "min" && arguments.length == 2) {
+                return new MinNode(arguments);
+            }
+            if (token.text == "max" && arguments.length == 2) {
+                return new MaxNode(arguments);
+            }
+            if (token.text == "if" && arguments.length == 3) {
+                return new IfNode(arguments);
+            }
+            trap_with_message("expression interpreter: unknown function " + token.text);
+        };
+    );
+
+    // Appends a random expression whose nesting is at most depth.
+    let generate = func(random: Random, out: builders.StringBuilder, depth: int) {
+        last choice = depth == 0 ? random.next(2) : random.next(10);
+        if (choice == 0) {
+            out.append_int(random.next(1000) as int64);
+        } else if (choice == 1) {
+            out.append(Names[random.next(Names.length)]);
+        } else if (choice == 2) {
+            out.append("-");
+            generate(random, out, depth - 1);
+        } else if (choice == 3) {
+            out.append("(");
+            generate(random, out, depth - 1);
+            out.append(")");
+        } else if (choice == 4) {
+            out.append(random.next(2) == 0 ? "min(" : "max(");
+            generate(random, out, depth - 1);
+            out.append(", ");
+            generate(random, out, depth - 1);
+            out.append(")");
+        } else if (choice == 5) {
+            out.append("if(");
+            generate(random, out, depth - 1);
+            out.append(random.next(2) == 0 ? " < " : " == ");
+            generate(random, out, depth - 1);
+            out.append(", ");
+            generate(random, out, depth - 1);
+            out.append(", ");
+            generate(random, out, depth - 1);
+            out.append(")");
+        } else {
+            out.append("(");
+            generate(random, out, depth - 1);
+            out.append(Operators[random.next(Operators.length)]);
+            generate(random, out, depth - 1);
+            out.append(")");
+        }
+    };
+
+    let script_source = func(random: Random) -> string {
+        last out = builders.create();
+        out.append("x = square(x)");
+        for (let i = 0; i < ChainDepth; i++) {
+            out.append(" + ");
+            out.append(Names[i % Names.length]);
+        }
+        out.append(";\n");
+        for (let i = 1; i < StatementCount; i++) {
+            out.append(Names[random.next(Names.length)]);
+            out.append(" = ");
+            generate(random, out, MaxDepth);
+            out.append(";\n");
+        }
+        return out.to_string();
+    };
+
+    let parse = func(source: string) -> Statement[list] {
+        last parser = new Parser(tokenize(source));
+        return parser.script();
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        if (args.length != 1) {
+            return program.ExitCode.Failure;
+        }
+        last rounds = result.value_or<int32>(int32s.parse(args[0]), -1);
+        if (rounds < 0) {
+            return program.ExitCode.Failure;
+        }
+        last random = new Random(7177);
+        last source = script_source(random);
+        let statements = parse(source);
+        last env = new Environment();
+        let checksum: int64 = 0;
+        for (let round = 0; round < rounds; round++) {
+            if (round % ReparseInterval == ReparseInterval - 1) {
+                statements = parse(source);
+            }
+            for (let name in Names) {
+                env.write(name, random.next(Modulus as int) as int64);
+            }
+            for (let statement in statements) {
+                last value = statement.expression.evaluate(env);
+                env.write(statement.target, value);
+                checksum = (checksum * 31 + value) & Mask;
+            }
+        }
+        last rendered = builders.create();
+        let nodes = 0;
+        for (let statement in statements) {
+            rendered.append(statement.target);
+            rendered.append(" = ");
+            statement.expression.render(rendered);
+            rendered.append(";\n");
+            nodes += statement.expression.size();
+        }
+        last text = rendered.to_string();
+        let text_checksum: int64 = 0;
+        for (let i = 0; i < text.byte_length; i++) {
+            text_checksum = (text_checksum * 31 + (text.byte_at(i) as int64)) & Mask;
+        }
+        console.println("expression-interpreter {} {} {} {} {} {}", rounds, statements.length, nodes,
+            source.byte_length, checksum, text_checksum);
+        return program.ExitCode.Ok;
+    };
+);

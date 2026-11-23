@@ -1,0 +1,108 @@
+// Row 17. A page cache indexes a dense range of page IDs and keeps residents
+// in recency order. Every access records a snapshot in a rolling audit log.
+// On misses and writes the cache also retains that snapshot until replacement
+// or eviction. The checksum covers the retired log, pending log and LRU order.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let lists = import:Std.Collections.Lists;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+export let MixedLifetime = module:program.Entry (
+    const Mask: int64 = 1073741823;
+    const AuditSize = 16;
+    const MaxPages = 4096;
+
+    let Snapshot = class (
+        export last key: int;
+        export last value: int64;
+
+        export let init = func(key: int, value: int64) => set;
+    );
+
+    let Entry = class (
+        export last key: int;
+        export let page: Snapshot;
+        export let previous: Entry;
+        export let next: Entry;
+
+        export let init = func(key: int, page: Snapshot) => set;
+    );
+
+    let unlink = func(entry: Entry) {
+        entry.previous.next = entry.next;
+        entry.next.previous = entry.previous;
+    };
+
+    let fold = func(checksum: int64, sample: Snapshot) -> int64 =>
+        (checksum * 31 + (sample.key as int64) + sample.value) & Mask;
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        if (args.length != 1) {
+            return program.ExitCode.Failure;
+        }
+        last requests = result.value_or<int32>(int32s.parse(args[0]), -1);
+        if (requests < 0) {
+            return program.ExitCode.Failure;
+        }
+        last capacity = int32s.clamp(requests / 32, 4, MaxPages);
+        last empty: Snapshot = new(0, 0);
+        last root: Entry = new(-1, empty);
+        root.previous = root;
+        root.next = root;
+        last directory = lists.filled<Entry>(capacity * 4, root);
+        last audit = lists.filled<Snapshot>(AuditSize, empty);
+        let resident = 0;
+        let hits = 0;
+        let evictions = 0;
+        let checksum: int64 = 0;
+        let random: int64 = 20261123;
+        for (let i = 0; i < requests; i++) {
+            random = (random * 1103515245 + 12345) & 2147483647;
+            last key_range = i % 4 == 0 ? directory.length : capacity / 2;
+            last key = ((random >> 8) % (key_range as int64)) as int;
+            let entry = directory[key];
+            last missed = entry == root;
+            if (missed) {
+                if (resident == capacity) {
+                    last victim = root.previous;
+                    unlink(victim);
+                    directory[victim.key] = root;
+                    evictions++;
+                } else {
+                    resident++;
+                }
+                entry = new(key, empty);
+                directory[key] = entry;
+            } else {
+                hits++;
+                unlink(entry);
+            }
+            entry.next = root.next;
+            entry.previous = root;
+            root.next.previous = entry;
+            root.next = entry;
+
+            last changed = missed || i % 5 == 0;
+            last old = entry.page.value;
+            last value = changed ? (old * 33 + random + (key as int64)) & Mask : old;
+            last sample: Snapshot = new(key, value);
+            if (changed) {
+                entry.page = sample;
+            }
+            last slot = i % AuditSize;
+            checksum = fold(checksum, audit[slot]);
+            audit[slot] = sample;
+        }
+        for (let sample in audit) {
+            checksum = fold(checksum, sample);
+        }
+        let cursor = root.next;
+        while (cursor != root) {
+            checksum = fold(checksum, cursor.page);
+            cursor = cursor.next;
+        }
+        console.println("mixed-lifetime {} {} {} {} {}", requests, resident, hits, evictions, checksum);
+        return program.ExitCode.Ok;
+    };
+);

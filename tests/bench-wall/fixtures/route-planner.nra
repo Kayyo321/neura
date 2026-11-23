@@ -1,0 +1,266 @@
+// Row 15 of the warmed application benchmarks. The
+// argument is the number of route queries. A road network of a grid of
+// intersections with some roads missing and some longer highways is held in
+// adjacency lists. Each query runs Dijkstra's algorithm with a hand-written
+// binary heap over lists, stops when the destination is settled, and
+// reconstructs the path. Every 64th query closes a road and reopens the
+// previous one. held-out/java/RoutePlanner.java and
+// held-out/csharp/RoutePlanner.cs print the same line.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let lists = import:Std.Collections.Lists;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+export let RoutePlanner = module:program.Entry (
+    const Width = 110;
+    const Height = 90;
+    const Highways = 900;
+    const ClosureInterval = 64;
+    const Unreached: int64 = 9223372036854775807;
+    const Mask: int64 = 1073741823;
+
+    let Random = class (
+        let state: int64;
+
+        export let init = func(seed: int64) {
+            state = seed;
+        };
+
+        // A value in [0, bound).
+        export let next = func(bound: int) -> int {
+            state = (state * 1103515245 + 12345) & 2147483647;
+            return ((state >> 4) % (bound as int64)) as int;
+        };
+    );
+
+    let Road = class (
+        export last target: int;
+        export last minutes: int;
+        export let open: bool = true;
+
+        export let init = func(target, minutes: int) => set;
+    );
+
+    let Intersection = class (
+        export last id: int;
+        export last roads: Road[list] = new;
+
+        export let init = func(id: int) => set;
+    );
+
+    let RoadNetwork = class (
+        export last intersections: Intersection[list] = new;
+        export last all_roads: Road[list] = new;
+
+        export let init = func(random: Random) {
+            for (let i = 0; i < Width * Height; i++) {
+                intersections.append(new Intersection(i));
+            }
+            for (let y = 0; y < Height; y++) {
+                for (let x = 0; x < Width; x++) {
+                    last here = y * Width + x;
+                    if (x + 1 < Width && random.next(10) != 0) {
+                        connect(here, here + 1, 5 + random.next(40));
+                    }
+                    if (y + 1 < Height && random.next(10) != 0) {
+                        connect(here, here + Width, 5 + random.next(40));
+                    }
+                }
+            }
+            for (let i = 0; i < Highways; i++) {
+                last from = random.next(intersections.length);
+                last to = random.next(intersections.length);
+                if (from != to) {
+                    connect(from, to, 60 + random.next(400));
+                }
+            }
+        };
+
+        let connect = func(from, to, minutes: int) {
+            last forward = new Road(to, minutes);
+            last backward = new Road(from, minutes);
+            intersections[from].roads.append(forward);
+            intersections[to].roads.append(backward);
+            all_roads.append(forward);
+            all_roads.append(backward);
+        };
+
+        export let size = func() -> int => intersections.length;
+    );
+
+    // A binary min-heap of (distance, intersection) pairs in two parallel lists.
+    let MinHeap = class (
+        last keys: int64[list] = new;
+        last values: int[list] = new;
+
+        export let is_empty = func() -> bool => keys.length == 0;
+
+        export let clear = func() {
+            lists.clear<int64>(keys);
+            lists.clear<int>(values);
+        };
+
+        export let top_key = func() -> int64 => keys[0];
+
+        export let push = func(key: int64, value: int) {
+            keys.append(key);
+            values.append(value);
+            let child = keys.length - 1;
+            while (child > 0) {
+                last parent = (child - 1) / 2;
+                if (keys[parent] <= keys[child]) {
+                    break;
+                }
+                swap(parent, child);
+                child = parent;
+            }
+        };
+
+        export let pop = func() -> int {
+            last top = values[0];
+            last last_index = keys.length - 1;
+            keys[0] = keys[last_index];
+            values[0] = values[last_index];
+            keys.remove_at(last_index);
+            values.remove_at(last_index);
+            let parent = 0;
+            while (true) {
+                last left = parent * 2 + 1;
+                if (left >= keys.length) {
+                    break;
+                }
+                let smallest = left;
+                if (left + 1 < keys.length && keys[left + 1] < keys[left]) {
+                    smallest = left + 1;
+                }
+                if (keys[parent] <= keys[smallest]) {
+                    break;
+                }
+                swap(parent, smallest);
+                parent = smallest;
+            }
+            return top;
+        };
+
+        let swap = func(a, b: int) {
+            last key = keys[a];
+            keys[a] = keys[b];
+            keys[b] = key;
+            last value = values[a];
+            values[a] = values[b];
+            values[b] = value;
+        };
+    );
+
+    let Route = class (
+        export last minutes: int64;
+        export last path: int[list];
+        export last settled: int;
+
+        export let init = func(minutes: int64, path: int[list], settled: int) => set;
+    );
+
+    let Planner = class (
+        last network: RoadNetwork;
+        last distance: int64[list];
+        last previous: int[list];
+        last stamp: int[list];
+        last heap: MinHeap = new;
+        let query: int = 0;
+
+        export let init = func(roads: RoadNetwork) {
+            network = roads;
+            distance = lists.filled<int64>(roads.size(), Unreached);
+            previous = lists.filled<int>(roads.size(), -1);
+            stamp = lists.filled<int>(roads.size(), -1);
+        };
+
+        let distance_of = func(node: int) -> int64 => stamp[node] == query ? distance[node] : Unreached;
+
+        let reach = func(node: int, minutes: int64, from: int) {
+            stamp[node] = query;
+            distance[node] = minutes;
+            previous[node] = from;
+            heap.push(minutes, node);
+        };
+
+        export let plan = func(source, target: int) -> Route {
+            query += 1;
+            heap.clear();
+            reach(source, 0, -1);
+            let settled = 0;
+            while (!heap.is_empty()) {
+                last minutes = heap.top_key();
+                last node = heap.pop();
+                if (minutes > distance_of(node)) {
+                    continue;
+                }
+                settled += 1;
+                if (node == target) {
+                    break;
+                }
+                for (let road in network.intersections[node].roads) {
+                    if (!road.open) {
+                        continue;
+                    }
+                    last candidate = minutes + (road.minutes as int64);
+                    if (candidate < distance_of(road.target)) {
+                        reach(road.target, candidate, node);
+                    }
+                }
+            }
+            last path: int[list] = new;
+            last total = distance_of(target);
+            if (total != Unreached) {
+                let at = target;
+                while (at != -1) {
+                    path.append(at);
+                    at = previous[at];
+                }
+                lists.reverse<int>(path);
+            }
+            return new Route(total, path, settled);
+        };
+    );
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        if (args.length != 1) {
+            return program.ExitCode.Failure;
+        }
+        last queries = result.value_or<int32>(int32s.parse(args[0]), -1);
+        if (queries < 0) {
+            return program.ExitCode.Failure;
+        }
+        last random = new Random(424242);
+        last network = new RoadNetwork(random);
+        last planner = new Planner(network);
+        let closed: Road = network.all_roads[0];
+        let reached = 0;
+        let hops: int64 = 0;
+        let settled: int64 = 0;
+        let checksum: int64 = 0;
+        for (let i = 0; i < queries; i++) {
+            if (i % ClosureInterval == 0) {
+                closed.open = true;
+                closed = network.all_roads[random.next(network.all_roads.length)];
+                closed.open = false;
+            }
+            last route = planner.plan(random.next(network.size()), random.next(network.size()));
+            settled += route.settled as int64;
+            if (route.path.length == 0) {
+                checksum = (checksum * 31 + 7) & Mask;
+                continue;
+            }
+            reached += 1;
+            hops += (route.path.length - 1) as int64;
+            checksum = (checksum * 31 + route.minutes) & Mask;
+            for (let node in route.path) {
+                checksum = (checksum * 17 + (node as int64)) & Mask;
+            }
+        }
+        console.println("route-planner {} {} {} {} {} {}", queries, network.all_roads.length, reached, hops,
+            settled, checksum);
+        return program.ExitCode.Ok;
+    };
+);

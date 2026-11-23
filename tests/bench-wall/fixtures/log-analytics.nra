@@ -1,0 +1,261 @@
+// Row 16, a warmed application row added before performance round 1. The
+// argument is the number of log lines. Lines are generated in batches as
+// text, split into lines and fields, and parsed; numeric path segments are
+// normalized away, and requests are grouped per endpoint and per host in hash
+// maps. The top endpoints by count and the top hosts by bytes are selected,
+// with the mean and variance of the latency in float64 and a smoothed latency
+// per host. Floats are printed only as scaled integers.
+// held-out/java/LogAnalytics.java and held-out/csharp/LogAnalytics.cs print
+// the same line.
+let builders = import:Std.Core.StringBuilder;
+let console = import:Std.Io.Console;
+let hash_map = import:Std.Collections.HashMap;
+let int32s = import:Std.Core.Int32;
+let int64s = import:Std.Core.Int64;
+let lists = import:Std.Collections.Lists;
+let optional = import:Std.Core.Optional;
+let ordering = import:Std.Core.Ordering;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let sorting = import:Std.Collections.Sorting;
+let strings = import:Std.Text.Strings;
+
+export let LogAnalytics = module:program.Entry (
+    const BatchSize = 4000;
+    const HostCount = 24;
+    const TopCount = 8;
+    const Mask: int64 = 1073741823;
+
+    let Methods: string[] = ["GET", "GET", "GET", "POST", "PUT", "DELETE"];
+    let Paths: string[] = [
+        "/api/items/#", "/api/items/#/reviews", "/api/users/#", "/api/users/#/orders/#", "/api/search",
+        "/static/app.js", "/static/style.css", "/health", "/api/carts/#/lines", "/login", "/api/reports/daily/#",
+        "/api/items"
+    ];
+
+    let Statuses: int[] = [200, 200, 200, 200, 200, 200, 201, 204, 301, 304, 400, 404, 404, 429, 500, 503];
+
+    let Random = class (
+        let state: int64;
+
+        export let init = func(seed: int64) {
+            state = seed;
+        };
+
+        // A value in [0, bound).
+        export let next = func(bound: int) -> int {
+            state = (state * 1103515245 + 12345) & 2147483647;
+            return ((state >> 4) % (bound as int64)) as int;
+        };
+    );
+
+    let Request = class (
+        export last host: string;
+        export last method: string;
+        export last endpoint: string;
+        export last status: int;
+        export last bytes: int;
+        export last latency: int;
+
+        export let init = func(host, method, endpoint: string, status, bytes, latency: int) => set;
+    );
+
+    let EndpointStats = class (
+        export last key: string;
+        export let count: int = 0;
+        export let client_errors: int = 0;
+        export let server_errors: int = 0;
+        export let bytes: int64 = 0;
+        export let latency_total: int64 = 0;
+        export let latency_squares: float64 = 0.0;
+        export let latency_max: int = 0;
+
+        export let init = func(key: string) => set;
+
+        export let add = func(request: Request) {
+            count += 1;
+            if (request.status >= 500) {
+                server_errors += 1;
+            } else if (request.status >= 400) {
+                client_errors += 1;
+            }
+            bytes += request.bytes as int64;
+            latency_total += request.latency as int64;
+            last latency = request.latency as float64;
+            latency_squares += latency * latency;
+            if (request.latency > latency_max) {
+                latency_max = request.latency;
+            }
+        };
+
+        export let mean = func() -> float64 => (latency_total as float64) / (count as float64);
+
+        export let variance = func() -> float64 {
+            last average = mean();
+            return latency_squares / (count as float64) - average * average;
+        };
+    );
+
+    let HostStats = class (
+        export last host: string;
+        export let requests: int = 0;
+        export let bytes: int64 = 0;
+        export let smoothed_latency: float64 = 0.0;
+
+        export let init = func(host: string) => set;
+
+        export let add = func(request: Request) {
+            if (requests == 0) {
+                smoothed_latency = request.latency as float64;
+            } else {
+                smoothed_latency = smoothed_latency * 0.875 + (request.latency as float64) * 0.125;
+            }
+            requests += 1;
+            bytes += request.bytes as int64;
+        };
+    );
+
+    let two_digits = func(value: int) -> string => value < 10 ? "0" + value.to_string() : value.to_string();
+
+    let generate_batch = func(random: Random, first, count: int) -> string {
+        last lines: string[list] = new;
+        for (let i = first; i < first + count; i++) {
+            last seconds = i % 86400;
+            last line = builders.create();
+            line.append("2026-11-23T");
+            line.append(two_digits(seconds / 3600));
+            line.append(":");
+            line.append(two_digits(seconds / 60 % 60));
+            line.append(":");
+            line.append(two_digits(seconds % 60));
+            line.append(" web-");
+            line.append(two_digits(1 + random.next(HostCount)));
+            line.append(" ");
+            line.append(Methods[random.next(Methods.length)]);
+            line.append(" ");
+            last template = Paths[random.next(Paths.length)];
+            for (let piece in strings.split(template, "#")) {
+                if (piece.byte_length == 0) {
+                    continue;
+                }
+                line.append(piece);
+                if (piece.byte_at(piece.byte_length - 1) == '/') {
+                    line.append_int((1 + random.next(99999)) as int64);
+                }
+            }
+            line.append(" ");
+            line.append_int(Statuses[random.next(Statuses.length)] as int64);
+            line.append(" ");
+            line.append_int((120 + random.next(48000)) as int64);
+            line.append(" ");
+            line.append_int((2 + random.next(40) + random.next(40) * random.next(12)) as int64);
+            line.append("ms req-");
+            line.append_int(i as int64);
+            lines.append(line.to_string());
+        }
+        return strings.join(lines, "\n");
+    };
+
+    let is_number = func(text: string) -> bool {
+        if (text.byte_length == 0) {
+            return false;
+        }
+        for (let i = 0; i < text.byte_length; i++) {
+            last c = text.byte_at(i);
+            if (c < '0' || c > '9') {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    let normalize = func(path: string) -> string {
+        last segments = strings.split(path, "/");
+        for (let i = 0; i < segments.length; i++) {
+            if (is_number(segments[i])) {
+                segments[i] = ":id";
+            }
+        }
+        return strings.join(segments, "/");
+    };
+
+    let parse_line = func(line: string) -> Request {
+        last fields = strings.split(line, " ");
+        if (fields.length != 8) {
+            trap_with_message("log analytics: malformed line");
+        }
+        last latency_text = optional.value_or<string>(strings.strip_suffix(fields[6], "ms"), "");
+        return new Request(
+            fields[1],
+            fields[2],
+            normalize(fields[3]),
+            result.value_or<int32>(int32s.parse(fields[4]), -1),
+            result.value_or<int32>(int32s.parse(fields[5]), -1),
+            result.value_or<int32>(int32s.parse(latency_text), -1)
+        );
+    };
+
+    let by_count = func(a: EndpointStats, b: EndpointStats) -> ordering.Ordering =>
+        ordering.then(int32s.compare(b.count, a.count), strings.compare(a.key, b.key));
+
+    let by_bytes = func(a: HostStats, b: HostStats) -> ordering.Ordering =>
+        ordering.then(int64s.compare(b.bytes, a.bytes), strings.compare(a.host, b.host));
+
+    let scaled = func(value: float64) -> int64 => (value * 1000.0) as int64;
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        if (args.length != 1) {
+            return program.ExitCode.Failure;
+        }
+        last line_count = result.value_or<int32>(int32s.parse(args[0]), -1);
+        if (line_count < 0) {
+            return program.ExitCode.Failure;
+        }
+        last random = new Random(5150);
+        last endpoints = hash_map.create<string, EndpointStats>();
+        last hosts = hash_map.create<string, HostStats>();
+        last per_hour = lists.filled<int>(24, 0);
+        let text_bytes: int64 = 0;
+        let first = 0;
+        while (first < line_count) {
+            last count = int32s.min(BatchSize, line_count - first);
+            last text = generate_batch(random, first, count);
+            text_bytes += text.byte_length as int64;
+            for (let line in strings.split(text, "\n")) {
+                last request = parse_line(line);
+                last key = request.method + " " + request.endpoint;
+                endpoints.get_or_put(key, func() -> EndpointStats => new EndpointStats(key)).add(request);
+                hosts.get_or_put(request.host, func() -> HostStats => new HostStats(request.host)).add(request);
+                last hour = int32s.parse(line.slice(11, 13));
+                per_hour[result.value_or<int32>(hour, 0)] += 1;
+            }
+            first += count;
+        }
+
+        last ranked_endpoints = endpoints.values();
+        sorting.sort<EndpointStats>(ranked_endpoints, by_count);
+        last ranked_hosts = hosts.values();
+        sorting.sort<HostStats>(ranked_hosts, by_bytes);
+        last report = builders.create();
+        report.append_line($"lines {line_count} bytes {text_bytes} endpoints {endpoints.size()}");
+        for (let i = 0; i < TopCount && i < ranked_endpoints.length; i++) {
+            last stats = ranked_endpoints[i];
+            report.append_line($"{stats.key:<32}{stats.count:>8}{stats.client_errors:>7}{stats.server_errors:>7}" ..
+                $"{stats.bytes:>12}{scaled(stats.mean()):>10}{scaled(stats.variance()):>14}{stats.latency_max:>6}");
+        }
+        for (let i = 0; i < TopCount && i < ranked_hosts.length; i++) {
+            last stats = ranked_hosts[i];
+            report.append_line($"{stats.host:<8}{stats.requests:>8}{stats.bytes:>12}{scaled(stats.smoothed_latency):>10}");
+        }
+        for (let hour = 0; hour < per_hour.length; hour++) {
+            report.append_line($"hour {hour:0>2} {per_hour[hour]}");
+        }
+        last text = report.to_string();
+        let checksum: int64 = 0;
+        for (let i = 0; i < text.byte_length; i++) {
+            checksum = (checksum * 31 + (text.byte_at(i) as int64)) & Mask;
+        }
+        console.println("log-analytics {} {} {} {}", line_count, endpoints.size(), text.byte_length, checksum);
+        return program.ExitCode.Ok;
+    };
+);
