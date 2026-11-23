@@ -101,7 +101,7 @@ These are the intended source-module contracts. Compiler support for the operati
 | --- | --- | --- | --- | --- |
 | Integers, floats, `bool`, fieldless enums, `string`, tuples | Built in (G3a) | Companion `compare` functions | No (`Strings.scalars` gives a list) | |
 | Array, list | Built in, structural (G3a) | No | Built-in for-each | |
-| `Optional<T>`, `Result<T>`, `Error`, `JsonValue` | Module functions; payload enums have no built-in equality | No | No | |
+| `Optional<T>`, `Result<T>`, `Error`, `JsonValue` | Built in when each payload supports value members | No | No | |
 | `ArrayList`, `LinkedList` | As lists | No | Yes | `MutableList`; `LinkedList` also `Deque` |
 | `ArrayDeque`, `PriorityQueue` | Identity | No | Yes | `Deque` or `Queue` |
 | `HashSet`, `TreeSet`, `BitSet` | As sets | No | Yes | `MutableSet`; `TreeSet` also `SortedSet` |
@@ -130,7 +130,7 @@ A class holding a compiled regular expression. Needs T1 only: its types are all 
 | `split(input)` | A built-in list of strings, with the rules of `Strings.split`. |
 | `group_count: int`, `pattern: string` | Get-only fields ([accessors](Types#accessors)), set at compilation. |
 
-`RegexMatch` is an immutable class: the get-only fields `start` and `end` (byte offsets), `text()`, `group(index) → Optional<string>`, `group_start(index) → int` (-1 when the group did not participate), and `named_group(name) → Optional<string>`. Group 0 is the whole match.
+`RegexMatch` is an immutable class: the get-only fields `start` and `end` (byte offsets), `text()`, `group(index) → Optional<string>`, `group_start(index) → int` (-1 when the group did not participate), and `named_group(name) → Optional<string>`. Group 0 is the whole match. Its capture positions are kept in a list, so it is not marked `#Immutable` and tasks cannot share it.
 
 ### 18.1 Language and layout
 

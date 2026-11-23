@@ -37,4 +37,4 @@ The following sections are taken from the [standard library specification](Stdli
 
 ### 7.4 `Bool`
 
-`to_int(v) → int` gives 1 or 0; `xor(a, b)`; `compare(a, b) → Ordering`; `hash(v)`; `to_string(v)`. `parse(text) → Result<bool>` accepts exactly `true` and `false` and needs T1.
+`to_int(v) → int` gives 1 or 0; `xor(a, b)`; `compare(a, b) → Ordering`; `hash(v)`; `to_string(v)`. `parse(text) → Result<bool>` accepts exactly `true` and `false` and needs T1. `bool` conforms to `Ordered<bool>` and `Parseable<bool>` of [section 6.6](Stdlib-Design#66-arithmetic).
