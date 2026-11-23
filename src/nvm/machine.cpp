@@ -488,7 +488,7 @@ public:
     // Only the serial driver owns the whole Execution. An externally
     // advanced Execution can be stopped and inspected between reference steps.
     void allow_sparse_frames() {
-        tier3_full_frames_ = !tier3_native_ || times_ || limits_.parallel_workers != 1 || limits_.keep_regions_at_end ||
+        tier3_full_frames_ = !tier3_native_ || limits_.parallel_workers != 1 || limits_.keep_regions_at_end ||
                              limits_.tier_shadow || tier_shadow_enabled() || tier3::verify_enabled();
 #ifdef NEURA_TEST_FRAME_HOOKS
         tier3_full_frames_ = tier3_full_frames_ || std::getenv("NEURA_TIER3_TEST_FULL_FRAMES") != nullptr;

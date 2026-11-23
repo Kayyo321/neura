@@ -385,8 +385,12 @@ NEURA_TEST(tier3, natural_checks_recover_sparse_frames_at_the_original_loop_trap
               label + ": the reference faults at the requested check");
 
         nvm::TierCache cache(image, options);
-        const auto actual = run_at(image, 2, &cache, {}, serial);
-        check_same(actual, expected, label);
+        nvm::TierTimes timeline(nvm::TierTimes::Clock::now());
+        const auto actual = run_at(image, 2, &cache, {}, [&](nvm::RunLimits& limits) {
+            serial(limits);
+            limits.tier_times = &timeline;
+        });
+        check_same(actual, expected, label + " with tier statistics");
         if (sparse) {
             const auto stats = cache.statistics();
             check(stats.native_mode == "native" && stats.native.steps != 0, label + ": machine code ran");
@@ -396,7 +400,7 @@ NEURA_TEST(tier3, natural_checks_recover_sparse_frames_at_the_original_loop_trap
             const auto resolved = cache.program(loop_function, std::uint64_t{1} << 40);
             check(resolved.region != nullptr, label + ": the loop has a function program");
             const auto* code = cache.native_code(*resolved.region, t3::Variant::SparseFrames);
-            check(code && code->function_entry && code->function_entry->machine, label + ": made sparse entry code");
+            check(code && code->function_entry && code->function_entry->machine, label + ": tier statistics used sparse entry code");
             const auto& ir = code->function_entry->ir;
             const bool reference = scenario.trap == nvm::TrapKind::ReferenceType;
             const auto checked_sparse_state = [&](const t3::Inst& in) {
@@ -515,6 +519,28 @@ NEURA_TEST(tier3_osr, specialised_heap_preheaders_replay_and_back_off) {
                   mode + ": the faulting scan has a caller in the same function");
         }
     }
+
+    // A check after the loop is reachable from its OSR entry but cannot
+    // produce a preflight there. The generic entry replays the original trap.
+    const auto after_loop = run_at(image, 0, nullptr, {"after-loop"}, serial);
+    check(!after_loop.result.completed && after_loop.result.trap.kind == nvm::TrapKind::IndexOutOfBounds,
+          "the reference faults on the read after the loop");
+    nvm::TierCache fallback_cache(image, options);
+    check_same(run_at(image, 2, &fallback_cache, {"after-loop"}, serial), after_loop, "generic OSR fallback");
+    const auto* region = fallback_cache.program(after_loop.result.trap.function, 0).region;
+    check(region != nullptr, "the looping function has a Tier 2 program");
+    const auto header = std::ranges::find_if(region->entries, &nvm::tier2::Region::Entry::loop_header);
+    check(header != region->entries.end() && header != region->entries.begin(), "the loop has a nonzero OSR entry");
+    const auto index = static_cast<std::uint32_t>(header - region->entries.begin());
+    const auto* parent = fallback_cache.native_code(*region, sparse ? t3::Variant::SparseFrames : t3::Variant::Standard);
+    check(parent && parent->osr_attempts == 1 && parent->osr_programs.empty(), "the child was tried and refused");
+    check(!parent->osr_template, "the final attempt released the template");
+    std::uint64_t bytes = 0;
+    std::string failure;
+    const auto fallback = parent->entry(image, index, bytes, failure);
+    check(fallback.program == parent && fallback.address && fallback.index == index && bytes == 0 && failure.empty(),
+          "the loop used its cached generic entry");
+    check_equal(fallback_cache.statistics().native_osr_programs, std::uint64_t{0}, "the refusal published no OSR code");
 
     // The induction index is in range. A second load takes its index from
     // the first load and faults only on the final iteration.

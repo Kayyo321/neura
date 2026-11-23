@@ -190,6 +190,21 @@ std::uint32_t entry_operand(const Function& f, const Loop& loop, std::uint32_t p
 
 // --- Floats (tier3_float.cpp, design 7.2) ---------------------------------------------------------
 
+// These producers compute a fresh binary32 and clear the rest of its word.
+// FloatNegate only flips one bit, including when its input is a raw word.
+inline bool rounded_binary32(const Inst& in) {
+    if (in.op != Op::Lift || in.type.type != Type::F32) return false;
+    switch (in.lifted.op) {
+    case lift::Opcode::FloatAdd:
+    case lift::Opcode::FloatSubtract:
+    case lift::Opcode::FloatMultiply:
+    case lift::Opcode::FloatDivide:
+    case lift::Opcode::FloatFromInteger:
+    case lift::Opcode::FloatConvert: return true;
+    default: return false;
+    }
+}
+
 // What a value's bits are, measured against the reference's (the program
 // interpreter, whose float arithmetic gives the canonical NaN):
 enum class NanClass : std::uint8_t {

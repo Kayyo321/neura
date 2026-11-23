@@ -1,0 +1,15 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let PackedFloatStores = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let values: float32[] = [1.0 as float32, 2.0 as float32, 3.0 as float32];
+        for (let i = 0; i < 20 + args.length; i = i + 1) {
+            let index = i % 3;
+            values[index] = values[(i + 1) % 3];
+            values[(i + 2) % 3] = values[index] + (0.25 as float32);
+        }
+        console.println("{:x}", values[0].to_bits());
+        return program.ExitCode.Ok;
+    };
+);

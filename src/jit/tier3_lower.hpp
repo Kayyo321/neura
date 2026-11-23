@@ -75,7 +75,7 @@ enum class Kind : std::uint8_t {
     AllocObject,     // defs[0] = a new object of imm fields (layout: the exit's immediate)
     Append,          // the list entry uses[0] gets uses[1]; `checked`: the value may not fit the storage
     // Floats (design 7). A float value of binary32 or binary64 lives in an
-    // XMM register (binary32 in the low 32 bits, bits 32 to 63 zero).
+    // XMM register. A raw binary32 word can retain bits above its numeric lane.
     Convert,         // defs[0] = uses[0] moved to the other register file (`width` 32: the low 32 bits)
     KernelLoad,      // defs[0] = the context's K
     KernelAdd,       // defs[0] = uses[0] + imm (K, in a function with inline kernels)

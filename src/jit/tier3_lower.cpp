@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <bit>
 #include <functional>
+#include <iterator>
 #include <map>
 #include <string>
 #include <tuple>
@@ -744,11 +745,18 @@ private:
     // ---- constants and fused compares ---------------------------------------
 
     std::uint8_t width_of(std::uint32_t v) const {
-        const auto& type = f_.insts[v].type;
-        switch (type.type) {
-        case t3::Type::Int:
+        const auto& in = f_.insts[v];
+        switch (in.type.type) {
         case t3::Type::F32:
-        case t3::Type::F64: return type.width;
+            // The slot type describes the numeric lane. Only an admitted
+            // entry slot, a masked run constant, known bits or a fresh
+            // arithmetic result bounds the whole word. A heap read, opaque
+            // return, selection, phi, Canon or FloatNegate may preserve it.
+            if (in.op == Op::EntryLoad || in.op == Op::RunConst || t3::detail::rounded_binary32(in)) return 32;
+            if (in.op == Op::Const && (in.imm >> 32) == 0) return 32;
+            return 64;
+        case t3::Type::Int:
+        case t3::Type::F64: return in.type.width;
         case t3::Type::Ref:
         case t3::Type::Ptr: return 64;
         default: refuse("a value of a type the code generator does not handle");
@@ -918,19 +926,15 @@ private:
 
     // The register file of value `v`'s own virtual register: XMM for a
     // binary32 or binary64 float, except one a helper or call returns (in
-    // rax) and one the heap code reads or chooses (its bits, in a general
-    // register).
+    // rax) and one Select chooses as bits in a general register.
     mir::RegClass home_class(std::uint32_t v) {
         v = canon(v);
         const auto& in = f_.insts[v];
-        if (!float_type(in.type)) return mir::RegClass::Gpr;
+        if (!float_type(in.type) || (in.op == Op::LoadElement && in.imm < 4)) return mir::RegClass::Gpr;
         switch (in.op) {
         case Op::Helper:
         case Op::Call:
         case Op::StateCall:
-        case Op::LoadField:
-        case Op::LoadElement:
-        case Op::LoadGlobal:
         case Op::Select:
         case Op::ResultWord:
         case Op::AllocObject: return mir::RegClass::Gpr;
@@ -940,7 +944,7 @@ private:
 
     // The width of the bits a move between register files carries.
     std::uint8_t move_width(std::uint32_t v) const {
-        return f_.insts[v].type.type == t3::Type::F32 ? 32 : 64;
+        return f_.insts[v].type.type == t3::Type::F32 ? width_of(v) : 64;
     }
 
     mir::VReg vreg(std::uint32_t v) {
@@ -1488,15 +1492,19 @@ private:
     // A heap check, read or write: registers for entries, data, indices and
     // values, a memory operand allowed for a length and a storage width.
     void lower_heap(std::uint32_t id, const t3::Inst& in) {
-        // A float value the heap code stores or chooses, as its bits in a
-        // general register: moved there before the instruction.
+        // The payload of a direct heap store can stay in its own register
+        // file. Other heap operands and helper arguments use general registers.
+        const auto payload = in.op == Op::StoreElement && in.imm >= 4 ? 3U : in.op == Op::StoreField ? 1U
+                           : in.op == Op::StoreGlobal ? 0U : std::size(in.operands);
         std::map<std::uint32_t, mir::VReg> bits;
         const auto in_gpr = [&](std::uint32_t v) {
             if (v != t3::none && v < f_.insts.size() && home_class(v) == mir::RegClass::Xmm) {
                 bits.emplace(canon(v), use_as(v, mir::RegClass::Gpr));
             }
         };
-        for (const auto operand : in.operands) in_gpr(operand);
+        for (unsigned i = 0; i < std::size(in.operands); ++i) {
+            if (i != payload) in_gpr(in.operands[i]);
+        }
         if (in.op == Op::Select) {
             for (std::uint32_t i = 0; i < in.count; ++i) in_gpr(f_.extras[in.extra + i]);
         }
@@ -1507,7 +1515,9 @@ private:
         Step step;
         step.inst = id;
         step.imm = in.imm;
-        const auto use = [&](mir::Inst& inst, unsigned k) { inst.uses.push_back(reg(value(in.operands[k]))); };
+        const auto use = [&](mir::Inst& inst, unsigned k) {
+            inst.uses.push_back(reg(k == payload ? vreg(in.operands[k]) : value(in.operands[k])));
+        };
         const auto def = [&](mir::Inst& inst) { inst.defs.push_back(reg(vreg(id))); };
         switch (in.op) {
         case Op::Lookup: {

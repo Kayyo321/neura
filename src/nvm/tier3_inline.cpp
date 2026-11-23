@@ -254,6 +254,14 @@ public:
 private:
     void refuse(const char* reason) { ++source_.refusals[reason]; }
 
+    // Keep original call-block indices while choosing sites. A caller with no
+    // local kernel needs its K built in SSA only if an accepted callee uses it.
+    struct Plan {
+        std::vector<std::pair<std::uint32_t, std::shared_ptr<const Function>>> calls;
+        using ClassTests = std::vector<std::pair<std::uint64_t, std::uint32_t>>;
+        std::vector<std::pair<std::uint32_t, ClassTests>> dispatches;
+    };
+
     // Inlines what the rules allow into `f`, at `level` below the root, with
     // the functions of `chain` (f's included) above it. Returns f's size
     // after its own inlining, starting from `own`.
@@ -283,6 +291,9 @@ private:
         // Keep existing limits and bound the expansion enabled by the wider
         // dispatch rule or outline. Cloning a prepared callee charges again,
         // including its nested expansion, in each native program using it.
+        Plan plan;
+        const auto initial = own;
+        const auto initial_total = total_;
         std::uint64_t caller_growth = 0;
         const auto room = [&](const Size& add, const Growth& growth) {
             const bool fits_legacy = level == 0 ? total_ + add.ops <= limit_
@@ -322,16 +333,39 @@ private:
                 refuse("arguments or results do not fit");
                 continue;
             }
-            splice(f, site, *callee->ir);
+            plan.calls.emplace_back(b, callee->ir);
             grow(callee->size, growth);
         }
-        for (const auto d : dispatches) inline_dispatch(f, d, chain, level, room, grow);
+        for (const auto d : dispatches) plan_dispatch(f, d, chain, level, room, grow, plan);
+        if (!f.inline_kernels && std::ranges::any_of(plan.calls, [](const auto& call) {
+                return call.second->inline_kernels;
+            })) {
+            // Use the same SSA builder as a caller with a local square root.
+            // It threads K from every entry through phis, budgets, frame
+            // states, calls and their reloads. The underlying CFG is identical.
+            auto rebuilt = level == 0 ? build(image_, *f.region, false, f.variant, true)
+                                      : build_inline_callee(image_, *f.region, true);
+            if (!rebuilt.program) {
+                refuse("caller kernel counter could not be lowered");
+                total_ = initial_total;
+                return initial;
+            }
+            rebuilt.program->ir.variant = f.variant;
+            if (level != 0) restrict_to_function_entry(rebuilt.program->ir);
+            f = std::move(rebuilt.program->ir);
+            ++f.pass_counts["inline.kernel_counter"];
+        }
+        for (const auto& [block, callee] : plan.calls) splice(f, call_site(f, block).value(), *callee);
+        for (const auto& [dispatch, tests] : plan.dispatches) {
+            class_tests(f, dispatch, tests);
+            ++f.class_tested_dispatches;
+        }
         return own;
     }
 
     template <typename Room, typename Grow>
-    void inline_dispatch(Function& f, std::uint32_t d, std::vector<std::uint32_t>& chain, std::uint32_t level,
-                         const Room& room, const Grow& grow) {
+    void plan_dispatch(const Function& f, std::uint32_t d, std::vector<std::uint32_t>& chain, std::uint32_t level,
+                         const Room& room, const Grow& grow, Plan& plan) {
         const auto dispatch = f.blocks[d].insts.back();
         const auto table_index = static_cast<std::uint32_t>(f.insts[dispatch].imm);
         if (table_index >= f.dispatch_tables.size() || table_index >= f.dispatch_origins.size()) {
@@ -394,11 +428,26 @@ private:
             if (extends_caller) growth.caller = growth.program;
         }
         if (!room(added, growth)) return;
-        for (const auto& [site, callee] : chosen) splice(f, site, *callee.ir);
+        for (const auto& [site, callee] : chosen) plan.calls.emplace_back(site.block, callee.ir);
         grow(added, growth);
-        if (!tests.empty()) {
-            class_tests(f, d, tests);
-            ++f.class_tested_dispatches;
+        if (!tests.empty()) plan.dispatches.emplace_back(d, std::move(tests));
+    }
+
+    static void restrict_to_function_entry(Function& ir) {
+        // An inlined call always starts at entry 0. Discard the
+        // other entries before counting or admitting new clones.
+        ir.entries.resize(1);
+        detail::remove_unreachable(ir);
+        detail::compact(ir);
+        ir.outlined_helper_exits = static_cast<std::uint64_t>(
+            std::ranges::count_if(ir.insts, [](const Inst& inst) {
+                return inst.op == Op::Deopt && (inst.flags & Checked) != 0;
+            }));
+        if (ir.outlined_helper_exits != 0) {
+            // After entry pruning, loop phis can be aliases of
+            // arguments already held in the reconstructed frame.
+            detail::copy_phis(ir, ir.pass_counts);
+            detail::compact(ir);
         }
     }
 
@@ -437,22 +486,8 @@ private:
                 prepared.refusal = "callee could not be lowered";
             } else {
                 auto& ir = built.program->ir;
-                // An inlined call always starts at entry 0. Discard the
-                // other entries before counting or admitting new clones.
-                ir.entries.resize(1);
-                detail::remove_unreachable(ir);
-                detail::compact(ir);
-                ir.outlined_helper_exits = static_cast<std::uint64_t>(
-                    std::ranges::count_if(ir.insts, [](const Inst& inst) {
-                        return inst.op == Op::Deopt && (inst.flags & Checked) != 0;
-                    }));
+                restrict_to_function_entry(ir);
                 const bool outlines_helper = ir.outlined_helper_exits != 0;
-                if (outlines_helper) {
-                    // After entry pruning, loop phis can be aliases of
-                    // arguments already held in the reconstructed frame.
-                    detail::copy_phis(ir, ir.pass_counts);
-                    detail::compact(ir);
-                }
                 chain.push_back(function);
                 const auto own = inline_into(ir, chain, level, base);
                 chain.pop_back();
@@ -519,11 +554,9 @@ private:
     }
 
     // The call's arguments fit the callee's parameters and its returned
-    // values fit the call's result; a callee with inline kernels goes only
-    // into a caller that has them (whose K is an SSA value).
+    // values fit the call's result.
     static bool compatible(const Function& f, const CallSite& site, const Function& g) {
         const auto& call = f.insts[site.call];
-        if (g.inline_kernels && !f.inline_kernels) return false;
         if (call.count != g.parameter_count || g.parameter_count > g.slot_types.size()) return false;
         for (std::uint32_t i = 0; i < call.count; ++i) {
             const auto& argument = f.insts[f.extras[call.extra + i]];

@@ -14,8 +14,8 @@
 //   (an Int(w) value is below 2^w): the processor's flags where they are
 //   exactly the failure condition (32 and 64 bits), else the sign extension
 //   and range tests of evaluate. Floats of binary32 and binary64 live in XMM
-//   registers (design 7.1; binary32 in the low 32 bits with bits 32 to 63
-//   zero, so that its 8 bytes in memory are its slot encoding) and their
+//   registers (design 7.1). A raw heap word retains all its bits and a fresh
+//   binary32 arithmetic result clears its upper word. Their
 //   operations are the scalar SSE2 instructions of lift::evaluate_float; a
 //   Deferred result keeps the hardware's NaN (tier3_float.cpp), a Canon and
 //   a frame write of a deferred value replace it by the canonical NaN.
@@ -1036,9 +1036,10 @@ private:
 
     // A call not inlined: the push through the call helper, then the
     // callee's native code, which continues C in r12.
-    // The largest frame native code pushes itself; a larger one is pushed
-    // by the call helper.
-    static constexpr std::uint32_t max_inline_frame = 64;
+    // Larger frames clear their unused slots with a repeated store, keeping
+    // the emitted code bounded. The helper pushes frames above this limit.
+    static constexpr std::uint32_t max_unrolled_frame = 64;
+    static constexpr std::uint32_t max_inline_frame = 128;
 
     // The callee's frame pushed in place, exactly as FrameStack::push does:
     // the header (block 0, the return slot and block, the base, not a
@@ -1076,7 +1077,8 @@ private:
         a_.lea(S64, values, Mem::at(values, base, 8));
         a_.mov(S64, flags, Mem::at(record, frame_off::initialized));
         a_.alu(Alu::add, S64, flags, base);
-        for (std::uint32_t i = 0; i < slots; ++i) {
+        const auto prefix = slots <= max_unrolled_frame ? slots : count;
+        for (std::uint32_t i = 0; i < prefix; ++i) {
             const auto at = static_cast<std::int32_t>(8 * i);
             if (i < count) {
                 a_.mov(S64, t, Mem::at(x64::rsp, at));
@@ -1093,6 +1095,19 @@ private:
         a_.mov(S64, Mem::at(context, off::flags), flags);
         a_.lea(S64, t, Mem::at(header, frame_off::block));
         a_.mov(S64, Mem::at(context, off::block), t);
+        if (prefix < slots) {
+            // System V leaves the direction flag clear. All capacity checks
+            // have passed, and no helper sees the frame until both arrays
+            // are initialized. REP consumes the header, size, and record
+            // registers, which the push has finished using.
+            a_.alu(Alu::xor_, S32, x64::rax, x64::rax);
+            a_.lea(S64, x64::rdi, Mem::at(values, displacement(8 * prefix)));
+            a_.mov(S32, x64::rcx, imm32(slots - prefix));
+            a_.rep_stos(S64);
+            a_.lea(S64, x64::rdi, Mem::at(flags, displacement(prefix)));
+            a_.mov(S32, x64::rcx, imm32(slots - prefix));
+            a_.rep_stos(S8);
+        }
         a_.alu(Alu::add, S64, Mem::at(context, off::inline_calls), Imm32{1});
     }
 
@@ -1160,10 +1175,10 @@ private:
     // pushed: what the enter helper (State::tier3_native_entry) decides from
     // the call, done here, with the helper as the way for everything the cell
     // does not settle. The cell (t3::CalleeCell, the run's, by callee) is
-    // filled by the helper when it enters the callee, for the standard
-    // variant and a callee that has no floating-point code and no entry
-    // conditions beyond the arguments' widths, and cleared when the run's
-    // program of the callee changes. Goes to `helper_path` (the frame stays
+    // filled by the helper when it enters a standard-variant callee without
+    // clean-slot conditions. It is cleared when the callee's program changes
+    // or a floating-point callee can no longer run in the new chain's
+    // environment. Goes to `helper_path` (the frame stays
     // pushed) when the cell is empty, an argument does not fit its
     // parameter, the native depth is spent, or the callee's frames would pass
     // the frame limit; else the callee's program and region are the
@@ -1211,7 +1226,8 @@ private:
         store_arguments(inst, ia, 0, count);
         const auto frame_size = f_.call_frames.find(static_cast<std::uint32_t>(step.imm));
         const bool in_place = t3::standard_variant(f_.variant) && frame_size != f_.call_frames.end() &&
-                              frame_size->second <= max_inline_frame && count <= frame_size->second;
+                              frame_size->second <= max_inline_frame && count <= max_unrolled_frame &&
+                              count <= frame_size->second;
         const auto pushed = a_.label();
         const auto entered = a_.label();
         if (in_place) {
@@ -1324,11 +1340,20 @@ private:
         }
     }
 
-    // Loads the element at `p` + `i` * `bytes`, zero-extended.
-    void load_element(Gpr d, Gpr p, Gpr i, std::uint64_t bytes) {
-        const auto at = Mem::at(p, i, static_cast<unsigned>(bytes), 0);
-        if (bytes == 1 || bytes == 2) a_.movzx(S32, d, width_size(bytes), at);
-        else a_.mov(width_size(bytes), d, at);
+    // The scalar moves copy payload bits, including NaNs and signed zero.
+    void load_heap_payload(mir::RegClass cls, const mir::Location& to, const Mem& at, std::uint64_t bytes) {
+        if (cls == mir::RegClass::Xmm) {
+            a_.movs(bytes == 4 ? Prec::single : Prec::dbl, xmm(to), at);
+        } else if (bytes <= 2) {
+            a_.movzx(S32, gpr(to), width_size(bytes), at);
+        } else {
+            a_.mov(width_size(bytes), gpr(to), at);
+        }
+    }
+
+    void store_heap_payload(mir::RegClass cls, const mir::Location& from, const Mem& at, std::uint64_t bytes) {
+        if (cls == mir::RegClass::Xmm) a_.movs(bytes == 4 ? Prec::single : Prec::dbl, at, xmm(from));
+        else a_.mov(width_size(bytes), at, gpr(from));
     }
 
     // Calls `offset`'s helper (context first) keeping every allocatable
@@ -1576,7 +1601,7 @@ private:
             return;
         case Kind::LoadField: {
             const auto at = field(gpr(ia.uses[0]), step.imm, step.index);
-            a_.mov(S64, gpr(ia.defs[0]), at);
+            load_heap_payload(inst.defs[0].vreg.cls, ia.defs[0], at, 8);
             return;
         }
         case Kind::LoadLength:
@@ -1597,8 +1622,9 @@ private:
             const auto i = gpr(ia.uses[1]);
             const bool load = step.kind == Kind::LoadElement;
             const auto access = [&](std::uint64_t bytes) {
-                if (load) load_element(gpr(ia.defs[0]), p, i, bytes);
-                else a_.mov(width_size(bytes), Mem::at(p, i, static_cast<unsigned>(bytes), 0), gpr(ia.uses[3]));
+                const auto at = Mem::at(p, i, static_cast<unsigned>(bytes), 0);
+                if (load) load_heap_payload(inst.defs[0].vreg.cls, ia.defs[0], at, bytes);
+                else store_heap_payload(inst.uses[3].vreg.cls, ia.uses[3], at, bytes);
             };
             if (step.imm == 8) {
                 access(8);
@@ -1622,17 +1648,17 @@ private:
             return;
         case Kind::LoadGlobal:
             a_.mov(S64, scratch, Mem::at(context, o3::globals));
-            a_.mov(S64, gpr(ia.defs[0]), Mem::at(scratch, displacement(8 * step.imm)));
+            load_heap_payload(inst.defs[0].vreg.cls, ia.defs[0], Mem::at(scratch, displacement(8 * step.imm)), 8);
             return;
         case Kind::StoreGlobal:
             a_.mov(S64, scratch, Mem::at(context, o3::globals));
-            a_.mov(S64, Mem::at(scratch, displacement(8 * step.imm)), gpr(ia.uses[0]));
+            store_heap_payload(inst.uses[0].vreg.cls, ia.uses[0], Mem::at(scratch, displacement(8 * step.imm)), 8);
             a_.mov(S64, scratch, Mem::at(context, o3::global_initialized));
             a_.mov(S8, Mem::at(scratch, displacement(step.imm)), Imm32{1});
             return;
         case Kind::StoreField: {
             const auto e = gpr(ia.uses[0]);
-            a_.mov(S64, field(e, step.imm, step.index), gpr(ia.uses[1]));
+            store_heap_payload(inst.uses[1].vreg.cls, ia.uses[1], field(e, step.imm, step.index), 8);
             set_bit(Mem::at(e, displacement(H::initialized_offset() + 8 * (step.imm / 64))), static_cast<unsigned>(step.imm % 64));
             return;
         }
@@ -2436,6 +2462,9 @@ private:
                             : in.op == Opcode::FloatMultiply ? x64::Fp::mul
                                                              : x64::Fp::div;
             a_.arith(op, prec, d, b());
+            // ADDSS and its peers preserve the high lanes of their left
+            // input. A binary32 arithmetic result is a zero-extended word.
+            if (!dbl && step.a_width > 32) a_.andpd(d, constant(0xFFFFFFFFULL));
             // The hardware's NaN stays only in a Deferred result.
             if ((ir.flags & t3::Deferred) == 0) canonicalize(d, width);
             return;

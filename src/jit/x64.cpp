@@ -230,6 +230,13 @@ void Assembler::ud2() {
 
 // ---- moves ----
 
+void Assembler::rep_stos(Size size) {
+    require(size == S8 || size == S64, "rep stos requires byte or quadword size");
+    byte(0xF3);
+    if (size == S64) byte(0x48);
+    byte(size == S8 ? 0xAA : 0xAB);
+}
+
 namespace {
 
 // The encoding of an integer instruction on `size`: the 8-bit form of the

@@ -29,6 +29,15 @@ let scan_indirect = func(values: int[list], bound: int) -> int {
     return total;
 };
 
+.NoInline
+let read_after_loop = func(values: int[list], bound: int) -> int {
+    let total = 0;
+    for (let i = 0; i < bound; i += 1) {
+        total += i;
+    }
+    return total + values[bound];
+};
+
 export let OsrPreheader = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         last values: int[list] = new([
@@ -55,6 +64,8 @@ export let OsrPreheader = module:program.Entry (
         } else if (mode == "indirect") {
             values[Size - 1] = Size;
             total = scan_indirect(values, Size);
+        } else if (mode == "after-loop") {
+            total = read_after_loop(values, Size);
         } else {
             total = scan(values, Size, 0, 0);
         }

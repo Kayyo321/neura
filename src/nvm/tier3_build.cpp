@@ -233,10 +233,11 @@ public:
     Builder(const nvr::Image& image, const tier2::Region& region, Variant variant, bool inline_callee = false)
         : image_(image), region_(region), variant_(variant), inline_callee_(inline_callee) {}
 
-    BuildResult run(bool check) {
+    BuildResult run(bool check, bool carry_kernel_steps) {
         BuildResult result;
         auto program = std::make_unique<Program>();
         f_ = &program->ir;
+        f_->inline_kernels = carry_kernel_steps;
         if (!region_.program) return refuse("not a function program");
         prepare();
         if (!error_.empty()) return refuse(error_);
@@ -978,11 +979,12 @@ private:
         return static_cast<unsigned>(element_width(image_.types[t.reference]));
     }
 
-    // Whether every value of `v`'s type fits `bytes` bytes.
+    // Whether the producer of `v` guarantees a word that fits `bytes` bytes.
     bool fits(std::uint32_t v, unsigned bytes) const {
-        const auto& type = f_->insts[v].type;
-        const unsigned bits = type.type == Type::Int ? type.width : 64U;
-        return bytes >= 8 || bits <= 8 * bytes;
+        const auto& in = f_->insts[v];
+        if (bytes >= 8 || (in.type.type == Type::Int && in.type.width <= 8 * bytes)) return true;
+        // An opaque binary32 word may require eight-byte storage.
+        return bytes == 4 && detail::rounded_binary32(in);
     }
 
     // The inline form of a state operation (docs/runtime/NVM.md,
@@ -1909,12 +1911,12 @@ private:
 
 } // namespace
 
-BuildResult build(const nvr::Image& image, const tier2::Region& program, bool check, Variant variant) {
-    return Builder(image, program, variant).run(check);
+BuildResult build(const nvr::Image& image, const tier2::Region& program, bool check, Variant variant, bool carry_kernel_steps) {
+    return Builder(image, program, variant).run(check, carry_kernel_steps);
 }
 
-BuildResult build_inline_callee(const nvr::Image& image, const tier2::Region& program) {
-    return Builder(image, program, Variant::Standard, true).run(false);
+BuildResult build_inline_callee(const nvr::Image& image, const tier2::Region& program, bool carry_kernel_steps) {
+    return Builder(image, program, Variant::Standard, true).run(false, carry_kernel_steps);
 }
 
 namespace {
@@ -1924,13 +1926,47 @@ const std::uint8_t* const lazy_failed = reinterpret_cast<const std::uint8_t*>(st
 
 } // namespace
 
-static std::unique_ptr<Program> specialize_entry(const nvr::Image& image, const Function& original,
+// Both passes that tag a heap preflight need a CheckIndex in the reachable
+// graph. A length operand can become a LoadLength after a phi simplifies,
+// so leave that test and loop membership to the specialized graph.
+static std::vector<std::uint32_t> osr_candidate_entries(const Function& f) {
+    std::vector<std::uint32_t> entries;
+    for (std::uint32_t i = 1; i < f.entries.size(); ++i) {
+        if (f.region->entries[i].loop_header) entries.push_back(i);
+    }
+    if (entries.empty()) return entries;
+
+    std::vector<std::uint32_t> work;
+    for (std::uint32_t b = 0; b < f.blocks.size(); ++b) {
+        if (std::ranges::any_of(f.blocks[b].insts, [&](auto id) { return f.insts[id].op == Op::CheckIndex; })) {
+            work.push_back(b);
+        }
+    }
+    if (work.empty()) return {};
+    std::vector<std::uint8_t> reaches_check(f.blocks.size(), 0);
+    for (const auto b : work) reaches_check[b] = 1;
+    while (!work.empty()) {
+        const auto block = work.back();
+        work.pop_back();
+        for (const auto p : f.blocks[block].preds) {
+            if (!reaches_check[p]) {
+                reaches_check[p] = 1;
+                work.push_back(p);
+            }
+        }
+    }
+    std::erase_if(entries, [&](auto i) { return !reaches_check[f.entries[i].ir_block]; });
+    return entries;
+}
+
+static std::unique_ptr<Program> specialize_entry(const nvr::Image& image, Function original,
                                                  std::uint32_t index, bool verify,
                                                  std::span<const LoopSite> checked_loops) {
     auto entry = std::make_unique<Program>();
     auto& ir = entry->ir;
-    ir = original;
-    ir.entries.assign(1, original.entries[index]);
+    const auto selected = original.entries[index];
+    ir = std::move(original);
+    ir.entries.assign(1, selected);
     ir.blocks[ir.entries.front().ir_block].entry = 0;
     detail::remove_unreachable(ir);
     detail::compact(ir);
@@ -1966,11 +2002,18 @@ Program::EntryCode Program::entry(const nvr::Image& image, std::uint32_t index, 
     const std::lock_guard lock(lazy_mutex);
     if (const auto* found = slot.address.load(std::memory_order_acquire)) return cached(found);
 
-    if (index != 0 && osr_template && ir.region->entries[index].loop_header && osr_attempts < max_osr_attempts) {
+    if (osr_template && std::ranges::binary_search(osr_entries, index)) {
         ++osr_attempts;
         std::unique_ptr<Program> osr;
         try {
-            osr = specialize_entry(image, *osr_template, index, verify, osr_checked_loops);
+            // Every requested entry is cached, including generic fallbacks.
+            // The last possible attempt takes ownership of the template's IR.
+            if (osr_attempts == max_osr_attempts || osr_attempts == osr_entries.size()) {
+                auto last = std::move(osr_template);
+                osr = specialize_entry(image, std::move(*last), index, verify, osr_checked_loops);
+            } else {
+                osr = specialize_entry(image, *osr_template, index, verify, osr_checked_loops);
+            }
         } catch (const std::logic_error& error) {
             if (std::getenv("NEURA_TIER_DUMP")) {
                 std::fprintf(stderr, "tier 3 OSR program %u entry %u: %s\n", ir.region->program_id, index, error.what());
@@ -2174,8 +2217,8 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
             if (options_.native_passes && tier3::passes_enabled()) {
                 if (machine_code_ && tier3::standard_variant(variant) && original.entries.size() > 1) {
                     built.program->function_entry = tier3::specialize_entry(image_, original, 0, verify, checked_loops);
-                    const auto& entries = original.region->entries;
-                    if (std::any_of(entries.begin() + 1, entries.end(), [](const auto& entry) { return entry.loop_header; })) {
+                    built.program->osr_entries = tier3::osr_candidate_entries(original);
+                    if (!built.program->osr_entries.empty()) {
                         built.program->osr_template = std::make_unique<tier3::Function>(original);
                         built.program->osr_checked_loops.assign(checked_loops.begin(), checked_loops.end());
                     }

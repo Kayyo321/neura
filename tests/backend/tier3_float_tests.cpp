@@ -15,8 +15,11 @@
 
 #include "jit/tier3_native.hpp"
 #include "nvm/tier1.hpp"
+#include "nvm/tier2.hpp"
 #include "nvm/tier3.hpp"
+#include "nvr/names.hpp"
 
+#include <algorithm>
 #include <cfenv>
 #include <functional>
 
@@ -200,8 +203,8 @@ NEURA_TEST(tier3, square_roots_under_profile_count_the_kernel_step_where_tier_0_
 NEURA_TEST(tier3, inline_square_roots_in_inlined_calls_keep_every_step) {
     // `scaled` (no square root) and `length` (one) are inlined into
     // `lengths`, which has its own and then calls `countdown` (none, not
-    // inlined); `length` is not inlined into `plain_lengths`, which has none
-    // and goes on after its call returns.
+    // inlined). Inlining `length` into `plain_lengths` gives that caller
+    // its first kernel step.
     const auto image = floats_image(environment);
     for (const auto back : {Back::Native, Back::Interp}) {
         const std::string on = std::string(" on ") + name_of(back);
@@ -249,6 +252,93 @@ NEURA_TEST(tier3, no_native_float_code_runs_in_a_rounding_mode_other_than_the_de
             check(cache.statistics().native.refused > before.native.refused,
                   "native float code is refused when rounding upward" + on);
         }
+    }
+}
+
+// A host request can change the floating environment between two native
+// chains in one execution. Restore the embedding thread's mode on all exits.
+class RoundingConsole final : public nvm::HostService {
+public:
+    ~RoundingConsole() override { std::fesetround(saved_); }
+    const nvm::HostSignature& signature() const override { return console.signature(); }
+    nvm::HostCompletion invoke(const nvm::HostRequest& request) override {
+        auto completion = console.invoke(request);
+        check(std::fesetround(console.requests.size() == 1 ? FE_UPWARD : FE_TONEAREST) == 0,
+              "the host changed its rounding mode");
+        return completion;
+    }
+    CapturingConsole console;
+private:
+    int saved_ = std::fegetround();
+};
+
+Captured run_with_rounding_changes(const nvr::Image& image, nvm::TierCache* cache) {
+    RoundingConsole host;
+    nvm::HostRegistry registry;
+    registry.add(host);
+    nvm::RunLimits limits;
+    limits.tier = cache ? 2 : 0;
+    limits.tier_cache = cache;
+    auto result = nvm::run(image, nvm::bind(image, registry), {}, limits);
+    return {std::move(result), host.console.output(), std::move(host.console.requests)};
+}
+
+NEURA_TEST(tier3, float_callee_cells_follow_host_rounding_changes_at_large_frame_boundaries) {
+    auto image = build_program({backend_dir(environment) / "tier3" / "float-callee.nra"});
+    const auto names = nvr::decode_names(image).value();
+    const auto root = std::find_if(names.functions.begin(), names.functions.end(),
+                                   [](const auto& name) { return name.ends_with(".root_bits"); });
+    check(root != names.functions.end(), "the floating callee is present");
+    auto& slots = image.functions.at(root - names.functions.begin()).frame_types;
+    for (const auto count : {64u, 65u, 128u, 129u}) {
+        slots.resize(count, slots.front());
+        const auto padded = nvr::load(nvr::encode(image));
+        const auto expected = run_with_rounding_changes(padded, nullptr);
+        check(expected.result.completed && expected.requests.size() == 3, "three reference roots");
+        auto options = float_options(Back::Native, 2, 2);
+        options.native_inlining = false;
+        nvm::TierCache cache(padded, options);
+        const auto actual = run_with_rounding_changes(padded, &cache);
+        const auto label = "floating callee of " + std::to_string(count) + " slots";
+        check_same_run(actual.result, expected.result, label);
+        check_equal(actual.output, expected.output, label + " across host rounding changes");
+        const auto stats = cache.statistics();
+        for (const auto depth : {1u, 2u, 3u}) {
+            compare(padded, cache, label + " at a frame limit", {},
+                    [=](nvm::RunLimits& limits) { limits.max_frames = depth; });
+        }
+        if (!runs(Back::Native) || nvm::tier_eager() || nvm::tier3_after() != 0) continue;
+        check(stats.native.refused > 0, label + " refuses hardware square root while rounding upward");
+        if (count <= 128) {
+            check(stats.native.cell_entries > 60, label + " reaches the floating callee through a cell");
+        } else {
+            check(stats.native.cell_entries < 60 && stats.native.helper_entries > 60,
+                  label + " uses the slow push above the inline frame bound");
+        }
+    }
+}
+
+NEURA_TEST(tier3, inlining_a_first_kernel_into_an_integer_loop_keeps_the_kernel_steps) {
+    const auto image = build_program({backend_dir(environment) / "tier3" / "float-callee.nra"});
+    const auto names = nvr::decode_names(image).value();
+    const auto caller = std::find_if(names.functions.begin(), names.functions.end(),
+                                     [](const auto& name) { return name.ends_with(".repeat"); });
+    check(caller != names.functions.end(), "the integer loop is present");
+    for (const auto back : {Back::Native, Back::Interp}) {
+        nvm::TierCache cache(image, float_options(back, 3, 2));
+        compare(image, cache, "promoted integer loop", {});
+        const auto stop = run_at(image, 0, nullptr, {}, {}).result.steps;
+        for (const auto limit : limits_from(1, stop + 1, 90)) {
+            compare(image, cache, "promoted integer loop at step " + std::to_string(limit), {},
+                    [=](nvm::RunLimits& limits) { limits.max_steps = limit; });
+        }
+        if (!runs(back) || nvm::tier_eager() || nvm::tier3_after() != 0) continue;
+        const auto resolved = cache.program(caller - names.functions.begin(), std::uint64_t{1} << 40);
+        check(resolved.region != nullptr, "the integer loop has a function program");
+        const auto* code = cache.native_code(*resolved.region, nvm::tier3::Variant::SparseFrames);
+        if (!code) code = cache.native_code(*resolved.region, nvm::tier3::Variant::Standard);
+        check(code && code->ir.inline_kernels && code->ir.pass_counts.contains("inline.kernel_counter"),
+              "inlining the floating callee gave the integer loop a kernel counter");
     }
 }
 

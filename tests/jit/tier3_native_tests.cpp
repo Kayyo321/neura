@@ -10,20 +10,22 @@
 // branch. Also the Budget's comparison, and code that is the same for the
 // same IR. Part of the `jit` suite (backend-jit); it runs where
 // tier 3 has a code generator (x86-64 Linux).
-#include "backend/fixtures.hpp"
+#include "backend/graph_test_support.hpp"
 
 #include "jit/jit.hpp"
 #include "jit/regalloc.hpp"
 #include "jit/tier3_lower.hpp"
 #include "jit/tier3_native.hpp"
 #include "lift/evaluate.hpp"
+#include "nvm/heap.hpp"
+#include "nvm/tier1.hpp"
 #include "nvm/tier3.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <initializer_list>
 #include <cstring>
+#include <initializer_list>
 #include <map>
 #include <memory>
 #include <set>
@@ -44,6 +46,8 @@ struct Fake {
     std::uint32_t block = 0;
     std::vector<std::uint64_t> values;
     std::vector<std::uint64_t> constants;
+    std::array<std::uint64_t, 2> globals{};
+    std::array<std::uint8_t, 2> global_flags{};
     // What the endings recorded.
     std::uint32_t left_at = t3::none;
     std::uint64_t left_counter = 0;
@@ -156,7 +160,8 @@ Compiled compile(t3::Function function) {
 }
 
 // Runs entry 0 of `program` on a frame of `slots` (every flag clear).
-Fake run(const t3::Program& program, const std::vector<std::uint64_t>& slots, std::uint64_t room = ~std::uint64_t{0}) {
+Fake run(const t3::Program& program, const std::vector<std::uint64_t>& slots, std::uint64_t room = ~std::uint64_t{0},
+         std::uint64_t extra_result = 0) {
     Fake fake;
     fake.slots = slots;
     fake.flags.assign(slots.size(), 0);
@@ -166,6 +171,7 @@ Fake run(const t3::Program& program, const std::vector<std::uint64_t>& slots, st
     c.owner = &fake;
     c.C = 0;
     c.room = room;
+    c.result_words[0] = extra_result;
     c.slots = fake.slots.data();
     c.flags = fake.flags.data();
     c.block = &fake.block;
@@ -173,6 +179,8 @@ Fake run(const t3::Program& program, const std::vector<std::uint64_t>& slots, st
     c.values = fake.values.data();
     c.run_constants = fake.constants.data();
     c.native_depth = 1;
+    c.globals = fake.globals.data();
+    c.global_initialized = fake.global_flags.data();
     c.functions = {&fake_state, &fake_check_reference, &fake_helper,     &fake_call,
                    &fake_return, &fake_leave,          &fake_deoptimize, &fake_evaluate,
                    nullptr};
@@ -752,6 +760,248 @@ NEURA_TEST(jit, tier_3_deferred_floats_are_canonical_wherever_their_bits_are_rea
     }
     check(tally.failures == 0, std::to_string(tally.failures) + " of " + std::to_string(tally.cases) +
                                    " cases differ; the first: " + tally.first);
+}
+
+// Check the producer used to choose direct storage, on compiler output.
+NEURA_TEST(jit, tier_3_packed_float_stores_require_a_narrow_producer) {
+    if (!native_runs()) return;
+    const auto image = build_program({environment.source_dir / "tests" / "jit" / "packed-float-stores.nra"});
+    nvm::RunLimits limits;
+    limits.tier = 0;
+    const auto expected = run_captured(image, limits);
+    check(expected.result.completed && expected.result.status == 0, "the reference run completed");
+
+    nvm::TierOptions options;
+    options.hint_after = options.search_after = options.region_after = options.native_after = 1;
+    options.minimum_proof_work = std::uint64_t{1} << 30;
+    options.programs = nvm::TierOptions::Programs::On;
+    options.tier3 = nvm::TierOptions::Tier3::Native;
+    nvm::TierCache cache(image, options);
+    limits.tier = 2;
+    limits.tier_cache = &cache;
+    for (unsigned i = 0; i < 3; ++i) {
+        const auto actual = run_captured(image, limits);
+        check_same_run(actual.result, expected.result, "packing binary32 stores");
+        check_equal(actual.output, expected.output, "binary32 stored bits");
+    }
+    check(cache.statistics().native.entered > 0, "a native program ran");
+    bool numeric = false;
+    bool raw = false;
+    for (std::uint32_t function = 0; function < image.functions.size(); ++function) {
+        const auto* region = cache.program(function, 0).region;
+        if (!region) continue;
+        const auto built = t3::build(image, *region, true);
+        if (!built.program) continue;
+        const auto& ir = built.program->ir;
+        for (const auto& in : ir.insts) {
+            if (in.op == t3::Op::StoreElement && in.imm == 4) {
+                const auto& value = ir.insts.at(in.operands[3]);
+                if (value.type.type == t3::Type::F32 && value.op == t3::Op::Lift &&
+                    value.lifted.op == Opcode::FloatAdd) numeric = true;
+            }
+            if (in.op == t3::Op::Widen) {
+                const auto& value = ir.insts.at(in.operands[2]);
+                if (value.type.type == t3::Type::F32 && value.op == t3::Op::LoadElement) raw = true;
+            }
+        }
+    }
+    check(numeric, "a rounded binary32 sum stores directly into a four-byte element");
+    check(raw, "a binary32 array word can still ask the heap to widen");
+}
+
+NEURA_TEST(jit, tier_3_float_heap_field_and_global_moves_preserve_raw_words) {
+    if (!native_runs()) return;
+    using jit::mir::RegClass;
+    using jit::native::Kind;
+    for (const unsigned width : {32U, 64U}) {
+        const auto declared = width / 8;
+        Builder b(4);
+        const auto source = b.value(0, t3::Op::EntryLoad, 64, 0);
+        const auto destination = b.value(0, t3::Op::EntryLoad, 64, 1);
+        b.f.insts[source].type = b.f.insts[destination].type = {t3::Type::Ptr, 0};
+        b.f.slot_types[0] = b.f.slot_types[1] = {t3::Type::Ptr, 0};
+        const auto object = b.value(0, t3::Op::EntryLoad, 64, 3);
+        b.f.insts[object].type = b.f.slot_types[3] = {t3::Type::Ptr, 0};
+        const auto storage = b.value(0, t3::Op::EntryLoad, 8, 2);
+        const auto c = b.value(0, t3::Op::EntryCounter, 64);
+        t3::Inst jump;
+        jump.op = t3::Op::Jump;
+        b.add(0, jump);
+        const auto index = b.value(1, t3::Op::Const, 1, 1);
+        t3::Inst load;
+        load.op = t3::Op::LoadElement;
+        load.type = {width == 32 ? t3::Type::F32 : t3::Type::F64, static_cast<std::uint8_t>(width)};
+        load.imm = declared;
+        load.operands[0] = source;
+        load.operands[1] = index;
+        load.operands[2] = storage;
+        const auto value = b.add(1, load);
+        t3::Inst global;
+        global.op = t3::Op::StoreGlobal;
+        global.flags = t3::Effect;
+        global.operands[0] = value;
+        b.add(1, global);
+        t3::Inst from_global;
+        from_global.op = t3::Op::LoadGlobal;
+        from_global.type = load.type;
+        const auto word = b.add(1, from_global);
+        t3::Inst field;
+        field.op = t3::Op::StoreField;
+        field.flags = t3::Effect;
+        field.aux = 1;
+        field.operands[0] = object;
+        field.operands[1] = word;
+        b.add(1, field);
+        t3::Inst from_field;
+        from_field.op = t3::Op::LoadField;
+        from_field.type = load.type;
+        from_field.aux = 1;
+        from_field.operands[0] = object;
+        const auto copy = b.add(1, from_field);
+
+        t3::Inst store;
+        store.op = t3::Op::StoreElement;
+        store.flags = t3::Effect;
+        store.imm = declared;
+        store.operands[0] = destination;
+        store.operands[1] = index;
+        store.operands[2] = storage;
+        store.operands[3] = copy;
+        b.add(1, store);
+        // Arithmetic on a widened binary32 word produces a fresh low lane.
+        t3::Inst sum;
+        sum.op = t3::Op::Lift;
+        sum.type = load.type;
+        sum.lifted.op = Opcode::FloatAdd;
+        sum.lifted.width = static_cast<std::uint8_t>(width);
+        sum.lifted.format = width == 32 ? lift::FloatType::Binary32 : lift::FloatType::Binary64;
+        sum.operands[0] = copy;
+        sum.operands[1] = copy;
+        global.imm = 1;
+        global.operands[0] = b.add(1, sum);
+        b.add(1, global);
+        t3::Inst leave;
+        leave.op = t3::Op::Leave;
+        leave.operands[0] = c;
+        leave.imm = 9;
+        b.add(1, leave);
+
+        const auto lowered = jit::native::lower(b.f, {0});
+        for (const auto& block : lowered.function.blocks) {
+            for (const auto& inst : block.insts) {
+                const auto kind = lowered.steps[inst.opcode].kind;
+                check(kind != Kind::Convert, "a float payload stays in the SIMD register file");
+                if (kind == Kind::LoadElement || kind == Kind::LoadGlobal || kind == Kind::LoadField) {
+                    check(inst.defs[0].vreg.cls == RegClass::Xmm, "SIMD load");
+                }
+                if (kind == Kind::StoreElement || kind == Kind::StoreGlobal || kind == Kind::StoreField) {
+                    check(inst.uses.back().vreg.cls == RegClass::Xmm, "SIMD store");
+                }
+            }
+        }
+        const auto compiled = compile(std::move(b.f));
+        check(compiled.program != nullptr, "float element code compiles: " + compiled.failure);
+        const std::array<std::uint64_t, 5> patterns =
+            width == 32 ? std::array<std::uint64_t, 5>{0x7F800123, 0xFFC00456, 0x80000000, 1, 0xFFFFFFFF3F800000ULL}
+                        : std::array<std::uint64_t, 5>{0x7FF0000000000123ULL, 0xFFF8000000000456ULL,
+                                                      0x8000000000000000ULL, 1, 0x3FF0000000000000ULL};
+        // A narrow list can have eight-byte storage. Write into a dirty
+        // second element and compare both words, including its upper bits.
+        for (unsigned bytes = declared; bytes <= 8; bytes += 4) {
+            for (const auto bits : patterns) {
+                std::array<std::uint64_t, 2> input{};
+                std::array<std::uint64_t, 2> output{~std::uint64_t{0}, ~std::uint64_t{0}};
+                auto expected = output;
+                std::memcpy(reinterpret_cast<unsigned char*>(input.data()) + bytes, &bits, bytes);
+                std::memcpy(reinterpret_cast<unsigned char*>(expected.data()) + bytes, &bits, bytes);
+                constexpr auto flags_word = nvm::Heap::initialized_offset() / 8;
+                constexpr auto field_word = nvm::Heap::first_field_offset(1) / 8;
+                std::array<std::uint64_t, field_word + 1> fields{};
+                fields[field_word] = ~std::uint64_t{0};
+                const auto fake = run(*compiled.program, {reinterpret_cast<std::uintptr_t>(input.data()),
+                                                          reinterpret_cast<std::uintptr_t>(output.data()), bytes,
+                                                          reinterpret_cast<std::uintptr_t>(fields.data())});
+                const auto raw = bytes == 4 ? bits & 0xFFFFFFFFULL : bits;
+                bool failed = false;
+                const auto computed = lift::evaluate(sum.lifted, raw, raw, failed);
+                check(!failed && fake.globals[1] == computed, "the arithmetic result matches the reference word");
+                check(fields[field_word] == raw && fake.globals[0] == raw, "the field and global copy the full word");
+                check(fields[flags_word] == 1 && fake.global_flags[0] == 1 && fake.global_flags[1] == 1,
+                      "the stores initialized the field and globals");
+                check_equal(fake.left_at, 9U, "machine code left after the element moves");
+                check(output == expected, "the store preserved the payload and its neighbour");
+            }
+        }
+    }
+}
+
+// An opaque multi-word return, a selection among words and a raw constant
+// need the same treatment as eight-byte heap storage at the XMM boundary.
+NEURA_TEST(jit, tier_3_opaque_binary32_words_match_the_reference) {
+    if (!native_runs()) return;
+    const t3::ValueType type{t3::Type::F32, 32};
+    for (const auto source : {t3::Op::ResultWord, t3::Op::Select, t3::Op::Const}) {
+        for (const auto bits : {0xABCDEF013F800000ULL, 0xFFFF000080000000ULL, 0x123456787F800123ULL}) {
+            Builder b(1);
+            const auto c = b.value(0, t3::Op::EntryCounter, 64);
+            const auto selector = b.value(0, t3::Op::EntryLoad, 1, 0);
+            t3::Inst jump;
+            jump.op = t3::Op::Jump;
+            b.add(0, jump);
+            t3::Inst producer;
+            producer.op = source;
+            producer.type = type;
+            if (source == t3::Op::ResultWord) producer.imm = 1;
+            if (source == t3::Op::Const) producer.imm = bits;
+            if (source == t3::Op::Select) {
+                producer.operands[0] = selector;
+                producer.count = 2;
+                producer.extra = static_cast<std::uint32_t>(b.f.extras.size());
+                b.f.extras.push_back(b.value(1, t3::Op::Const, 64, 0));
+                b.f.extras.push_back(b.value(1, t3::Op::Const, 64, bits));
+            }
+            const auto word = b.add(1, producer);
+            t3::Inst negate;
+            negate.op = t3::Op::Lift;
+            negate.type = type;
+            negate.lifted.op = Opcode::FloatNegate;
+            negate.lifted.width = 32;
+            negate.lifted.format = lift::FloatType::Binary32;
+            negate.operands[0] = word;
+            t3::Inst store;
+            store.op = t3::Op::StoreGlobal;
+            store.flags = t3::Effect;
+            store.operands[0] = b.add(1, negate);
+            b.add(1, store);
+            // Arithmetic defines a fresh zero-extended word even when the
+            // result of canonicalizing a non-NaN still has high bits.
+            t3::Inst canon;
+            canon.op = t3::Op::Canon;
+            canon.type = type;
+            canon.operands[0] = word;
+            auto sum = negate;
+            sum.lifted.op = Opcode::FloatAdd;
+            sum.operands[0] = b.add(1, canon);
+            sum.operands[1] = word;
+            store.imm = 1;
+            store.operands[0] = b.add(1, sum);
+            b.add(1, store);
+            t3::Inst leave;
+            leave.op = t3::Op::Leave;
+            leave.operands[0] = c;
+            leave.imm = 9;
+            b.add(1, leave);
+            const auto compiled = compile(std::move(b.f));
+            check(compiled.program != nullptr, "binary32 word code compiles: " + compiled.failure);
+            const auto fake = run(*compiled.program, {1}, ~std::uint64_t{0}, bits);
+            bool failed = false;
+            const auto expected_negate = lift::evaluate(negate.lifted, bits, 0, failed);
+            const auto expected_sum = lift::evaluate(sum.lifted, t3::canonical_nan(bits, 32), bits, failed);
+            check_equal(fake.globals[0], expected_negate, "negation preserves every bit of the opaque word but its sign");
+            check_equal(fake.globals[1], expected_sum, "a fresh sum has the reference result bits");
+            check(!failed && fake.left_at == 9, "the operations complete");
+        }
+    }
 }
 
 // A function that returns several words (NVR 1.7): the value is in rsi, the

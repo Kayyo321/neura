@@ -159,6 +159,8 @@ public:
     // imm32 (zero-extending), mov r64, simm32, or movabs.
     void mov_constant(Gpr to, std::uint64_t value);
     void lea(Size size, Gpr to, const Mem& from);  // 16, 32, 64
+    // Store AL or RAX into RCX consecutive cells at RDI (rep stosb/stosq).
+    void rep_stos(Size size);
 
     // add, or, adc, and, sub, xor, cmp.
     void alu(Alu op, Size size, Gpr to, Gpr from);

@@ -399,7 +399,7 @@ let Tier3Floats = module:program.Entry (
     // No square root: inlined into a function with one.
     let scaled = func(v: float64, by: float64) -> float64 => v * by;
 
-    // A square root: inlined into a function with one, not into one without.
+    // One square root, inlined into callers with and without their own roots.
     let length = func(x: float64, y: float64) -> float64 => math.sqrt(x * x + y * y);
 
     // A call that is not inlined, and has no square root, after one.

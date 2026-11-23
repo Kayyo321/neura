@@ -519,8 +519,17 @@
     // cell accounting (tier3::Context). Inline allocation is off when the
     // pool is not in use, a fleet shares the cell count, or a heap log
     // records writes.
-    void tier3_publish(tier3::Context& context) {
+    void tier3_publish(tier3::Context& context, bool float_default) {
         if (tier3_cells_.size() != image_.functions.size()) tier3_cells_.assign(image_.functions.size(), {});
+        // A host boundary can change the environment between native chains.
+        // Drop floating-point entries before a nondefault chain can use them.
+        // Its enter helper will refuse to cache them again in that environment.
+        if (context.float_default && !float_default) {
+            for (auto& cell : tier3_cells_) {
+                if (cell.program && (cell.region->uses_float || cell.program->ir.uses_float)) cell = {};
+            }
+        }
+        context.float_default = float_default;
         context.callee_cells = tier3_cells_.data();
         context.handle_table = heap_.handle_table();
         context.allocator = heap_.native_allocator();
@@ -715,15 +724,15 @@
     // that native code enters it again without the helper while what the
     // helper settled from the program and the variant alone still holds:
     // the standard variant (the profile and checkable ones keep the helper),
-    // no floating-point code (whose entry depends on the floating-point
-    // environment), no clean slots at entry 0 (whose NaNs the helper checks),
-    // and machine code with its entry 0 made. What depends on the call (the
-    // argument widths, the native depth, the frame limit) is checked by the
-    // native code that uses the cell; the cell is cleared by use_program.
+    // no clean slots at entry 0 (whose NaNs the helper checks), and machine
+    // code with its entry 0 made. What depends on the call (the argument
+    // widths, the native depth, the frame limit) is checked by the native code
+    // that uses the cell. The dispatcher drops floating-point cells before a
+    // nondefault chain, and use_program clears a cell when its program changes.
     void tier3_cache_callee(std::uint32_t callee, const tier3::Program& code) {
         if (!tier3::standard_variant(tier3_variant()) || callee >= tier3_cells_.size()) return;
         const auto* program = callee < function_programs_.size() ? function_programs_[callee] : nullptr;
-        if (program == nullptr || program->uses_float || code.ir.uses_float || !code.machine) return;
+        if (program == nullptr || !code.machine) return;
         if (!code.ir.clean_slots.empty() && !code.ir.clean_slots.front().empty()) return;
         if (code.entry_code.at(0) == jit::native::lazy) return;
         auto& cell = tier3_cells_[callee];
@@ -850,12 +859,13 @@
         const auto& code = *selected.program;
         const auto& entered = *code.ir.region;
         const auto* address = selected.address;
+        const bool float_default = lift::float_environment_is_default();
         {
             auto frame = frames_.back();
             const auto& entry = entered.entries[entry_index];
             // Native float code (the program's, or an inline sqrt's) runs only
             // in the default floating-point environment.
-            bool refuse = (entered.uses_float || code.ir.uses_float) && !lift::float_environment_is_default();
+            bool refuse = (entered.uses_float || code.ir.uses_float) && !float_default;
             refuse = refuse || (tier3_native_ && code.machine && address == nullptr);
             for (const auto slot : entry.reads) refuse = refuse || !frame.initialized[slot];
             // The machine code of a function program's entry 0 takes the
@@ -892,10 +902,9 @@
         context.flushed = 0;
         context.allowance = allowance;
         context.native_depth = 0;
-        context.float_default = lift::float_environment_is_default();
         context.region = &entered;
         context.next_block = 0;
-        tier3_publish(context);
+        tier3_publish(context, float_default);
         tier3_room(context);
         tier3::Result result;
         if (tier3_native_ && code.machine) {
@@ -992,10 +1001,9 @@
         context.flushed = 0;
         context.allowance = std::numeric_limits<std::uint64_t>::max();
         context.native_depth = 0;
-        context.float_default = lift::float_environment_is_default();
         context.region = program.ir.region;
         context.next_block = 0;
-        tier3_publish(context);
+        tier3_publish(context, lift::float_environment_is_default());
         tier3_room(context);
         // Tests only: the step limit of a stopped run does not apply.
         context.room = std::numeric_limits<std::uint64_t>::max();

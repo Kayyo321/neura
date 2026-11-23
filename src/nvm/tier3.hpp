@@ -470,10 +470,11 @@ struct Program {
     mutable std::mutex lazy_mutex;
     mutable std::unique_ptr<LazyEntry[]> lazy_entries;
     mutable std::vector<std::unique_ptr<jit::Program>> lazy_code;
-    // Unoptimized, already inlined IR, used only when an OSR entry is first
-    // requested. Bound attempts as well as successful specializations.
+    // Keep the unoptimized, already inlined IR only when an OSR entry can
+    // reach a bounds check. The last eligible attempt consumes the template.
     static constexpr unsigned max_osr_attempts = 2;
-    std::unique_ptr<const Function> osr_template;
+    std::vector<std::uint32_t> osr_entries;
+    mutable std::unique_ptr<Function> osr_template;
     std::vector<LoopSite> osr_checked_loops;
     mutable unsigned osr_attempts = 0;
     mutable std::vector<std::unique_ptr<Program>> osr_programs;
@@ -535,11 +536,11 @@ struct BuildResult {
 // Builds the IR of `program` (a function program of `image`) and verifies it
 // when `verify` is set (NEURA_TIER3_VERIFY=1, and debug builds).
 BuildResult build(const nvr::Image& image, const tier2::Region& program, bool verify,
-                  Variant variant = Variant::Standard);
+                  Variant variant = Variant::Standard, bool carry_kernel_steps = false);
 
 // Builds the standard IR for a callee clone. Its outlined helper edges
 // replay the original image block with the frame chain supplied by inlining.
-BuildResult build_inline_callee(const nvr::Image& image, const tier2::Region& program);
+BuildResult build_inline_callee(const nvr::Image& image, const tier2::Region& program, bool carry_kernel_steps = false);
 
 // The violations of the verifier's rules (V1-V10) in `function`; empty when
 // it is well formed. Each message starts with the rule's name.
@@ -753,9 +754,9 @@ struct NativeHelpers {
 // the run): the callee's entry, its program and region, and the frames its
 // code needs below its own. Zero (`entry` null) until the helper has entered
 // the callee once, and again whenever the run's program of the function
-// changes. Only for the standard variant and callees without floating-point
-// code or entry-0 clean slots, whose entry conditions all depend on the
-// function's program alone (see State::tier3_cache_callee).
+// changes. Only for standard variants and callees without entry-0 clean
+// slots. The dispatcher drops cells for floating-point callees when it next
+// enters a chain in a nondefault floating-point environment.
 struct CalleeCell {
     const std::uint8_t* entry = nullptr;
     const Program* program = nullptr;

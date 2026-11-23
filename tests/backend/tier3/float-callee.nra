@@ -1,0 +1,26 @@
+// The caller works only on integer bits. Its callee must use the reference
+// square root when the console service changes the host's rounding mode.
+let console = import:Std.Io.Console;
+let math = import:Std.Math.Math;
+let program = import:Std.Program;
+
+export let FloatCallee = module:program.Entry (
+    .NoInline
+    let root_bits = func(bits: uint64) -> uint64 => math.sqrt(float64.from_bits(bits)).to_bits() + 1;
+
+    .NoInline
+    let repeat = func(bits: uint64) -> uint64 {
+        let total: uint64 = 0;
+        for (let i = 0; i < 63; i += 1) {
+            total ^= root_bits(bits);
+        }
+        return total;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        for (let i = 0; i < 3; i += 1) {
+            console.println("{:x}", repeat(4613937818241073152));
+        }
+        return program.ExitCode.Ok;
+    };
+);
