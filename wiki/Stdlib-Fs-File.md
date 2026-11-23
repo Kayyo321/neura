@@ -59,6 +59,7 @@ The following sections are taken from the [standard library specification](Stdli
   - A file is closed even when the body closed it already, which reports no error. `with_connection` connects without a time limit.
   - A trap in the body ends the run without cleanup; the runner then closes what the run left open.
 - **`Closeable.release<T>(resource: Closeable, outcome: Result<T>) → Result<T>`** is the closing rule on its own: it closes the resource and combines the result with the outcome of the work, as `with_open` does. A program that owns another kind of closeable resource calls it exactly once, after the work, on every ordinary completion.
+- A [`using`](CoreLanguage#using) block applies the same rule to the value a `return` carries out of it, for a close that has already run ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Lifetime030.md), implemented, proposed). The rule is held by `close_outcome` in an internal module, `std/io/internal/close-outcome.nra`, which only a program that writes `using` loads, so that the programs that do not keep their images.
 - Where a wrapper owns a closeable resource, it can use the `Closeable` interface. A wrapper over a bare function value does not own or close the function's receiver.
 - **Frame slots keep storage alive.** A reference in a local stays reachable until the local is overwritten or the function returns ([NVM](NVM#garbage-collection)). The rule for library code: an operation that replaces a large structure (a hash rebuild, a sort buffer, a deque rebalance) does the work in a helper function and returns the new structure, so the old one's last frame reference dies when the helper returns and not when the caller's loop ends.
 
@@ -108,7 +109,7 @@ The three names are this page's shorthand. A type overlay cannot name a function
 
 Needs P2 for every host operation and T1 for `Path`.
 
-**`Path`** is an immutable class holding normalized text.
+**`Path`** is an `#Immutable` class holding normalized text.
 
 - The separator is `/` on every host. `\` is an ordinary character in `Path`. The Windows file-system host also accepts `\` as a separator.
 - **Normalization at construction.** Repeated separators collapse, `.` components are removed, and a trailing separator is removed except for a root. An empty result is `.`. `..` components are kept because removing them can change where a path with links leads. A relative path starting with a drive designator followed by more components keeps a leading `./`, as in `./C:/x`. For example, `Path.of("C:").join("x")` remains relative.

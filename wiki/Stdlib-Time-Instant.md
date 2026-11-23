@@ -65,7 +65,7 @@ These are the intended source-module contracts. Compiler support for the operati
 | --- | --- | --- | --- | --- |
 | Integers, floats, `bool`, fieldless enums, `string`, tuples | Built in (G3a) | Companion `compare` functions | No (`Strings.scalars` gives a list) | |
 | Array, list | Built in, structural (G3a) | No | Built-in for-each | |
-| `Optional<T>`, `Result<T>`, `Error`, `JsonValue` | Module functions; payload enums have no built-in equality | No | No | |
+| `Optional<T>`, `Result<T>`, `Error`, `JsonValue` | Built in when each payload supports value members | No | No | |
 | `ArrayList`, `LinkedList` | As lists | No | Yes | `MutableList`; `LinkedList` also `Deque` |
 | `ArrayDeque`, `PriorityQueue` | Identity | No | Yes | `Deque` or `Queue` |
 | `HashSet`, `TreeSet`, `BitSet` | As sets | No | Yes | `MutableSet`; `TreeSet` also `SortedSet` |
@@ -79,7 +79,7 @@ These are the intended source-module contracts. Compiler support for the operati
 
 Needs P2 for every host operation and T1 for `Path`.
 
-**`Path`** is an immutable class holding normalized text.
+**`Path`** is an `#Immutable` class holding normalized text.
 
 - The separator is `/` on every host. `\` is an ordinary character in `Path`. The Windows file-system host also accepts `\` as a separator.
 - **Normalization at construction.** Repeated separators collapse, `.` components are removed, and a trailing separator is removed except for a root. An empty result is `.`. `..` components are kept because removing them can change where a path with links leads. A relative path starting with a drive designator followed by more components keeps a leading `./`, as in `./C:/x`. For example, `Path.of("C:").join("x")` remains relative.
@@ -106,7 +106,7 @@ Needs P2 for every host operation and T1 for `Path`.
 
 ### 12.1 `Std.Time`
 
-The value types are immutable classes with `compare_to`, `equals`, `hash_code`, and `to_string`. Their arithmetic is checked integer arithmetic and their text is digits and punctuation joined by concatenation. Each `parse` needs T1.
+The value types are `#Immutable` classes with `compare_to`, `equals`, `hash_code`, and `to_string`. Their arithmetic is checked integer arithmetic and their text is digits and punctuation joined by concatenation. Each `parse` needs T1.
 
 **`Duration`** is a signed count of nanoseconds in one `int64` (about ±292 years).
 

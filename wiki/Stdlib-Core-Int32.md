@@ -118,12 +118,12 @@ The compiler supplies these results for supported value members. Companion funct
 | `int64`, `uint64` | Same value | Low 32 bits exclusive-or high 32 bits | Decimal, as above |
 | Floats | Same bit pattern, except that every NaN equals every NaN. `0.0` and `-0.0` are **not** equal. | The bit pattern with every NaN replaced by the canonical NaN; 16-bit patterns zero-extended, the 64-bit pattern folded like `uint64` | [Section 7.5](Stdlib-Design#75-float-text-conversion) |
 | Fieldless enum | Same variant | The ordinal | The variant name |
+| Payload enum | Same variant and equal payloads in declaration order | Start with ordinal + 1, then multiply by 31 and add each payload hash with wrapping arithmetic | Variant name, then positional values in parentheses or named fields in braces, separated by commas and spaces |
 | `string` | Same bytes | Start with 0; for each byte, 31 times the hash plus the byte, wrapping | The string itself |
 | Tuple | Same element types and each pair of elements equal, in order | Start with 1; for each element, 31 times the hash plus the element's hash, wrapping | `[`, the elements' text separated by `, `, `]` |
 | Array, list | Same kind, same length, and each pair of elements equal in index order | As for a tuple | As for a tuple |
 | Class (default, G3b) | Identity | The identity number times 2,654,435,761, wrapping | The qualified class name, `#`, and the identity number, for example `Acme.Shapes.Circle#3` |
 | Function value | Not comparable | None | None |
-| Payload enum | Not provided | Not provided | Not provided |
 
 Float equality here deliberately differs from `==`: it is an equivalence relation consistent with the hash, which hash tables need, while `==` stays IEEE 754. The multiplier 31 is chosen because multiplying by 31 is a shift and a subtraction.
 

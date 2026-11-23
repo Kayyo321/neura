@@ -101,7 +101,7 @@ These are the intended source-module contracts. Compiler support for the operati
 | --- | --- | --- | --- | --- |
 | Integers, floats, `bool`, fieldless enums, `string`, tuples | Built in (G3a) | Companion `compare` functions | No (`Strings.scalars` gives a list) | |
 | Array, list | Built in, structural (G3a) | No | Built-in for-each | |
-| `Optional<T>`, `Result<T>`, `Error`, `JsonValue` | Module functions; payload enums have no built-in equality | No | No | |
+| `Optional<T>`, `Result<T>`, `Error`, `JsonValue` | Built in when each payload supports value members | No | No | |
 | `ArrayList`, `LinkedList` | As lists | No | Yes | `MutableList`; `LinkedList` also `Deque` |
 | `ArrayDeque`, `PriorityQueue` | Identity | No | Yes | `Deque` or `Queue` |
 | `HashSet`, `TreeSet`, `BitSet` | As sets | No | Yes | `MutableSet`; `TreeSet` also `SortedSet` |
@@ -161,16 +161,17 @@ There is no accessor for the error alone: `match` reads it.
 | `Parse` | `kind: ParseErrorKind`, `offset: int`, `message: string` | Text does not match the expected grammar. `offset` is the byte offset of the first offending byte, or the input's length for an unexpected end. |
 | `Encoding` | `offset: int`, `message: string` | Bytes are not valid in the expected encoding. |
 | `Custom` | One `ErrorDetail` | An error defined outside the library. |
-| `Context` | `message: string`, `cause: Error` | Another error with a description of what was being attempted. |
+| `Context` | `message: string`, `cause: ErrorLink` | Another error with a description of what was being attempted. The cause is `cause.cause`. |
 
 - `IoErrorKind` is a fieldless enum, in order: `NotFound`, `PermissionDenied`, `AlreadyExists`, `InvalidInput`, `Interrupted`, `UnexpectedEnd`, `NotADirectory`, `IsADirectory`, `DirectoryNotEmpty`, `ConnectionRefused`, `ConnectionReset`, `TimedOut`, `Unsupported`, `CapabilityDenied`, `Closed`, `InvalidData`, `Other`, `Cancelled`. The first fourteen map from host error codes 1 through 14, and `Cancelled` from code 15, the answer of a cancelled version 2 request ([Concurrency](Concurrency#104-host-io)); it comes last so that the kinds before it keep their order. `Closed` and `InvalidData` are produced by the library.
 - `ParseErrorKind`, in order: `Empty`, `InvalidCharacter`, `OutOfRange`, `UnexpectedEnd`, `Syntax`.
 - **`ErrorDetail`** is an abstract class with two requirements, `code() → string` (a stable identifier such as `billing.card_declined`) and `message() → string`. User code defines its own error types by deriving from it; dynamic dispatch on a non-generic class works. It is the library's one class meant to be a base. `SimpleDetail` is the concrete subclass that stores both strings.
 - Adding a variant to `Error` breaks every `match` without a wildcard arm, so the variant list changes only with a major version. Code that only reports errors should end its `match` with a wildcard arm that calls `Errors.message`.
 - Errors are immutable. A cause is set at construction, so chains are finite and acyclic.
-- **`PortableError`** is the transferable copy of an `Error`, for a failure that must cross a channel or a spawn. `Error` itself is not transferable, because `Custom` holds an `ErrorDetail` object ([Concurrency](Concurrency#51-transferable-types)). `PortableError` has the same variants and fields with one change: `Custom` is `Custom { code: string, message: string }`, and the cause of its `Context` is a `PortableError`.
+- **`ErrorLink`** is a final class with one `last` field, `cause: Error`. A `Context` error holds its cause through it because an enum value cannot contain a value of its own type ([Types](Types)); `Errors.context` builds the link. Until 0.3.0 the field was the `Error` itself, so code that matches `Context { message, cause }` now reads `cause.cause`.
+- **`PortableError`** is the transferable copy of an `Error`, for a failure that must cross a channel or a spawn. `Error` itself is not transferable, because `Custom` holds an `ErrorDetail` object ([Concurrency](Concurrency#51-transferable-types)). `PortableError` has the same variants and fields with one change: `Custom` is `Custom { code: string, message: string }`, and the cause of its `Context` is a `PortableErrorLink`, the same link as `ErrorLink` for a `PortableError`, marked `#Immutable` so that a portable error stays transferable.
 
-The module `Error` exports the enum, the two kind enums, `ErrorDetail`, `SimpleDetail`, and:
+The module `Error` exports the enum, the two kind enums, `ErrorDetail`, `SimpleDetail`, `ErrorLink`, `PortableErrorLink`, and:
 
 | Function | Behavior |
 | --- | --- |
