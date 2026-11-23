@@ -182,15 +182,17 @@ export let Strings = module (
         return pieces;
     };
 
+    const MaxJoinedTextBytes: uint64 = 2147483647;
+
     /// @brief The parts with the separator between each pair.
+    ///
+    /// When the accumulated bytes exceed 2,147,483,647, the join traps with
+    /// "joined text exceeds the maximum text length".
     .[Pure, ThreadSafe]
     export let join = func(parts: string[list], separator: string) -> string {
         last count = parts.length;
-        if (count == 0) {
-            return "";
-        }
-        if (count == 1) {
-            return parts[0];
+        if (count <= 1) {
+            return count == 1 ? parts[0] : "";
         }
         last bytes: uint8[list] = new;
         last has_separator = separator.byte_length > 0;
@@ -202,6 +204,11 @@ export let Strings = module (
             last part = parts[k];
             append_bytes(bytes, part, 0, part.byte_length);
             k += 1;
+        }
+        // This private list starts empty and only grows by appends.
+        // Its version counts the bytes even past the int32 length range.
+        if (bytes.version > MaxJoinedTextBytes) {
+            trap_with_message("joined text exceeds the maximum text length");
         }
         return text_of(bytes);
     };
