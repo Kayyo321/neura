@@ -159,6 +159,8 @@ std::string audit_refine(lift::Opcode op, bool sense, bool is_signed, unsigned w
                          std::uint64_t x_hi, std::uint64_t y_lo, std::uint64_t y_hi, std::uint64_t samples);
 // Preheaders and loop-invariant code motion.
 bool hoist_invariants(Function& f, Counts& counts);
+// Bounds checks covered by stable heap metadata and a preheader guard.
+bool guard_heap_bounds(Function& f, Counts& counts);
 
 // A natural loop with a single header that dominates it.
 struct Loop {

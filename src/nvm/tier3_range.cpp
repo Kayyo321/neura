@@ -494,6 +494,21 @@ struct Node {
     bool sense = true;
 };
 
+struct UpperBound {
+    std::uint32_t value;
+    bool inclusive;
+};
+
+// Index passes through the full input word on success. A signed Index
+// also rejects negative values before the resulting word can be used.
+std::uint32_t index_input(const Function& f, std::uint32_t index) {
+    const auto& in = f.insts[index];
+    const auto input = in.operands[0];
+    if (in.op != Op::Lift || in.lifted.op != lift::Opcode::Index || input == none ||
+        in.lifted.width != declared_width(f, input) || in.type.width < in.lifted.width) return index;
+    return input;
+}
+
 class Analysis {
 public:
     Analysis(const Function& f, const Cfg& cfg) : f_(f), cfg_(cfg) {}
@@ -582,6 +597,37 @@ public:
             return true;
         }
         return false;
+    }
+
+    // Upper bounds on the entire unsigned index word at this use. A signed
+    // relation has the same order when the index is nonnegative. On a path
+    // taking that relation, its bound then has to be nonnegative too.
+    std::vector<UpperBound> upper_bounds(std::uint32_t index, std::uint32_t node) const {
+        const auto input = index_input(f_, index);
+        const auto& checked = f_.insts[index];
+        std::vector<UpperBound> bounds;
+        for (auto n = node; n != none; n = nodes_[n].parent) {
+            Rel rel{};
+            bool is_signed = false;
+            unsigned width = 0;
+            if (!relation_of(f_, nodes_[n].cmp, nodes_[n].sense, rel, is_signed, width)) continue;
+            const auto& compare = f_.insts[nodes_[n].cmp];
+            auto value = compare.operands[0];
+            auto bound = compare.operands[1];
+            if (rel == Rel::Gt || rel == Rel::Ge) {
+                std::swap(value, bound);
+                rel = flip(rel);
+            }
+            if ((rel != Rel::Lt && rel != Rel::Le) || value == none || bound == none ||
+                (value != index && value != input) || !tracked(f_.insts[value]) || !tracked(f_.insts[bound])) continue;
+            const auto value_width = declared_width(f_, value);
+            if (value_width > width || declared_width(f_, bound) > width) continue;
+            const bool checked_nonnegative = input != index && value == input && checked.lifted.is_signed &&
+                                             (checked.flags & Checked) != 0;
+            if (is_signed && value_width == width && !checked_nonnegative && refined(value, node).s.lo < 0) continue;
+            bounds.push_back({bound, rel == Rel::Le});
+        }
+        return bounds;
     }
 
 private:
@@ -1112,6 +1158,119 @@ std::uint32_t add_inst(Function& f, std::uint32_t block, Inst in) {
     return id;
 }
 
+struct HeapBound {
+    std::uint32_t bound;
+    std::uint32_t length;
+    // An affine index is bounded by bound squared. This limit on the
+    // factor certifies that the square and the source index fit.
+    std::uint64_t square_limit = 0;
+    bool inclusive = false;
+    auto operator<=>(const HeapBound&) const = default;
+};
+
+bool full_width_arithmetic(const Function& f, const Inst& in) {
+    return in.op == Op::Lift && tracked(in) && in.lifted.width != 0 && in.lifted.width <= in.type.width &&
+           std::all_of(in.operands, in.operands + 2, [&](std::uint32_t value) {
+               return value != none && tracked(f.insts[value]) && declared_width(f, value) <= in.lifted.width;
+           });
+}
+
+std::uint64_t floor_sqrt(std::uint64_t value) {
+    std::uint64_t low = 0;
+    std::uint64_t high = std::uint64_t{1} << 32;
+    while (high - low > 1) {
+        const auto middle = (low + high) / 2;
+        if (middle * middle <= value) low = middle;
+        else high = middle;
+    }
+    return low;
+}
+
+// For row*side+column, a shared strict bound on both subscripts gives
+// row*side+column < side*side. The guard also proves the intermediate
+// product and sum fit their original widths and the square fits uint64.
+std::optional<HeapBound> affine_bound(const Function& f, const Analysis& analysis, std::uint32_t index,
+                                      std::uint32_t length, std::uint32_t node) {
+    const auto& add = f.insts[index_input(f, index)];
+    if (!full_width_arithmetic(f, add) ||
+        (add.lifted.op != lift::Opcode::Add && add.lifted.op != lift::Opcode::AddWrapping)) return std::nullopt;
+    const auto maximum = [](const Inst& in) {
+        return in.lifted.is_signed ? smax(in.lifted.width) : umax(in.lifted.width);
+    };
+    for (unsigned side = 0; side != 2; ++side) {
+        const auto& mul = f.insts[add.operands[side]];
+        if (!full_width_arithmetic(f, mul) || mul.lifted.op != lift::Opcode::Multiply) continue;
+        const auto column = analysis.upper_bounds(add.operands[1 - side], node);
+        for (unsigned factor = 0; factor != 2; ++factor) {
+            const auto bound = mul.operands[factor];
+            const auto row = analysis.upper_bounds(mul.operands[1 - factor], node);
+            const auto below = [bound](const UpperBound& upper) { return !upper.inclusive && upper.value == bound; };
+            if (!std::any_of(column.begin(), column.end(), below) || !std::any_of(row.begin(), row.end(), below)) continue;
+            const auto largest = std::min(umax(64), std::min(maximum(add), maximum(mul)) + 1);
+            return HeapBound{bound, length, floor_sqrt(static_cast<std::uint64_t>(largest))};
+        }
+    }
+    return std::nullopt;
+}
+
+bool stable_length(const Function& f, const Loop& loop) {
+    for (const auto block : loop.body) {
+        for (const auto id : f.blocks[block].insts) {
+            const auto& in = f.insts[id];
+            // A fixed-width element replacement preserves the heap entry
+            // and its length even if the write uses an alias of this list.
+            if (in.op != Op::StoreElement && is_effect(in)) return false;
+        }
+    }
+    return true;
+}
+
+bool available_at_header(const Function& f, const Cfg& cfg, const Places& places, const Loop& loop,
+                         std::uint32_t value) {
+    const auto block = places.block[value];
+    return f.insts[value].op == Op::Const ||
+           (block != none && block != loop.header && !loop.in_body[block] && cfg.dominates(block, loop.header));
+}
+
+std::uint32_t insert_heap_bound(Function& f, const HeapBound& proof, std::uint32_t preheader, std::uint32_t state) {
+    const auto guard = [&](lift::Opcode op, std::uint32_t lhs, std::uint32_t rhs) {
+        Inst compare;
+        compare.op = Op::Lift;
+        compare.type = {Type::Int, 1};
+        compare.lifted.op = op;
+        compare.lifted.width = 64;
+        compare.operands[0] = lhs;
+        compare.operands[1] = rhs;
+        const auto condition = add_inst(f, preheader, compare);
+        Inst check;
+        check.op = Op::Guard;
+        check.operands[0] = condition;
+        check.state = state;
+        check.flags = Checked;
+        return add_inst(f, preheader, check);
+    };
+    auto bound = proof.bound;
+    if (f.insts[bound].op == Op::Const) bound = add_inst(f, preheader, f.insts[bound]);
+    if (proof.square_limit != 0) {
+        Inst limit;
+        limit.op = Op::Const;
+        limit.type = {Type::Int, 64};
+        limit.imm = proof.square_limit;
+        const auto max_factor = add_inst(f, preheader, limit);
+        const auto fits = guard(lift::Opcode::LessEqual, bound, max_factor);
+        Inst square;
+        square.op = Op::Lift;
+        square.type = {Type::Int, 64};
+        square.lifted.op = lift::Opcode::Multiply;
+        square.lifted.width = 64;
+        square.operands[0] = bound;
+        square.operands[1] = bound;
+        square.guard = fits;
+        bound = add_inst(f, preheader, square);
+    }
+    return guard(proof.inclusive ? lift::Opcode::Less : lift::Opcode::LessEqual, bound, proof.length);
+}
+
 // Guards in the preheader for the candidates of `loop_header`'s loop; the
 // ids of the guards made, and the preheader.
 using Made = std::vector<std::pair<std::uint32_t, const char*>>;
@@ -1356,6 +1515,85 @@ bool eliminate_checks(const nvr::Image&, Function& f, Counts& counts) {
         any = true;
     }
     return any;
+}
+
+bool guard_heap_bounds(Function& f, Counts& counts) {
+    if (std::none_of(f.insts.begin(), f.insts.end(), [](const Inst& in) { return in.op == Op::CheckIndex; })) return false;
+    const Cfg cfg(f);
+    auto loops = find_loops(f, cfg);
+    std::erase_if(loops, [&](const Loop& loop) { return head_state(f, loop) == none || !stable_length(f, loop); });
+    if (loops.empty()) return false;
+    // Prefer the furthest enclosing stable loop so the bounds need not be
+    // checked again at every entry into a nested loop.
+    std::reverse(loops.begin(), loops.end());
+    Analysis analysis(f, cfg);
+    if (!analysis.run()) return false;
+    const Places places(f);
+
+    struct Use {
+        std::uint32_t block;
+        std::uint32_t check;
+    };
+    std::map<std::uint32_t, std::map<HeapBound, std::vector<Use>>> plans;
+    for (const auto block : cfg.rpo) {
+        auto node = analysis.start_node(block);
+        for (const auto id : f.blocks[block].insts) {
+            const auto& in = f.insts[id];
+            node = analysis.after(node, id);
+            if (in.op != Op::CheckIndex || in.guard != none) continue;
+            const auto index = in.operands[0];
+            const auto length = in.operands[1];
+            if (f.insts[length].op != Op::LoadLength) continue;
+            const auto bounds = analysis.upper_bounds(index, node);
+            const auto affine = affine_bound(f, analysis, index, length, node);
+            for (const auto& loop : loops) {
+                if (!loop.in_body[block] || !available_at_header(f, cfg, places, loop, length)) continue;
+                const auto direct = std::find_if(bounds.begin(), bounds.end(), [&](const UpperBound& upper) {
+                    return available_at_header(f, cfg, places, loop, upper.value);
+                });
+                if (direct != bounds.end()) {
+                    plans[loop.header][{direct->value, length, 0, direct->inclusive}].push_back({block, id});
+                    break;
+                }
+                if (affine && available_at_header(f, cfg, places, loop, affine->bound)) {
+                    plans[loop.header][*affine].push_back({block, id});
+                    break;
+                }
+            }
+        }
+    }
+
+    std::vector<std::uint8_t> removed(f.insts.size(), 0);
+    for (const auto& [header, group] : plans) {
+        // Other preheaders can have inserted blocks inside this loop.
+        const auto current = find_loops(f, Cfg(f));
+        const auto loop = std::find_if(current.begin(), current.end(), [&](const Loop& item) { return item.header == header; });
+        if (loop == current.end()) continue;
+        const auto preheader = make_preheader(f, *loop);
+        const auto state = preheader_state(f, *loop, preheader);
+        for (const auto& [proof, uses] : group) {
+            const auto guard = insert_heap_bound(f, proof, preheader, state);
+            const auto entry = f.insts[proof.length].operands[0];
+            ++counts[proof.square_limit == 0 ? "guard.heap_bounds" : "guard.heap_affine"];
+            for (const auto& [block, check] : uses) {
+                const auto index = f.insts[check].operands[0];
+                for (const auto id : f.blocks[block].insts) {
+                    auto& inst = f.insts[id];
+                    if ((inst.op != Op::LoadElement && inst.op != Op::StoreElement) || inst.operands[1] != index ||
+                        inst.guard != none || places.position[id] <= places.position[check]) continue;
+                    const auto& data = f.insts[inst.operands[0]];
+                    if (data.op == Op::LoadData && data.operands[0] == entry) inst.guard = guard;
+                }
+                removed[check] = 1;
+                ++counts["elim.bounds"];
+            }
+        }
+    }
+    if (plans.empty()) return false;
+    for (auto& block : f.blocks) {
+        std::erase_if(block.insts, [&](std::uint32_t id) { return id < removed.size() && removed[id]; });
+    }
+    return true;
 }
 
 } // namespace neura::nvm::tier3::detail

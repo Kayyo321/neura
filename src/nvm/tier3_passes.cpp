@@ -1171,6 +1171,7 @@ void optimize(const nvr::Image& image, Function& f, bool verify_each) {
     run("fold and propagate", [&] { simplify(f, counts); });
     run("loop-invariant code motion", [&] { hoist_invariants(f, counts); });
     run("value numbering", [&] { number_values(f, counts); });
+    run("guarded heap bounds", [&] { guard_heap_bounds(f, counts); });
     run("dead code removal", [&] { remove_dead(f, counts); });
     run("checkpoint lengths", [&] { compute_budgets(f); });
     f.pass_counts = std::move(counts);

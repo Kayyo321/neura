@@ -286,11 +286,17 @@ bool hoist_one(Function& f, const Cfg& cfg, const Loop& loop, Counts& counts) {
     // helper, call or state call may free, collect, grow or write anything).
     bool safepoint = false;
     bool widens = false;
+    bool stable_for_preflight = true;
+    bool has_list_bounds = false;
     std::vector<std::uint64_t> fields;
     std::vector<std::uint64_t> globals;
     for (const auto b : loop.body) {
         for (const auto id : f.blocks[b].insts) {
             const auto& in = f.insts[id];
+            if (is_effect(in) && in.op != Op::StoreElement) stable_for_preflight = false;
+            if (in.op == Op::CheckIndex && in.operands[1] != none && f.insts[in.operands[1]].op == Op::LoadLength) {
+                has_list_bounds = true;
+            }
             if (in.op == Op::Helper || in.op == Op::Call || in.op == Op::StateCall || in.op == Op::AllocObject ||
                 in.op == Op::Append) {
                 safepoint = true;
@@ -324,8 +330,16 @@ bool hoist_one(Function& f, const Cfg& cfg, const Loop& loop, Counts& counts) {
     };
     const auto check_refusal = [&](const Inst& in, bool on_every_path, bool effect_seen) -> const char* {
         if (!has_state) return "header has no reconstructible frame state";
-        if (!on_every_path) return "check does not execute on every back edge";
-        if (effect_seen) return "check follows a possible effect";
+        // Fixed-width element stores keep field flags, handles, lengths and
+        // backing storage stable, including through aliases. The speculative
+        // checks can fail only by resuming at the original header, before
+        // any of the loop's steps or effects. A zero-trip loop then skips
+        // its original checks, as does any path that never reaches a use.
+        const bool preflight = stable_for_preflight && has_list_bounds && !safepoint && !widens &&
+                               (in.op == Op::CheckNotNil || in.op == Op::Lookup || in.op == Op::CheckKind ||
+                                in.op == Op::CheckInit || in.op == Op::CheckIndex);
+        if (!preflight && !on_every_path) return "check does not execute on every back edge";
+        if (!preflight && effect_seen) return "check follows a possible effect";
         if (in.guard != none) return "check depends on a guard";
         return nullptr;
     };
