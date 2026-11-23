@@ -1,0 +1,23 @@
+let program = import:Std.Program;
+
+let Node = class (
+    export last value: int = 17;
+);
+
+let accumulate = func(item: Node, fail_at: int) -> int {
+    let current = item;
+    let total = 0;
+    for (let i = 0; i < 64; i = i + 1) {
+        if (i == fail_at) {
+            current = nil;
+        }
+        total = total + current.value;  // trap: wrong hint
+    }
+    return total;
+};
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        return accumulate(new Node(), 63) == 1088 ? program.ExitCode.Ok : program.ExitCode.Failure;
+    };
+);

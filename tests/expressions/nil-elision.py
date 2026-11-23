@@ -138,6 +138,67 @@ def exercise(neura, native, work, label, source, cases, expect_difference=None):
     return count
 
 
+FIELD_READ = "exit state read-field immediate "
+HINTED_FIELD_READ = "exit state read-field non-nil-receiver immediate "
+
+
+def force_read_hint(neura, original, hinted):
+    assembly = hinted.with_suffix(".nvra")
+    build(neura, "disassemble", original, "-o", assembly)
+    text = assembly.read_text(encoding="utf-8")
+    assert text.count(FIELD_READ) == 1 and "non-nil-receiver" not in text
+    assembly.write_text(text.replace(FIELD_READ, HINTED_FIELD_READ), encoding="utf-8")
+    build(neura, "assemble", assembly, "-o", hinted)
+    assert hinted.read_bytes() != original.read_bytes(), "the inserted hint did not reach the artifact"
+    build(neura, "disassemble", hinted, "-o", assembly)
+    assert assembly.read_text(encoding="utf-8").count(HINTED_FIELD_READ) == 1
+    return text
+
+
+def verify_tier2_wrong_hint(neura, native, work):
+    source = FIXTURES / "tier2-wrong-hint.nra"
+    case = trap(source, "// trap: wrong hint")
+    original = work / "tier2-checked.nvr"
+    hinted = work / "tier2-wrong-hint.nvr"
+    build(neura, "build", "--no-nil-check-elision", source, "-o", original)
+    force_read_hint(neura, original, hinted)
+
+    command = (neura, "run", "--runtime=off", "--gpu=off", "--deny-native", "--stats", "--tier-stats")
+
+    def run_case(mode, flags, image, env=None):
+        result = run(*command, *flags, image, env=env)
+        outcome = verify_outcome(result, case, mode)
+        counters = re.search(
+            r"^stats: steps (\d+), peak heap cells (\d+)(?:, peak stack cells (\d+))?, host requests (\d+)",
+            result.stderr, re.M,
+        )
+        site = re.search(r" in function (\d+) block (\d+) at ", result.stderr)
+        assert counters is not None and site is not None, (mode, result.stderr)
+        return (outcome, counters.groups(), site.groups()), result.stderr
+
+    reference, _ = run_case("checked tier 0", ("--tier=0", "--jit=off"), original)
+    count = 1
+    for mode, flags, env in tier_modes(native):
+        if mode not in {"tier 0", "tier 2 interpreter", "tier 2 native"}:
+            continue
+        outcome, diagnostics = run_case(mode, flags, hinted, env)
+        assert outcome == reference, (mode, outcome, reference)
+        count += 1
+        if mode == "tier 0":
+            continue
+
+        # A region must attempt this state operation and return control to
+        # the reference interpreter at the exact field read that traps.
+        function, block = outcome[2]
+        assert re.search(r"^tier: steps .* \(in regions [1-9]\d*\),", diagnostics, re.M), diagnostics
+        assert re.search(r"^tier: regions .*; deoptimized: .*state traps 1$", diagnostics, re.M), diagnostics
+        assert f"tier: deoptimized 1 times at function {function} block {block}\n" in diagnostics, diagnostics
+        if mode == "tier 2 native":
+            # The site-specific deoptimization must come from native code.
+            assert re.search(r"^tier: jit .*; entries native [1-9]\d*, interpreted 0$", diagnostics, re.M), diagnostics
+    return count
+
+
 def verify_artifacts(neura, native, work, case):
     positive = work / "positive-optimized.nvr"
     assembly = work / "positive.nvra"
@@ -148,17 +209,9 @@ def verify_artifacts(neura, native, work, case):
     assert positive.read_bytes() == rebuilt.read_bytes(), "hinted image did not round-trip"
 
     original = work / "no-removable-check-disabled.nvr"
-    assembly = work / "original-checked.nvra"
-    build(neura, "disassemble", original, "-o", assembly)
-    text = assembly.read_text(encoding="utf-8")
     # The contract-only fixture has one field read, reached with nil.
-    read = "exit state read-field immediate "
-    assert text.count(read) == 1 and "non-nil-receiver" not in text
     hinted = work / "incorrect-receiver-hint.nvr"
-    assembly = hinted.with_suffix(".nvra")
-    assembly.write_text(text.replace(read, "exit state read-field non-nil-receiver immediate "), encoding="utf-8")
-    build(neura, "assemble", assembly, "-o", hinted)
-    assert hinted.read_bytes() != original.read_bytes(), "the inserted hint did not reach the artifact"
+    text = force_read_hint(neura, original, hinted)
 
     result = run(neura, "run", "--runtime=off", "--tier=0", "--jit=off", original)
     reference = verify_outcome(result, case, "unhinted artifact")
@@ -168,7 +221,7 @@ def verify_artifacts(neura, native, work, case):
         assert outcome == reference, (mode, outcome, reference)
 
     assembly = work / "invalid-receiver-hint.nvra"
-    assembly.write_text(text.replace(read, "exit state allocate-object non-nil-receiver immediate "), encoding="utf-8")
+    assembly.write_text(text.replace(FIELD_READ, "exit state allocate-object non-nil-receiver immediate "), encoding="utf-8")
     result = run(neura, "assemble", assembly, "-o", assembly.with_suffix(".nvr"))
     assert result.returncode == 1, result.stderr
     assert "non-nil-receiver requires a nil-checked object state operation" in result.stderr, result.stderr
@@ -203,6 +256,7 @@ def qualify(neura, native, work):
     contract = trap(unchanged, "// trap: contract")
     count += exercise(neura, native, work, "no-removable-check", unchanged, [contract], False)
     count += verify_artifacts(neura, native, work, contract)
+    count += verify_tier2_wrong_hint(neura, native, work)
 
     conditions = TESTS / "expressions" / "nil-conditions" / "conditions.nra"
     class_nil = TESTS / "backend" / "programs" / "class-nil.nra"

@@ -1832,11 +1832,9 @@ private:
         return result;
     }
 
-    enum class ReceiverChecks { UseHint, Full };
-
-    Heap::Ref state_receiver(const nvr::Exit& exit, std::uint64_t handle, ReceiverChecks checks) {
+    Heap::Ref state_receiver(const nvr::Exit& exit, std::uint64_t handle) {
         const auto type_index = exit.arguments.front().type;
-        if (checks == ReceiverChecks::UseHint && exit.receiver_non_nil) {
+        if (exit.receiver_non_nil) {
             // Slot zero has no heap entry. Failed lookups retain the original
             // nil, released-storage, invalid-handle and type diagnostics.
             const auto found = heap_.find(handle);
@@ -4097,8 +4095,7 @@ private:
 #endif
     }
 
-    std::uint64_t state(const nvr::Exit& exit, const std::vector<std::uint64_t>& args,
-                        ReceiverChecks receiver_checks = ReceiverChecks::UseHint) {
+    std::uint64_t state(const nvr::Exit& exit, const std::vector<std::uint64_t>& args) {
         const auto& types = exit.arguments;
         switch (exit.operation) {
         case nvr::StateOp::ReadComponent:
@@ -4161,9 +4158,9 @@ private:
             return heap_.retain_storage(args[0], item);
         }
         case nvr::StateOp::ReadTag:
-            return heap_.type(state_receiver(exit, args[0], receiver_checks));
+            return heap_.type(state_receiver(exit, args[0]));
         case nvr::StateOp::ReadField: {
-            const auto item = state_receiver(exit, args[0], receiver_checks);
+            const auto item = state_receiver(exit, args[0]);
             if (!heap_.initialized(item, exit.immediate)) {
                 if (args.size() == 2) return args[1];
                 fault(TrapKind::UninitializedField, "field " + std::to_string(exit.immediate));
@@ -4171,7 +4168,7 @@ private:
             return heap_.field(item, exit.immediate);
         }
         case nvr::StateOp::WriteField: {
-            const auto item = state_receiver(exit, args[0], receiver_checks);
+            const auto item = state_receiver(exit, args[0]);
             for (std::size_t i = 1; i < args.size(); ++i) {
                 const auto at = exit.immediate + static_cast<std::uint32_t>(i - 1);
                 if (heap_log_) heap_log_->push_back({false, true, args[0], at, heap_.field(item, at),
