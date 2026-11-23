@@ -38,7 +38,7 @@
     tier3::Variant tier3_variant() const {
         if (limits_.profile) return tier3::Variant::Profile;
         if (tier_check_) return tier3::Variant::Checkable;
-        return tier3::Variant::Standard;
+        return tier3_full_frames_ ? tier3::Variant::Standard : tier3::Variant::SparseFrames;
     }
 
     // The native code of `program`, or null. At a checkpoint (`count`), an
@@ -260,6 +260,63 @@
         }
     }
 
+    // The checker compares full and sparse executions using the original
+    // image's continuation mask, computed independently of the native IR.
+    void record_frame_replay(const tier3::Function& fn, std::uint32_t state_id) {
+        ++frame_replay_events_;
+        // Keep a separate sample of specializations with one native entry.
+        // The interpreter-resume graph may otherwise use the entire budget.
+        const bool entry_only = fn.region && fn.entries.size() == 1 && fn.entries.front().block == 0 &&
+                                fn.region->entries.size() > 1;
+        auto& sampled = entry_only ? frame_replay_entry_reports_ : frame_replay_reports_;
+        if (sampled == 32) return;
+        ++sampled;
+        const auto& leaf = fn.states[state_id];
+        std::size_t omitted = 0;
+        for (auto state = state_id; state != tier3::none; state = fn.states[state].caller) {
+            omitted += std::ranges::count_if(fn.states[state].slots, [](const auto& slot) {
+                return slot.kind == tier3::StateSlot::Kind::Dead;
+            });
+        }
+        frame_replay_omitted_ += omitted;
+        std::ostringstream output;
+        output << "frame-recovery {\"function\":" << leaf.function << ",\"block\":" << leaf.block
+               << ",\"step\":" << steps_ << ",\"variant\":" << static_cast<unsigned>(fn.variant)
+               << ",\"omitted\":" << omitted << ",\"frames\":[";
+        std::map<std::uint32_t, tier3::detail::FrameLiveness> liveness;
+        for (std::size_t i = 0; i < frames_.size(); ++i) {
+            const auto& frame = frames_.header(i);
+            const auto& live = liveness.try_emplace(frame.function, image_, frame.function).first->second;
+            const auto size = image_.functions[frame.function].frame_types.size();
+            const auto* flags = frames_.initialized(i);
+            const auto* slots = frames_.slots(i);
+            if (i != 0) output << ',';
+            output << "{\"function\":" << frame.function << ",\"block\":" << frame.block
+                   << ",\"initialized\":[";
+            for (std::size_t slot = 0; slot < size; ++slot) {
+                if (slot != 0) output << ',';
+                output << (flags[slot] != 0 ? "true" : "false");
+            }
+            output << "],\"values\":[";
+            std::vector<std::uint32_t> dead;
+            for (std::uint32_t slot = 0; slot < size; ++slot) {
+                if (slot != 0) output << ',';
+                const auto masked = live.dead_scalar(frame.block, slot);
+                if (masked) dead.push_back(slot);
+                if (masked || flags[slot] == 0) output << "null";
+                else output << slots[slot];
+            }
+            output << "],\"dead\":[";
+            for (std::size_t slot = 0; slot < dead.size(); ++slot) {
+                if (slot != 0) output << ',';
+                output << dead[slot];
+            }
+            output << "]}";
+        }
+        output << "]}\n";
+        std::fputs(output.str().c_str(), stderr);
+    }
+
     // Leaves compiled code at `state_id`: its frames materialized, the
     // counters of the state in the context, the steps flushed.
     static void tier3_deoptimize(tier3::Context* context, const tier3::Function* fn, std::uint32_t state_id,
@@ -274,6 +331,7 @@
         context->next_block = leaf.block;
         context->reason = reason;
         self.tier3_flush(*context);
+        if (reason == tier3::Reason::FrameReplay) self.record_frame_replay(*fn, state_id);
     }
 
     static void tier3_leave(tier3::Context* context, std::uint32_t block) {
@@ -624,7 +682,7 @@
     // argument widths, the native depth, the frame limit) is checked by the
     // native code that uses the cell; the cell is cleared by use_program.
     void tier3_cache_callee(std::uint32_t callee, const tier3::Program& code) {
-        if (tier3_variant() != tier3::Variant::Standard || callee >= tier3_cells_.size()) return;
+        if (!tier3::standard_variant(tier3_variant()) || callee >= tier3_cells_.size()) return;
         const auto* program = callee < function_programs_.size() ? function_programs_[callee] : nullptr;
         if (program == nullptr || program->uses_float || code.ir.uses_float || !code.machine) return;
         if (!code.ir.clean_slots.empty() && !code.ir.clean_slots.front().empty()) return;
@@ -838,6 +896,7 @@
             case tier3::Reason::StateTraps: ++region_counts_.state_traps; ++native_counts_.state_traps; break;
             case tier3::Reason::Guards: ++region_counts_.checks; ++native_counts_.guards; break;
             case tier3::Reason::Exits: ++region_counts_.exits; ++native_counts_.exits; break;
+            case tier3::Reason::FrameReplay: break;
             }
             break;
         case tier3::Outcome::Trapped:

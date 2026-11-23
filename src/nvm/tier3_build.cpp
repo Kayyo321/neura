@@ -1,4 +1,5 @@
 #include "tier3.hpp"
+#include "tier3_frame_liveness.hpp"
 #include "environment.hpp"
 
 #include "heap.hpp"
@@ -10,6 +11,7 @@
 #include "kernels/kernel_binding.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -19,6 +21,21 @@
 #include <utility>
 
 namespace neura::nvm::tier3 {
+
+std::optional<std::uint64_t> frame_replay_seed() {
+    // Native code is cached within a process, so keep its test seed fixed.
+    static const auto seed = []() -> std::optional<std::uint64_t> {
+        const auto* text = std::getenv("NEURA_TIER3_TEST_FRAME_SEED");
+        if (text == nullptr) return std::nullopt;
+        const auto* end = text + std::strlen(text);
+        std::uint64_t value = 0;
+        const auto parsed = std::from_chars(text, end, value);
+        if (parsed.ec != std::errc{} || parsed.ptr != end) return std::nullopt;
+        return value;
+    }();
+    return seed;
+}
+
 namespace {
 
 using tier2::Code;
@@ -892,7 +909,7 @@ private:
             return false;
         }
         // The profile and checkable variants write through the reference.
-        const bool checkable = variant_ != Variant::Standard;
+        const bool checkable = !standard_variant(variant_);
         switch (exit.operation) {
         case StateOp::ReadTag:
         case StateOp::ReadField:
@@ -1047,7 +1064,7 @@ private:
     // does: a failure deoptimizes to the block's entry, and tier 1 traps
     // there. False for any other helper.
     bool fast_path(const tier2::Op& op, const nvr::Exit& exit, const std::vector<std::uint32_t>& arguments) {
-        if (variant_ != Variant::Standard) return false;
+        if (!standard_variant(variant_)) return false;
         const bool allocates = exit.operation == nvr::StateOp::AllocateObject && arguments.empty() &&
                                exit.immediate < image_.layouts.size();
         const bool appends = exit.operation == nvr::StateOp::AppendElement && arguments.size() == 2 &&
@@ -1907,7 +1924,7 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
     // they keep using the published code until its replacement is ready.
     if (!slot.compare_exchange_strong(expected, native_forming, std::memory_order_acq_rel)) {
         previous = native_code(program, variant);
-        if (!previous || variant != tier3::Variant::Standard) return previous;
+        if (!previous || !tier3::standard_variant(variant)) return previous;
         const std::lock_guard lock(mutex_);
         const auto& pending = previous->pending_callees;
         if (previous->rebuild_attempted || pending.empty() ||
@@ -1926,9 +1943,9 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
     try {
         built = tier3::build(image_, program, tier3::verify_enabled(), variant);
         if (built.program) built.program->ir.variant = variant;
-        // Only the standard variant inlines: the profile and checkable
+        // The standard variants inline. The profile and checkable
         // variants keep every call and return the reference's.
-        if (built.program && variant == tier3::Variant::Standard && options_.native_inlining) {
+        if (built.program && tier3::standard_variant(variant) && options_.native_inlining) {
             const tier3::InlineSource source{
                 [this, previous, &pending](std::uint32_t function) -> tier3::InlineSource::CalleeProgram {
                     const std::lock_guard lock(mutex_);
@@ -1961,7 +1978,7 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
             const bool verify = tier3::verify_enabled();
             original.check_heap = verify;
             if (options_.native_passes && tier3::passes_enabled()) {
-                if (machine_code_ && variant == tier3::Variant::Standard && original.entries.size() > 1) {
+                if (machine_code_ && tier3::standard_variant(variant) && original.entries.size() > 1) {
                     auto entry = std::make_unique<tier3::Program>();
                     entry->ir = original;
                     entry->ir.entries.resize(1);
@@ -1969,8 +1986,10 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
                     tier3::detail::compact(entry->ir);
                     const tier3::detail::Cfg cfg(entry->ir);
                     if (!tier3::detail::find_loops(entry->ir, cfg).empty()) {
-                        tier3::optimize(image_, entry->ir, verify);
-                        tier3::place_canons(image_, entry->ir, verify);
+                        const auto omitted = tier3::detail::prune_dead_frame_slots(image_, entry->ir);
+                        const auto verify_entry = verify || (omitted != 0 && tier3::frame_replay_seed());
+                        tier3::optimize(image_, entry->ir, verify_entry);
+                        tier3::place_canons(image_, entry->ir, verify_entry);
                         built.program->function_entry = std::move(entry);
                     }
                 }

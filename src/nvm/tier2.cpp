@@ -2103,16 +2103,16 @@ TierCache::RegionResolution TierCache::program(std::uint32_t function, std::uint
         if (native_enabled() && options_.native_inlining) {
             // Initial settlement is a cold path. Consult the recorded
             // dependencies here, with no poll on interpreted or native calls.
-            std::vector<const tier2::Region*> callers;
+            std::vector<std::pair<const tier2::Region*, tier3::Variant>> callers;
             for (const auto& code : native_owned_) {
                 const auto& pending = code->pending_callees;
                 if (!code->rebuild_attempted && std::binary_search(pending.begin(), pending.end(), function) &&
                     std::all_of(pending.begin(), pending.end(), [&](std::uint32_t callee) {
                         return programs_[callee].state == RegionEntry::State::Settled;
-                    })) callers.push_back(code->ir.region);
+                    })) callers.emplace_back(code->ir.region, code->ir.variant);
             }
             lock.unlock();
-            for (const auto* caller : callers) compile_native(*caller, tier3::Variant::Standard);
+            for (const auto& [caller, variant] : callers) compile_native(*caller, variant);
         }
 #endif
         return result;

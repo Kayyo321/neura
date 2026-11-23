@@ -20,6 +20,8 @@ class GraphDevice;
 class Fleet;
 class TierCache;
 class TierTimes;
+class TaskClock;
+struct RunResult;
 
 struct TaskDumpRequest;
 class ScheduleChooser;
@@ -577,6 +579,9 @@ public:
 
 private:
     friend class Fleet;
+#ifndef NEURA_WASM_RUNTIME
+    friend RunResult run(const nvr::Image&, const Bindings&, std::span<const std::string>, RunLimits, TaskClock*);
+#endif
 
     static void validate_entry_arguments(const nvr::Image& image, std::uint32_t entry,
                                          std::span<const std::string> arguments);

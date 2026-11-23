@@ -102,7 +102,8 @@ std::vector<const t3::Function*> native_functions(const nvr::Image& image, nvm::
     for (std::uint32_t function = 0; function < image.functions.size(); ++function) {
         const auto* program = function_program(cache, function);
         if (!program) continue;
-        for (const auto variant : {t3::Variant::Standard, t3::Variant::Profile, t3::Variant::Checkable}) {
+        for (unsigned i = 0; i < t3::variant_count; ++i) {
+            const auto variant = static_cast<t3::Variant>(i);
             if (const auto* code = cache.native_code(*program, variant)) list.push_back(&code->ir);
         }
     }
@@ -146,7 +147,7 @@ void heap_operations_run_inline_and_every_run_matches_tier_0(const Environment& 
         // No inline state operation is left to state() but text equality
         // (the profile and checkable variants write through it).
         for (const auto& in : ir->insts) {
-            if (ir->variant != t3::Variant::Standard) break;
+            if (!t3::standard_variant(ir->variant)) break;
             if (in.op != t3::Op::StateCall || in.aux == t3::none) continue;
             check(ir->exits[in.aux]->operation == nvr::StateOp::TextEqual, "only text equality stays a state call");
         }

@@ -223,6 +223,7 @@ private:
     const Lowered& l_;
     const mir::Allocation& alloc_;
     Assembler& a_;
+    const std::optional<std::uint64_t> frame_replay_seed_ = t3::frame_replay_seed();
     std::vector<Label> block_labels_;
     std::uint32_t spill_base_ = 0;
     std::uint32_t saved_program_ = 0;
@@ -483,9 +484,11 @@ private:
     // state names, from where the allocation keeps it at this instruction,
     // into the context's value array, then calls the deoptimization helper.
     // Checks with the same state, reason and locations share a stub.
-    Label stub(const mir::Inst& inst, const mir::InstAllocation& ia) {
+    Label stub(const mir::Inst& inst, const mir::InstAllocation& ia,
+               std::optional<t3::Reason> reason_override = std::nullopt) {
         const auto& step = l_.steps[inst.opcode];
         if (step.state == t3::none) throw EmitError("a check without a frame state");
+        const auto reason = reason_override ? static_cast<std::uint8_t>(*reason_override) : step.reason;
         // Each value with its location and whether that is an XMM register.
         struct Named {
             mir::Location location;
@@ -496,7 +499,7 @@ private:
         for (const auto& [use, value] : step.state_values) {
             values.push_back({ia.state_uses.at(use), value, inst.state_uses.at(use).vreg.cls == mir::RegClass::Xmm});
         }
-        std::vector<std::uint64_t> key{step.state, step.reason, pending_};
+        std::vector<std::uint64_t> key{step.state, reason, pending_};
         for (const auto& named : values) {
             key.push_back(named.value);
             key.push_back((static_cast<std::uint64_t>(named.xmm) << 40) |
@@ -507,7 +510,7 @@ private:
         if (const auto found = stubs_.find(key); found != stubs_.end()) return found->second;
         const auto label = a_.label();
         stubs_.emplace(std::move(key), label);
-        const auto tail = tail_for(step.state, step.reason);
+        const auto tail = tail_for(step.state, reason);
         const auto blocks = f_.states[step.state].blocks;
         cold_.push_back([this, label, tail, blocks, values, constants, pending] {
             a_.bind(label);
@@ -769,6 +772,20 @@ private:
             if (kernel) a_.alu(Alu::sub, S64, scratch, Mem::at(context, off::K));
             a_.alu(Alu::cmp, S64, scratch, Mem::at(context, off::room));
             a_.jcc(Cond::a, stub(inst, ia));
+            if (frame_replay_seed_) {
+                // Sample by original continuation and executed block count. The
+                // same seed visits the same points with full and sparse frames.
+                const auto& state = f_.states[step.state];
+                auto sample = *frame_replay_seed_ ^ (std::uint64_t{state.function} << 32) ^ state.block;
+                sample = (sample ^ (sample >> 30)) * 0xbf58476d1ce4e5b9ULL;
+                sample = (sample ^ (sample >> 27)) * 0x94d049bb133111ebULL;
+                const auto selected = static_cast<std::int32_t>((sample ^ (sample >> 31)) & 15U);
+                const auto shift = static_cast<std::int32_t>(pending_ & 15U) - selected;
+                a_.mov(S32, scratch, counter);
+                a_.alu(Alu::add, S32, scratch, Imm32{shift});
+                a_.test(S32, scratch, Imm32{15});
+                a_.jcc(Cond::e, stub(inst, ia, t3::Reason::FrameReplay));
+            }
             return;
         }
         case Kind::SwitchCheck: {
@@ -841,7 +858,7 @@ private:
             // helper: popping the frame in place writes one result slot. So
             // does a function that enters a storage region (NVR 1.7): the
             // helper releases the regions its frame left open.
-            if (f_.variant == t3::Variant::Standard && step.index == 0 && !f_.enters_region) inline_pop();
+            if (t3::standard_variant(f_.variant) && step.index == 0 && !f_.enters_region) inline_pop();
             a_.mov(S64, x64::rdx, counter);
             a_.mov(S64, x64::rdi, context);
             a_.mov(S32, x64::rcx, imm32(step.index));
@@ -1189,7 +1206,7 @@ private:
         store_kernel_steps(ia, count);
         store_arguments(inst, ia, 0, count);
         const auto frame_size = f_.call_frames.find(static_cast<std::uint32_t>(step.imm));
-        const bool in_place = f_.variant == t3::Variant::Standard && frame_size != f_.call_frames.end() &&
+        const bool in_place = t3::standard_variant(f_.variant) && frame_size != f_.call_frames.end() &&
                               frame_size->second <= max_inline_frame && count <= frame_size->second;
         const auto pushed = a_.label();
         const auto entered = a_.label();

@@ -1,4 +1,5 @@
 #include "tier3.hpp"
+#include "tier3_frame_liveness.hpp"
 
 #include "tier3_passes.hpp"
 
@@ -602,7 +603,8 @@ private:
             }
             const auto& state = f_.states[s];
             for (std::size_t r = 0; r < count && r < state.slots.size(); ++r) {
-                if (state.slots[r].kind != StateSlot::Kind::Unchanged) written[r] = 1;
+                const auto kind = state.slots[r].kind;
+                if (kind == StateSlot::Kind::Value || kind == StateSlot::Kind::Const) written[r] = 1;
                 if (state.flags[r].kind != StateFlag::Kind::Unchanged) written[count + r] = 1;
             }
         } else if (in.op == Op::Call && in.aux < f_.exits.size()) {
@@ -709,7 +711,17 @@ private:
                     fail("V3", at(id) + " has a frame state of a program that does not exist");
                     good = false;
                 }
-                for (const auto& slot : state.slots) {
+                for (std::uint32_t r = 0; r < state.slots.size(); ++r) {
+                    const auto& slot = state.slots[r];
+                    if (slot.kind == StateSlot::Kind::Dead) {
+                        if (!frame_liveness_) frame_liveness_.emplace(image_, f_.function);
+                        if (f_.variant != Variant::SparseFrames || f_.entries.size() != 1 || f_.entries.front().block != 0 ||
+                            state.function != f_.function || depth != 1 || state.caller != none ||
+                            !detail::precommit_deopt(in) || !frame_liveness_->dead_scalar(state.block, r)) {
+                            fail("V3", at(id) + " omits a scalar needed at its frame continuation");
+                            good = false;
+                        }
+                    }
                     if (slot.kind != StateSlot::Kind::Value) continue;
                     const auto v = static_cast<std::uint32_t>(slot.value);
                     if (v >= f_.insts.size() || block_of_[v] == none ||
@@ -1400,6 +1412,7 @@ private:
     std::vector<std::uint32_t> idom_;
     std::vector<std::uint32_t> number_;
     std::map<std::uint32_t, std::vector<std::uint8_t>> written_before_;
+    std::optional<detail::FrameLiveness> frame_liveness_;
     std::uint32_t root_ = 0;
 };
 
@@ -1461,7 +1474,7 @@ std::string describe(const Function& f) {
             out << " s" << r << "=";
             out << (slot.kind == StateSlot::Kind::Value ? "%" + std::to_string(slot.value)
                     : slot.kind == StateSlot::Kind::Const ? "#" + std::to_string(slot.value)
-                                                          : std::string("."));
+                    : slot.kind == StateSlot::Kind::Dead  ? std::string("dead") : std::string("."));
             out << (state.flags[r].kind == StateFlag::Kind::One ? "!" : state.flags[r].kind == StateFlag::Kind::Value
                                                                          ? "?%" + std::to_string(state.flags[r].value)
                                                                          : std::string());

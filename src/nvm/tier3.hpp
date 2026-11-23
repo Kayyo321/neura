@@ -12,6 +12,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -255,6 +256,9 @@ struct StateSlot {
         Unchanged,
         Value,
         Const,
+        // A scalar that the reference continuation cannot read before replacing.
+        // Recovery leaves its physical value word alone.
+        Dead,
     };
     Kind kind = Kind::Unchanged;
     // The SSA value (Value), or the bits (Const).
@@ -320,8 +324,15 @@ struct Entry {
 // per program version and variant. Standard inlines; Profile (--profile)
 // and Checkable (NEURA_TIER_CHECK=1) do not, so that every frame is the
 // reference's at every call and return.
-enum class Variant : std::uint8_t { Standard, Profile, Checkable };
-inline constexpr unsigned variant_count = 3;
+enum class Variant : std::uint8_t { Standard, Profile, Checkable, SparseFrames };
+inline constexpr unsigned variant_count = 4;
+
+constexpr bool standard_variant(Variant variant) {
+    return variant == Variant::Standard || variant == Variant::SparseFrames;
+}
+
+// The checker can ask generated code to deoptimize at sampled checkpoints.
+std::optional<std::uint64_t> frame_replay_seed();
 
 struct Function {
     std::vector<Inst> insts;
@@ -531,8 +542,8 @@ enum class Status : std::uint8_t {
     Trapped = 3,
 };
 
-enum class Reason : std::uint8_t { Budget, Checks, Selectors, References, StateTraps, Guards, Exits };
-inline constexpr unsigned reason_count = 7;
+enum class Reason : std::uint8_t { Budget, Checks, Selectors, References, StateTraps, Guards, Exits, FrameReplay };
+inline constexpr unsigned reason_count = 8;
 
 enum class Outcome : std::uint8_t {
     // The activation returned its value to a native caller.

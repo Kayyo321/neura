@@ -21,16 +21,26 @@ let FunctionEntryLoops = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         let nan = float64.from_bits(9'223'092'407'043'655'969u64);
         let values = [4.0, 9.0, -0.0, nan];
-        let checksum = 0u64;
-        for (let warmup = 0; warmup < 256; warmup = warmup + 1) {
-            checksum = checksum ^ sum_roots(values, 0, 1, 4, false);
-        }
-        console.println("{:x}", checksum);
-
         let choice = "";
         if (args.length > 0) {
             choice = args[0];
         }
+        // Exercise the special values during warmup so a bounded frame
+        // recovery trace can see them before the output boundary.
+        let left = 0;
+        let right = 1;
+        if (choice == "nan") {
+            left = 3;
+        } else if (choice == "zero") {
+            left = 2;
+            right = 2;
+        }
+        let checksum = 0u64;
+        for (let warmup = 0; warmup < 256; warmup = warmup + 1) {
+            checksum = checksum ^ sum_roots(values, left, right, 4, false);
+        }
+        console.println("{:x}", checksum);
+
         if (choice == "resume") {
             console.println("{:x}", sum_roots(values, 0, 1, 4, true));
         } else if (choice == "before") {

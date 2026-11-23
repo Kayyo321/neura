@@ -95,10 +95,11 @@ std::uint32_t function_named(const nvr::Image& image, const std::string& name) {
     return 0;
 }
 
-// The standard native program of `function` in `cache`, or null.
+// The standard native program of `function` in `cache`, sparse or full.
 const t3::Function* native_ir(nvm::TierCache& cache, std::uint32_t function) {
     const auto resolved = cache.program(function, std::uint64_t{1} << 40);
     if (resolved.region == nullptr) return nullptr;
+    if (const auto* code = cache.native_code(*resolved.region, t3::Variant::SparseFrames)) return &code->ir;
     const auto* code = cache.native_code(*resolved.region, t3::Variant::Standard);
     return code == nullptr ? nullptr : &code->ir;
 }
