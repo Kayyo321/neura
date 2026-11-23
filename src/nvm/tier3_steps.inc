@@ -47,6 +47,19 @@
     const tier3::Program* tier3_code(const tier2::Region& program, bool count) {
         if (!tier3_ready()) return nullptr;
         const auto variant = tier3_variant();
+        if (!tier3_checked_loops_.empty()) {
+            const auto found = tier3_checked_loops_.find(program.function);
+            if (found != tier3_checked_loops_.end()) {
+                auto& checked = found->second;
+                if (checked.region != &program || checked.compiled_sites != checked.sites.size()) {
+                    const TierTimes::Scope timing(times_, TierTimes::Category::Tier1);
+                    checked.versions.push_back(tier_->rebuild_native(program, variant, checked.sites));
+                    checked.region = &program;
+                    checked.compiled_sites = checked.sites.size();
+                }
+                return checked.versions.back().get();
+            }
+        }
         if (const auto* code = tier_->native_code(program, variant)) return code;
         if (!count) return nullptr;
         const auto arrivals = tier_->count_native(program.program_id);
@@ -54,6 +67,18 @@
         // Building the program is timed as tier 1 (--tier-stats).
         const TierTimes::Scope timing(times_, TierTimes::Category::Tier1);
         return tier_->compile_native(program, variant);
+    }
+
+    void tier3_note_preflight_failure(std::uint32_t function, tier3::LoopSite site) {
+        // Count failures at the original loop header, including across OSR,
+        // direct native entry and Tier 2 program refreshes. Other runs using
+        // the same cache have independent feedback and callee cells.
+        constexpr unsigned failure_limit = 3;
+        auto& failures = tier3_preflight_failures_[{function, site}];
+        if (failures >= failure_limit || ++failures != failure_limit) return;
+        tier3_checked_loops_[function].sites.push_back(site);
+        if (function < tier3_cells_.size()) tier3_cells_[function] = {};
+        ++native_counts_.loop_preflight_backoffs;
     }
 
     // The speculation record of a Dispatch op (tier3::DispatchRecord): kept
@@ -332,6 +357,7 @@
         context->reason = reason;
         self.tier3_flush(*context);
         if (reason == tier3::Reason::FrameReplay) self.record_frame_replay(*fn, state_id);
+        else if (leaf.loop_preflight) self.tier3_note_preflight_failure(fn->function, {leaf.function, leaf.block});
     }
 
     static void tier3_leave(tier3::Context* context, std::uint32_t block) {

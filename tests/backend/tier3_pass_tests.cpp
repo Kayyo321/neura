@@ -9,6 +9,7 @@
 #include "nvm/tier2.hpp"
 #include "nvm/tier3.hpp"
 #include "nvm/tier3_passes.hpp"
+#include "nvr/names.hpp"
 
 #include <algorithm>
 #include <cfenv>
@@ -732,6 +733,13 @@ NEURA_TEST(tier3, value_numbering_keeps_a_component_load_across_a_store_to_anoth
         lookup.flags = t3::Checked;
         lookup.state = s.state;
         const auto entry = ir.add(s.body, lookup);
+        t3::Inst bounds;
+        bounds.op = t3::Op::CheckIndex;
+        bounds.operands[0] = s.entry.slot[1];
+        bounds.operands[1] = ir.konst(s.body, 1024);
+        bounds.flags = t3::Checked;
+        bounds.state = s.state;
+        const auto check_id = ir.add(s.body, bounds);
         const auto heap = [&](t3::Op op, t3::ValueType type, std::uint32_t a, std::uint32_t b = t3::none,
                               std::uint32_t c2 = t3::none, std::uint32_t d = t3::none, std::uint64_t imm = 0,
                               std::uint32_t aux = t3::none) {
@@ -744,6 +752,7 @@ NEURA_TEST(tier3, value_numbering_keeps_a_component_load_across_a_store_to_anoth
             in.operands[3] = d;
             in.imm = imm;
             in.aux = aux;
+            if (op == t3::Op::LoadElement || op == t3::Op::StoreElement) in.guard = check_id;
             if (op == t3::Op::StoreElement) in.flags = t3::Effect;
             return ir.add(s.body, in);
         };
@@ -1470,6 +1479,121 @@ NEURA_TEST(tier3, dead_code_removal_drops_unused_pure_values_and_never_a_check_a
     check_equal(ir.count_of("dce.values"), std::uint64_t{3}, "three values removed");
 }
 
+// --- Guarded heap bounds -------------------------------------------------------------------------------------
+
+void check_heap_bound(bool affine, bool bounded, bool checked_loop) {
+    constexpr unsigned width = 16;
+    LoopOptions options;
+    options.start_at_zero = true;
+    options.middle_entry = false;
+    options.width = width;
+    options.is_signed = false;
+    std::uint32_t check_id = t3::none;
+    std::uint32_t access_id = t3::none;
+    std::uint32_t successor_access = t3::none;
+    auto l = counted_loop(options, [&](Loop& loop) {
+        auto& ir = loop.ir;
+        const auto bound = loop.first.slot[1];
+        ir.f.insts[loop.compare].operands[1] = bounded ? bound : loop.i;
+
+        auto& preheader = ir.f.blocks[loop.pre].insts;
+        const auto jump = preheader.back();
+        preheader.pop_back();
+        t3::Inst lookup;
+        lookup.op = t3::Op::Lookup;
+        lookup.type = {t3::Type::Ptr, 0};
+        lookup.operands[0] = loop.first.slot[0];
+        lookup.flags = t3::Checked;
+        lookup.state = ir.f.insts[preheader.front()].state;
+        const auto entry = ir.add(loop.pre, lookup);
+        t3::Inst size;
+        size.op = t3::Op::LoadLength;
+        size.type = {t3::Type::Int, 64};
+        size.operands[0] = entry;
+        const auto length = ir.add(loop.pre, size);
+        t3::Inst data;
+        data.op = t3::Op::LoadData;
+        data.type = {t3::Type::Ptr, 0};
+        data.operands[0] = entry;
+        const auto pointer = ir.add(loop.pre, data);
+        preheader.push_back(jump);
+
+        auto index = loop.i;
+        if (affine) {
+            const auto product = ir.lift(loop.body, Opcode::Multiply, true, loop.i, bound, true, loop.body_state);
+            index = ir.lift(loop.body, Opcode::Add, true, product, loop.i, true, loop.body_state);
+        }
+        t3::Inst bounds;
+        bounds.op = t3::Op::CheckIndex;
+        bounds.operands[0] = index;
+        bounds.operands[1] = length;
+        bounds.flags = t3::Checked;
+        bounds.state = loop.body_state;
+        check_id = ir.add(loop.body, bounds);
+        t3::Inst access;
+        access.op = t3::Op::LoadElement;
+        access.type = {t3::Type::Int, 32};
+        access.operands[0] = pointer;
+        access.operands[1] = index;
+        access.operands[2] = ir.konst(loop.body, 4);
+        access.imm = 4;
+        access.guard = check_id;
+        access_id = ir.add(loop.body, access);
+        increment(loop, width, false);
+
+        // Value numbering may leave one bounds check for uses in several blocks.
+        loop.latch = ir.block(2, false);
+        ir.jump(loop.body, loop.latch);
+        access.op = t3::Op::StoreElement;
+        access.type = {};
+        access.operands[3] = access_id;
+        access.flags = t3::Effect;
+        successor_access = ir.add(loop.latch, access);
+    });
+    auto& ir = l->ir;
+    ir.expect_valid("before guarded heap bounds");
+    const t3::LoopSite disabled[] = {{0, 1}};
+    const auto sites = checked_loop ? std::span<const t3::LoopSite>(disabled) : std::span<const t3::LoopSite>();
+    const bool applied = bounded && !checked_loop;
+    check_equal(d3::guard_heap_bounds(ir.f, ir.counts, sites), applied, "whether the heap bounds pass applies");
+    ir.expect_valid("after guarded heap bounds");
+    check_equal(ir.present(check_id), !applied, "unproven index checks stay in the loop");
+    check_equal(ir.count_of(affine ? "guard.heap_affine" : "guard.heap_bounds"), std::uint64_t{applied},
+                "the expected guard was counted");
+    const auto guard = ir.f.insts[access_id].guard;
+    check_equal(ir.f.insts[successor_access].guard, guard, "the access in the successor block names the same proof");
+    if (!applied) {
+        check_equal(guard, check_id, "the access names its original bounds check");
+        return;
+    }
+    check(guard != t3::none && ir.f.blocks[ir.block_of(guard)].preheader, "the access names a preheader guard");
+    if (guard == t3::none) return;
+    ir.f.insts[successor_access].guard = t3::none;
+    check(std::ranges::any_of(ir.violations(), [](const auto& violation) { return violation.starts_with("V10:"); }),
+          "V10 rejects the unchecked successor access without its guard");
+    ir.f.insts[successor_access].guard = guard;
+    const auto& state = ir.f.states[ir.f.insts[guard].state];
+    check(state.loop_preflight && state.block == 1, "the guard replays before entering the original loop");
+    if (affine) {
+        const auto& comparison = ir.f.insts[ir.f.insts[guard].operands[0]];
+        const auto& square = ir.f.insts[comparison.operands[0]];
+        const auto& width_test = ir.f.insts[ir.f.insts[square.guard].operands[0]];
+        check_equal(ir.f.insts[width_test.operands[1]].imm, std::uint64_t{181}, "the square is guarded at the int16 limit");
+    }
+}
+
+NEURA_TEST(tier3, direct_heap_bounds_require_a_dominating_upper_bound_and_respect_back_off) {
+    check_heap_bound(false, true, false);
+    check_heap_bound(false, false, false);
+    check_heap_bound(false, true, true);
+}
+
+NEURA_TEST(tier3, affine_heap_bounds_require_both_subscripts_and_guard_the_original_width) {
+    check_heap_bound(true, true, false);
+    check_heap_bound(true, false, false);
+    check_heap_bound(true, true, true);
+}
+
 // --- Induction variables and their guards ------------------------------------------------------------------------
 
 std::vector<std::uint32_t> guards_in(const Ir& ir) { return ir.all_of(t3::Op::Guard); }
@@ -1616,7 +1740,7 @@ NEURA_TEST(tier3, an_invariant_pure_op_moves_to_the_preheader_and_a_loop_variant
     });
     auto& ir = l->ir;
     ir.expect_valid("before");
-    d3::hoist_invariants(ir.f, ir.counts);
+    d3::hoist_invariants(ir.image, ir.f, ir.counts);
     ir.expect_valid("after");
     const auto p = preheader_of(ir, l->head);
     check(p != t3::none, "a preheader was made");
@@ -1640,7 +1764,7 @@ NEURA_TEST(tier3, a_division_whose_check_went_stays_where_its_proof_holds_and_do
         increment(loop, 32);
     });
     auto& ir = l->ir;
-    d3::hoist_invariants(ir.f, ir.counts);
+    d3::hoist_invariants(ir.image, ir.f, ir.counts);
     ir.expect_valid("after");
     const auto p = preheader_of(ir, l->head);
     check(p != t3::none, "the pure op moved, so a preheader was made");
@@ -1656,7 +1780,7 @@ NEURA_TEST(tier3, an_invariant_check_on_every_path_moves_to_the_preheader_with_t
         increment(loop, 32);
     });
     auto& ir = l->ir;
-    d3::hoist_invariants(ir.f, ir.counts);
+    d3::hoist_invariants(ir.image, ir.f, ir.counts);
     ir.expect_valid("after");
     const auto p = preheader_of(ir, l->head);
     check_equal(ir.block_of(product), p, "the checked product moved");
@@ -1687,7 +1811,7 @@ NEURA_TEST(tier3, a_check_on_a_conditional_path_is_not_hoisted) {
     });
     auto& ir = l->ir;
     ir.expect_valid("before");
-    d3::hoist_invariants(ir.f, ir.counts);
+    d3::hoist_invariants(ir.image, ir.f, ir.counts);
     ir.expect_valid("after");
     const auto p = preheader_of(ir, l->head);
     check(p != t3::none, "a preheader was made for the check that can move");
@@ -1715,7 +1839,7 @@ NEURA_TEST(tier3, a_check_is_not_hoisted_past_a_state_call_that_writes_a_helper_
         const std::string what = effect == t3::Op::StateCall ? "a state call" : effect == t3::Op::Helper ? "a helper"
                                  : effect == t3::Op::Call ? "a call" : "a write-back";
         ir.expect_valid(what + " before");
-        d3::hoist_invariants(ir.f, ir.counts);
+        d3::hoist_invariants(ir.image, ir.f, ir.counts);
         ir.expect_valid(what + " after");
         const auto p = preheader_of(ir, l->head);
         check(p != t3::none, what + ": a preheader was made for the check before the effect");
@@ -1735,7 +1859,7 @@ NEURA_TEST(tier3, a_loop_that_can_be_entered_in_its_middle_is_left_alone) {
     });
     auto& ir = l->ir;
     ir.expect_valid("before");
-    d3::hoist_invariants(ir.f, ir.counts);
+    d3::hoist_invariants(ir.image, ir.f, ir.counts);
     run_elimination(ir);
     check_equal(preheader_of(ir, l->head), t3::none, "no preheader: the loop has an entry besides its head");
     check_equal(ir.block_of(invariant), l->body, "nothing moved");
@@ -1957,6 +2081,50 @@ std::vector<Built> build_all(const nvr::Image& image, nvm::TierCache& cache) {
         list.push_back(std::move(built));
     }
     return list;
+}
+
+NEURA_TEST(tier3, a_field_read_stays_in_the_loop_when_its_preheader_only_proves_the_base_layout) {
+    if (!programs_run()) return;
+    const auto image = build_program({backend_dir(environment) / "tier3" / "field-layout-hoist.nra"});
+    const auto names = nvr::decode_names(image);
+    check(names.has_value(), "the image names its functions");
+    const auto walk = std::ranges::find_if(names->functions, [](const std::string& name) {
+        return name == "walk" || name.ends_with(".walk");
+    });
+    check(walk != names->functions.end(), "the image has a walk function");
+    const auto function = static_cast<std::uint32_t>(walk - names->functions.begin());
+
+    // Settle the portable program, then build and inspect the optimized IR
+    // separately. The test never has to run the speculative field load.
+    auto options = native_options();
+    options.tier3 = nvm::TierOptions::Tier3::Off;
+    nvm::TierCache cache(image, options);
+    run_captured(image, limits_at(2, &cache));
+    const auto programs = build_all(image, cache);
+    const auto built = std::ranges::find_if(programs, [&](const Built& item) { return item.function == function; });
+    check(built != programs.end() && built->result.program, "walk has Tier 3 IR");
+    auto ir = built->result.program->ir;
+    t3::optimize(image, ir, true);
+    bool checked_cell_in_preheader = false;
+    bool read_special_in_loop = false;
+    for (const auto& block : ir.blocks) {
+        for (const auto id : block.insts) {
+            const auto& in = ir.insts[id];
+            if (in.op == t3::Op::CheckKind && block.preheader) {
+                const auto& test = ir.type_tests[in.imm];
+                checked_cell_in_preheader |= test.types.size() == 2 &&
+                    std::ranges::any_of(test.types, [&](std::uint32_t layout) {
+                        return image.layouts[layout].fields.size() == 1;
+                    });
+            }
+            if (in.op == t3::Op::LoadField && in.imm == 1) {
+                check(!block.preheader, "the subclass-only field may not leave the loop");
+                read_special_in_loop = true;
+            }
+        }
+    }
+    check(checked_cell_in_preheader && read_special_in_loop,
+          "the preheader proves the base layout while the loop retains the subclass load");
 }
 
 NEURA_TEST(tier3, the_passes_leave_every_function_program_of_the_test_programs_well_formed_and_remove_checks_from_them) {

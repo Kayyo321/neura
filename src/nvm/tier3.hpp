@@ -6,6 +6,7 @@
 #include "tier2.hpp"
 
 #include <atomic>
+#include <compare>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -13,6 +14,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -200,6 +202,7 @@ enum Flag : std::uint16_t {
     // it elsewhere (tier3_float.cpp places the Canons that make every
     // observed bit the reference's).
     Deferred = 16,
+    BoundsProven = 32,   // Element access whose bounds were proved without a guard.
 };
 
 struct Inst {
@@ -215,8 +218,9 @@ struct Inst {
     std::uint32_t aux = none;
     lift::Instruction lifted;
     std::uint32_t state = none;
-    // For an op whose check a guard replaced: the Guard that covers it (none
-    // otherwise). It dominates the op (verifier rule V10). A NotEqual
+    // For an op whose check a guard replaced: the Guard that covers it. An
+    // element access with an intact check names its CheckIndex here. Both
+    // dominate the op (verifier rule V10). A NotEqual
     // comparison that exits an induction loop and whose true edge the
     // analysis reads as "the variable is below the bound" names the Guard
     // that asserts the variable starts at or below it, and its `imm` says
@@ -294,6 +298,15 @@ struct FrameState {
     // SSA values of C and K (K: none while no inline kernel runs).
     std::uint32_t blocks = none;
     std::uint32_t kernel_steps = none;
+    // A speculative heap preflight can fail even when the original loop
+    // succeeds. Its state names the original loop header for back-off.
+    bool loop_preflight = false;
+};
+
+struct LoopSite {
+    std::uint32_t function;
+    std::uint32_t block;
+    auto operator<=>(const LoopSite&) const = default;
 };
 
 // The kind and type an entry must have: the static type of a reference
@@ -523,7 +536,8 @@ bool verify_enabled();
 // verifying after each pass when `verify` is set; a violation prints the
 // pass and the IR and aborts. `NEURA_TIER3_PASSES=0` (a testing aid, read
 // once) turns the pipeline off in TierCache::compile_native.
-void optimize(const nvr::Image& image, Function& function, bool verify);
+void optimize(const nvr::Image& image, Function& function, bool verify,
+              std::span<const LoopSite> checked_loops = {});
 
 // Marks the float arithmetic and the Sqrts Deferred and places the Canons
 // that make every observed bit the reference's (tier3_float.cpp, design 7.2),

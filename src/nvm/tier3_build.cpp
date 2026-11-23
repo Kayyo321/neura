@@ -935,7 +935,8 @@ private:
     }
 
     std::uint32_t heap_op(Op op, ValueType type, std::uint32_t a, std::uint32_t b = none, std::uint32_t c = none,
-                          std::uint32_t d = none, std::uint64_t imm = 0, std::uint32_t aux = none) {
+                          std::uint32_t d = none, std::uint64_t imm = 0, std::uint32_t aux = none,
+                          std::uint32_t guard = none) {
         Inst in;
         in.op = op;
         in.type = type;
@@ -945,6 +946,7 @@ private:
         in.operands[3] = d;
         in.imm = imm;
         in.aux = aux;
+        in.guard = guard;
         if (op == Op::StoreField || op == Op::StoreElement || op == Op::StoreGlobal || op == Op::Widen) in.flags = Effect;
         return emit(std::move(in));
     }
@@ -1068,7 +1070,7 @@ private:
             const auto k = static_cast<std::uint64_t>(components->size());
             const auto words = heap_op(Op::LoadLength, integer(64), entry);
             const auto elements = arithmetic(lift::Opcode::Divide, words, constant(k, integer(bits_of(k))), state);
-            heap_check(Op::CheckIndex, args[1], elements, 0, state);
+            const auto bounds = heap_check(Op::CheckIndex, args[1], elements, 0, state);
             const auto first = arithmetic(lift::Opcode::Multiply, args[1], constant(k, integer(bits_of(k))), state);
             const auto word = arithmetic(lift::Opcode::Add, first, constant(exit.immediate, integer(bits_of(exit.immediate))),
                                          state);
@@ -1077,9 +1079,9 @@ private:
             // The component rides in aux: its own alias class (Memory).
             const auto component = static_cast<std::uint32_t>(exit.immediate);
             if (exit.operation == StateOp::ReadComponent) {
-                result = heap_op(Op::LoadElement, result_type, data, word, storage, none, 8, component);
+                result = heap_op(Op::LoadElement, result_type, data, word, storage, none, 8, component, bounds);
             } else {
-                heap_op(Op::StoreElement, {}, data, word, storage, args[2], 8, component);
+                heap_op(Op::StoreElement, {}, data, word, storage, args[2], 8, component, bounds);
             }
             break;
         }
@@ -1087,7 +1089,7 @@ private:
         case StateOp::WriteElement: {
             const auto entry = typed_entry(args[0], types[0].type, state);
             const auto length = heap_op(Op::LoadLength, integer(64), entry);
-            heap_check(Op::CheckIndex, args[1], length, 0, state);
+            const auto bounds = heap_check(Op::CheckIndex, args[1], length, 0, state);
             const auto declared = declared_bytes(types[0].type);
             if (exit.operation == StateOp::WriteElement && !fits(args[2], declared)) {
                 // A value that may not fit the declared width: the reference
@@ -1098,9 +1100,9 @@ private:
             const auto data = heap_op(Op::LoadData, {Type::Ptr, 0}, entry);
             const auto storage = heap_op(Op::LoadStorage, integer(8), entry);
             if (exit.operation == StateOp::ReadElement) {
-                result = heap_op(Op::LoadElement, result_type, data, args[1], storage, none, declared);
+                result = heap_op(Op::LoadElement, result_type, data, args[1], storage, none, declared, none, bounds);
             } else {
-                heap_op(Op::StoreElement, {}, data, args[1], storage, args[2], declared);
+                heap_op(Op::StoreElement, {}, data, args[1], storage, args[2], declared, none, bounds);
             }
             break;
         }
@@ -1555,6 +1557,7 @@ private:
             for (auto& operand : in.operands) {
                 if (operand != none) operand = find(operand);
             }
+            if (in.guard != none) in.guard = find(in.guard);
             for (std::uint32_t i = 0; i < in.count; ++i) {
                 // Gather's odd entries are bit numbers, not values.
                 if (in.op == Op::Gather && (i % 2) != 0) continue;
@@ -1737,6 +1740,7 @@ private:
             work.pop_back();
             const auto& in = f_->insts[v];
             for (const auto operand : in.operands) mark(operand);
+            mark(in.guard);
             if (in.op == Op::Phi || in.op == Op::StateCall || in.op == Op::Helper || in.op == Op::Call ||
                 in.op == Op::Select || in.op == Op::AllocObject || in.op == Op::Append || in.op == Op::Return) {
                 for (std::uint32_t i = 0; i < in.count; ++i) mark(f_->extras[in.extra + i]);
@@ -1770,6 +1774,7 @@ private:
         for (auto& in : insts) {
             for (auto& operand : in.operands) operand = map(operand);
             if (in.state != none) in.state = state_number[in.state];
+            in.guard = map(in.guard);
             if (in.count != 0) {
                 const auto old = in.extra;
                 in.extra = static_cast<std::uint32_t>(extras.size());
@@ -2014,13 +2019,26 @@ const tier3::Program* TierCache::native_code(const tier2::Region& program, tier3
 }
 
 const tier3::Program* TierCache::compile_native(const tier2::Region& program, tier3::Variant variant) {
+    return compile_native(program, variant, {}, nullptr);
+}
+
+std::unique_ptr<tier3::Program> TierCache::rebuild_native(const tier2::Region& program, tier3::Variant variant,
+                                                        std::span<const tier3::LoopSite> checked_loops) {
+    std::unique_ptr<tier3::Program> replacement;
+    compile_native(program, variant, checked_loops, &replacement);
+    return replacement;
+}
+
+const tier3::Program* TierCache::compile_native(const tier2::Region& program, tier3::Variant variant,
+                                               std::span<const tier3::LoopSite> checked_loops,
+                                               std::unique_ptr<tier3::Program>* replacement) {
     if (program.program_id >= native_capacity_) return nullptr;
     auto& slot = native_programs_[program.program_id * tier3::variant_count + static_cast<unsigned>(variant)];
     const tier3::Program* expected = nullptr;
     const tier3::Program* previous = nullptr;
     // On the first build, the other runs go on interpreting. On a rebuild,
     // they keep using the published code until its replacement is ready.
-    if (!slot.compare_exchange_strong(expected, native_forming, std::memory_order_acq_rel)) {
+    if (!replacement && !slot.compare_exchange_strong(expected, native_forming, std::memory_order_acq_rel)) {
         previous = native_code(program, variant);
         if (!previous || !tier3::standard_variant(variant)) return previous;
         const std::lock_guard lock(mutex_);
@@ -2045,11 +2063,11 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
         // variants keep every call and return the reference's.
         if (built.program && tier3::standard_variant(variant) && options_.native_inlining) {
             const tier3::InlineSource source{
-                [this, previous, &pending](std::uint32_t function) -> tier3::InlineSource::CalleeProgram {
+                [this, previous, replacement, &pending](std::uint32_t function) -> tier3::InlineSource::CalleeProgram {
                     const std::lock_guard lock(mutex_);
                     const auto& found = programs_[function];
                     if (found.state == RegionEntry::State::Settled) return {found.region.get(), true};
-                    if (!previous) pending.push_back(function);
+                    if (!previous && !replacement) pending.push_back(function);
                     return {nullptr, false};
                 },
                 [this](const tier2::Region& region, std::uint32_t table) { return dispatch_record(region, table); },
@@ -2086,12 +2104,12 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
                     if (!tier3::detail::find_loops(entry->ir, cfg).empty()) {
                         const auto omitted = tier3::detail::prune_dead_frame_slots(image_, entry->ir);
                         const auto verify_entry = verify || (omitted != 0 && tier3::frame_replay_seed());
-                        tier3::optimize(image_, entry->ir, verify_entry);
+                        tier3::optimize(image_, entry->ir, verify_entry, checked_loops);
                         tier3::place_canons(image_, entry->ir, verify_entry);
                         built.program->function_entry = std::move(entry);
                     }
                 }
-                tier3::optimize(image_, original, verify);
+                tier3::optimize(image_, original, verify, checked_loops);
             }
             tier3::place_canons(image_, original, verify);
         }
@@ -2145,9 +2163,11 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
                 }
             }
         }
+        const char* suffix = ":\n";
+        if (replacement) suffix = " (loop preflight back-off):\n";
+        else if (previous) suffix = " (callee settlement rebuild):\n";
         std::fputs(("tier 3 program " + std::to_string(program.program_id) + " of function " +
-                    std::to_string(program.function) + (previous ? " (callee settlement rebuild):\n" : ":\n") +
-                    text).c_str(), stderr);
+                    std::to_string(program.function) + suffix + text).c_str(), stderr);
     }
     bool settled_during_build = false;
     {
@@ -2182,15 +2202,16 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
             }
             statistics_.native_inlined += built.program->ir.inlined_calls;
             statistics_.native_class_tests += built.program->ir.class_tested_dispatches;
-            native_owned_.push_back(std::move(built.program));
+            if (replacement) *replacement = std::move(built.program);
+            else native_owned_.push_back(std::move(built.program));
             ++statistics_.native_programs;
             statistics_.native_bytes += bytes;
         } else {
             ++statistics_.native_failed;
-            ++statistics_.native_rejections[previous ? "rebuild: " + built.reason : built.reason];
+            ++statistics_.native_rejections[previous || replacement ? "rebuild: " + built.reason : built.reason];
         }
         // Settlement observes the wait record and this slot under one lock.
-        slot.store(published ? published : previous ? previous : native_failed, std::memory_order_release);
+        if (!replacement) slot.store(published ? published : previous ? previous : native_failed, std::memory_order_release);
     }
     if (settled_during_build) return compile_native(program, variant);
     return published ? published : previous;
@@ -2232,6 +2253,7 @@ void TierCache::add_native_events(const NativeCounts& counts,
     total.budget += counts.budget;
     total.checks += counts.checks;
     total.guards += counts.guards;
+    total.loop_preflight_backoffs += counts.loop_preflight_backoffs;
     total.selectors += counts.selectors;
     total.references += counts.references;
     total.state_traps += counts.state_traps;

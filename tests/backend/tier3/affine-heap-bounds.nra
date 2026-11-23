@@ -1,0 +1,47 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+// The guard must admit side 181 and leave side 182 to the checked int16 arithmetic.
+let grid = func(values: int[list], n: int16) -> int {
+    let total = 0;
+    for (let i: int16 = 0; i < n; i = i + 1) {
+        for (let j: int16 = 0; j < n; j = j + 1) {
+            let k: int16 = i * n + j;
+            let v = values[k];
+            values[k] = v + 1;
+            total = total + v;
+        }
+    }
+    return total;
+};
+
+let drive = func(values: int[list], reps: int, last: int16) -> int {
+    let total = 0;
+    for (let lane = 0; lane < reps; lane = lane + 1) {
+        let side: int16 = 8;
+        if (lane == reps - 1) {
+            side = last;
+        }
+        total = total + grid(values, side);
+    }
+    return total;
+};
+
+let P = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let values: int[list] = new;
+        let limit = 33200;
+        if (args[0] == "short") {
+            limit = 32760;
+        }
+        for (let i = 0; i < limit; i = i + 1) {
+            values.append(1);
+        }
+        let side: int16 = 181;
+        if (args[0] == "wide") {
+            side = 182;
+        }
+        console.println("{}", drive(values, 100, side));
+        return program.ExitCode.Ok;
+    };
+);

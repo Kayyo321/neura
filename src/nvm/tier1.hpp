@@ -15,6 +15,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -27,6 +28,7 @@ struct Region;
 namespace tier3 {
 struct Program;
 struct DispatchRecord;
+struct LoopSite;
 enum class Variant : std::uint8_t;
 }
 
@@ -191,6 +193,7 @@ struct NativeCounts {
     std::uint64_t budget = 0;
     std::uint64_t checks = 0;
     std::uint64_t guards = 0;
+    std::uint64_t loop_preflight_backoffs = 0;
     std::uint64_t selectors = 0;
     std::uint64_t references = 0;
     std::uint64_t state_traps = 0;
@@ -396,6 +399,10 @@ public:
     bool native_ready(const tier2::Region& program, std::uint64_t arrivals);
     const tier3::Program* native_code(const tier2::Region& program, tier3::Variant variant) const;
     const tier3::Program* compile_native(const tier2::Region& program, tier3::Variant variant);
+    // A run-local native replacement with checked loops. Its owner keeps
+    // it alive for as long as any native activation or callee cell uses it.
+    std::unique_ptr<tier3::Program> rebuild_native(const tier2::Region& program, tier3::Variant variant,
+                                                  std::span<const tier3::LoopSite> checked_loops);
     // The speculation record of dispatch table `table` of `program`
     // (tier3::DispatchRecord), or null: programs have them only while tier 3
     // is on.
@@ -521,6 +528,9 @@ private:
     };
     std::vector<NativeWaiting> native_waiting_;
     std::vector<std::unique_ptr<tier3::Program>> native_owned_;
+    const tier3::Program* compile_native(const tier2::Region& program, tier3::Variant variant,
+                                         std::span<const tier3::LoopSite> checked_loops,
+                                         std::unique_ptr<tier3::Program>* replacement);
     // The speculation records of each program's dispatch tables, by program
     // number, made when the program is published (with tier 3 on).
     std::unique_ptr<std::atomic<tier3::DispatchRecord*>[]> dispatch_records_;

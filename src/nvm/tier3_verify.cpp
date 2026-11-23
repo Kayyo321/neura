@@ -1362,14 +1362,24 @@ private:
                (l.format == lift::FloatType::Binary32 || l.format == lift::FloatType::Binary64);
     }
 
-    // --- V10: removed checks have their guard -----------------------------------------------
+    // --- V10: each element access records its bounds proof -----------------------------------
 
     void guards() {
         for (std::uint32_t id = 0; id < f_.insts.size(); ++id) {
             const auto& in = f_.insts[id];
-            if (in.guard == none || block_of_[id] == none || !reachable(block_of_[id])) continue;
-            if (in.guard >= f_.insts.size() || f_.insts[in.guard].op != Op::Guard || block_of_[in.guard] == none) {
-                fail("V10", at(id) + " names a guard that is not a Guard");
+            if (block_of_[id] == none || !reachable(block_of_[id])) continue;
+            const bool element = in.op == Op::LoadElement || in.op == Op::StoreElement;
+            if (in.guard == none) {
+                if (element && (in.flags & BoundsProven) == 0) fail("V10", at(id) + " has no index check or bounds proof");
+                continue;
+            }
+            if (in.guard >= f_.insts.size() || block_of_[in.guard] == none) {
+                fail("V10", at(id) + " names a missing guard");
+                continue;
+            }
+            const auto& check = f_.insts[in.guard];
+            if (check.op != Op::Guard && (!element || check.op != Op::CheckIndex)) {
+                fail("V10", at(id) + " names an invalid guard");
                 continue;
             }
             if (!available(in.guard, block_of_[id], position_[id])) {
@@ -1454,6 +1464,7 @@ std::string describe(const Function& f) {
             if ((in.op == Op::LoadField || in.op == Op::StoreField) && in.aux != none) out << " words " << in.aux;
             if (in.op == Op::Lift) out << " op" << static_cast<int>(in.lifted.op);
             if ((in.flags & Deferred) != 0) out << " deferred";
+            if ((in.flags & BoundsProven) != 0) out << " bounds proved";
             if (in.state != none) out << " state " << in.state;
             if (in.guard != none) out << " guard %" << in.guard;
             if (in.op == Op::Jump || in.op == Op::Branch || in.op == Op::Switch || in.op == Op::Dispatch) {

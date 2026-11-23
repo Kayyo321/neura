@@ -158,9 +158,10 @@ std::string audit_lift(const lift::Instruction& l, unsigned result_width, unsign
 std::string audit_refine(lift::Opcode op, bool sense, bool is_signed, unsigned w, unsigned dx, unsigned dy, std::uint64_t x_lo,
                          std::uint64_t x_hi, std::uint64_t y_lo, std::uint64_t y_hi, std::uint64_t samples);
 // Preheaders and loop-invariant code motion.
-bool hoist_invariants(Function& f, Counts& counts);
+bool hoist_invariants(const nvr::Image& image, Function& f, Counts& counts,
+                      std::span<const LoopSite> checked_loops = {});
 // Bounds checks covered by stable heap metadata and a preheader guard.
-bool guard_heap_bounds(Function& f, Counts& counts);
+bool guard_heap_bounds(Function& f, Counts& counts, std::span<const LoopSite> checked_loops = {});
 
 // A natural loop with a single header that dominates it.
 struct Loop {
@@ -183,6 +184,7 @@ std::uint32_t make_preheader(Function& f, const Loop& loop);
 // A copy of the header's entry state, in the preheader: the header's phis
 // replaced by what the preheader gives them.
 std::uint32_t preheader_state(Function& f, const Loop& loop, std::uint32_t preheader);
+bool loop_preflight_disabled(const Function& f, const Loop& loop, std::span<const LoopSite> checked_loops);
 // The value the preheader gives the header's phi `phi`.
 std::uint32_t entry_operand(const Function& f, const Loop& loop, std::uint32_t phi);
 

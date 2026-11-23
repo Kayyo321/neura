@@ -1147,7 +1147,7 @@ bool passes_enabled() {
     return enabled;
 }
 
-void optimize(const nvr::Image& image, Function& f, bool verify_each) {
+void optimize(const nvr::Image& image, Function& f, bool verify_each, std::span<const LoopSite> checked_loops) {
     using namespace detail;
     Counts counts = std::move(f.pass_counts);
     const auto check = [&](const char* pass) {
@@ -1169,9 +1169,9 @@ void optimize(const nvr::Image& image, Function& f, bool verify_each) {
     run("value numbering", [&] { number_values(f, counts); });
     run("check elimination", [&] { eliminate_checks(image, f, counts); });
     run("fold and propagate", [&] { simplify(f, counts); });
-    run("loop-invariant code motion", [&] { hoist_invariants(f, counts); });
+    run("loop-invariant code motion", [&] { hoist_invariants(image, f, counts, checked_loops); });
     run("value numbering", [&] { number_values(f, counts); });
-    run("guarded heap bounds", [&] { guard_heap_bounds(f, counts); });
+    run("guarded heap bounds", [&] { guard_heap_bounds(f, counts, checked_loops); });
     run("dead code removal", [&] { remove_dead(f, counts); });
     run("checkpoint lengths", [&] { compute_budgets(f); });
     f.pass_counts = std::move(counts);

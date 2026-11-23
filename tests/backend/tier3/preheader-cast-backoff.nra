@@ -1,0 +1,46 @@
+// A cast and a subclass field read on a path the loop never takes. LICM's
+// preflight may hoist the kind check (and the field read) to the preheader.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Cell = class (
+    export let value: int = 1;
+);
+
+let Special = class:Cell (
+    export let extra: int = 7;
+);
+
+let walk = func(values: int[list], c: Cell, n: int) -> int {
+    let total = 0;
+    for (let i = 0; i < n; i = i + 1) {
+        let v = values[i];
+        values[i] = v + 1;
+        if (v == -5) {
+            let s = c as Special;
+            total = total + s.extra;
+        }
+        total = total + c.value;
+    }
+    return total;
+};
+
+let P = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let values: int[list] = new;
+        for (let i = 0; i < 200; i = i + 1) {
+            values.append(i);
+        }
+        let plain = new Cell();
+        let sum = 0;
+        for (let w = 0; w < 500; w = w + 1) {
+            sum = sum + walk(values, plain, 200);
+        }
+        console.println("{}", sum);
+        if (args[0] == "cast") {
+            values[3] = -5;
+            console.println("{}", walk(values, plain, 200));
+        }
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,131 @@
+// Tier 3 preheaders around float64 list reads and fixed-width element writes.
+// Arguments are the case, the initial index, and the exclusive loop bound.
+// Normal cases warm update before the last call. The osr case enters it once.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let lists = import:Std.Collections.Lists;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+export let GuardedPreheader = module:program.Entry (
+    let Buffer = class (
+        export let values: float64[list];
+
+        export let init = func(initial: float64[list]) {
+            values = initial;
+        };
+    );
+
+    // The destination and input may alias. The replacement cannot change
+    // a float64 list's storage width, handle, or length.
+    .NoInline
+    let update = func(destination: Buffer, input: Buffer, start: int, stop: int) -> float64 {
+        let sum = 0.0;
+        for (let i = start; i < stop; i += 1) {
+            destination.values[i] = destination.values[i] + 0.5;
+            sum = sum + input.values[i];
+        }
+        return sum;
+    };
+
+    .NoInline
+    let affine_update = func(destination: Buffer, input: Buffer, start: int, stop: int,
+        offset: int, stride: int) -> float64 {
+        let sum = 0.0;
+        for (let i = start; i < stop; i += 1) {
+            destination.values[i] = destination.values[i] + 0.5;
+            sum = sum + input.values[offset + i * stride];
+        }
+        return sum;
+    };
+
+    // The write through other can change the field read through input.
+    .NoInline
+    let replace = func(input: Buffer, other: Buffer, new_values: float64[list], start: int,
+        stop: int) -> float64 {
+        let sum = 0.0;
+        for (let i = start; i < stop; i += 1) {
+            sum = sum + input.values[i];
+            if (i == 1) {
+                other.values = new_values;
+            }
+        }
+        return sum;
+    };
+
+    // The list reached through input can grow through its separate alias.
+    .NoInline
+    let extend = func(input: Buffer, other: float64[list], start: int, stop: int) -> float64 {
+        let sum = 0.0;
+        for (let i = start; i < stop; i += 1) {
+            other.append(0.5);
+            sum = sum + input.values[i];
+        }
+        return sum;
+    };
+
+    let warm = func {
+        last source = new Buffer(new([1.0, 2.0, 3.0, 4.0]));
+        last destination = new Buffer(new([1.0, 2.0, 3.0, 4.0]));
+        let checksum = 0.0;
+        for (let round = 0; round < 128; round += 1) {
+            checksum = checksum + update(destination, source, 0, 4);
+        }
+        if (checksum != 1280.0) {
+            trap_with_message("guarded preheader: warm-up checksum");
+        }
+    };
+
+    let print_bits = func(label: string, value: float64) {
+        console.println("{} {:x}", label, value.to_bits());
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        if (args.length != 3) {
+            trap_with_message("guarded preheader: expected case, start, stop");
+        }
+        last mode = args[0];
+        last start = result.value_or<int32>(int32s.parse(args[1]), 0);
+        last stop = result.value_or<int32>(int32s.parse(args[2]), 0);
+
+        if (mode == "osr") {
+            last source = new Buffer(lists.filled<float64>(256, 2.0));
+            last destination = new Buffer(lists.filled<float64>(256, 1.0));
+            print_bits(mode, update(destination, source, start, stop));
+            return program.ExitCode.Ok;
+        }
+
+        warm();
+        last values: float64[list] = new([1.0, 2.0, 3.0, 4.0]);
+        last destination = new Buffer(values);
+        if (mode == "write" || mode == "high" || mode == "negative") {
+            last sum = update(destination, destination, start, stop);
+            console.println("{} {:x} {:x} {:x}", mode, sum.to_bits(),
+                values[0].to_bits(), values[3].to_bits());
+        } else if (mode == "zero") {
+            last absent: Buffer = nil;
+            print_bits(mode, update(absent, absent, start, stop));
+        } else if (mode == "late") {
+            last short_source = new Buffer(new([10.0, 20.0]));
+            print_bits(mode, update(destination, short_source, start, stop));
+        } else if (mode == "mutate") {
+            last replacement: float64[list] = new([10.0, 20.0, 30.0, 40.0]);
+            print_bits(mode, replace(destination, destination, replacement, start, stop));
+        } else if (mode == "shrink") {
+            last replacement: float64[list] = new([10.0, 20.0]);
+            print_bits(mode, replace(destination, destination, replacement, start, stop));
+        } else if (mode == "grow") {
+            last backing: float64[list] = new([1.0]);
+            last source = new Buffer(backing);
+            last sum = extend(source, backing, start, stop);
+            console.println("{} {:x} {}", mode, sum.to_bits(), backing.length);
+        } else if (mode == "affine" || mode == "affine-overflow") {
+            last source = new Buffer(new([0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]));
+            last stride = mode == "affine" ? 2 : 2147483647;
+            print_bits(mode, affine_update(destination, source, start, stop, 1, stride));
+        } else {
+            trap_with_message("guarded preheader: unknown case");
+        }
+        return program.ExitCode.Ok;
+    };
+);

@@ -889,7 +889,7 @@ struct Round {
 // masks that do nothing, and folds what has one value. `guards` are the
 // guards of this round (instructions that rely on one name it).
 Round eliminate(Function& f, const Cfg& cfg, const Analysis& analysis, Counts& counts,
-                const std::vector<std::pair<std::uint32_t, std::uint32_t>>& guards) {
+                const std::vector<std::pair<std::uint32_t, std::uint32_t>>& guards, bool prove_bounds) {
     Round round;
     Replacements repl(f.insts.size());
     std::vector<std::uint8_t> gone(f.insts.size(), 0);
@@ -927,7 +927,7 @@ Round eliminate(Function& f, const Cfg& cfg, const Analysis& analysis, Counts& c
                 }
                 continue;
             }
-            if (in.op == Op::CheckIndex) {
+            if (in.op == Op::CheckIndex && prove_bounds) {
                 const auto x = analysis.refined(in.operands[0], node);
                 const auto len = analysis.refined(in.operands[1], node);
                 if ((!x.bottom && !len.bottom && x.u.hi < len.u.lo) || analysis.index_below(in.operands[0], in.operands[1], node)) {
@@ -981,6 +981,12 @@ Round eliminate(Function& f, const Cfg& cfg, const Analysis& analysis, Counts& c
         }
     }
     if (repl.any() || std::any_of(gone.begin(), gone.end(), [](std::uint8_t g) { return g != 0; })) {
+        for (auto& in : f.insts) {
+            if ((in.op == Op::LoadElement || in.op == Op::StoreElement) && in.guard != none && gone[in.guard]) {
+                in.guard = none;
+                in.flags |= BoundsProven;
+            }
+        }
         repl.apply(f);
         for (auto& block : f.blocks) {
             std::vector<std::uint32_t> kept;
@@ -1471,7 +1477,7 @@ bool eliminate_checks(const nvr::Image&, Function& f, Counts& counts) {
         Cfg cfg(f);
         Analysis analysis(f, cfg);
         if (!analysis.run()) return false;
-        any = eliminate(f, cfg, analysis, counts, {}).changed;
+        any = eliminate(f, cfg, analysis, counts, {}, true).changed;
     }
     // Guards of induction variables: facts about the value a loop starts
     // with, which an entry from the interpreter gives from the frame.
@@ -1509,7 +1515,9 @@ bool eliminate_checks(const nvr::Image&, Function& f, Counts& counts) {
             // use them.
             return any;
         }
-        const auto result = eliminate(f, cfg2, with_guards, counts, guards);
+        // The heap-preheader pass records the exact guard covering an
+        // access. Bounds proved here can depend on several induction guards.
+        const auto result = eliminate(f, cfg2, with_guards, counts, guards, false);
         prune_guards(f, made_all, counts);
         if (!result.changed) return any;
         any = true;
@@ -1517,11 +1525,13 @@ bool eliminate_checks(const nvr::Image&, Function& f, Counts& counts) {
     return any;
 }
 
-bool guard_heap_bounds(Function& f, Counts& counts) {
+bool guard_heap_bounds(Function& f, Counts& counts, std::span<const LoopSite> checked_loops) {
     if (std::none_of(f.insts.begin(), f.insts.end(), [](const Inst& in) { return in.op == Op::CheckIndex; })) return false;
     const Cfg cfg(f);
     auto loops = find_loops(f, cfg);
-    std::erase_if(loops, [&](const Loop& loop) { return head_state(f, loop) == none || !stable_length(f, loop); });
+    std::erase_if(loops, [&](const Loop& loop) {
+        return head_state(f, loop) == none || loop_preflight_disabled(f, loop, checked_loops) || !stable_length(f, loop);
+    });
     if (loops.empty()) return false;
     // Prefer the furthest enclosing stable loop so the bounds need not be
     // checked again at every entry into a nested loop.
@@ -1530,11 +1540,7 @@ bool guard_heap_bounds(Function& f, Counts& counts) {
     if (!analysis.run()) return false;
     const Places places(f);
 
-    struct Use {
-        std::uint32_t block;
-        std::uint32_t check;
-    };
-    std::map<std::uint32_t, std::map<HeapBound, std::vector<Use>>> plans;
+    std::map<std::uint32_t, std::map<HeapBound, std::vector<std::uint32_t>>> plans;
     for (const auto block : cfg.rpo) {
         auto node = analysis.start_node(block);
         for (const auto id : f.blocks[block].insts) {
@@ -1552,18 +1558,19 @@ bool guard_heap_bounds(Function& f, Counts& counts) {
                     return available_at_header(f, cfg, places, loop, upper.value);
                 });
                 if (direct != bounds.end()) {
-                    plans[loop.header][{direct->value, length, 0, direct->inclusive}].push_back({block, id});
+                    plans[loop.header][{direct->value, length, 0, direct->inclusive}].push_back(id);
                     break;
                 }
                 if (affine && available_at_header(f, cfg, places, loop, affine->bound)) {
-                    plans[loop.header][*affine].push_back({block, id});
+                    plans[loop.header][*affine].push_back(id);
                     break;
                 }
             }
         }
     }
 
-    std::vector<std::uint8_t> removed(f.insts.size(), 0);
+    if (plans.empty()) return false;
+    std::vector<std::uint32_t> guard_of(f.insts.size(), none);
     for (const auto& [header, group] : plans) {
         // Other preheaders can have inserted blocks inside this loop.
         const auto current = find_loops(f, Cfg(f));
@@ -1571,27 +1578,25 @@ bool guard_heap_bounds(Function& f, Counts& counts) {
         if (loop == current.end()) continue;
         const auto preheader = make_preheader(f, *loop);
         const auto state = preheader_state(f, *loop, preheader);
-        for (const auto& [proof, uses] : group) {
+        f.states[state].loop_preflight = true;
+        for (const auto& [proof, checks] : group) {
             const auto guard = insert_heap_bound(f, proof, preheader, state);
-            const auto entry = f.insts[proof.length].operands[0];
             ++counts[proof.square_limit == 0 ? "guard.heap_bounds" : "guard.heap_affine"];
-            for (const auto& [block, check] : uses) {
-                const auto index = f.insts[check].operands[0];
-                for (const auto id : f.blocks[block].insts) {
-                    auto& inst = f.insts[id];
-                    if ((inst.op != Op::LoadElement && inst.op != Op::StoreElement) || inst.operands[1] != index ||
-                        inst.guard != none || places.position[id] <= places.position[check]) continue;
-                    const auto& data = f.insts[inst.operands[0]];
-                    if (data.op == Op::LoadData && data.operands[0] == entry) inst.guard = guard;
-                }
-                removed[check] = 1;
+            for (const auto check : checks) {
+                guard_of[check] = guard;
                 ++counts["elim.bounds"];
             }
         }
     }
-    if (plans.empty()) return false;
+    // Value numbering can share the removed check with accesses in other blocks.
+    for (auto& in : f.insts) {
+        if ((in.op == Op::LoadElement || in.op == Op::StoreElement) && in.guard < guard_of.size() &&
+            guard_of[in.guard] != none) {
+            in.guard = guard_of[in.guard];
+        }
+    }
     for (auto& block : f.blocks) {
-        std::erase_if(block.insts, [&](std::uint32_t id) { return id < removed.size() && removed[id]; });
+        std::erase_if(block.insts, [&](std::uint32_t id) { return id < guard_of.size() && guard_of[id] != none; });
     }
     return true;
 }

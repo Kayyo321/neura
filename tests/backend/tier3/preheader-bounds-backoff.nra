@@ -1,0 +1,33 @@
+// The bound n exceeds the length, but a data-dependent break always leaves
+// before the access goes out of range. The heap guard fails on every entry.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let scan = func(values: int[list], n: int) -> int {
+    let total = 0;
+    for (let i = 0; i < n; i = i + 1) {
+        let v = values[i];
+        if (v < 0) {
+            break;
+        }
+        values[i] = v + 1;
+        total = total + v;
+    }
+    return total;
+};
+
+let P = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let values: int[list] = new;
+        for (let i = 0; i < 2000; i = i + 1) {
+            values.append(1);
+        }
+        values.append(-1);
+        let sum = 0;
+        for (let w = 0; w < 300; w = w + 1) {
+            sum = sum + scan(values, values.length + 7);
+        }
+        console.println("{}", sum);
+        return program.ExitCode.Ok;
+    };
+);

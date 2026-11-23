@@ -22,6 +22,8 @@
 namespace neura::testing {
 namespace {
 
+namespace t3 = nvm::tier3;
+
 // Lifts every block, forms every program at the first arrival, and turns
 // every program native at its first checkpoint, with machine code.
 nvm::TierOptions machine_options() {
@@ -287,6 +289,55 @@ NEURA_TEST(tier3, machine_code_of_a_loop_entered_in_its_middle_deoptimizes_exact
     check(off.statistics().native.steps > 0, "machine code ran the loop without the passes");
     // NEURA_TIER3_AFTER makes the program native only after that trap.
     if (nvm::tier3_after() == 0) check(traps.statistics().native.guards > 0, "the guard failed before the trap");
+}
+
+NEURA_TEST(tier3, the_affine_heap_guard_runs_at_the_int16_limit_and_replays_width_and_length_failures) {
+    const auto image = build_program({backend_dir(environment) / "tier3" / "affine-heap-bounds.nra"});
+    const auto serial = [](nvm::RunLimits& limits) { limits.profile = false; };
+    const auto overflow = run_at(image, 0, nullptr, {"wide"}, serial);
+    check(!overflow.result.completed && overflow.result.trap.kind == nvm::TrapKind::Program &&
+              overflow.result.trap.reason == 1, "side 182 traps in the original checked arithmetic");
+    const auto grid = overflow.result.trap.function;
+    auto options = machine_options();
+    // Keep grid as a separate native callee. Its loop-resume program cannot
+    // form an affine guard because it does not know the loop's initial state.
+    options.native_inlining = false;
+    for (const std::string mode : {"ok", "wide", "short"}) {
+        nvm::TierCache cache(image, options);
+        const auto expected = run_at(image, 0, nullptr, {mode}, serial);
+        const auto actual = run_at(image, 2, &cache, {mode}, serial);
+        check_same(actual, expected, "affine heap guard " + mode);
+        if (mode == "ok") {
+            check(actual.result.completed && actual.output == "355897\n", "side 181 fits int16 and the list");
+        } else if (mode == "short") {
+            check(!actual.result.completed && actual.result.trap.kind == nvm::TrapKind::IndexOutOfBounds,
+                  "side 181 with a one-element-short list traps at the original access");
+        }
+        if (!machine_code_runs() || !t3::passes_enabled()) continue;
+
+        const auto resolved = cache.program(grid, std::uint64_t{1} << 40);
+        check(resolved.region != nullptr, "grid has a Tier 2 program");
+        if (!resolved.region) continue;
+        auto* code = cache.native_code(*resolved.region, t3::Variant::SparseFrames);
+        if (!code) code = cache.native_code(*resolved.region, t3::Variant::Standard);
+        check(code && code->function_entry && code->function_entry->ir.pass_counts.contains("guard.heap_affine") &&
+                  !code->ir.pass_counts.contains("guard.heap_affine"), "grid guards only at its direct entry");
+        if (!code || !code->function_entry) continue;
+        const auto& states = code->function_entry->ir.states;
+        const auto header = std::ranges::find_if(states, [](const auto& state) { return state.loop_preflight; });
+        check(header != states.end(), "the affine guard names a loop-header recovery state");
+        if (header == states.end()) continue;
+
+        const auto stats = cache.statistics();
+        // Grid is the only callee the driver calls in its 100-iteration loop.
+        check(stats.native.cell_entries >= 90, "the driver repeatedly enters native callees directly");
+        check_equal(stats.native.guards, mode == "ok" ? std::uint64_t{0} : std::uint64_t{1},
+                    "affine guard failures for " + mode);
+        if (mode != "ok") {
+            check(stats.native_deopts.contains({grid, header->block}) && header->block != actual.result.trap.block,
+                  "native code fails at the preheader and replays the original trap inside grid");
+        }
+    }
 }
 
 NEURA_TEST(tier3, the_statistics_line_reports_machine_code_entries_and_bytes) {

@@ -1,5 +1,6 @@
 #include "tier3_passes.hpp"
 
+#include "heap.hpp"
 #include "lift/evaluate.hpp"
 
 #include <algorithm>
@@ -202,6 +203,14 @@ std::uint32_t preheader_state(Function& f, const Loop& loop, std::uint32_t) {
     return id;
 }
 
+bool loop_preflight_disabled(const Function& f, const Loop& loop, std::span<const LoopSite> checked_loops) {
+    if (checked_loops.empty()) return false;
+    const auto state = head_state(f, loop);
+    if (state == none) return false;
+    const auto& header = f.states[state];
+    return std::ranges::find(checked_loops, LoopSite{header.function, header.block}) != checked_loops.end();
+}
+
 namespace {
 
 const char* heap_kind_name(Op op) {
@@ -231,7 +240,8 @@ bool hoistable_pure(const Inst& in) {
     }
 }
 
-bool hoist_one(Function& f, const Cfg& cfg, const Loop& loop, Counts& counts) {
+bool hoist_one(const nvr::Image& image, Function& f, const Cfg& cfg, const Loop& loop, Counts& counts,
+               std::span<const LoopSite> checked_loops) {
     const Places places(f);
     const auto n = f.blocks.size();
     const bool has_state = head_state(f, loop) != none;
@@ -286,7 +296,7 @@ bool hoist_one(Function& f, const Cfg& cfg, const Loop& loop, Counts& counts) {
     // helper, call or state call may free, collect, grow or write anything).
     bool safepoint = false;
     bool widens = false;
-    bool stable_for_preflight = true;
+    bool stable_for_preflight = !loop_preflight_disabled(f, loop, checked_loops);
     bool has_list_bounds = false;
     std::vector<std::uint64_t> fields;
     std::vector<std::uint64_t> globals;
@@ -309,19 +319,42 @@ bool hoist_one(Function& f, const Cfg& cfg, const Loop& loop, Counts& counts) {
     const auto written = [](const std::vector<std::uint64_t>& list, std::uint64_t index) {
         return std::find(list.begin(), list.end(), index) != list.end();
     };
-    // Entries whose kind and type a check before the loop, or one that
-    // leaves it, has fixed: a field or version may be read from them.
+    // A check that reaches the preheader proves the entry's kind. For field
+    // reads, every layout it accepts must also contain the field at the
+    // offset the generated load will use.
     std::vector<std::uint8_t> kind_checked(f.insts.size(), 0);
+    std::multimap<std::uint32_t, std::uint32_t> object_checks;
+    const auto note_kind_check = [&](const Inst& in) {
+        const auto entry = in.operands[0];
+        kind_checked[entry] = 1;
+        const auto& lookup = f.insts[entry];
+        const auto& test = f.type_tests[in.imm];
+        if (lookup.op == Op::Lookup && lookup.imm == 0 && test.kind == static_cast<std::uint8_t>(EntryKind::Object) &&
+            !test.any_type && !test.types.empty()) {
+            object_checks.emplace(entry, in.imm);
+        }
+    };
+    const auto layout_contains = [&](const Inst& read) {
+        const auto [first, last] = object_checks.equal_range(read.operands[0]);
+        return std::any_of(first, last, [&](const auto& check) {
+            const auto& test = f.type_tests[check.second];
+            return (read.aux == none || read.aux == test.words) &&
+                   std::ranges::all_of(test.types, [&](std::uint32_t layout) {
+                       return read.imm < image.layouts[layout].fields.size();
+                   });
+        });
+    };
     for (std::uint32_t id = 0; id < f.insts.size(); ++id) {
         const auto& in = f.insts[id];
         const auto b = places.block[id];
         if (in.op == Op::CheckKind && b != none && !loop.in_body[b] && cfg.dominates(b, loop.header)) {
-            kind_checked[in.operands[0]] = 1;
+            note_kind_check(in);
         }
     }
     struct Move {
         std::uint32_t id;
         bool check;
+        bool preflight = false;
     };
     std::vector<Move> plan;
     const char* first_refusal = nullptr;
@@ -387,8 +420,8 @@ bool hoist_one(Function& f, const Cfg& cfg, const Loop& loop, Counts& counts) {
                 } else {
                     take_constants();
                     if (in.op == Op::Lookup) outside[id] = 1;
-                    if (in.op == Op::CheckKind) kind_checked[in.operands[0]] = 1;
-                    plan.push_back({id, true});
+                    if (in.op == Op::CheckKind) note_kind_check(in);
+                    plan.push_back({id, true, !on_every_path || effect_seen});
                 }
             } else if (is_heap_read(in.op) && in.op != Op::LoadElement) {
                 if (safepoint) {
@@ -397,8 +430,8 @@ bool hoist_one(Function& f, const Cfg& cfg, const Loop& loop, Counts& counts) {
                 }
                 bool moves = true;
                 switch (in.op) {
-                case Op::LoadField:
-                case Op::LoadVersion: moves = kind_checked[in.operands[0]] != 0 && !(in.op == Op::LoadField && written(fields, in.imm)); break;
+                case Op::LoadField: moves = !written(fields, in.imm) && layout_contains(in); break;
+                case Op::LoadVersion: moves = kind_checked[in.operands[0]] != 0; break;
                 case Op::LoadData:
                 case Op::LoadStorage: moves = !widens; break;
                 case Op::LoadGlobal: moves = !written(globals, in.imm); break;
@@ -444,6 +477,7 @@ bool hoist_one(Function& f, const Cfg& cfg, const Loop& loop, Counts& counts) {
         header.insts = std::move(kept);
     }
     std::uint32_t state = none;
+    std::uint32_t preflight_state = none;
     std::vector<std::uint8_t> moving(f.insts.size(), 0);
     for (const auto& m : plan) moving[m.id] = 1;
     for (auto& block : f.blocks) {
@@ -459,8 +493,12 @@ bool hoist_one(Function& f, const Cfg& cfg, const Loop& loop, Counts& counts) {
     auto& target = f.blocks[preheader].insts;
     for (const auto& m : plan) {
         if (m.check) {
-            if (state == none) state = preheader_state(f, loop, preheader);
-            f.insts[m.id].state = state;
+            auto& resume = m.preflight ? preflight_state : state;
+            if (resume == none) {
+                resume = preheader_state(f, loop, preheader);
+                f.states[resume].loop_preflight = m.preflight;
+            }
+            f.insts[m.id].state = resume;
             ++counts[is_heap_check(f.insts[m.id].op) ? std::string("licm.") + heap_kind_name(f.insts[m.id].op) : std::string("licm.check")];
         } else if (is_heap_read(f.insts[m.id].op)) {
         } else if (f.insts[m.id].op != Op::Const) {
@@ -473,7 +511,7 @@ bool hoist_one(Function& f, const Cfg& cfg, const Loop& loop, Counts& counts) {
 
 } // namespace
 
-bool hoist_invariants(Function& f, Counts& counts) {
+bool hoist_invariants(const nvr::Image& image, Function& f, Counts& counts, std::span<const LoopSite> checked_loops) {
     std::vector<std::uint32_t> headers;
     {
         const Cfg cfg(f);
@@ -485,7 +523,7 @@ bool hoist_invariants(Function& f, Counts& counts) {
         const auto loops = find_loops(f, cfg);
         const auto found = std::find_if(loops.begin(), loops.end(), [&](const Loop& l) { return l.header == header; });
         if (found == loops.end()) continue;
-        any |= hoist_one(f, cfg, *found, counts);
+        any |= hoist_one(image, f, cfg, *found, counts, checked_loops);
     }
     return any;
 }
