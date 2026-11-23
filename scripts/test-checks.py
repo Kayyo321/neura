@@ -405,6 +405,32 @@ let selected = Choice
          repr(api.comment_notes(hashed, 4) + api.tag_notes(api.tags_above(hashed, 4))))
     same("wiki API: parameter tags in signatures use hash", api.declaration(mixed, 4), api.declaration(hashed, 4))
 
+    generator = load_script("generate-wiki")
+    spec = "\n".join(["# Spec", "", "## 8. Text", "", "### 8.1 `Strings`", "",
+                      "See [8.2](#82-builder) and [it](Overview.md#top).", "",
+                      "```text", "# not a heading", "```", "", "### 8.2 Builder", "", "Builder text.", ""])
+    page = "\n".join(["# Module", "", "## Notes", "", "### 8.1 hand written, not mirrored", "old", "",
+                      "## Detailed contracts", "", "Intro.", "", "### 8.1 `Strings`", "", "Stale text.", "",
+                      "### Hand-written subsection", "", "Mine.", "", "### 8.2 Builder", "", "Builder text.", "",
+                      "## Elsewhere", "", "### 9.9 hand written, not mirrored", "keep", ""])
+    updated, problems = api.mirror_sections("Stdlib-Core-Strings.md", page, spec, generator)
+    same("wiki API: a stale mirrored section is reported with page, heading and first differing line",
+         "\n".join(problems),
+         'wiki/Stdlib-Core-Strings.md: section "### 8.1 `Strings`" differs from docs/lang/Stdlib.md at page line 14: '
+         'page has "Stale text.", specification has "See [8.2](Stdlib-Design#82-builder) and [it](Overview#top)."')
+    same("wiki API: the refresh rewrites the section and leaves other text alone", updated,
+         page.replace("Stale text.", "See [8.2](Stdlib-Design#82-builder) and [it](Overview#top).\n\n"
+                                     "```text\n# not a heading\n```"))
+    same("wiki API: a refreshed page is current", repr(api.mirror_sections("X.md", updated, spec, generator)),
+         repr((updated, [])))
+    unknown = page.replace("### 8.2 Builder", "### 8.7 Missing")
+    same("wiki API: a numbered section under Detailed contracts without a counterpart is an error",
+         "\n".join(api.mirror_sections("X.md", unknown, spec, generator)[1][1:]),
+         'wiki/X.md: section "### 8.7 Missing" has no counterpart in docs/lang/Stdlib.md')
+    same("wiki API: a spec section of level two is mirrored at level three",
+         api.mirror_sections("X.md", "## Detailed contracts\n\n### 8. Text\n", spec, generator)[1][0][:50],
+         'wiki/X.md: section "### 8. Text" differs from docs')
+
 
 def redirects() -> None:
     """The preview's redirects stay on the preview and keep the request out of the header line."""
