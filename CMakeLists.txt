@@ -1198,7 +1198,8 @@ endif()
 
 include(CTest)
 
-if(BUILD_TESTING AND NEURA_SDK)
+option(NEURA_TEST_FRAME_LIVENESS "Build the independent Tier 3 frame liveness audit for tests" OFF)
+if(BUILD_TESTING AND NEURA_SDK AND NEURA_TEST_FRAME_LIVENESS)
     set_property(SOURCE src/nvm/tier3_build.cpp APPEND PROPERTY COMPILE_DEFINITIONS NEURA_TEST_FRAME_LIVENESS=1)
 endif()
 

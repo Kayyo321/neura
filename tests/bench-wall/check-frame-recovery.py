@@ -437,7 +437,7 @@ def main():
     workload.add_argument("--inputs", type=Path, help="prepared corpus manifest with pinned receipts and images")
     workload.add_argument("--fixture", action="store_true", help="check diagnostic modes and traps on a tracked fixture")
     parser.add_argument("--audit-live-slots", action="store_true",
-                        help="run the test build's independent image-based liveness check over the corpus")
+                        help="check sparse frames with an SDK built using -DNEURA_TEST_FRAME_LIVENESS=ON")
     parser.add_argument("--out-dir", required=True, type=Path)
     parser.add_argument("--gate-size", choices=("quick", "full", "long"), default="long")
     parser.add_argument("--seed", type=int, action="append", help="repeatable uint64 seed")
