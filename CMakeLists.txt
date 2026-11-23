@@ -2039,6 +2039,9 @@ if(BUILD_TESTING AND NEURA_SDK)
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/backend/tier3/preheader-backoff.py" "$<TARGET_FILE:neura>"
             "$<TARGET_FILE:neura_backend_tests>" "${CMAKE_CURRENT_SOURCE_DIR}")
         set_tests_properties(backend-tier3-preflight-backoff PROPERTIES TIMEOUT 120)
+        add_test(NAME backend-tier3-osr-preheader COMMAND neura_backend_tests tier3_osr
+            "${CMAKE_CURRENT_SOURCE_DIR}" specialised_heap_preheaders_replay_and_back_off)
+        set_tests_properties(backend-tier3-osr-preheader PROPERTIES TIMEOUT 120)
         add_test(NAME backend-tier3-guarded-preheader COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/backend/tier3/guarded-preheader.py" "$<TARGET_FILE:neura>")
         set_tests_properties(backend-tier3-guarded-preheader PROPERTIES TIMEOUT 300)

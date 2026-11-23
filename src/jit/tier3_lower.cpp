@@ -565,8 +565,9 @@ private:
         // parameters).
         if (f_.region != nullptr) {
             for (const auto e : entries_) {
-                if (e >= f_.region->entries.size()) continue;
-                const auto& reads = f_.region->entries[e].reads;
+                const auto* entry = f_.region->entry_at(f_.entries[e].block);
+                if (!entry) continue;
+                const auto& reads = entry->reads;
                 for (const auto id : f_.blocks[e].insts) {
                     const auto& in = f_.insts[id];
                     if (in.op == Op::EntryFlag && std::find(reads.begin(), reads.end(), in.imm) != reads.end()) {
@@ -584,7 +585,7 @@ private:
         // case above (that entry is refused).
         if (f_.region != nullptr && f_.region->program) {
             for (const auto e : entries_) {
-                if (e >= f_.region->entries.size() || f_.region->entries[e].block != 0) continue;
+                if (f_.entries[e].block != 0 || !f_.region->entry_at(0)) continue;
                 for (const auto id : f_.blocks[e].insts) {
                     const auto& in = f_.insts[id];
                     if (in.op == Op::EntryFlag && in.imm >= f_.region->parameter_count && !known_[id]) {
@@ -602,8 +603,9 @@ private:
         // the block, whichever way they got there.
         if (f_.region != nullptr && f_.region->program) {
             for (const auto e : entries_) {
-                if (e >= f_.region->entries.size()) continue;
-                const auto& facts = f_.region->entries[e].flags;
+                const auto* entry = f_.region->entry_at(f_.entries[e].block);
+                if (!entry) continue;
+                const auto& facts = entry->flags;
                 std::map<std::uint32_t, std::uint32_t> representative;
                 for (const auto id : f_.blocks[e].insts) {
                     const auto& in = f_.insts[id];

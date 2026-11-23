@@ -448,19 +448,35 @@ struct Program {
     // Whether to check the register allocation of code made later.
     bool verify = false;
 
-    // The code of IR entry `entry`, made now the first time a lazy entry is
-    // asked for (by one thread; the others wait): null when it could not be
-    // made. `bytes` and `failure` say what this call made, for statistics.
-    const std::uint8_t* entry(std::uint32_t entry, std::uint64_t& bytes, std::string& failure) const;
+    struct EntryCode {
+        const Program* program;
+        const std::uint8_t* address;
+        std::uint32_t index;
+    };
+    // A lazy entry can have its own single-entry program. Its IR, address,
+    // and local entry index always travel together. A null address means
+    // code could not be made. `bytes` and `failure` report work done here.
+    EntryCode entry(const nvr::Image& image, std::uint32_t index, std::uint64_t& bytes, std::string& failure) const;
     // Runs the code at `address` (an entry's) with `context` filled as
     // run_native_program fills it; the context's `outcome` says how it ended.
     void enter(Context& context, const std::uint8_t* address) const;
 
-    // The lazy entries' code: by entry, its address once made (or `failed`),
-    // and the code, kept as long as the program.
+    // The lazy entries' code and IR stay live with the parent, including when
+    // callee settlement or loop preflight back-off replaces the parent.
+    struct LazyEntry {
+        std::atomic<const std::uint8_t*> address = nullptr;
+        const Program* program = nullptr;
+    };
     mutable std::mutex lazy_mutex;
-    mutable std::unique_ptr<std::atomic<const std::uint8_t*>[]> lazy_entries;
+    mutable std::unique_ptr<LazyEntry[]> lazy_entries;
     mutable std::vector<std::unique_ptr<jit::Program>> lazy_code;
+    // Unoptimized, already inlined IR, used only when an OSR entry is first
+    // requested. Bound attempts as well as successful specializations.
+    static constexpr unsigned max_osr_attempts = 2;
+    std::unique_ptr<const Function> osr_template;
+    std::vector<LoopSite> osr_checked_loops;
+    mutable unsigned osr_attempts = 0;
+    mutable std::vector<std::unique_ptr<Program>> osr_programs;
 
     // Unsettled Tier 2 callee programs seen by the first inlining pass.
     // Only the cache's publication path reads or writes this metadata,

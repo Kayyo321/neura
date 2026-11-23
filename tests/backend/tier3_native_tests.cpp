@@ -432,6 +432,137 @@ NEURA_TEST(tier3_backoff, recursive_backoff_reuses_refreshed_programs) {
     check(stats.refreshed > 0 && stats.native.steps > 0, "a program refreshes and machine code runs");
 }
 
+NEURA_TEST(tier3_osr, specialised_heap_preheaders_replay_and_back_off) {
+    check(machine_code_runs() && t3::passes_enabled(), "this test requires the native Tier 3 passes");
+    const auto image = build_program({backend_dir(environment) / "tier3" / "osr-preheader.nra"});
+    auto options = machine_options();
+    options.native_after = 7;
+    options.native_inlining = false;
+    const auto serial = [](nvm::RunLimits& limits) { limits.profile = false; };
+    bool full_frames = false;
+#ifdef NEURA_TEST_FRAME_HOOKS
+    full_frames = std::getenv("NEURA_TIER3_TEST_FULL_FRAMES") != nullptr;
+#endif
+    const bool sparse = !t3::verify_enabled() && !nvm::tier_check_enabled() && !nvm::tier_shadow_enabled() && !full_frames;
+    const auto late = run_at(image, 0, nullptr, {"late"}, serial);
+    const auto& trap = late.result.trap;
+    check(!late.result.completed && trap.kind == nvm::TrapKind::IndexOutOfBounds, "tier 0 reaches the late read");
+    check_equal(trap.detail, std::string("index 32 for length 32"), "the list fails after 32 valid reads");
+    const auto& faulting = image.functions.at(trap.function).blocks.at(trap.block);
+    check(std::ranges::any_of(faulting.exits, [](const auto& exit) {
+        return exit.kind == nvr::ExitKind::State && exit.operation == nvr::StateOp::ReadElement;
+    }), "the original trap site reads the list");
+
+    struct Case {
+        const char* mode;
+        const char* output;
+    };
+    for (const auto& scenario : {Case{"pass", "32\n"}, {"late", nullptr}, {"backoff", "186\n"},
+                                  {"recursive", "96\n"}, {"recursive-late", nullptr}}) {
+        const std::string mode = scenario.mode;
+        const auto expected = mode == "late" ? late : run_at(image, 0, nullptr, {mode}, serial);
+        if (scenario.output) {
+            check(expected.result.completed, mode + ": tier 0 completes");
+            check_equal(expected.output, std::string(scenario.output), mode + ": checksum");
+        } else {
+            check(!expected.result.completed && expected.result.trap.kind == trap.kind &&
+                  expected.result.trap.detail == trap.detail && expected.result.trap.function == trap.function &&
+                  expected.result.trap.block == trap.block, mode + ": tier 0 traps at the original read");
+        }
+
+        nvm::TierCache cache(image, options);
+        check_same(run_at(image, 2, &cache, {mode}, serial), expected, mode);
+        const auto stats = cache.statistics();
+        check(stats.native.osr_entries > 0 && stats.native.steps > 0 && stats.region_counts.program_steps > 0,
+              mode + ": the Tier 2 interpreter handed the loop to specialised machine code");
+        const auto* program = cache.program(trap.function, 0).region;
+        check(program && program->entries.size() > 1 && program->entries.front().block == 0,
+              mode + ": scan has both a function and a loop entry");
+        const auto header = program->entries[1].block;
+        check(header != 0 && header != trap.block, mode + ": the preflight has a separate loop header");
+        if (!scenario.output || mode == "backoff") {
+            check(stats.native.guards > 0 && stats.native_deopts.contains({trap.function, header}),
+                  mode + ": a guard deoptimises at the original loop header");
+        } else {
+            check_equal(stats.native.guards, std::uint64_t{0}, mode + ": valid preflights hold");
+        }
+        if (mode == "late" && sparse) {
+            const auto* code = cache.native_code(*program, t3::Variant::SparseFrames);
+            check(code && !code->osr_programs.empty(), "the scan made a sparse OSR program");
+            const auto has_sparse_preflight = [header](const auto& osr) {
+                if (osr->ir.entries.front().block != header) return false;
+                return std::ranges::any_of(osr->ir.states, [header](const auto& state) {
+                    return state.block == header && state.loop_preflight &&
+                           std::ranges::any_of(state.slots, [](const auto& slot) {
+                               return slot.kind == t3::StateSlot::Kind::Dead;
+                           });
+                });
+            };
+            check(std::ranges::any_of(code->osr_programs, has_sparse_preflight),
+                  "the failed OSR preflight omits a dead scalar at the original header");
+        }
+        if (mode == "backoff") {
+            check_equal(stats.native.guards, std::uint64_t{3}, "three failed guards before replacement");
+            check_equal(stats.native.loop_preflight_backoffs, std::uint64_t{1}, "the scan backs off once in the run");
+        }
+        if (mode.starts_with("recursive")) {
+            check(stats.native.helper_entries + stats.native.cell_entries > 0,
+                  mode + ": the specialised caller reaches another native activation");
+        }
+        if (mode == "recursive-late") {
+            const auto& callers = expected.result.trap.callers;
+            check(!callers.empty() && callers.front().first == trap.function,
+                  mode + ": the faulting scan has a caller in the same function");
+        }
+    }
+
+    // The induction index is in range. A second load takes its index from
+    // the first load and faults only on the final iteration.
+    const auto indirect = run_at(image, 0, nullptr, {"indirect"}, serial);
+    const auto& body_trap = indirect.result.trap;
+    check(!indirect.result.completed && body_trap.kind == nvm::TrapKind::IndexOutOfBounds &&
+              body_trap.detail == trap.detail && body_trap.function != trap.function,
+          "tier 0 reaches the out-of-bounds indirect read");
+    nvm::TierCache indirect_cache(image, options);
+    check_same(run_at(image, 2, &indirect_cache, {"indirect"}, serial), indirect, "OSR body fault");
+    const auto indirect_stats = indirect_cache.statistics();
+    check(indirect_stats.native.osr_entries > 0 && indirect_stats.native.guards == 0,
+          "the indirect loop entered specialised code and passed its preflight");
+    check_equal(indirect_stats.native.state_traps, std::uint64_t{1}, "the indirect heap check deoptimises once");
+    check(indirect_stats.native_deopts.contains({body_trap.function, body_trap.block}),
+          "the specialised body deoptimises at the indirect read");
+
+    // An externally advanced execution exposes its full frames at the trap.
+    const auto fault_frames = [&](std::uint8_t tier, nvm::TierCache* cache) {
+        auto limits = limits_at(tier, cache);
+        serial(limits);
+        nvm::Execution execution(image, std::vector<std::string>{"indirect"}, limits);
+        const auto event = execution.advance();
+        check(event.kind == nvm::Event::Kind::Trapped, "the indirect read faults before printing");
+        check_same_trap(event.trap, body_trap, "inspectable OSR body fault");
+        check_equal(execution.steps(), indirect.result.steps, "inspectable OSR body fault steps");
+        return execution.tier3_frames();
+    };
+    nvm::TierCache inspected_cache(image, options);
+    const auto reference_frames = fault_frames(0, nullptr);
+    check(!reference_frames.empty() && reference_frames.back().function == body_trap.function,
+          "the faulting activation remains inspectable");
+    check_same_frames(fault_frames(2, &inspected_cache), reference_frames, "OSR body fault");
+    const auto inspected = inspected_cache.statistics();
+    check(inspected.native.osr_entries > 0 && inspected.native.guards == 0 &&
+              inspected.native_deopts.contains({body_trap.function, body_trap.block}),
+          "the inspected frames came from the specialised body fault");
+
+    for (const auto& [mode, steps] : {std::pair{"late", late.result.steps},
+                                     std::pair{"indirect", indirect.result.steps}}) {
+        for (const auto limit : {steps - 1, steps, steps + 1}) {
+            nvm::TierCache cache(image, options);
+            compare(image, cache, std::string(mode) + " OSR fault at step limit " + std::to_string(limit), {mode},
+                    [limit, &serial](nvm::RunLimits& limits) { serial(limits); limits.max_steps = limit; });
+        }
+    }
+}
+
 NEURA_TEST(tier3, the_statistics_line_reports_machine_code_entries_and_bytes) {
     const auto image = build_program({tier_program(environment, "program-calls")});
     nvm::TierCache cache(image, machine_options());

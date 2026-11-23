@@ -715,7 +715,7 @@ private:
                     const auto& slot = state.slots[r];
                     if (slot.kind == StateSlot::Kind::Dead) {
                         if (!frame_liveness_) frame_liveness_.emplace(image_, f_.function);
-                        if (f_.variant != Variant::SparseFrames || f_.entries.size() != 1 || f_.entries.front().block != 0 ||
+                        if (f_.variant != Variant::SparseFrames || f_.entries.size() != 1 ||
                             state.function != f_.function || depth != 1 || state.caller != none ||
                             !detail::precommit_deopt(in) || !frame_liveness_->dead_scalar(state.block, r)) {
                             fail("V3", at(id) + " omits a scalar needed at its frame continuation");

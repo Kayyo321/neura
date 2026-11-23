@@ -867,7 +867,7 @@ private:
             }
         }
         for (std::uint32_t local = 0; local < n; ++local) {
-            if (entry[local] || head[local]) region_.entries.push_back({blocks_[local], 0, {}, {}});
+            if (entry[local] || head[local]) region_.entries.push_back({blocks_[local], 0, {}, {}, head[local] != 0});
         }
     }
 

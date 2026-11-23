@@ -299,8 +299,7 @@
         ++frame_replay_events_;
         // Keep a separate sample of specializations with one native entry.
         // The interpreter-resume graph may otherwise use the entire budget.
-        const bool entry_only = fn.region && fn.entries.size() == 1 && fn.entries.front().block == 0 &&
-                                fn.region->entries.size() > 1;
+        const bool entry_only = fn.region && fn.entries.size() == 1 && fn.region->entries.size() > 1;
         auto& sampled = entry_only ? frame_replay_entry_reports_ : frame_replay_reports_;
         if (sampled == 32) return;
         ++sampled;
@@ -833,22 +832,24 @@
     // ending every frame is as tier 1 would have it, the innermost frame's
     // block is where the run goes on, and the steps are in the run's.
     RegionOutcome run_native_program(const tier3::Program& published, std::uint32_t entry_index, std::uint64_t allowance) {
-        const auto& code = published.for_entry(entry_index);
-        const auto& entered = *code.ir.region;
-        // The machine code of the entry, made now if it is made on first use;
+        const auto& initial = published.for_entry(entry_index);
+        tier3::Program::EntryCode selected{&initial, nullptr, entry_index};
+        // The code of the entry, made now if it is made on first use;
         // an entry without it is refused.
-        const std::uint8_t* address = nullptr;
-        if (tier3_native_ && code.machine) {
+        if (tier3_native_ && initial.machine) {
             std::uint64_t bytes = 0;
             std::string failure;
-            if (code.entry_code.at(entry_index) == jit::native::lazy) {
+            if (initial.entry_code.at(entry_index) == jit::native::lazy) {
                 const TierTimes::Scope timing(times_, TierTimes::Category::Tier1);
-                address = code.entry(entry_index, bytes, failure);
+                selected = initial.entry(image_, entry_index, bytes, failure);
             } else {
-                address = code.entry(entry_index, bytes, failure);
+                selected = initial.entry(image_, entry_index, bytes, failure);
             }
-            if (bytes != 0 || !failure.empty()) tier_->note_native_entry(bytes, failure);
+            if (bytes != 0 || !failure.empty()) tier_->note_native_entry(bytes, failure, selected.program != &initial);
         }
+        const auto& code = *selected.program;
+        const auto& entered = *code.ir.region;
+        const auto* address = selected.address;
         {
             auto frame = frames_.back();
             const auto& entry = entered.entries[entry_index];
@@ -873,7 +874,7 @@
             // (Region::Entry::flags) are the frame's.
             if (code.verify && tier3_native_ && code.machine) tier3_check_flag_facts(entered, entry, frame.initialized);
             refuse = refuse || frames_.size() + code.ir.max_inline_depth > limits_.max_frames;
-            refuse = refuse || !tier3_clean_entry(code.ir, entry_index, frame.slots);
+            refuse = refuse || !tier3_clean_entry(code.ir, selected.index, frame.slots);
             if (refuse) {
                 ++region_counts_.refused;
                 ++native_counts_.refused;
@@ -882,6 +883,7 @@
         }
         ++region_counts_.entries;
         ++native_counts_.entered;
+        if (selected.program != &initial) ++native_counts_.osr_entries;
         auto& context = tier3_context_;
         context.owner = this;
         context.helpers = &tier3_helpers_;
@@ -916,7 +918,7 @@
             result.outcome = static_cast<tier3::Outcome>(context.outcome);
             if (result.outcome == tier3::Outcome::Return) result.outcome = tier3::Outcome::Leave;
         } else {
-            result = tier3::interpret(context, code, entry_index, false);
+            result = tier3::interpret(context, code, selected.index, false);
         }
         tier3_count_fast(context);
         std::uint64_t blocks = context.C;

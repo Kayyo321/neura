@@ -158,6 +158,8 @@ std::string describe(const TierStatistics& s) {
                std::to_string(n.exits) + "; traps in place " + std::to_string(n.traps) + "; steps in native code " +
                std::to_string(n.steps) + "\n";
         out += "tier: native loop preflight back-offs " + std::to_string(n.loop_preflight_backoffs) + "\n";
+        out += "tier: native OSR programs " + std::to_string(s.native_osr_programs) + ", entered " +
+               std::to_string(n.osr_entries) + "\n";
         out += "tier: native heap: allocations fast " + std::to_string(n.fast_allocations) + ", slow " +
                std::to_string(n.slow_allocations) + "; appends fast " + std::to_string(n.fast_appends) + ", slow " +
                std::to_string(n.slow_appends) + "; checks removed:";

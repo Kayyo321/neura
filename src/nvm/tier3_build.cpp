@@ -1924,14 +1924,85 @@ const std::uint8_t* const lazy_failed = reinterpret_cast<const std::uint8_t*>(st
 
 } // namespace
 
-const std::uint8_t* Program::entry(std::uint32_t index, std::uint64_t& bytes, std::string& failure) const {
+static std::unique_ptr<Program> specialize_entry(const nvr::Image& image, const Function& original,
+                                                 std::uint32_t index, bool verify,
+                                                 std::span<const LoopSite> checked_loops) {
+    auto entry = std::make_unique<Program>();
+    auto& ir = entry->ir;
+    ir = original;
+    ir.entries.assign(1, original.entries[index]);
+    ir.blocks[ir.entries.front().ir_block].entry = 0;
+    detail::remove_unreachable(ir);
+    detail::compact(ir);
+    if (detail::find_loops(ir, detail::Cfg(ir)).empty()) return nullptr;
+
+    [[maybe_unused]] const auto omitted = detail::prune_dead_frame_slots(image, ir);
+#ifdef NEURA_TEST_FRAME_HOOKS
+    if (ir.variant == Variant::SparseFrames) {
+        static const bool audit_liveness = [] {
+            const auto* test = std::getenv("NEURA_TIER3_TEST_FRAME_AUDIT");
+            return test != nullptr && std::strcmp(test, "1") == 0;
+        }();
+        if (audit_liveness) testing::audit_frame_liveness(image, ir, omitted);
+    }
+    verify = verify || (omitted != 0 && frame_replay_seed());
+#endif
+    optimize(image, ir, verify, checked_loops);
+    place_canons(image, ir, verify);
+    return entry;
+}
+
+Program::EntryCode Program::entry(const nvr::Image& image, std::uint32_t index, std::uint64_t& bytes,
+                                  std::string& failure) const {
     bytes = 0;
-    if (index >= entry_code.size() || !machine) return nullptr;
-    if (entry_code[index] != jit::native::lazy) return machine->address() + entry_code[index];
+    if (index >= entry_code.size() || !machine) return {this, nullptr, index};
+    if (entry_code[index] != jit::native::lazy) return {this, machine->address() + entry_code[index], index};
     auto& slot = lazy_entries[index];
-    if (const auto* found = slot.load(std::memory_order_acquire)) return found == lazy_failed ? nullptr : found;
+    const auto cached = [&](const std::uint8_t* address) -> EntryCode {
+        if (address == lazy_failed) return {this, nullptr, index};
+        return {slot.program, address, slot.program == this ? index : 0};
+    };
+    if (const auto* found = slot.address.load(std::memory_order_acquire)) return cached(found);
     const std::lock_guard lock(lazy_mutex);
-    if (const auto* found = slot.load(std::memory_order_acquire)) return found == lazy_failed ? nullptr : found;
+    if (const auto* found = slot.address.load(std::memory_order_acquire)) return cached(found);
+
+    if (index != 0 && osr_template && ir.region->entries[index].loop_header && osr_attempts < max_osr_attempts) {
+        ++osr_attempts;
+        std::unique_ptr<Program> osr;
+        try {
+            osr = specialize_entry(image, *osr_template, index, verify, osr_checked_loops);
+        } catch (const std::logic_error& error) {
+            if (std::getenv("NEURA_TIER_DUMP")) {
+                std::fprintf(stderr, "tier 3 OSR program %u entry %u: %s\n", ir.region->program_id, index, error.what());
+            }
+        }
+        // A rebuilt loop can cost more to run even when its graph is
+        // smaller. Publish only when the specialized loop hoists a heap
+        // preflight. Otherwise the generic code retains the loop checks.
+        if (osr && std::ranges::any_of(osr->ir.states, &FrameState::loop_preflight)) {
+            auto generated = jit::native::generate(osr->ir, verify);
+            if (generated.failure.empty()) osr->machine = jit::Program::load(generated.code.bytes, generated.failure);
+            if (osr->machine) {
+                osr->verify = verify;
+                osr->entry_code = std::move(generated.code.entries);
+                osr->trampoline = generated.code.trampoline;
+                const auto* address = osr->machine->address() + osr->entry_code.front();
+                const auto* program = osr.get();
+                if (std::getenv("NEURA_TIER_DUMP")) {
+                    std::fprintf(stderr, "tier 3 OSR program %u of function %u at block %u:\n",
+                                 ir.region->program_id, ir.function, osr->ir.entries.front().block);
+                    for (const auto& [name, count] : osr->ir.pass_counts)
+                        std::fprintf(stderr, "pass %s %llu\n", name.c_str(), static_cast<unsigned long long>(count));
+                }
+                osr_programs.push_back(std::move(osr));
+                bytes = generated.code.bytes.size();
+                slot.program = program;
+                slot.address.store(address, std::memory_order_release);
+                return {program, address, 0};
+            }
+        }
+    }
+
     auto generated = jit::native::generate_entry(ir, index, verify);
     std::unique_ptr<jit::Program> code;
     if (generated.failure.empty()) {
@@ -1940,14 +2011,15 @@ const std::uint8_t* Program::entry(std::uint32_t index, std::uint64_t& bytes, st
     }
     if (!code) {
         failure = generated.failure;
-        slot.store(lazy_failed, std::memory_order_release);
-        return nullptr;
+        slot.address.store(lazy_failed, std::memory_order_release);
+        return {this, nullptr, index};
     }
     const auto* address = code->address() + generated.code.entries.at(index);
-    bytes = generated.code.bytes.size();
     lazy_code.push_back(std::move(code));
-    slot.store(address, std::memory_order_release);
-    return address;
+    bytes = generated.code.bytes.size();
+    slot.program = this;
+    slot.address.store(address, std::memory_order_release);
+    return {this, address, index};
 }
 
 void Program::enter(Context& context, const std::uint8_t* address) const {
@@ -2101,29 +2173,11 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
             original.check_heap = verify;
             if (options_.native_passes && tier3::passes_enabled()) {
                 if (machine_code_ && tier3::standard_variant(variant) && original.entries.size() > 1) {
-                    auto entry = std::make_unique<tier3::Program>();
-                    entry->ir = original;
-                    entry->ir.entries.resize(1);
-                    tier3::detail::remove_unreachable(entry->ir);
-                    tier3::detail::compact(entry->ir);
-                    const tier3::detail::Cfg cfg(entry->ir);
-                    if (!tier3::detail::find_loops(entry->ir, cfg).empty()) {
-                        [[maybe_unused]] const auto omitted = tier3::detail::prune_dead_frame_slots(image_, entry->ir);
-#ifdef NEURA_TEST_FRAME_HOOKS
-                        if (variant == tier3::Variant::SparseFrames) {
-                            static const bool audit_liveness = [] {
-                                const auto* test = std::getenv("NEURA_TIER3_TEST_FRAME_AUDIT");
-                                return test != nullptr && std::strcmp(test, "1") == 0;
-                            }();
-                            if (audit_liveness) testing::audit_frame_liveness(image_, entry->ir, omitted);
-                        }
-                        const auto verify_entry = verify || (omitted != 0 && tier3::frame_replay_seed());
-#else
-                        const auto verify_entry = verify;
-#endif
-                        tier3::optimize(image_, entry->ir, verify_entry, checked_loops);
-                        tier3::place_canons(image_, entry->ir, verify_entry);
-                        built.program->function_entry = std::move(entry);
+                    built.program->function_entry = tier3::specialize_entry(image_, original, 0, verify, checked_loops);
+                    const auto& entries = original.region->entries;
+                    if (std::any_of(entries.begin() + 1, entries.end(), [](const auto& entry) { return entry.loop_header; })) {
+                        built.program->osr_template = std::make_unique<tier3::Function>(original);
+                        built.program->osr_checked_loops.assign(checked_loops.begin(), checked_loops.end());
                     }
                 }
                 tier3::optimize(image_, original, verify, checked_loops);
@@ -2158,7 +2212,7 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
                 } else {
                     native.entry_code = std::move(generated.code.entries);
                 }
-                native.lazy_entries = std::make_unique<std::atomic<const std::uint8_t*>[]>(native.entry_code.size());
+                native.lazy_entries = std::make_unique<tier3::Program::LazyEntry[]>(native.entry_code.size());
                 bytes = generated.code.bytes.size();
             }
         }
@@ -2254,9 +2308,10 @@ void TierCache::note_native(bool machine, const std::string& off) {
     if (!off.empty()) statistics_.native_off = off;
 }
 
-void TierCache::note_native_entry(std::uint64_t bytes, const std::string& failure) {
+void TierCache::note_native_entry(std::uint64_t bytes, const std::string& failure, bool osr) {
     const std::lock_guard lock(mutex_);
     statistics_.native_bytes += bytes;
+    if (osr) ++statistics_.native_osr_programs;
     if (!failure.empty()) ++statistics_.native_rejections["an entry: " + failure];
 }
 
@@ -2271,6 +2326,7 @@ void TierCache::add_native_events(const NativeCounts& counts,
     total.checks += counts.checks;
     total.guards += counts.guards;
     total.loop_preflight_backoffs += counts.loop_preflight_backoffs;
+    total.osr_entries += counts.osr_entries;
     total.selectors += counts.selectors;
     total.references += counts.references;
     total.state_traps += counts.state_traps;

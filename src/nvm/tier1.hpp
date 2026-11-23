@@ -194,6 +194,7 @@ struct NativeCounts {
     std::uint64_t checks = 0;
     std::uint64_t guards = 0;
     std::uint64_t loop_preflight_backoffs = 0;
+    std::uint64_t osr_entries = 0;
     std::uint64_t selectors = 0;
     std::uint64_t references = 0;
     std::uint64_t state_traps = 0;
@@ -276,6 +277,7 @@ struct TierStatistics {
     std::string native_mode;
     std::string native_off;
     std::uint64_t native_programs = 0;
+    std::uint64_t native_osr_programs = 0;
     std::uint64_t native_bytes = 0;
     std::uint64_t native_inlined = 0;
     std::uint64_t native_class_tests = 0;
@@ -412,7 +414,7 @@ public:
     void note_native(bool machine, const std::string& off);
     // A run made the code of an entry made on first use (tier3::Program::
     // entry): its bytes, or why it could not.
-    void note_native_entry(std::uint64_t bytes, const std::string& failure);
+    void note_native_entry(std::uint64_t bytes, const std::string& failure, bool osr);
     void add_native_events(const NativeCounts& counts,
                            const std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint64_t>& deopts);
     std::uint64_t count_region(std::uint32_t function, std::uint32_t block) {

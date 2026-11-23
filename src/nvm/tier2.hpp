@@ -229,6 +229,8 @@ struct Region {
         // when no such fact is proven (including every slot when the
         // analysis gives up). Empty for a region that is not a program.
         std::vector<std::uint32_t> flags;
+        // A back edge in the function program reaches this entry.
+        bool loop_header = false;
     };
     static constexpr std::uint32_t flag_unknown = 0xFFFFFFFFU;
     // Ascending by block.

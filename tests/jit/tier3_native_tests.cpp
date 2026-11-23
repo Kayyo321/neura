@@ -151,7 +151,7 @@ Compiled compile(t3::Function function) {
     compiled.program->entry_code = generated.code.entries;
     compiled.program->trampoline = generated.code.trampoline;
     compiled.program->lazy_entries =
-        std::make_unique<std::atomic<const std::uint8_t*>[]>(compiled.program->entry_code.size());
+        std::make_unique<t3::Program::LazyEntry[]>(compiled.program->entry_code.size());
     return compiled;
 }
 
@@ -178,7 +178,7 @@ Fake run(const t3::Program& program, const std::vector<std::uint64_t>& slots, st
                    nullptr};
     std::uint64_t bytes = 0;
     std::string failure;
-    program.enter(c, program.entry(0, bytes, failure));
+    program.enter(c, program.entry(nvr::Image{}, 0, bytes, failure).address);
     return fake;
 }
 

@@ -1,0 +1,64 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+const Size = 32;
+
+.NoInline
+let scan = func(values: int[list], bound: int, child_bound: int, depth: int) -> int {
+    let total = 0;
+    for (let i = 0; i < bound; i += 1) {
+        last value = values[i];
+        if (value < 0) {
+            break;
+        }
+        total += value;
+    }
+    if (depth > 0) {
+        total += scan(values, child_bound, child_bound, depth - 1);
+    }
+    return total;
+};
+
+.NoInline
+let scan_indirect = func(values: int[list], bound: int) -> int {
+    let total = 0;
+    for (let i = 0; i < bound; i += 1) {
+        last offset = values[i];
+        total += values[offset];
+    }
+    return total;
+};
+
+export let OsrPreheader = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last values: int[list] = new([
+            1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1
+        ]);
+        last mode = args[0];
+        let total = 0;
+        if (mode == "backoff") {
+            // Each scan's bound exceeds the length, but the sentinel is
+            // reached first. All scans share one execution's guard feedback.
+            values[Size - 1] = -1;
+            for (let trip = 0; trip < 6; trip += 1) {
+                total += scan(values, Size + 1, 0, 0);
+            }
+        } else if (mode == "late") {
+            total = scan(values, Size + 1, 0, 0);
+        } else if (mode == "recursive") {
+            total = scan(values, Size, Size, 2);
+        } else if (mode == "recursive-late") {
+            total = scan(values, Size, Size + 1, 1);
+        } else if (mode == "indirect") {
+            values[Size - 1] = Size;
+            total = scan_indirect(values, Size);
+        } else {
+            total = scan(values, Size, 0, 0);
+        }
+        console.println("{}", total);
+        return program.ExitCode.Ok;
+    };
+);

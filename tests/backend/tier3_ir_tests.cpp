@@ -550,21 +550,6 @@ Stopped stop_after(const nvr::Image& image, std::uint64_t steps) {
     return stopped;
 }
 
-void check_same_frames(const std::vector<nvm::Execution::Tier3Frame>& actual,
-                       const std::vector<nvm::Execution::Tier3Frame>& expected, const std::string& label) {
-    check_equal(actual.size(), expected.size(), label + " frame count");
-    for (std::size_t i = 0; i < std::min(actual.size(), expected.size()); ++i) {
-        const auto where = label + " frame " + std::to_string(i);
-        check_equal(actual[i].function, expected[i].function, where + " function");
-        check_equal(actual[i].block, expected[i].block, where + " block");
-        check_equal(actual[i].return_slot, expected[i].return_slot, where + " return slot");
-        check_equal(actual[i].return_block, expected[i].return_block, where + " return block");
-        check_equal(actual[i].boundary, expected[i].boundary, where + " boundary");
-        check(actual[i].slots == expected[i].slots, where + " slots");
-        check(actual[i].initialized == expected[i].initialized, where + " initialized flags");
-    }
-}
-
 } // namespace
 
 // --- The builder --------------------------------------------------------------

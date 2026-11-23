@@ -227,7 +227,7 @@ inline bool precommit_deopt(const Inst& inst) {
 // A state shared with commit, an inlined frame or a possible
 // observer still has its full payload. Keep initialized flags unchanged.
 inline std::size_t prune_dead_frame_slots(const nvr::Image& image, Function& function) {
-    if (function.variant != Variant::SparseFrames || function.entries.size() != 1 || function.entries.front().block != 0 ||
+    if (function.variant != Variant::SparseFrames || function.entries.size() != 1 ||
         function.function >= image.functions.size()) {
         return 0;
     }
