@@ -51,13 +51,20 @@
             const auto found = tier3_checked_loops_.find(program.function);
             if (found != tier3_checked_loops_.end()) {
                 auto& checked = found->second;
-                if (checked.region != &program || checked.compiled_sites != checked.sites.size()) {
-                    const TierTimes::Scope timing(times_, TierTimes::Category::Tier1);
-                    checked.versions.push_back(tier_->rebuild_native(program, variant, checked.sites));
-                    checked.region = &program;
+                if (checked.compiled_sites != checked.sites.size()) {
+                    // The failure that adds an exclusion clears the callee
+                    // cell and unwinds the entire native chain before the
+                    // next lookup. Its superseded builds can now be freed.
+                    checked.versions.clear();
                     checked.compiled_sites = checked.sites.size();
                 }
-                return checked.versions.back().get();
+                auto version = checked.versions.find(&program);
+                if (version == checked.versions.end()) {
+                    const TierTimes::Scope timing(times_, TierTimes::Category::Tier1);
+                    auto replacement = tier_->rebuild_native(program, variant, checked.sites);
+                    version = checked.versions.emplace(&program, std::move(replacement)).first;
+                }
+                return version->second.get();
             }
         }
         if (const auto* code = tier_->native_code(program, variant)) return code;

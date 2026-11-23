@@ -4897,10 +4897,10 @@ private:
     std::vector<tier3::CalleeCell> tier3_cells_;
     struct CheckedNativeLoops {
         std::vector<tier3::LoopSite> sites;
-        const tier2::Region* region = nullptr;
         std::size_t compiled_sites = 0;
-        // A superseded program may still be on the native call stack.
-        std::vector<std::unique_ptr<tier3::Program>> versions;
+        // Tier 2 keeps retired regions alive for callers that resume them.
+        // Keep one checked build per region for the current exclusion set.
+        std::map<const tier2::Region*, std::unique_ptr<tier3::Program>> versions;
     };
     std::map<std::pair<std::uint32_t, tier3::LoopSite>, unsigned> tier3_preflight_failures_;
     std::map<std::uint32_t, CheckedNativeLoops> tier3_checked_loops_;

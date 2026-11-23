@@ -412,6 +412,23 @@ NEURA_TEST(tier3, natural_checks_recover_sparse_frames_at_the_original_loop_trap
     }
 }
 
+// The Python driver checks the replacement IDs from NEURA_TIER_DUMP.
+NEURA_TEST(tier3_backoff, recursive_backoff_reuses_refreshed_programs) {
+    const auto image = build_program({backend_dir(environment) / "tier3" / "preheader-recursive-backoff.nra"});
+    auto options = machine_options();
+    options.native_after = 4;
+    options.program_proofs = 0;
+    options.native_inlining = false;
+    nvm::TierCache cache(image, options);
+    const auto serial = [](nvm::RunLimits& limits) { limits.profile = false; };
+    const auto reference = run_at(image, 0, nullptr, {}, serial);
+    check(reference.result.completed && !reference.output.empty(), "the recursive reference execution finishes");
+    check_same(run_at(image, 2, &cache, {}, serial), reference, "recursive back-off and refresh");
+    const auto stats = cache.statistics();
+    check_equal(stats.native.loop_preflight_backoffs, std::uint64_t{1}, "the loop backs off once");
+    check(stats.refreshed > 0 && stats.native.steps > 0, "a program refreshes and machine code runs");
+}
+
 NEURA_TEST(tier3, the_statistics_line_reports_machine_code_entries_and_bytes) {
     const auto image = build_program({tier_program(environment, "program-calls")});
     nvm::TierCache cache(image, machine_options());

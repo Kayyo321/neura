@@ -1,0 +1,46 @@
+// The deepest call can exceed its list's length, but always breaks on the
+// sentinel. The late leaf reaches cold blocks while callers still hold the
+// old program. Each caller makes a new call before returning to its caller.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let visit = func(values: int[list], bound: int, leaf_bound: int, depth: int, late: bool) -> int64 {
+    let sum: int64 = 0;
+    for (let i = 0; i < bound; i += 1) {
+        last value = values[i];
+        if (value < 0) {
+            break;
+        }
+        values[i] = value + 1;
+        sum += value as int64;
+    }
+    if (depth > 0) {
+        last child_bound = depth == 1 ? leaf_bound : bound;
+        last subtotal = visit(values, child_bound, leaf_bound, depth - 1, late);
+        return sum + subtotal + visit(values, bound, bound, 0, false);
+    }
+    if (late) {
+        for (let i = 0; i < 300; i += 1) {
+            sum += ((i * 5 + 1) % 61) as int64;
+        }
+    }
+    return sum;
+};
+
+let RecursiveBackoff = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last values: int[list] = new;
+        for (let i = 0; i < 40; i += 1) {
+            values.append(i);
+        }
+        values.append(-1);
+        last length = values.length;
+        let checksum = visit(values, length, length, 8, false);
+        for (let trip = 0; trip < 8; trip += 1) {
+            checksum += visit(values, length, length + 7, 8, false);
+        }
+        checksum += visit(values, length, length + 7, 12, true);
+        console.print_line(checksum.to_string());
+        return program.ExitCode.Ok;
+    };
+);

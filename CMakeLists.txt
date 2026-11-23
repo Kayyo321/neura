@@ -2032,7 +2032,8 @@ if(BUILD_TESTING AND NEURA_SDK)
             --candidate "$<TARGET_FILE:neura>" --fixture nil-result)
         set_tests_properties(backend-tier3-nil-result PROPERTIES TIMEOUT 180)
         add_test(NAME backend-tier3-preflight-backoff COMMAND "${Python3_EXECUTABLE}"
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/backend/tier3/preheader-backoff.py" "$<TARGET_FILE:neura>")
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/backend/tier3/preheader-backoff.py" "$<TARGET_FILE:neura>"
+            "$<TARGET_FILE:neura_backend_tests>" "${CMAKE_CURRENT_SOURCE_DIR}")
         set_tests_properties(backend-tier3-preflight-backoff PROPERTIES TIMEOUT 120)
         add_test(NAME backend-tier3-guarded-preheader COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/backend/tier3/guarded-preheader.py" "$<TARGET_FILE:neura>")

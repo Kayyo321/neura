@@ -13,6 +13,7 @@ NATIVE = re.compile(
     r'^tier: native programs .*?, guards (?P<guards>\d+), .*?, '
     r'state traps (?P<state_traps>\d+), .*?; steps in native code (?P<steps>\d+)$', re.M)
 BACKOFFS = re.compile(r'^tier: native loop preflight back-offs (\d+)$', re.M)
+REBUILDS = re.compile(r'^tier 3 program (\d+) of function (\d+) \(loop preflight back-off\):$', re.M)
 FAILURE_LIMIT = 3
 
 
@@ -54,6 +55,16 @@ def check(neura, image, argument, expected_output, expected_trap, deopt_kind):
                          f'deoptimizations and native steps\n{result.stderr}')
 
 
+def check_recursive(backend, source_dir):
+    selector = ['tier3_backoff', source_dir, 'recursive_backoff_reuses_refreshed_programs']
+    result = run(backend, selector, dict(ENVIRONMENT, NEURA_TIER_DUMP='1'))
+    if result.returncode != 0:
+        raise ValueError(f'recursive preflight: backend test failed\n{result.stdout}{result.stderr[-4000:]}')
+    rebuilds = REBUILDS.findall(result.stderr)
+    if len({function for _, function in rebuilds}) != 1 or len(set(rebuilds)) < 2 or len(set(rebuilds)) != len(rebuilds):
+        raise ValueError(f'recursive preflight: expected one build per region for the same function, got {rebuilds}')
+
+
 def main():
     neura = pathlib.Path(sys.argv[1]).resolve()
     sources = pathlib.Path(__file__).resolve().parent
@@ -66,6 +77,7 @@ def main():
         check(neura, bounds, 'ordinary', '90300000\n', None, 'guards')
         check(neura, cast, 'ordinary', '100000\n', None, 'state_traps')
         check(neura, cast, 'cast', '100000\n', 'invalid class cast', 'state_traps')
+    check_recursive(pathlib.Path(sys.argv[2]).resolve(), pathlib.Path(sys.argv[3]).resolve())
 
 
 if __name__ == '__main__':
