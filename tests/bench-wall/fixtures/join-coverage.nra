@@ -1,0 +1,84 @@
+// Held-out join coverage with the fixed argument 2000. The two checksums
+// cover direct joins and the joins inside the string indentation functions.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let text = import:Std.Core.String;
+
+export let JoinCoverage = module:program.Entry (
+    const Mask: int64 = 1073741823;
+
+    let expect = func(label: string, actual: string, expected: string) {
+        if (actual != expected) {
+            trap_with_message("join coverage: " + label);
+        }
+    };
+
+    let observe = func(checksum: int64, value: string, round: int) -> int64 {
+        last length = value.byte_length;
+        let next = (checksum * 31 + (length as int64)) & Mask;
+        if (length > 0) {
+            next = (next * 31 + (value.byte_at(round % length) as int64)) & Mask;
+        }
+        return next;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        if (args.length != 1) {
+            trap_with_message("join coverage: expected a rotation count");
+        }
+        last rotations = result.value_or<int32>(int32s.parse(args[0]), 0);
+        if (rotations <= 0) {
+            trap_with_message("join coverage: expected a positive rotation count");
+        }
+
+        last short_pieces: string[list] = new([
+            "ax", "", "7", "b", "mix", "red", "UV", "p",
+            "x9", "up", "", "q", "42", "end", "run", "N",
+            "bin", "v2", "A", "", "tap", "low", "D", "ok",
+            "R", "12", "yes", "0", "", "K", "out", "zz"
+        ]);
+        last long_pieces: string[list] = new([
+            strings.repeat("north-west:", 32),
+            strings.repeat("south-east:", 29),
+            strings.repeat("upstream:", 31)
+        ]);
+        last unicode_pieces: string[list] = new(["é", "", "猫", "🙂é"]);
+        last single_piece: string[list] = new(["only 猫"]);
+        last no_pieces: string[list] = new;
+
+        expect("short pieces", strings.join(short_pieces, ":"),
+            "ax::7:b:mix:red:UV:p:x9:up::q:42:end:run:N:bin:v2:A::tap:low:D:ok:R:12:yes:0::K:out:zz");
+        expect("empty separator", strings.join(short_pieces, ""),
+            "ax7bmixredUVpx9upq42endrunNbinv2AtaplowDokR12yes0Koutzz");
+        expect("multibyte separator", strings.join(unicode_pieces, "🔹"), "é🔹🔹猫🔹🙂é");
+        expect("single piece", strings.join(single_piece, "ignored"), "only 猫");
+        expect("empty list", strings.join(no_pieces, "|"), "");
+
+        let direct_checksum: int64 = 0;
+        for (let round = 0; round < rotations; round++) {
+            direct_checksum = observe(direct_checksum, strings.join(short_pieces, ":"), round);
+            direct_checksum = observe(direct_checksum, strings.join(long_pieces, " / "), round);
+            direct_checksum = observe(direct_checksum, strings.join(short_pieces, ""), round);
+            direct_checksum = observe(direct_checksum, strings.join(unicode_pieces, "🔹"), round);
+            direct_checksum = observe(direct_checksum, strings.join(single_piece, "ignored"), round);
+            direct_checksum = observe(direct_checksum, strings.join(no_pieces, "|"), round);
+        }
+
+        last lines = "alpha\r\n  beta\r猫";
+        last padded_lines = "  alpha  \r\n    beta\t\r  猫";
+        expect("indent", text.indent(lines, 2), "  alpha\n    beta\n  猫\n");
+        expect("strip indent", text.strip_indent(padded_lines), "alpha\n  beta\n猫");
+
+        let indentation_checksum: int64 = 0;
+        for (let round = 0; round < rotations; round++) {
+            indentation_checksum = observe(indentation_checksum, text.indent(lines, 2), round);
+            indentation_checksum = observe(indentation_checksum, text.strip_indent(padded_lines), round);
+        }
+
+        console.println("join-coverage {} {}", direct_checksum, indentation_checksum);
+        return program.ExitCode.Ok;
+    };
+);

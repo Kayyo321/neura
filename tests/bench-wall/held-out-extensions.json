@@ -1,0 +1,46 @@
+{
+  "rows": [
+    {
+      "row": 11,
+      "label": "row 11, added after the freeze for join coverage",
+      "fixture": {
+        "name": "join-coverage",
+        "mode": "run",
+        "source": "tests/bench-wall/fixtures/join-coverage.nra",
+        "purpose": "Direct joins with short, long, UTF-8, empty and singleton inputs, followed by indent and strip_indent.",
+        "options": [
+          "--parallel-workers",
+          "1"
+        ],
+        "arguments": [
+          "2000"
+        ],
+        "sha256": {
+          "tests/bench-wall/fixtures/join-coverage.nra": "ea5ec0534eec8ed31c288eaa18e94c304fa792c0193a52108a761d1b77d6587d"
+        }
+      },
+      "output_sha256": "002c8f395fb5810d1099501a91b6d24c591bbb1796ce3e8635a40abc50194549"
+    },
+    {
+      "row": 12,
+      "label": "row 12, added after the freeze for append coverage",
+      "fixture": {
+        "name": "append-coverage",
+        "mode": "run",
+        "source": "tests/bench-wall/fixtures/append-coverage.nra",
+        "purpose": "Literal and dynamic UTF-8 appends and integer formatting, with growing and short-lived builders.",
+        "options": [
+          "--parallel-workers",
+          "1"
+        ],
+        "arguments": [
+          "225000"
+        ],
+        "sha256": {
+          "tests/bench-wall/fixtures/append-coverage.nra": "706826527c3f9d08c2f7848f92327b672537d98599ca25b5073bebd85c0f6d08"
+        }
+      },
+      "output_sha256": "7233e0a6e01776f4d89d79439197360a55085abbef0cbf055884f24aea226c9e"
+    }
+  ]
+}
