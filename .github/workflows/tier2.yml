@@ -50,7 +50,7 @@ jobs:
           ldd --version | head -1
 
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNEURA_TEST_TIMEOUT_SCALE=12
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNEURA_TEST_TIMEOUT_SCALE=12 -DNEURA_TEST_FRAME_HOOKS=ON
 
       - name: Build
         run: cmake --build build --parallel "$(nproc)" 2>&1 | tee build/build.log
@@ -118,7 +118,7 @@ jobs:
           xcode-select --print-path
 
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNEURA_TEST_TIMEOUT_SCALE=12
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNEURA_TEST_TIMEOUT_SCALE=12 -DNEURA_TEST_FRAME_HOOKS=ON
 
       - name: Build
         run: cmake --build build --parallel "$(sysctl -n hw.ncpu)" 2>&1 | tee build/build.log
@@ -193,7 +193,7 @@ jobs:
       # where a check needs the names).
       - name: Configure
         run: >
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DNEURA_TEST_FRAME_HOOKS=ON
           -DNEURA_STATIC_LAUNCHER=OFF
           -DNEURA_STATIC_DISPATCHER=OFF
           -DNEURA_TEST_TIMEOUT_SCALE=6
@@ -266,7 +266,7 @@ jobs:
       - name: Select the Windows build environment
         uses: ./.github/actions/windows
       - name: Configure
-        run: cmake --preset '${{ matrix.preset }}' -DNEURA_TEST_TIMEOUT_SCALE=12
+        run: cmake --preset '${{ matrix.preset }}' -DNEURA_TEST_TIMEOUT_SCALE=12 -DNEURA_TEST_FRAME_HOOKS=ON
       - name: Build
         run: cmake --build --preset '${{ matrix.preset }}' --parallel 4 2>&1 | tee build-${{ matrix.preset }}/build.log
       - name: Require an MSVC build without Neura compiler warnings

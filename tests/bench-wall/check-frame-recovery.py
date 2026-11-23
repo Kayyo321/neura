@@ -3,7 +3,8 @@
 
 The corpus mode consumes a prepared manifest of unchanged NVR images and
 frozen held-out sources with their existing gate receipts. Fixture mode uses
-one small checked-in program to exercise both optimized and diagnostic modes.
+checked-in programs to exercise both optimized and diagnostic modes and audit
+sparse frame omissions.
 The runner uses the same candidate SDK for both arms and keeps raw output.
 With --audit-live-slots, the test build independently checks the omissions
 of every sparse function-entry graph formed during one corpus run.
@@ -266,6 +267,19 @@ def corpus(args, seeds):
     print(f"{len(cases)} workloads, {len(evidence)} pairs, {sum(row['captured'] for row in evidence)} matched frames")
 
 
+def parse_audit(stderr, log):
+    programs, ordinary = [], []
+    for line in stderr.splitlines(keepends=True):
+        if not line.startswith(LIVENESS_AUDIT):
+            ordinary.append(line)
+            continue
+        row = json.loads(line[len(LIVENESS_AUDIT):])
+        require(all(number(row[field]) for field in ("function", "checked_states", "checked_slots")) and
+                row["checked_states"] <= row["checked_slots"] and
+                bool(row["checked_states"]) == bool(row["checked_slots"]), f"{log}: invalid liveness audit record")
+        programs.append(row)
+    return programs, b"".join(ordinary)
+
 
 def audit_corpus(args):
     cases = corpus_cases(args)
@@ -273,16 +287,8 @@ def audit_corpus(args):
     for case in cases:
         log = args.out_dir / f"{case.name}-audit"
         result = invoke(args, case.command, case.cwd, log, env={"NEURA_TIER3_TEST_FRAME_AUDIT": "1"})
-        check_corpus_result(case, (result.returncode, result.stdout, result.stderr))
-        programs = []
-        for line in result.stderr.splitlines():
-            if not line.startswith(LIVENESS_AUDIT):
-                continue
-            row = json.loads(line[len(LIVENESS_AUDIT):])
-            require(all(number(row[field]) for field in ("function", "checked_states", "checked_slots")) and
-                    row["checked_states"] <= row["checked_slots"] and
-                    bool(row["checked_states"]) == bool(row["checked_slots"]), f"{log}: invalid liveness audit record")
-            programs.append(row)
+        programs, ordinary = parse_audit(result.stderr, log)
+        check_corpus_result(case, (result.returncode, result.stdout, ordinary))
         require(programs or case.name in {"held-fan-out", "held-worker-group"},
                 f"{log}: no sparse function-entry audit records")
         states = sum(row["checked_states"] for row in programs)
@@ -385,6 +391,16 @@ def diagnostics(args, seeds):
     captured_bits = {"fixture-nan": set(), "fixture-zero": set()}
     gc_roots = 0
     for case, expected, layouts in fixture_cases(args):
+        if case.name == "fixture-resume":
+            log = args.out_dir / f"{case.name}-audit"
+            result = invoke(args, case.command, case.cwd, log, env={"NEURA_TIER3_TEST_FRAME_AUDIT": "1"})
+            programs, ordinary = parse_audit(result.stderr, log)
+            # Replay records would also change stderr with the seed unset.
+            require((result.returncode, result.stdout, ordinary) == expected,
+                    f"{case.name}: the unseeded audit differs from tier 0")
+            audited = sum(row["checked_slots"] for row in programs)
+            require(audited > 0, f"{case.name}: the liveness audit did not check any omitted slots")
+            print(f"{case.name}: liveness audit checked {audited} omissions")
         for seed in seeds:
             outcome, trace, _ = pair(args, case, seed)
             require(outcome == expected, f"{case.name}, seed {seed}: differs from tier 0")
@@ -396,6 +412,8 @@ def diagnostics(args, seeds):
                 gc_roots += roots
             if case.name != "fixture-resume":
                 continue
+            require(trace, f"{case.name}, seed {seed}: no forced sparse and full frame captures")
+            print(f"{case.name}, seed {seed}: {len(trace)} matched sparse and full frame captures")
             modes = (
                 ("tier-stats", STANDARD, ("--tier-stats",), {}),
                 ("tier-stats-parallel", STANDARD, ("--tier-stats", "--parallel-workers", "2"), {}),
@@ -435,9 +453,9 @@ def main():
     parser.add_argument("--candidate", required=True, type=Path)
     workload = parser.add_mutually_exclusive_group(required=True)
     workload.add_argument("--inputs", type=Path, help="prepared corpus manifest with pinned receipts and images")
-    workload.add_argument("--fixture", action="store_true", help="check diagnostic modes and traps on a tracked fixture")
+    workload.add_argument("--fixture", action="store_true", help="check frame replay and liveness on tracked fixtures")
     parser.add_argument("--audit-live-slots", action="store_true",
-                        help="check sparse frames with an SDK built using -DNEURA_TEST_FRAME_LIVENESS=ON")
+                        help="check sparse frames with an SDK built using -DNEURA_TEST_FRAME_HOOKS=ON")
     parser.add_argument("--out-dir", required=True, type=Path)
     parser.add_argument("--gate-size", choices=("quick", "full", "long"), default="long")
     parser.add_argument("--seed", type=int, action="append", help="repeatable uint64 seed")

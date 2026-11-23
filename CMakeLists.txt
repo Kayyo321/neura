@@ -1198,9 +1198,12 @@ endif()
 
 include(CTest)
 
-option(NEURA_TEST_FRAME_LIVENESS "Build the independent Tier 3 frame liveness audit for tests" OFF)
-if(BUILD_TESTING AND NEURA_SDK AND NEURA_TEST_FRAME_LIVENESS)
-    set_property(SOURCE src/nvm/tier3_build.cpp APPEND PROPERTY COMPILE_DEFINITIONS NEURA_TEST_FRAME_LIVENESS=1)
+option(NEURA_TEST_FRAME_HOOKS "Build Tier 3 frame replay and liveness audit hooks for tests" OFF)
+if(BUILD_TESTING AND NEURA_SDK AND NEURA_TEST_FRAME_HOOKS)
+    set_property(SOURCE
+        src/nvm/machine.cpp src/nvm/tier3_build.cpp src/jit/tier3_emit.cpp
+        tests/backend/tier3_native_tests.cpp
+        APPEND PROPERTY COMPILE_DEFINITIONS NEURA_TEST_FRAME_HOOKS=1)
 endif()
 
 if(BUILD_TESTING AND NEURA_ENABLE_SERVER_TLS)
@@ -2039,6 +2042,23 @@ if(BUILD_TESTING AND NEURA_SDK)
         add_test(NAME backend-tier3-guarded-preheader COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/backend/tier3/guarded-preheader.py" "$<TARGET_FILE:neura>")
         set_tests_properties(backend-tier3-guarded-preheader PROPERTIES TIMEOUT 300)
+        if(NEURA_TEST_FRAME_HOOKS)
+            # With assertions enabled, Tier 3 verification requires full frames.
+            get_property(neura_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+            string(TOLOWER "${CMAKE_BUILD_TYPE}" neura_frame_build_type)
+            if(neura_multi_config OR neura_frame_build_type MATCHES "^(release|relwithdebinfo|minsizerel)$")
+                set(neura_frame_test_configs)
+                if(neura_multi_config)
+                    set(neura_frame_test_configs CONFIGURATIONS Release RelWithDebInfo MinSizeRel)
+                endif()
+                add_test(NAME backend-tier3-frame-recovery COMMAND "${Python3_EXECUTABLE}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/bench-wall/check-frame-recovery.py"
+                    --candidate "$<TARGET_FILE:neura>" --fixture --seed 277
+                    --out-dir "${CMAKE_CURRENT_BINARY_DIR}/backend-tier3-frame-recovery"
+                    ${neura_frame_test_configs})
+                set_tests_properties(backend-tier3-frame-recovery PROPERTIES TIMEOUT 180)
+            endif()
+        endif()
     endif()
 
     add_test(NAME backend-each COMMAND "${CMAKE_COMMAND}"

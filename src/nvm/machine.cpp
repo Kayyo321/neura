@@ -12,8 +12,10 @@
 #ifndef NEURA_WASM_RUNTIME
 #include "driver.hpp"
 #include "jit/tier3_native.hpp"
+#ifdef NEURA_TEST_FRAME_HOOKS
 #include "tier3_frame_liveness.hpp"
 #include <sstream>
+#endif
 #endif
 #include "lift/evaluate.hpp"
 #include "nvr/format.hpp"
@@ -395,12 +397,14 @@ public:
     ~State() {
 #ifndef NEURA_WASM_RUNTIME
         stop_parallel_workers();
+#ifdef NEURA_TEST_FRAME_HOOKS
         if (frame_replay_) {
             std::fprintf(stderr, "frame-recovery-summary {\"captured\":%u,\"forced\":%llu,\"omitted\":%llu}\n",
                          frame_replay_reports_ + frame_replay_entry_reports_,
                          static_cast<unsigned long long>(frame_replay_events_),
                          static_cast<unsigned long long>(frame_replay_omitted_));
         }
+#endif
 #endif
         stop_tracking_heap();
         // A shadow's tier steps are not the run's (NEURA_TIER_CHECK=2).
@@ -440,7 +444,9 @@ public:
 #ifdef NEURA_WASM_RUNTIME
         if (tier2_ && limits_.jit == jit::Mode::On) throw std::invalid_argument("the browser runtime has no native code");
 #else
+#ifdef NEURA_TEST_FRAME_HOOKS
         frame_replay_ = tier3::frame_replay_seed().has_value();
+#endif
         // Tier 3 runs function programs: it is on when the cache turns
         // them native (docs/runtime/NVM.md, "Execution tiers").
         tier3_ = tier2_ && tier_->native_enabled();
@@ -483,8 +489,10 @@ public:
     // advanced Execution can be stopped and inspected between reference steps.
     void allow_sparse_frames() {
         tier3_full_frames_ = !tier3_native_ || times_ || limits_.parallel_workers != 1 || limits_.keep_regions_at_end ||
-                             limits_.tier_shadow || tier_shadow_enabled() || tier3::verify_enabled() ||
-                             std::getenv("NEURA_TIER3_TEST_FULL_FRAMES") != nullptr;
+                             limits_.tier_shadow || tier_shadow_enabled() || tier3::verify_enabled();
+#ifdef NEURA_TEST_FRAME_HOOKS
+        tier3_full_frames_ = tier3_full_frames_ || std::getenv("NEURA_TIER3_TEST_FULL_FRAMES") != nullptr;
+#endif
     }
 #endif
 
@@ -4900,6 +4908,9 @@ private:
         std::size_t compiled_sites = 0;
         // Tier 2 keeps retired regions alive for callers that resume them.
         // Keep one checked build per region for the current exclusion set.
+        // With deferred proofs off, Tier 2 forms one region plus at most four
+        // refreshes. With deferred proofs on, its block count bounds refreshes.
+        // No shipped preset enables both deferred proofs and Tier 3.
         std::map<const tier2::Region*, std::unique_ptr<tier3::Program>> versions;
     };
     std::map<std::pair<std::uint32_t, tier3::LoopSite>, unsigned> tier3_preflight_failures_;
@@ -4936,11 +4947,13 @@ private:
     std::unique_ptr<Shadow> shadow_;
 #ifndef NEURA_WASM_RUNTIME
     bool tier3_full_frames_ = true;
+#ifdef NEURA_TEST_FRAME_HOOKS
     bool frame_replay_ = false;
     unsigned frame_replay_reports_ = 0;
     unsigned frame_replay_entry_reports_ = 0;
     std::uint64_t frame_replay_events_ = 0;
     std::uint64_t frame_replay_omitted_ = 0;
+#endif
 #endif
 };
 

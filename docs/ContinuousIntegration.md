@@ -25,6 +25,8 @@ Tests of optional platform features do not skip when the runner lacks the featur
 
 A pull request that adds CTest entries raises `--minimum` in the workflow to the new count. A pull request that removes entries lowers it, which makes the removal visible in review.
 
+Standalone SDK test builds in Tier 1 and Tier 2 enable `NEURA_TEST_FRAME_HOOKS`, and the native Tier 3 frame recovery test in optimized Linux x86-64 builds exercises `NEURA_TIER3_TEST_FRAME_SEED`, `NEURA_TIER3_TEST_FULL_FRAMES` and the frame liveness audit. The release job keeps the option off, so its CTest suite omits the hook test and the binaries it tests and packages have no frame test hooks.
+
 ### What Tier 1 does not cover
 
 Tier 1 builds Linux x86-64 with GCC 14 and Windows x86-64 with MSVC. [Tier 2](#tier-2-platform-and-sanitizer-runs) covers macOS, Linux arm64, clang-cl on Windows, and sanitizers when a maintainer starts it. [Tier 3](#tier-3-release-qualification) builds and qualifies release archives.

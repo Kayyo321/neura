@@ -292,6 +292,7 @@
         }
     }
 
+#ifdef NEURA_TEST_FRAME_HOOKS
     // The checker compares full and sparse executions using the original
     // image's continuation mask, computed independently of the native IR.
     void record_frame_replay(const tier3::Function& fn, std::uint32_t state_id) {
@@ -348,6 +349,7 @@
         output << "]}\n";
         std::fputs(output.str().c_str(), stderr);
     }
+#endif
 
     // Leaves compiled code at `state_id`: its frames materialized, the
     // counters of the state in the context, the steps flushed.
@@ -363,8 +365,13 @@
         context->next_block = leaf.block;
         context->reason = reason;
         self.tier3_flush(*context);
-        if (reason == tier3::Reason::FrameReplay) self.record_frame_replay(*fn, state_id);
-        else if (leaf.loop_preflight) self.tier3_note_preflight_failure(fn->function, {leaf.function, leaf.block});
+#ifdef NEURA_TEST_FRAME_HOOKS
+        if (reason == tier3::Reason::FrameReplay) {
+            self.record_frame_replay(*fn, state_id);
+            return;
+        }
+#endif
+        if (leaf.loop_preflight) self.tier3_note_preflight_failure(fn->function, {leaf.function, leaf.block});
     }
 
     static void tier3_leave(tier3::Context* context, std::uint32_t block) {

@@ -11,7 +11,6 @@
 #include "kernels/kernel_binding.hpp"
 
 #include <algorithm>
-#include <charconv>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -20,12 +19,14 @@
 #include <string_view>
 #include <utility>
 
-#ifdef NEURA_TEST_FRAME_LIVENESS
+#ifdef NEURA_TEST_FRAME_HOOKS
+#include <charconv>
 #include "../../tests/bench-wall/frame-liveness-oracle.hpp"
 #endif
 
 namespace neura::nvm::tier3 {
 
+#ifdef NEURA_TEST_FRAME_HOOKS
 std::optional<std::uint64_t> frame_replay_seed() {
     // Native code is cached within a process, so keep its test seed fixed.
     static const auto seed = []() -> std::optional<std::uint64_t> {
@@ -39,6 +40,7 @@ std::optional<std::uint64_t> frame_replay_seed() {
     }();
     return seed;
 }
+#endif
 
 namespace {
 
@@ -2106,8 +2108,8 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
                     tier3::detail::compact(entry->ir);
                     const tier3::detail::Cfg cfg(entry->ir);
                     if (!tier3::detail::find_loops(entry->ir, cfg).empty()) {
-                        const auto omitted = tier3::detail::prune_dead_frame_slots(image_, entry->ir);
-#ifdef NEURA_TEST_FRAME_LIVENESS
+                        [[maybe_unused]] const auto omitted = tier3::detail::prune_dead_frame_slots(image_, entry->ir);
+#ifdef NEURA_TEST_FRAME_HOOKS
                         if (variant == tier3::Variant::SparseFrames) {
                             static const bool audit_liveness = [] {
                                 const auto* test = std::getenv("NEURA_TIER3_TEST_FRAME_AUDIT");
@@ -2115,8 +2117,10 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
                             }();
                             if (audit_liveness) testing::audit_frame_liveness(image_, entry->ir, omitted);
                         }
-#endif
                         const auto verify_entry = verify || (omitted != 0 && tier3::frame_replay_seed());
+#else
+                        const auto verify_entry = verify;
+#endif
                         tier3::optimize(image_, entry->ir, verify_entry, checked_loops);
                         tier3::place_canons(image_, entry->ir, verify_entry);
                         built.program->function_entry = std::move(entry);

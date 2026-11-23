@@ -223,7 +223,9 @@ private:
     const Lowered& l_;
     const mir::Allocation& alloc_;
     Assembler& a_;
+#ifdef NEURA_TEST_FRAME_HOOKS
     const std::optional<std::uint64_t> frame_replay_seed_ = t3::frame_replay_seed();
+#endif
     std::vector<Label> block_labels_;
     std::uint32_t spill_base_ = 0;
     std::uint32_t saved_program_ = 0;
@@ -772,6 +774,7 @@ private:
             if (kernel) a_.alu(Alu::sub, S64, scratch, Mem::at(context, off::K));
             a_.alu(Alu::cmp, S64, scratch, Mem::at(context, off::room));
             a_.jcc(Cond::a, stub(inst, ia));
+#ifdef NEURA_TEST_FRAME_HOOKS
             if (frame_replay_seed_) {
                 // Sample by original continuation and executed block count. The
                 // same seed visits the same points with full and sparse frames.
@@ -786,6 +789,7 @@ private:
                 a_.test(S32, scratch, Imm32{15});
                 a_.jcc(Cond::e, stub(inst, ia, t3::Reason::FrameReplay));
             }
+#endif
             return;
         }
         case Kind::SwitchCheck: {

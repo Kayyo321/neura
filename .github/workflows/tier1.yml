@@ -103,7 +103,7 @@ jobs:
 
       - name: Configure
         run: >
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNEURA_TEST_FRAME_HOOKS=ON
           -DNEURA_ENABLE_SERVER_TLS=ON "-DOPENSSL_ROOT_DIR=$HOME/server-components/openssl"
           -DNEURA_ENABLE_SERVER_HTTP2=ON "-DNEURA_NGHTTP2_ROOT=$HOME/server-components/nghttp2"
           -DNEURA_ENABLE_POSTGRES=ON "-DNEURA_LIBPQ_SOURCE=$HOME/server-components/postgresql"
@@ -140,7 +140,7 @@ jobs:
 
       - name: Require every test to have run
         if: ${{ !cancelled() }}
-        run: python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 326
+        run: python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 327
 
       - name: Upload the test report
         if: ${{ !cancelled() }}
@@ -227,7 +227,7 @@ jobs:
           python scripts/gen-kernels.py --check
           python scripts/build-site.py --check
       - name: Configure
-        run: cmake --preset windows-msvc -DNEURA_TEST_TIMEOUT_SCALE=12
+        run: cmake --preset windows-msvc -DNEURA_TEST_TIMEOUT_SCALE=12 -DNEURA_TEST_FRAME_HOOKS=ON
       - name: Build
         run: cmake --build --preset windows-msvc --parallel 4 2>&1 | tee build-windows-msvc/build.log
       - name: Require an MSVC build without Neura compiler warnings

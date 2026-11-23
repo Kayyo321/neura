@@ -367,9 +367,12 @@ NEURA_TEST(tier3, natural_checks_recover_sparse_frames_at_the_original_loop_trap
     auto options = machine_options();
     options.native_inlining = false;
     const auto serial = [](nvm::RunLimits& limits) { limits.profile = false; };
+    bool full_frames = false;
+#ifdef NEURA_TEST_FRAME_HOOKS
+    full_frames = std::getenv("NEURA_TIER3_TEST_FULL_FRAMES") != nullptr;
+#endif
     const bool sparse = machine_code_runs() && t3::passes_enabled() && !t3::verify_enabled() &&
-                        !nvm::tier_check_enabled() && !nvm::tier_shadow_enabled() &&
-                        std::getenv("NEURA_TIER3_TEST_FULL_FRAMES") == nullptr;
+                        !nvm::tier_check_enabled() && !nvm::tier_shadow_enabled() && !full_frames;
 
     for (const auto& scenario : cases) {
         auto model = prototype;

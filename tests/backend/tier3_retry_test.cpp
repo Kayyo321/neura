@@ -1,6 +1,7 @@
 // Standalone fault-injection regression. Compile this translation unit instead
 // of tier3_build.cpp and link against the NVM's static libraries. Renaming the
 // inliner here leaves the production library and verifier unchanged.
+// Use -DNEURA_TEST_FRAME_HOOKS=1 when linking a hook-enabled NVM archive.
 #define inline_calls tier3_retry_test_inline_calls
 #include "../../src/nvm/tier3_build.cpp"
 #undef inline_calls

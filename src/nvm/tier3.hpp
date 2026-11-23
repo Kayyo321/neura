@@ -344,8 +344,10 @@ constexpr bool standard_variant(Variant variant) {
     return variant == Variant::Standard || variant == Variant::SparseFrames;
 }
 
+#ifdef NEURA_TEST_FRAME_HOOKS
 // The checker can ask generated code to deoptimize at sampled checkpoints.
 std::optional<std::uint64_t> frame_replay_seed();
+#endif
 
 struct Function {
     std::vector<Inst> insts;
