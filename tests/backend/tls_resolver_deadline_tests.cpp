@@ -33,6 +33,22 @@ bool bounded_connect() {
     return !answer.success && answer.value.bits == host_error::timed_out &&
            std::chrono::steady_clock::now() - started < 500ms;
 }
+// Under load the caller can pass its 20 ms deadline before it starts a
+// resolver worker, which is a correct timeout that never reaches
+// getaddrinfo, or the worker can start after the caller has returned. Every
+// call must time out promptly; at least one worker must then be seen blocked
+// in the stalled resolver, so the timeout came from not waiting for it.
+enum class Stall { reached, escaped, never_entered };
+Stall stalled_lookup() {
+    entered = false;
+    const auto limit = std::chrono::steady_clock::now() + 5s;
+    do {
+        if (!bounded_connect()) return Stall::escaped;
+        const auto settle = std::chrono::steady_clock::now() + 200ms;
+        while (!entered.load() && std::chrono::steady_clock::now() < settle) std::this_thread::sleep_for(1ms);
+    } while (!entered.load() && std::chrono::steady_clock::now() < limit);
+    return entered.load() ? Stall::reached : Stall::never_entered;
+}
 }
 extern "C" int __real_getaddrinfo(const char*, const char*, const addrinfo*, addrinfo**);
 extern "C" int __wrap_getaddrinfo(const char* host, const char* service, const addrinfo* hints, addrinfo** output) {
@@ -44,15 +60,16 @@ extern "C" int __wrap_getaddrinfo(const char* host, const char* service, const a
 }
 int main() {
     const auto fail = [](const char* reason) { std::cerr << reason << '\n'; return 1; };
-    if (!bounded_connect() || !entered || finished) return fail("DNS escaped its caller deadline");
+    const auto first = stalled_lookup();
+    if (first == Stall::escaped || finished) return fail("DNS escaped its caller deadline");
+    if (first == Stall::never_entered) return fail("lookup never entered the system resolver");
     if (!bounded_connect() || finished) return fail("busy resolver did not fail promptly");
     // An outstanding parent worker must not leave the forked child holding
     // a permanently busy resolver slot or a mutex owned by a vanished thread.
     const auto child = ::fork();
     if (child < 0) return fail("fork failed");
     if (child == 0) {
-        entered = false;
-        if (!bounded_connect() || !entered) _exit(1);
+        if (stalled_lookup() != Stall::reached) _exit(1);
         release = true;
         while (!finished) std::this_thread::sleep_for(1ms);
         _exit(0);
