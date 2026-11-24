@@ -211,6 +211,41 @@
           "sha256": "0549fe2d945d8e03d31d29032c0bc876e4750ea40e5518fa49c4b6e6c20349db"
         }
       }
+    },
+    {
+      "row": 18,
+      "label": "row 18, warmed application outside the pooled ten-row geomean",
+      "warmed": true,
+      "pooled_ten_row_geomean": false,
+      "fixture": {
+        "name": "channel-workers",
+        "mode": "run",
+        "source": "tests/bench-wall/fixtures/channel-workers.nra",
+        "purpose": "Distribute jobs through a bounded queue to three workers that return results over a second bounded channel to a collector.",
+        "options": [
+          "--virtual-time",
+          "--parallel-workers",
+          "1"
+        ],
+        "arguments": [
+          "2250000"
+        ],
+        "sha256": {
+          "tests/bench-wall/fixtures/channel-workers.nra": "22ba4bb6bdf186a24f9a5e529eade5eb4c26f54ac07864489a36ca7215226b85"
+        }
+      },
+      "steps": 166501247,
+      "output_sha256": "5092ec1ce66e4521c0de6b5ad109325c290c6195c699df53dc86364b603e9cb2",
+      "twins": {
+        "java": {
+          "source": "tests/bench-wall/held-out/java/ChannelWorkers.java",
+          "sha256": "613240f22ea30d30aec79a79fd27e60b0cbecd60c6231422b33e0757f7b93e0f"
+        },
+        "csharp": {
+          "source": "tests/bench-wall/held-out/csharp/ChannelWorkers.cs",
+          "sha256": "7bc128403ff5f4354450d0ad788d823af53f01c5b767bbd74587b6361990cd98"
+        }
+      }
     }
   ]
 }
