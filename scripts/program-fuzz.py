@@ -11,6 +11,7 @@ shapes someone thought of. This tool covers shapes nobody did:
     scripts/program-fuzz.py generate --seed 7 --out DIR
     scripts/program-fuzz.py run --neura build/neura --seeds 1..100 --jobs 4 --report DIR
     scripts/program-fuzz.py run --neura build/neura --quick
+    scripts/program-fuzz.py coverage --seeds 1..10 --neura build/neura
 
 `generate` writes DIR/program-N.nra, a pure function of N (a `random.Random(N)`
 and nothing else: no clock, no hashing, no iteration over unordered
@@ -1403,14 +1404,20 @@ def parse_seeds(text):
 
 
 def coverage(args):
-    """The share of programs that use each feature."""
+    """The share of programs that use each feature, with optional runtime coverage for task seeds."""
     seeds = parse_seeds(args.seeds)
     counts = {name: 0 for name in FEATURES}
+    task_seeds = []
     for seed in seeds:
-        for name in build_program(seed, any_values=not args.without_any_values)[2].features:
+        _, _, program = build_program(seed, any_values=not args.without_any_values)
+        for name in program.features:
             counts[name] += 1
+        if program.tasks:
+            task_seeds.append(seed)
     for name in FEATURES:
         print(f"{name:20} {counts[name]:5} of {len(seeds)}  {100.0 * counts[name] / len(seeds):5.1f}%")
+    if args.neura:
+        return task_native_coverage(args, task_seeds)
     return 0
 
 
@@ -1517,6 +1524,60 @@ class Runner:
 
 STATS = re.compile(rb"stats: steps (\d+), peak heap cells (\d+)(?:, peak stack cells (\d+))?")
 HEAP_ENTRY = re.compile(rb"heap limit exceeded: allocation of (\d+) cells before entry")
+NATIVE_ENTRIES = re.compile(rb"^tier: native programs \d+ [^\n]+; entered (\d+),", re.MULTILINE)
+
+
+def task_native_coverage(args, seeds):
+    """Record machine-code entries in the fuzz modes that explicitly request native Tier 3."""
+    modes = [(name, options, environment) for name, options, environment in MODES
+             if environment.get("NEURA_TIER3") == "native"]
+    runner = Runner(str(Path(args.neura).resolve()), args.timeout)
+    print(f"\nTier 3 machine-code entries in {len(seeds)} task seeds (faults disabled):")
+    totals = {name: 0 for name, _, _ in modes}
+    covered = dict(totals)
+    failed = False
+    with tempfile.TemporaryDirectory() as directory:
+        for seed in seeds:
+            source, arguments, _ = build_program(seed, any_values=not args.without_any_values)
+            program = Path(directory) / f"program-{seed}.nra"
+            image = program.with_suffix(".nvr")
+            program.write_text(source, encoding="utf-8", newline="\n")
+            try:
+                built = subprocess.run([runner.neura, "build", str(program), "-o", str(image)],
+                                       capture_output=True, stdin=subprocess.DEVNULL, timeout=args.timeout)
+            except subprocess.TimeoutExpired:
+                print(f"seed {seed}: the build timed out", file=sys.stderr)
+                failed = True
+                continue
+            if built.returncode != 0 or built.stdout or built.stderr:
+                print(f"seed {seed}: the build failed\n{(built.stdout + built.stderr).decode(errors='replace')}",
+                      file=sys.stderr)
+                failed = True
+                continue
+            entries = []
+            for name, options, environment in modes:
+                # Platforms without machine code still run and report zero.
+                options = [option for option in options if option != "--jit=on"] + ["--tier-stats"]
+                outcome = runner.run(image, [arguments[0], "0"], options, environment)
+                if (outcome.status != 0 or not re.search(rb"^s\d+ tasks ", outcome.stdout, re.MULTILINE)
+                        or not STATS.search(outcome.stderr) or b"\ntier: " not in outcome.stderr):
+                    print(f"seed {seed}, {name}: task coverage run failed\n{outcome.text()}", file=sys.stderr)
+                    failed = True
+                    continue
+                match = NATIVE_ENTRIES.search(outcome.stderr)
+                if not match and re.search(rb"^tier: native programs \d+ ", outcome.stderr, re.MULTILINE):
+                    print(f"seed {seed}, {name}: malformed native tier statistics\n{outcome.text()}", file=sys.stderr)
+                    failed = True
+                    continue
+                interpreted = b"\ntier: native programs on the IR interpreter:" in outcome.stderr
+                count = int(match[1]) if match and not interpreted else 0
+                totals[name] += count
+                covered[name] += count > 0
+                entries.append(f"{name}={count}")
+            print(f"seed {seed}: {', '.join(entries)}")
+    for name, _, _ in modes:
+        print(f"{name:29} {totals[name]:8} entries in {covered[name]} of {len(seeds)} task seeds")
+    return 1 if failed else 0
 
 
 def spread(low, high, count):
@@ -1844,6 +1905,8 @@ def main():
     compile_parser.add_argument("--jobs", type=int, default=2)
     coverage_parser = commands.add_parser("coverage", help="the share of programs that use each feature")
     coverage_parser.add_argument("--seeds", required=True)
+    coverage_parser.add_argument("--neura", help="also build and count native entries in the task seeds")
+    coverage_parser.add_argument("--timeout", type=float, default=120.0, help="seconds for a build or run")
     for command in (generate_parser, run_parser, compile_parser, coverage_parser):
         command.add_argument("--without-any-values", action="store_true",
                              help="omit the any section for comparison with the earlier corpus")

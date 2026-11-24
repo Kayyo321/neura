@@ -1510,6 +1510,29 @@ if(BUILD_TESTING AND NEURA_SDK)
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/concurrency/schedules.cmake"
     )
 
+    # Compare execution tiers at each quantum, including recorded scheduler
+    # inputs and choices. Keep the fixture groups independently bounded.
+    foreach(section IN ITEMS programs monitors io parallel special schedules)
+        add_test(NAME concurrency-tiers-${section} COMMAND ${CMAKE_COMMAND}
+            "-DNEURA=$<TARGET_FILE:neura>"
+            "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+            "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/concurrency-tiers-${section}-tests"
+            "-DSECTION=${section}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/concurrency/tiers.cmake")
+        set_tests_properties(concurrency-tiers-${section} PROPERTIES TIMEOUT 600)
+    endforeach()
+    # Only x86-64 Linux emits Tier 3 machine code. Until M1, zero native
+    # task entries are the expected failure of this independent probe.
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND neura_host_arch STREQUAL "x86_64")
+        add_test(NAME concurrency-tiers-nonvacuity COMMAND ${CMAKE_COMMAND}
+            "-DNEURA=$<TARGET_FILE:neura>"
+            "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+            "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/concurrency-tiers-nonvacuity-tests"
+            -DSECTION=nonvacuity -DEXPECT_MISSING_NATIVE=ON
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/concurrency/tiers.cmake")
+        set_tests_properties(concurrency-tiers-nonvacuity PROPERTIES TIMEOUT 120)
+    endif()
+
     # Monitors: #Synchronized methods on shared instances (Concurrency.md section 8.1).
     add_test(NAME concurrency-monitors COMMAND ${CMAKE_COMMAND}
         "-DNEURA=$<TARGET_FILE:neura>"
