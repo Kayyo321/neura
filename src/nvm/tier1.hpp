@@ -296,6 +296,18 @@ struct TierStatistics {
     std::uint64_t native_heap_hoisted = 0;
 };
 
+class CompileObserver;
+
+struct CompileActivity {
+    std::uint64_t lifted_attempts;
+    std::uint64_t tier2_compiled;
+    std::uint64_t tier3_programs;
+    std::uint64_t tier3_failed;
+    std::uint64_t tier3_lazy_entries;
+    std::uint64_t tier3_osr_programs;
+    std::uint64_t tier3_bytes;
+};
+
 // The lifted blocks of one validated image, shared by every execution of it:
 // a run, the members of a fleet, and the worker threads of parallel items.
 // Thread-safe. Lowered blocks are immutable once published and live as long
@@ -437,6 +449,9 @@ public:
     void add_steps(const TierSteps& steps);
     void add_reference_steps(std::uint32_t function, std::uint32_t block, std::uint64_t steps);
     TierStatistics statistics() const;
+    CompileActivity compile_activity() const;
+    // Set before the cache is used. Null leaves compilation untimed.
+    void observe_compilation(CompileObserver* observer) { compile_observer_ = observer; }
 
 private:
     struct Entry {
@@ -539,6 +554,8 @@ private:
     std::vector<std::unique_ptr<tier3::DispatchRecord[]>> dispatch_owned_;
     void make_dispatch_records(const tier2::Region& program);
 #endif
+    CompileObserver* compile_observer_ = nullptr;
+    std::uint64_t native_lazy_entries_ = 0;
     bool machine_code_ = false;
     std::string machine_code_off_;
     std::unique_ptr<std::atomic<std::uint64_t>[]> region_counts_;

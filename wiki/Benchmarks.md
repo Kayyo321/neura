@@ -101,6 +101,65 @@ One local measurement of `python3 scripts/bench-wall.py --quick --compare-tiers`
 
 Native code pays off where most steps run in regions of integer loops: collatz (0.58 of the interpreter's time), fannkuch and sieve (0.65), string-building (0.75), and sort, hash-map, and parse-results (0.84 to 0.86). Float operations are compiled inline too, but the float programs (mandelbrot, nbody, spectral-norm) spend most of a quick-size run proving their blocks, so the two columns are equal there. Elsewhere the time goes to steps outside regions (tier 1 and tier 0), to region entries and exits, to state operations, which run the interpreter's code, and to proving blocks. binary-trees and sha256 run under a third of their steps in regions, because a region ends at every call, return, and allocation. The 1.13 of dispatch is the noise of a 0.13 s run: its regions take 18 ms as native code and 23 ms on the interpreter. These figures depend on the machine; steps and outputs do not.
 
+## Held-out startup and execution phases
+
+The ten entries in the [held-out manifest](https://github.com/Kayyo321/neura/blob/main/tests/bench-wall/held-out.json) retain the original startup budget. The seven library suites start `neura test` from source, and the three program rows start `neura run --runtime=off` from an ordinary `neura build` image. The phased driver checks that these program bytes also match the companion build. The release wall and CPU geomeans require all ten. `--only` supports partial runs. `--include-extensions` additionally reads the [extension manifest](https://github.com/Kayyo321/neura/blob/main/tests/bench-wall/held-out-extensions.json) and gives each selected extension an individual report. The phased driver stages the original fixtures from the manifest's recorded Git revision, checks every source digest, and retains their relative paths. Extension sources and twins are checked against their own digests.
+
+### Prepare the SDKs
+
+Build `neura` and `neura-held-out` in each Linux source build being compared. The companion is excluded from the default build and normal install. For an SDK built outside the source directory's `build/` directory, stage it under a private prefix so its tools find its standard library.
+
+```sh
+cmake --build build --target neura neura-held-out
+cmake --install build --prefix "$prefix" --component core
+cmake --install build --prefix "$prefix" --component sdk
+cmake --install build --prefix "$prefix" --component benchmark
+```
+
+Use one prefix per SDK. The staged driver checks the companion's SDK version and matches the actual shared libraries used by the ordinary tools and the companion. It records a compile-time header fingerprint and interface sizes from the companion, executable and library digests, standard library file digests, and optional `--before-ref` and `--after-ref` commit IDs. A staged comparison with an older revision requires building a companion and the shared benchmark support into that revision's SDK. Record that common source patch when presenting results. Use the historical command without `--phases` and a checkout containing the pinned inputs to compare the original startup budget against an unmodified earlier SDK. A separately built compatibility companion can use the earlier SDK's untouched libraries if it supplies the same phase protocol and is built against that SDK's headers. Its diagnostic fields can report unavailable observer data.
+
+### Collect a comparison
+
+Run the [held-out driver](https://github.com/Kayyo321/neura/blob/main/scripts/bench-held-out.py) with the JDK and .NET SDK for the selected managed twins. They use Java Serial GC and .NET workstation GC with concurrent collection disabled. Their full workload returns the expected rendered bytes, which are compared outside the timer. Their process CPU clocks include runtime compilation and collection threads. The driver records the actual runtime and driver digests.
+
+```sh
+taskset -c 7 python3 scripts/bench-held-out.py \
+    --before "$reference/bin/neura" --after "$reference/bin/neura" \
+    --before-ref "$reference_revision" --after-ref "$reference_revision" \
+    --phases --include-extensions --cpu7 --runs 2 --warmups 3 --samples 2 --no-perf \
+    --jdk "$jdk" --dotnet "$dotnet" --out-dir build/held-out-aa
+
+taskset -c 7 python3 scripts/bench-held-out.py \
+    --before "$reference/bin/neura" --after "$candidate/bin/neura" \
+    --before-ref "$reference_revision" --after-ref "$candidate_revision" \
+    --phases --include-extensions --cpu7 --runs 2 --warmups 3 --samples 2 --no-perf \
+    --jdk "$jdk" --dotnet "$dotnet" --aa-results build/held-out-aa/held-out-phases.json \
+    --out-dir build/held-out-ab
+```
+
+`--cpu7` requires a four-second idle observation and the performance governor before each timed fork. The driver records up to three admission observations per attempt. It schedules the original forks first, reverses arm order on alternating forks, and keeps every clean slot. Two replay rounds can recover missing slots. For warmed application rows, recovery is limited to two extra timed forks across all arms. A fork is struck if its wall minus process CPU gap exceeds 2 ms, or exceeds both 0.5 ms and 1% of wall. The rule applies to every fork pinned to CPU 7, including runs with multiple workers. Timing on several CPUs reports raw wall and CPU values, since workers can use CPU concurrently there.
+
+An unfilled slot is reported as owed. The driver keeps running the other phases and workloads, with untimed checks when admission prevented any execution. The startup gate uses the matched A/A wall spread plus one percentage point for the pooled frozen-ten result and three points per row. The pool needs every frozen startup arm and matching A/A source and driver digests. Rows with complete data still receive individual verdicts. A passing selection of fewer than ten rows is reported as partial. Use a fresh `--out-dir` for a new run so partial and completed receipts stay available.
+
+The harness pins explicit workers for staged runs. `--workers 4` sets a four-worker default for rows that have no manifest override. The startup budget retains the original command and its worker default. The standard command-line options and manifest arguments apply to all other execution phases. Run stdin starts at EOF. `--stop-file` interrupts an active subprocess and preserves saved fork receipts.
+
+### Read the phase receipts
+
+| Phase | Boundary |
+| --- | --- |
+| Startup budget | Fresh ordinary CLI process through exit. The report retains raw child wall and CPU samples. |
+| Source to image | Fresh compiler invocation through NVR encoding. Each fork records its own image digest, wall and process CPU through encoding, and separate validation and image-write intervals. The suite exporter uses the same discovery, include roots, selection, and compilation as `neura test`, with an adjacent catalog of ordered test IDs, labels, and entries. |
+| Cold prebuilt | Fresh companion process through exit with its SDK's encoded image and catalog. Includes process start, validation, binding, first-use compilation, result handling and teardown. |
+| Warmed | Full execution inside one already prepared fork. Every invocation gets fresh program state and virtual clock when requested, with host cleanup between tests and invocations. The tier cache persists within the fork. Every warmup and sample records wall and process CPU, output hashes, completion, traps, logical steps, heap peak, and changes in the cache's compilation counters. |
+
+`--verify-tiers` replays the ordinary CLI in five explicit modes. It disables Tier 3 for the reference evaluator, lifted blocks, interpreted regions, and region JIT. A separate replay requests native Tier 3. The report records each mode's options, environment and observed tier counters, including cases where an execution policy leaves Tier 3 unused.
+
+Ordered test completion and steps are compared against the ordinary test reporter. Full stdout and execution stderr are compared with the ordinary CLI. The source-build receipts retain compiler stderr for each SDK. The driver verifies that these diagnostics form the expected suffix of ordinary suite stderr before deriving the execution bytes. The ordinary test reporter's per-test output must also appear in those execution streams in order. The phased comparison records program and per-test heap peaks as observations, including any cross-SDK changes. The legacy startup comparison requires equal steps and heap peaks by default. `--allow-cost-change` permits cost differences in either mode. A separate heap-limit replay checks that the companion applies the same limit and reports the same semantic outcome as the ordinary CLI. The harness records the command, image identity, actual worker count and invocation index with the samples.
+
+`held-out-phases.md` shows the median wall and process CPU times. `held-out-phases.json` and the individual raw receipts preserve the samples, settings, and outcome checks.
+
+A separate first-use replay records image I/O, decoding, binding and cache setup. Tier 3 build events identify function, function program, variant, entry and thread. Events include initial compilation, callee settlement, preflight back-off, generic lazy entry generation, and OSR specialization or fallback. Hits bypass the timed compiler. Lock waits are reported separately. A nested fallback is part of its enclosing build. The report sums exclusive compiler CPU across threads and gives the wall union and overlapping wall intervals. Lift proof and search counters and the coarse serial timeline remain separate. Replays describe a component of one invocation. The acceptance samples use ordinary execution with compilation timing disabled.
+
 ## One machine's results
 
 ### 0.2.1-rc.3 at the long sizes

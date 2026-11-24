@@ -1,4 +1,5 @@
 #include "tier3.hpp"
+#include "compile_observer.hpp"
 #include "tier3_frame_liveness.hpp"
 #include "environment.hpp"
 
@@ -15,6 +16,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <map>
 #include <string_view>
 #include <utility>
@@ -23,6 +25,66 @@
 #include <charconv>
 #include "../../tests/bench-wall/frame-liveness-oracle.hpp"
 #endif
+
+namespace neura::nvm {
+namespace {
+
+std::int64_t thread_cpu_time() noexcept {
+#ifdef CLOCK_THREAD_CPUTIME_ID
+    std::timespec time{};
+    if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &time) == 0)
+        return static_cast<std::int64_t>(time.tv_sec) * 1'000'000'000 + time.tv_nsec;
+#endif
+    return -1;
+}
+
+class CompileScope {
+public:
+    CompileScope(CompileObserver* observer, const tier2::Region& program, tier3::Variant variant,
+                 std::string_view kind, std::uint32_t entry = nvr::absent)
+        : observer_(observer), event_{kind, "rejected", program.function, program.program_id,
+                                      static_cast<std::uint32_t>(variant), entry, {}, {}, {}, -1} {
+        if (!observer_) return;
+        cpu_start_ = thread_cpu_time();
+        event_.start = std::chrono::steady_clock::now();
+    }
+
+    ~CompileScope() { finish(event_.outcome); }
+
+    void finish(std::string_view outcome) noexcept {
+        if (!observer_) return;
+        event_.end = std::chrono::steady_clock::now();
+        const auto cpu_end = thread_cpu_time();
+        if (cpu_start_ >= 0 && cpu_end >= cpu_start_) event_.cpu_nanoseconds = cpu_end - cpu_start_;
+        event_.outcome = outcome;
+        event_.thread = std::this_thread::get_id();
+        observer_->compilation(event_);
+        observer_ = nullptr;
+    }
+
+private:
+    CompileObserver* observer_;
+    CompileEvent event_;
+    std::int64_t cpu_start_ = -1;
+};
+
+// Only diagnostic runs probe contention. Cache hits and wait intervals do
+// not count as code generation. Acquire the lock before timing publication.
+std::unique_lock<std::mutex> compile_lock(std::mutex& mutex, CompileObserver* observer,
+                                         const tier2::Region& program, tier3::Variant variant,
+                                         std::uint32_t entry = nvr::absent) {
+    if (!observer) return std::unique_lock(mutex);
+    std::unique_lock lock(mutex, std::try_to_lock);
+    if (!lock.owns_lock()) {
+        CompileScope wait(observer, program, variant, "lock_wait", entry);
+        lock.lock();
+        wait.finish("acquired");
+    }
+    return lock;
+}
+
+} // namespace
+} // namespace neura::nvm
 
 namespace neura::nvm::tier3 {
 
@@ -1999,10 +2061,13 @@ Program::EntryCode Program::entry(const nvr::Image& image, std::uint32_t index, 
         return {slot.program, address, slot.program == this ? index : 0};
     };
     if (const auto* found = slot.address.load(std::memory_order_acquire)) return cached(found);
-    const std::lock_guard lock(lazy_mutex);
+    const auto lock = compile_lock(lazy_mutex, compile_observer, *ir.region, ir.variant, index);
     if (const auto* found = slot.address.load(std::memory_order_acquire)) return cached(found);
 
+    bool tried_osr = false;
     if (osr_template && std::ranges::binary_search(osr_entries, index)) {
+        CompileScope attempt(compile_observer, *ir.region, ir.variant, "osr", index);
+        tried_osr = true;
         ++osr_attempts;
         std::unique_ptr<Program> osr;
         try {
@@ -2041,11 +2106,14 @@ Program::EntryCode Program::entry(const nvr::Image& image, std::uint32_t index, 
                 bytes = generated.code.bytes.size();
                 slot.program = program;
                 slot.address.store(address, std::memory_order_release);
+                attempt.finish("published");
                 return {program, address, 0};
             }
         }
+        attempt.finish("rejected");
     }
 
+    CompileScope lazy(compile_observer, *ir.region, ir.variant, tried_osr ? "osr_fallback" : "lazy_entry", index);
     auto generated = jit::native::generate_entry(ir, index, verify);
     std::unique_ptr<jit::Program> code;
     if (generated.failure.empty()) {
@@ -2062,6 +2130,7 @@ Program::EntryCode Program::entry(const nvr::Image& image, std::uint32_t index, 
     bytes = generated.code.bytes.size();
     slot.program = this;
     slot.address.store(address, std::memory_order_release);
+    lazy.finish("published");
     return {this, address, index};
 }
 
@@ -2162,7 +2231,7 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
     if (!replacement && !slot.compare_exchange_strong(expected, native_forming, std::memory_order_acq_rel)) {
         previous = native_code(program, variant);
         if (!previous || !tier3::standard_variant(variant)) return previous;
-        const std::lock_guard lock(mutex_);
+        const auto lock = compile_lock(mutex_, compile_observer_, program, variant);
         const auto& pending = previous->pending_callees;
         if (previous->rebuild_attempted || pending.empty() ||
             !std::all_of(pending.begin(), pending.end(), [&](std::uint32_t callee) {
@@ -2173,6 +2242,8 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
                 return programs_[callee].region != nullptr;
             })) return previous;
     }
+    CompileScope work(compile_observer_, program, variant,
+                      replacement ? "backoff_rebuild" : previous ? "settlement_rebuild" : "initial");
     tier3::BuildResult built;
     std::vector<std::uint32_t> pending;
     std::map<std::string, std::uint64_t> inline_refusals;
@@ -2184,8 +2255,9 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
         // variants keep every call and return the reference's.
         if (built.program && tier3::standard_variant(variant) && options_.native_inlining) {
             const tier3::InlineSource source{
-                [this, previous, replacement, &pending](std::uint32_t function) -> tier3::InlineSource::CalleeProgram {
-                    const std::lock_guard lock(mutex_);
+                [this, previous, replacement, &pending, &program, variant](std::uint32_t function)
+                    -> tier3::InlineSource::CalleeProgram {
+                    const auto lock = compile_lock(mutex_, compile_observer_, program, variant);
                     const auto& found = programs_[function];
                     if (found.state == RegionEntry::State::Settled) return {found.region.get(), true};
                     if (!previous && !replacement) pending.push_back(function);
@@ -2205,8 +2277,10 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
                 // A rejected rebuild already has published code to keep.
                 if (!previous) {
                     ++inline_refusals["verification"];
+                    CompileScope fallback(compile_observer_, program, variant, "inline_fallback");
                     built = tier3::build(image_, program, tier3::verify_enabled(), variant);
                     if (built.program) built.program->ir.variant = variant;
+                    fallback.finish(built.program ? "built" : "rejected");
                 }
             }
         }
@@ -2229,12 +2303,15 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
         }
         if (built.program && machine_code_) {
             auto& native = *built.program;
+            native.compile_observer = compile_observer_;
             auto* entry = native.function_entry.get();
             auto generated = jit::native::generate(entry ? entry->ir : native.ir, tier3::verify_enabled());
             if (entry && !generated.failure.empty()) {
+                CompileScope fallback(compile_observer_, program, variant, "entry_zero_fallback", 0);
                 native.function_entry.reset();
                 entry = nullptr;
                 generated = jit::native::generate(native.ir, tier3::verify_enabled());
+                fallback.finish(generated.failure.empty() ? "generated" : "rejected");
             }
             if (generated.failure.empty()) {
                 built.program->machine = jit::Program::load(generated.code.bytes, generated.failure);
@@ -2285,7 +2362,7 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
     }
     bool settled_during_build = false;
     {
-        const std::lock_guard lock(mutex_);
+        const auto lock = compile_lock(mutex_, compile_observer_, program, variant);
         for (const auto& [reason, count] : inline_refusals) statistics_.native_inline_refusals[reason] += count;
         if (built.program) {
             std::sort(pending.begin(), pending.end());
@@ -2327,6 +2404,7 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
         // Settlement observes the wait record and this slot under one lock.
         if (!replacement) slot.store(published ? published : previous ? previous : native_failed, std::memory_order_release);
     }
+    work.finish(published ? (replacement ? "built" : "published") : "rejected");
     if (settled_during_build) return compile_native(program, variant);
     return published ? published : previous;
 }
@@ -2354,6 +2432,7 @@ void TierCache::note_native(bool machine, const std::string& off) {
 void TierCache::note_native_entry(std::uint64_t bytes, const std::string& failure, bool osr) {
     const std::lock_guard lock(mutex_);
     statistics_.native_bytes += bytes;
+    ++native_lazy_entries_;
     if (osr) ++statistics_.native_osr_programs;
     if (!failure.empty()) ++statistics_.native_rejections["an entry: " + failure];
 }

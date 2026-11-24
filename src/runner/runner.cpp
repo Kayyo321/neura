@@ -405,6 +405,23 @@ bool times_runs(const nvm::RunLimits& limits) {
     return !limits.graph_device && limits.parallel_workers <= 1;
 }
 
+nvm::RunResult run_bound(const nvr::Image& image, Host& host, const nvm::Bindings& bindings,
+                         std::span<const std::string> arguments, const nvm::RunLimits& limits, bool virtual_time) {
+    nvm::VirtualTaskClock virtual_clock;
+    auto* clock = virtual_time ? &virtual_clock : nullptr;
+    host.services.set_clock(clock);
+    struct ResetClock {
+        nvm::StandardServices& services;
+        ~ResetClock() { services.set_clock(nullptr); }
+    } reset{host.services};
+    return nvm::run(image, bindings, arguments, limits, clock);
+}
+
+void end_run(Host& host) {
+    host.services.end_run();
+    host.secrets.release_all();
+}
+
 int run(const nvr::Image& image, Host& host, std::span<const std::string> arguments,
         const RunOptions& options, std::string_view name, std::size_t image_bytes) {
     // --tier-stats: the timeline starts when the caller started reading

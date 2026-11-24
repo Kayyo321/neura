@@ -1,4 +1,5 @@
 #include "commands.hpp"
+#include "benchmark.hpp"
 
 #include "source_docs.hpp"
 #include "source_loader.hpp"
@@ -392,12 +393,14 @@ void package_native(const Options& options, std::span<const std::uint8_t> bytes)
 #endif
 }
 
-} // namespace
-
-int build(const Options& options) {
+int build_to_file(const Options& options, benchmark::BuildTiming* timing) {
     std::vector<neura::IrBundleFile> files;
     std::vector<std::string> links;
     const auto bytes = build_image_bytes(options, &files, &links);
+    if (timing) {
+        timing->encoded = std::chrono::steady_clock::now();
+        timing->encoded_cpu = std::clock();
+    }
     if (options.native_executable) {
         package_native(options, bytes);
         return 0;
@@ -405,9 +408,22 @@ int build(const Options& options) {
     // Load the encoded image before publishing it, so that a writer or
     // converter fault cannot produce an executable the runtime rejects.
     neura::nvr::load(bytes);
+    if (timing) timing->validated = std::chrono::steady_clock::now();
     write_file(options.output.value(), bytes);
+    if (timing) timing->written = std::chrono::steady_clock::now();
     if (!files.empty()) write_bundle_files(options.output.value(), files, links);
     return 0;
+}
+
+} // namespace
+
+int build(const Options& options) {
+    return build_to_file(options, nullptr);
+}
+
+int benchmark::export_program(const Options& options, BuildTiming& timing) {
+    if (options.native_executable) throw std::runtime_error("program benchmark requires a plain NVR image");
+    return build_to_file(options, &timing);
 }
 
 int docs(const Options& options) {

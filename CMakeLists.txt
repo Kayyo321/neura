@@ -1023,6 +1023,38 @@ if(NEURA_SDK)
     # installation runs bundles without libneura-sdk.
     neura_add_shared(neura_sdk_library neura-sdk sdk neura_core_library neura_cli_sdk neura_cli_artifact neura_cli_explain
         neura_cli_tags neura_cli_debug neura_compiler neura_decompiler neura_libclang neura_app neura_project)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        # Build the held-out benchmark tool with this SDK's headers and libraries.
+        add_executable(neura-held-out EXCLUDE_FROM_ALL tests/bench-wall/held-out.cpp)
+        target_include_directories(neura-held-out PRIVATE src)
+        target_link_libraries(neura-held-out PRIVATE neura_core_library neura_sdk_library)
+        set(held_out_headers src/cli/benchmark.hpp src/cli/gpu_run.hpp src/cli/options.hpp src/nvm/compile_observer.hpp
+            src/nvm/host.hpp src/nvm/machine.hpp src/nvm/tier1.hpp src/nvm/tier3.hpp src/nvr/format.hpp
+            src/runner/runner.hpp)
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${held_out_headers})
+        set(held_out_header_hashes "")
+        foreach(header IN LISTS held_out_headers)
+            file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/${header}" header_hash)
+            string(APPEND held_out_header_hashes "${header}=${header_hash}\n")
+        endforeach()
+        string(SHA256 held_out_header_fingerprint "${held_out_header_hashes}")
+        target_compile_definitions(neura-held-out PRIVATE
+            NEURA_BENCH_HEADER_SHA256="${held_out_header_fingerprint}"
+            NEURA_BENCH_COMPILER="${CMAKE_CXX_COMPILER_ID}-${CMAKE_CXX_COMPILER_VERSION}")
+        if(NEURA_HAS_GPU)
+            target_compile_definitions(neura-held-out PRIVATE NEURA_HAS_GPU=1)
+        endif()
+        if(TARGET neura_sql)
+            target_compile_definitions(neura-held-out PRIVATE NEURA_HAS_SQL)
+        endif()
+        set_target_properties(neura-held-out PROPERTIES BUILD_RPATH "${neura_build_rpath}"
+            INSTALL_RPATH "${neura_install_rpath}")
+        install(TARGETS neura-held-out RUNTIME DESTINATION bin COMPONENT benchmark EXCLUDE_FROM_ALL)
+        if(NEURA_PORTABLE_RELEASE)
+            target_link_options(neura-held-out PRIVATE -static-libstdc++ -static-libgcc)
+        endif()
+        neura_target_defaults(neura-held-out)
+    endif()
 endif()
 
 set(NEURA_TOOL_TARGETS)
