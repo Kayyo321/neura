@@ -236,6 +236,20 @@ def decode_messages(payloads, wbits, reset):
     return out
 
 
+def final_block_sent(payloads, wbits, reset):
+    """Whether any of the module's compressed messages ended a DEFLATE stream (a block with BFINAL=1): zlib sets
+    eof on the decompressor once it has read a final block. The module's permessage-deflate output must never do
+    that, under context takeover or not."""
+    decompressor = zlib.decompressobj(wbits=wbits)
+    for payload in payloads:
+        if reset:
+            decompressor = zlib.decompressobj(wbits=wbits)
+        decompressor.decompress(payload + TAIL)
+        if decompressor.eof:
+            return True
+    return False
+
+
 def python_messages(messages, wbits, reset):
     out, compressor = [], zlib.compressobj(6, zlib.DEFLATED, wbits)
     for message in messages:
@@ -318,6 +332,8 @@ def add_rfc7692(run):
         payloads = [frame[:-4] for frame in unframed(output)]
         if any(not frame.endswith(TAIL) for frame in unframed(output)):
             return "a payload does not end with 00 00 FF FF"
+        if final_block_sent(payloads, -15, False):
+            return "a compressed message contains a final block (BFINAL=1)"
         if decode_messages(payloads, -15, False) != [hello, hello]:
             return "Python decoded different messages"
         return None if len(payloads[1]) < len(payloads[0]) else "the second message did not use the window"
@@ -347,7 +363,10 @@ def add_streams(run, data):
                 frames = unframed(output)
                 if any(not frame.endswith(TAIL) for frame in frames):
                     return "a payload does not end with 00 00 FF FF"
-                decoded = decode_messages([frame[:-4] for frame in frames], -wbits, reset)
+                payloads = [frame[:-4] for frame in frames]
+                if final_block_sent(payloads, -wbits, reset):
+                    return "a compressed message contains a final block (BFINAL=1)"
+                decoded = decode_messages(payloads, -wbits, reset)
                 return None if decoded == messages else "Python decoded different messages"
             run.add("stream-deflate", framed(messages), [wbits, reset], check, f"module stream window {wbits} reset {reset}")
     # Window limits: a match 300 bytes back is beyond a 256-byte window. zlib's compressor reaches at most
