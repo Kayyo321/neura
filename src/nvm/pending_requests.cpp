@@ -647,12 +647,24 @@ bool wait_kqueue(std::vector<pollfd>& descriptors, int timeout_ms) {
 }
 #endif
 
+// One poll entry per descriptor: interests on the same descriptor (two
+// operations, or an operation and background work on its socket) share it.
+// poll(2) on macOS reports readiness on only one of several entries for the
+// same descriptor, so duplicates would leave the others never ready.
 class NativeWaits {
 public:
     std::size_t add(PosixWait::Interest source) {
-        const auto index = descriptors_.size();
-        descriptors_.push_back({static_cast<int>(source.descriptor), poll_events(source.events), 0});
-        return index;
+        const int fd = static_cast<int>(source.descriptor);
+        const short events = poll_events(source.events);
+        auto found = entry_of_.find(fd);
+        if (found == entry_of_.end()) {
+            found = entry_of_.emplace(fd, descriptors_.size()).first;
+            descriptors_.push_back({fd, 0, 0});
+        }
+        descriptors_[found->second].events |= events;
+        const auto slot = slots_.size();
+        slots_.push_back({found->second, events});
+        return slot;
     }
 
     std::size_t add(WindowsWait) {
@@ -680,10 +692,21 @@ public:
         }
     }
 
-    bool ready(std::size_t index) const { return descriptors_[index].revents != 0; }
+    // Ready for what this interest asked, or failed (which wakes every
+    // interest on the descriptor, as a separate entry would have been).
+    bool ready(std::size_t slot) const {
+        const auto& [entry, events] = slots_[slot];
+        return (descriptors_[entry].revents & (events | POLLERR | POLLHUP | POLLNVAL)) != 0;
+    }
 
 private:
+    struct Slot {
+        std::size_t entry;
+        short events;
+    };
     std::vector<pollfd> descriptors_;
+    std::map<int, std::size_t> entry_of_;
+    std::vector<Slot> slots_;
 };
 
 #endif
