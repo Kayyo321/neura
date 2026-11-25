@@ -137,7 +137,7 @@ Three rules apply to every package. New code includes Windows headers only throu
 | W28 | TLS, HTTP/2, PostgreSQL and TLS trust | deferred to 0.3.1 | [Server host](../runtime/ServerHost.md), [Install](../Install.md), [SQL](../runtime/Sql.md) |
 | W29 | `neurad` | decided | [Service030](Service030.md), [Service](../runtime/Service.md) |
 | W30 | Native executables | Win64 PE in 0.3.1, qualification pending | [Standalone executables](../lang/Standalone.md), [Standalone design](Standalone.md) |
-| W31 | Desktop | deferred to 0.3.1 | [Desktop030](Desktop030.md), [Providers](../runtime/Providers.md) |
+| W31 | Desktop build, run and dev | Win64 in 0.3.1, desktop session qualification pending | [Desktop030](Desktop030.md), [Providers](../runtime/Providers.md) |
 | W32 | Project tools | decided | [Projects](../apps/Projects.md), [Projects030](Projects030.md) |
 | W33 | GPU | decided | [GPU execution](../lang/GpuExecution.md) |
 | W34 | Testing | decided | [Continuous integration](../ContinuousIntegration.md), [CONTRIBUTING](../../CONTRIBUTING.md) |
@@ -382,7 +382,9 @@ The payload and footer stay in the PE overlay. The Security directory names the 
 
 ### W31: Desktop
 
-Desktop hosting and packaging on Windows are deferred to 0.3.1. They require a Windows native child (W30). The project commands refuse desktop operations requiring that child on Windows 0.3.0.
+In 0.3.1, `neura build --target desktop` includes the Win64 PE child (W30), the web bundle and the bridge registry. `neura run` and `neura dev` launch the pinned Electron 45.3.3 host, which starts the child without a shell, checks the registry digest and communicates over binary pipes. The data directory uses `%LOCALAPPDATA%`. Run and dev put the host in a Windows Job Object for cancellation and descendant cleanup. Dev replaces the job when a project edit changes the bundle.
+
+The Windows desktop suite exercises the project commands, Unicode paths, bridge and window behavior, and child cleanup. The Electron cases require a Windows desktop session. Windows 0.3.0 reports that the desktop host is unavailable.
 
 ### W32: Project tools
 
@@ -456,7 +458,7 @@ Each case below has a defined refusal; none is left to fail in an unspecified wa
 | Native JIT | Win64 code generation and calling conventions await qualification | `--jit=auto` uses the interpreter. `--jit=on` fails with `Windows has no JIT in 0.3.0` |
 | Native executable generation in the 0.3.0 archive | The PE launcher is a 0.3.1 addition (W30) | The 0.3.0 command reports `Windows has no native launcher in 0.3.0` |
 | Server TLS, HTTP/2, `Std.Net.Tls` and PostgreSQL | OpenSSL, nghttp2 and libpq integration is deferred to 0.3.1 | TLS listener startup, HTTP/2 enablement and PostgreSQL pool setup name the Windows 0.3.0 limit. `Std.Net.Tls` reports that TLS is unavailable in the runtime |
-| Desktop host and desktop project operations | The Windows Electron host and its native child need qualification | Desktop build, dev, run and package report `the desktop host is unavailable on Windows in Neura 0.3.0` |
+| Desktop host and desktop project operations in the 0.3.0 archive | W31 records the 0.3.1 addition | The 0.3.0 commands report `the desktop host is unavailable on Windows in Neura 0.3.0` |
 | The server host's fork-based worker zygote (`--worker-start zygote`) | Windows has no fork, and cloning a Win32 process that uses the CRT and Winsock is unsupported, so a pre-forked worker cannot be made safely | The existing `--worker-start zygote needs Linux`; the default on Windows is exec, as on macOS |
 | The fully static launcher (`neura build --native --static`, `neura-launcher-static`, `NEURA_STATIC_LAUNCHER=ON`) | The fully static flavor requires Linux | The Windows launcher search reports `--static: the fully static launcher requires Linux`. CMake reports `NEURA_STATIC_LAUNCHER requires Linux` |
 | Unix-domain datagram sockets and the abstract namespace (`neura.net.unix.datagram`, `unix.send_to`, `unix.receive_from`, `@` names) | Windows `AF_UNIX` implements only stream sockets and has no abstract namespace | 13 (`Unsupported`), as macOS answers for abstract names; the standard library's documentation and tests say so |

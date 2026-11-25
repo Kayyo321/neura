@@ -468,6 +468,8 @@ test('the Neura child reassembles frames larger than one read, up to the largest
     await channel.ready;
     const large = Buffer.alloc(300000, 0x61);
     large[0] = 0x7b;
+    // Windows CRT text mode would change the CRLF or stop at Ctrl+Z.
+    large.set([0x0d, 0x0a, 0x1a, 0x00, 0xff], 65534);
     large[large.length - 1] = 0x7d;
     await queue.send(Kind.Call, callBody(1, 1, 'fixture.echo', large));
     // The largest request the host forwards: a Call frame of exactly D-3.

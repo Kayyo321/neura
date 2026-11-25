@@ -11,15 +11,13 @@ The test then checks that no process of the application listens on a socket,
 ends it with SIGTERM, and checks that it exits 0 and that nothing it started
 survives.
 
-The Windows .zip is only built as a container, from a stand-in engine
-directory, because neither the Windows engine nor a Windows native child is
-available here: it is compared byte for byte and listed, not launched. The
-test also checks that .dmg, .msix and --sign are refused, and that test hooks
-reach only a package built with --test-hooks.
+The .zip container fixture uses a stand-in Windows engine. It compares the
+output bytes and verifies the archive entries. The test also checks the .dmg,
+.msix and --sign refusals and that test hooks reach only a package built with
+--test-hooks.
 """
 
 import argparse
-import ctypes
 import hashlib
 import json
 import os
@@ -34,7 +32,7 @@ import time
 import zipfile
 
 from run_app_test import build_child
-from run_shell_test import ELECTRON_X11, isolated_environment, stop_children
+from run_shell_test import ELECTRON_X11, PIPED_TEXT, WINDOWS, isolated_environment, stop_children, use_subreaper
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
@@ -74,13 +72,15 @@ def make_package(directory, child):
     (web / "bundle.json").write_bytes(manifest)
     registry = json.dumps({"operations": OPERATIONS, "schema": 1}, separators=(",", ":")).encode()
     (directory / "registry.json").write_bytes(registry)
-    shutil.copyfile(child, directory / "bin" / "app-child")
-    (directory / "bin" / "app-child").chmod(0o755)
+    child_path = f"bin/{child.name}"
+    shutil.copyfile(child, directory / child_path)
+    if not WINDOWS:
+        (directory / child_path).chmod(0o755)
     (directory / "desktop.json").write_text(json.dumps({
         "schema": 1, "kind": "desktop", "id": APPLICATION_ID, "version": "0.1.0",
         "web": {"directory": "web", "manifestDigest": digest(manifest)},
         "registry": {"path": "registry.json", "sha256": digest(registry)},
-        "child": {"executable": "bin/app-child", "args": []},
+        "child": {"executable": child_path, "args": []},
         "supportedRequirements": {"browserAdapter": 1}, "externalOrigins": [], "capabilities": [], "limits": {},
     }, sort_keys=True))
 
@@ -94,9 +94,10 @@ def make_icon(path):
 
 
 def packager(engine, directory, output, icon, *extra, check=True):
-    return subprocess.run([sys.executable, str(ROOT / "scripts" / "package-desktop.py"), "--engine", str(engine),
+    return subprocess.run([sys.executable, "-X", "utf8", str(ROOT / "scripts" / "package-desktop.py"), "--engine", str(engine),
                            "--package", str(directory), "--name", "fixture", "--icon", str(icon), "-o", str(output),
-                           *extra], check=check, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=300)
+                           *extra], check=check, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=300,
+                          **PIPED_TEXT)
 
 
 def package(engine, directory, output, icon, *extra):
@@ -137,10 +138,12 @@ def check_deb(deb):
     print(f"Verified .deb metadata and listing ({len(lines)} entries)")
 
 
-def check_refusals(engine, directory, scratch, icon):
-    for extra, message in ((["--format", "dmg"], "built on macOS"), (["--format", "msix"], "built on Windows"),
-                           (["--sign"], "signing runs on the target system"),
-                           (["--format", "zip"], "needs the Windows x86-64 engine")):
+def check_refusals(engine, directory, scratch, icon, suffix):
+    refusals = [(["--format", "dmg"], "built on macOS"), (["--format", "msix"], "built on Windows"),
+                (["--sign"], "signing runs on the target system")]
+    if suffix == "tar.gz":
+        refusals.append((["--format", "zip"], "needs the Windows x86-64 engine"))
+    for extra, message in refusals:
         result = packager(engine, directory, scratch / "refused", icon, *extra, check=False)
         if result.returncode == 0 or message not in result.stderr or (scratch / "refused").exists():
             raise RuntimeError(f"{extra} was not refused as expected: {result.stderr}")
@@ -149,32 +152,41 @@ def check_refusals(engine, directory, scratch, icon):
     manifest = json.loads((hooked / "desktop.json").read_text())
     manifest["testHooks"] = {"dialogs": "test-dialogs.json"}
     (hooked / "desktop.json").write_text(json.dumps(manifest))
-    result = packager(engine, hooked, scratch / "refused", icon, check=False)
+    result = packager(engine, hooked, scratch / "refused", icon, "--format", suffix, check=False)
     if result.returncode == 0 or "--test-hooks" not in result.stderr:
         raise RuntimeError("a release build of a desktop.json with test hooks was not refused")
-    print("Verified refusals: .dmg, .msix, --sign, a .zip without the Windows engine, test hooks in a release")
+    print("Verified package format, signing and release test-hook refusals")
 
 
-def check_test_hooks(engine, directory, scratch, icon):
+def read_dialogs(path, suffix):
+    script = "fixture/resources/app/test-dialogs.json"
+    manifest = "fixture/resources/app/desktop.json"
+    if suffix == "zip":
+        with zipfile.ZipFile(path) as archive:
+            return script in archive.namelist(), json.loads(archive.read(manifest))
+    with tarfile.open(path) as archive:
+        return script in archive.getnames(), json.load(archive.extractfile(manifest))
+
+
+def check_test_hooks(engine, directory, scratch, icon, suffix):
     script = scratch / "dialogs.json"
     script.write_text('[{"canceled": true}]')
-    release = package(engine, directory, scratch / "release.tar.gz", icon)
-    test = package(engine, directory, scratch / "test.tar.gz", icon, "--test-hooks", str(script))
-    with tarfile.open(scratch / "release.tar.gz") as archive:
-        if "fixture/resources/app/test-dialogs.json" in archive.getnames():
-            raise RuntimeError("a release package holds the dialog script")
-        if "testHooks" in json.loads(archive.extractfile("fixture/resources/app/desktop.json").read()):
-            raise RuntimeError("a release package names test hooks")
-    with tarfile.open(scratch / "test.tar.gz") as archive:
-        manifest = json.loads(archive.extractfile("fixture/resources/app/desktop.json").read())
-        if manifest.get("testHooks") != {"dialogs": "test-dialogs.json"}:
-            raise RuntimeError("a --test-hooks package does not name its dialog script")
+    release_path = scratch / f"release.{suffix}"
+    test_path = scratch / f"test.{suffix}"
+    release = package(engine, directory, release_path, icon, "--format", suffix)
+    test = package(engine, directory, test_path, icon, "--format", suffix, "--test-hooks", str(script))
+    scripted, manifest = read_dialogs(release_path, suffix)
+    if scripted or "testHooks" in manifest:
+        raise RuntimeError("a release package carries test hooks")
+    scripted, manifest = read_dialogs(test_path, suffix)
+    if not scripted or manifest.get("testHooks") != {"dialogs": "test-dialogs.json"}:
+        raise RuntimeError("a --test-hooks package lacks its dialog script or manifest entry")
     if release == test:
         raise RuntimeError("the test package equals the release package")
     print("Verified test hooks: only a --test-hooks package carries the dialog driver")
 
 
-def check_zip(directory, scratch, icon):
+def make_windows_engine(scratch):
     # A stand-in for the Windows engine directory: the file names the packager handles, with placeholder bytes.
     engine = scratch / "windows-engine"
     (engine / "resources").mkdir(parents=True)
@@ -182,18 +194,26 @@ def check_zip(directory, scratch, icon):
     for name, data in (("electron.exe", b"MZ stand-in"), ("ffmpeg.dll", b"stand-in"), ("LICENSE", b"license"),
                        ("LICENSES.chromium.html", b"notices"), ("resources/default_app.asar", b"excluded")):
         (engine / name).write_bytes(data)
+    return engine
+
+
+def check_zip(engine, directory, scratch, icon):
     archive = twice(engine, directory, scratch, icon, "zip", "--format", "zip")
     with zipfile.ZipFile(archive) as opened:
         names = opened.namelist()
         if opened.testzip() is not None:
             raise RuntimeError("the .zip is corrupt")
+        manifest = json.loads(opened.read("fixture/resources/app/desktop.json"))
+        child = opened.read(f"fixture/resources/app/{manifest['child']['executable']}")
+        if WINDOWS and not child.startswith(b"MZ"):
+            raise RuntimeError("the .zip does not contain the Windows PE child")
     for wanted in ("fixture/fixture.exe", "fixture/resources/icons/fixture.ico", "fixture/LICENSES/LICENSE.electron",
                    "fixture/resources/app/main.js"):
         if wanted not in names:
             raise RuntimeError(f"the .zip lacks {wanted}")
     if "fixture/resources/default_app.asar" in names:
         raise RuntimeError("the .zip holds default_app.asar")
-    print(f"Verified the .zip container from a stand-in Windows engine ({len(names)} entries); not a Windows package")
+    print(f"Verified the .zip container from a stand-in Windows engine ({len(names)} entries)")
 
 
 def launch(executable, scratch, label):
@@ -243,9 +263,7 @@ def listening_inodes():
 
 
 def inner(executable):
-    libc = ctypes.CDLL(None, use_errno=True)
-    if libc.prctl(36, 1, 0, 0, 0) != 0:  # PR_SET_CHILD_SUBREAPER
-        raise OSError(ctypes.get_errno(), "could not adopt package subprocesses")
+    use_subreaper()
     environment = {key: value for key, value in os.environ.items() if key in {"DISPLAY", "HOME", "XDG_DATA_HOME", "XAUTHORITY"}}
     environment["PATH"] = "/usr/bin:/bin"
     for tool in ("neura", "node"):
@@ -302,12 +320,19 @@ def main():
     if args.inner:
         inner(str(args.inner))
         return 0
-    with tempfile.TemporaryDirectory(prefix="neura-desktop-package-") as scratch:
+    with tempfile.TemporaryDirectory(prefix="Neura package 資-") as scratch:
         scratch = Path(scratch)
         child = build_child(str(args.neura.resolve()), scratch)
         directory = scratch / "package"
         make_package(directory, child)
         icon = make_icon(scratch / "icon.png")
+        windows_engine = make_windows_engine(scratch)
+        if WINDOWS:
+            check_zip(windows_engine, directory, scratch, icon)
+            check_refusals(windows_engine, directory, scratch, icon, "zip")
+            check_test_hooks(windows_engine, directory, scratch, icon, "zip")
+            return 0
+
         engine = args.electron.resolve().parent
         tarball = twice(engine, directory, scratch, icon, "tar.gz")
         install = scratch / "Install dir é"
@@ -325,9 +350,9 @@ def main():
         root = scratch / "Deb root é"
         subprocess.run(["dpkg-deb", "-x", str(deb), str(root)], check=True)
         failed |= launch(root / "opt" / "fixture" / "fixture", scratch, "deb")
-        check_zip(directory, scratch, icon)
-        check_refusals(engine, directory, scratch, icon)
-        check_test_hooks(engine, directory, scratch, icon)
+        check_zip(windows_engine, directory, scratch, icon)
+        check_refusals(engine, directory, scratch, icon, "tar.gz")
+        check_test_hooks(engine, directory, scratch, icon, "tar.gz")
         return failed
 
 

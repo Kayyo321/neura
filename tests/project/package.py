@@ -158,14 +158,9 @@ def main():
         if WINDOWS:
             result = run('package', '--target', 'desktop', cwd=project, env=env)
             package = project / 'dist/stock-0.1.0-desktop.zip'
-            check(result.returncode == 0 and package.exists(), 'package the desktop target as a .zip')
-            if result.returncode == 0 and package.exists():
-                with zipfile.ZipFile(package) as archive:
-                    names = set(archive.namelist())
-                check({'stock/resources/app/desktop.json', 'stock/resources/app/web/bundle.json'} <= names,
-                      'the desktop package holds desktop.json and the embedded web bundle')
-            else:
-                print(result.stdout + result.stderr)
+            refused(result, 'E1033', 'the desktop host is unavailable on Windows in Neura 0.3.0',
+                    'Windows desktop delivery requires the ZIP packager')
+            check(not package.exists(), 'the refused Windows desktop delivery leaves no archive')
         else:
             result = run('package', '--target', 'desktop', '--format', 'tar.gz', cwd=project, env=env)
             package = project / 'dist/stock-0.1.0-desktop.tar.gz'

@@ -15,6 +15,7 @@
 
 #include "app/project.hpp"
 #include "cli/tool.hpp"
+#include "platform/text.hpp"
 #include "project/files.hpp"
 #include "tooling/json.hpp"
 
@@ -43,7 +44,6 @@
 #include "platform/file.hpp"
 #include "platform/process.hpp"
 #include "platform/socket.hpp"
-#include "platform/text.hpp"
 #include "platform/windows.hpp"
 
 #include <atomic>
@@ -291,7 +291,7 @@ void add_tree(Snapshot& result, const fs::path& root, const fs::path& directory)
     std::error_code error;
     fs::recursive_directory_iterator it(directory, fs::directory_options::skip_permission_denied, error), end;
     for (; !error && it != end; it.increment(error)) {
-        if (it->is_directory(error) && it->path().filename().string().starts_with('.')) {
+        if (it->is_directory(error) && app::display_path(it->path().filename()).starts_with('.')) {
             it.disable_recursion_pending();
             continue;
         }
@@ -619,6 +619,7 @@ int develop(const Options& options) {
         host_arguments.insert(host_arguments.begin(), {"--listen", "127.0.0.1:" + std::to_string(options.port)});
     }
     const auto start_host = [&] {
+        if (stop_requested) return;
         try {
             const auto command = app::host_command(result->directory, host_arguments, std::cerr, true);
             if (command) {
@@ -768,7 +769,7 @@ int dev(const std::vector<std::string>& arguments) {
         } else if (arg == "--web-runtime") {
             const auto v = value();
             if (!v) return 1;
-            options.web_runtime = *v;
+            options.web_runtime = platform::path_from_utf8(*v);
         } else if (arg == "--port") {
             const auto v = value();
             if (!v) return 1;

@@ -88,15 +88,15 @@ def wait_for(predicate, seconds=30):
     return None
 
 
-class Dev:
-    """`neura dev` with a pipe for standard input and its output collected in a file."""
+class ForegroundTool:
+    """A Neura tool with a pipe for its input and its output collected in a file."""
 
-    def __init__(self, project, *args, env=None):
-        self.log = project.parent / f'{project.name}-dev.log'
+    def __init__(self, project, command, *args, env=None):
+        self.log = project.parent / f'{project.name}-{command}.log'
         self.output = open(self.log, 'w')
         # On Windows its own process group, so that Ctrl+Break reaches it and nothing else.
         flags = subprocess.CREATE_NEW_PROCESS_GROUP if WINDOWS else 0
-        self.process = subprocess.Popen([str(NEURA), 'dev', *map(str, args)], cwd=project, env=env,
+        self.process = subprocess.Popen([str(NEURA), command, *map(str, args)], cwd=project, env=env,
                                         stdin=subprocess.PIPE, stdout=self.output, stderr=subprocess.STDOUT,
                                         creationflags=flags)
 
@@ -111,6 +111,7 @@ class Dev:
             status = self.process.wait(timeout=seconds)
         except subprocess.TimeoutExpired:
             self.process.kill()
+            self.process.wait(timeout=10)
             status = None
         self.output.close()
         return status
@@ -210,6 +211,74 @@ def port_closed(port):
         return probe.connect_ex(('127.0.0.1', port)) != 0
 
 
+def desktop_windows(env):
+    # A Node host runs the production bundle reader and binary registry handshake.
+    # The Electron suite separately exercises the visible window host.
+    node = shutil.which('node')
+    if not node:
+        print('note: Node is unavailable; the Windows desktop run and dev cases are not run')
+        return
+    project = SCRATCH / 'bureau café 編'
+    shutil.copytree(SOURCE / 'tests/project/build/app', project)
+    host = SCRATCH / 'hôte de test 猫'
+    host.mkdir()
+    shutil.copyfile(SOURCE / 'tests/project/desktop-probe.js', host / 'main.js')
+    environment = dict(env, NEURA_DESKTOP_ENGINE=node, NEURA_DESKTOP_HOST=str(host),
+                       NEURA_TEST_DESKTOP_HOST=str(SOURCE / 'hosts/desktop/main.js'))
+    environment.pop('NEURA_RUN_OPTIONS', None)
+    release = project / 'sortie release 編'
+    build = subprocess.run([NEURA, 'build', '--target', 'desktop', '--update-lock', '--out', release],
+                           cwd=project, env=environment, capture_output=True, text=True,
+                           encoding='utf-8', errors='replace', timeout=120)
+    check(build.returncode == 0, 'build a desktop project at a Unicode path')
+    if build.returncode != 0:
+        print(build.stdout + build.stderr)
+        return
+    ready = r'neura desktop probe: ready \((\d+), (\d+)\) ([0-9a-f]{64})'
+
+    direct = ForegroundTool(project, 'run', release, env=environment)
+    started = direct.wait_line(ready)
+    check(started is not None, 'neura run launches a Windows PE child and completes Hello')
+    handles = process_tree(int(started.group(1))) if started else []
+    try:
+        check(len(handles) >= 2, 'both the desktop host and PE child are live')
+        if direct.process.poll() is None:
+            direct.process.send_signal(signal.CTRL_BREAK_EVENT)
+        check(direct.finish() == 131, 'a Ctrl+Break interrupts neura run')
+        check(not group_members(handles), 'neura run reaps the desktop job')
+        if not started:
+            print(direct.text())
+    finally:
+        close_tree(handles)
+
+    dev = ForegroundTool(project, 'dev', '--target', 'desktop', env=environment)
+    first = dev.wait_line(ready)
+    check(first is not None, 'neura dev launches the Windows desktop host')
+    first_tree = process_tree(int(first.group(1))) if first else []
+    second_tree = []
+    try:
+        if first:
+            check(len(first_tree) >= 2, 'the original dev desktop job contains the PE child')
+            before = len(dev.text())
+            source = project / 'desktop/main.nra'
+            write(source, read(source).replace('"Counter"', '"Second counter"'))
+            second = dev.wait_line(ready, after=before)
+            check(second is not None and second.group(3) != first.group(3), 'a desktop source edit restarts with a new PE image')
+            if second:
+                second_tree = process_tree(int(second.group(1)))
+                check(len(second_tree) >= 2, 'the restarted dev job contains its PE child')
+            check(not group_members(first_tree), 'the original desktop job is gone after rebuild')
+        if dev.process.poll() is None:
+            dev.process.send_signal(signal.CTRL_BREAK_EVENT)
+        check(dev.finish() == 0 and 'neura dev: stopped' in dev.text(), 'a Ctrl+Break stops desktop dev')
+        check(not group_members(second_tree), 'the restarted desktop job is gone after dev stops')
+        if not first:
+            print(dev.text())
+    finally:
+        close_tree(first_tree)
+        close_tree(second_tree)
+
+
 def main():
     shutil.rmtree(SCRATCH, ignore_errors=True)
     SCRATCH.mkdir(parents=True)
@@ -220,7 +289,7 @@ def main():
     check(subprocess.run([str(NEURA), 'new', str(web), '--template', 'web'], capture_output=True).returncode == 0,
           'neura new page')
     (web / 'neura.lock').unlink()
-    dev = Dev(web, '--target', 'web', '--port', '0', env=env)
+    dev = ForegroundTool(web, 'dev', '--target', 'web', '--port', '0', env=env)
     found = dev.wait_line(r'serving web at http://127\.0\.0\.1:(\d+)/')
     check(found is not None, 'neura dev serves a web target')
     if found:
@@ -272,7 +341,7 @@ def main():
         print(f'note: neura-server-host{EXE} is not built here; the server host cases are not run')
         stops = ()
         port = free_port()
-        dev = Dev(server, '--target', 'server', '--port', str(port))
+        dev = ForegroundTool(server, 'dev', '--target', 'server', '--port', str(port))
         found = dev.wait_line(r'neura-server-host was found neither')
         check(found is not None and (server / 'dist/dev/server/bundle.json').exists(),
               'neura dev builds the server target and says that the host is missing')
@@ -281,7 +350,7 @@ def main():
         check(status == 0 and 'neura dev: stopped' in dev.text(), 'a Ctrl+Break stops neura dev')
     for stop, name in stops:
         port = free_port()
-        dev = Dev(server, '--target', 'server', '--port', str(port))
+        dev = ForegroundTool(server, 'dev', '--target', 'server', '--port', str(port))
         first = dev.wait_line(r'started neura-server-host \(process (\d+)\)')
         check(first is not None, f'neura dev starts the server host ({name})')
         if not first:
@@ -327,6 +396,9 @@ def main():
     result = subprocess.run([str(NEURA), 'package', '--target', 'server', '--bundle', str(bundle)], cwd=server,
                             capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60)
     check(result.returncode == 1 and '[E1029]' in result.stderr, 'neura package refuses a dev bundle (case 38)')
+
+    if WINDOWS:
+        desktop_windows(env)
 
     if failures:
         print(f'{len(failures)} failed: {failures}')

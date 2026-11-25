@@ -4,6 +4,8 @@
 #include "cli/module_path.hpp"
 #include "cli/tool.hpp"
 #include "neura/version.hpp"
+#include "platform/environment.hpp"
+#include "platform/text.hpp"
 #include "project/files.hpp"
 #include "project/toml.hpp"
 #include "tooling/json.hpp"
@@ -12,7 +14,6 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
-#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -36,7 +37,6 @@
 #include "platform/file.hpp"
 #include "platform/process.hpp"
 #include "platform/self.hpp"
-#include "platform/text.hpp"
 
 #include <chrono>
 #include <thread>
@@ -214,7 +214,7 @@ const std::map<std::string, std::string, std::less<>> media_types{
 };
 
 std::string lower_extension(const fs::path& path) {
-    auto ext = path.extension().string();
+    auto ext = display_path(path.extension());
     std::ranges::transform(ext, ext.begin(), [](char c) { return c >= 'A' && c <= 'Z' ? char(c + 32) : c; });
     return ext;
 }
@@ -466,16 +466,16 @@ Sha256Digest component_digest(TargetKind kind, std::string_view name, std::strin
 // --- Web bundles ----------------------------------------------------------------------------------------
 
 std::optional<fs::path> web_runtime_dir(const BuildOptions& options) {
+    if (options.web_runtime) return options.web_runtime;
     std::vector<fs::path> candidates;
-    if (options.web_runtime) candidates.push_back(*options.web_runtime);
-    if (const char* env = std::getenv("NEURA_WEB_RUNTIME"); env && *env) candidates.emplace_back(env);
+    if (const auto env = platform::get_env("NEURA_WEB_RUNTIME"); env && !env->empty())
+        candidates.push_back(platform::path_from_utf8(*env));
     candidates.push_back(install_prefix() / "share" / "neura" / "web");
     for (const auto& dir : candidates) {
         std::error_code error;
         if (fs::is_regular_file(dir / "nvm.wasm", error) && fs::is_regular_file(dir / "nvm.mjs", error) &&
             fs::is_regular_file(dir / "boot.mjs", error))
             return dir;
-        if (options.web_runtime && dir == *options.web_runtime) return dir; // reported missing below
     }
     return std::nullopt;
 }
@@ -650,7 +650,8 @@ BuildResult build_web(Project& project, const std::string& name, const Target& t
                  " (or name a directory with --web-runtime or NEURA_WEB_RUNTIME)");
     }
     const auto staging = staging_for(out);
-    const auto scratch = out.parent_path() / (out.filename().string() + ".neura-image");
+    auto scratch = out;
+    scratch += ".neura-image";
     const auto compiled = compile(project, target, options, scratch, false, "app.nvr");
     check_capabilities(target, read_image(compiled.image, target.entry.span));
 
@@ -698,7 +699,8 @@ BuildResult build_web(Project& project, const std::string& name, const Target& t
         assembly.add(path, data);
         links.push_back(path);
     }
-    const auto listing = fs::path(compiled.path.string() + ".styles.json");
+    auto listing = compiled.path;
+    listing += ".styles.json";
     if (fs::exists(listing)) {
         const auto styles = Json::parse(read_file(listing));
         if (styles["schema"].integer(0) != 1) fail_E1029(target.span, "unknown schema of " + detail::path_text(listing.filename()));
@@ -821,7 +823,8 @@ BuildResult build_server(Project& project, const std::string& name, const Target
         bundle.origins["connect"] = http_origin_texts(*server.connect_origins);
     }
     const auto staging = staging_for(out);
-    const auto scratch = out.parent_path() / (out.filename().string() + ".neura-image");
+    auto scratch = out;
+    scratch += ".neura-image";
     const auto compiled = compile(project, target, options, scratch, false, "app.nvr");
     fs::remove_all(scratch);
     check_capabilities(target, read_image(compiled.image, target.entry.span));
@@ -881,17 +884,16 @@ BuildResult build_desktop(Project& project, const std::string& name, const Targe
     }
     bundle.requirements.emplace("desktop_host", 1);
     const auto staging = staging_for(out);
-    const auto scratch = out.parent_path() / (out.filename().string() + ".neura-image");
-    // The native child is built for this system. A Windows child is a PE
-    // file, which CreateProcess starts only by its .exe name (W31).
-    const auto suffix = tool::executable_file("");
+    auto scratch = out;
+    scratch += ".neura-image";
     const auto& web_settings = std::get<WebSettings>(project.manifest.targets.at(desktop.ui.value).settings);
     // The native child's http_client grant is always scoped: to the desktop
     // target's connect list, else its ui target's, else to no origin at all,
     // as anything outside the lists is unreachable (Projects030.md).
     const auto& configured_origins = desktop.origins.connect ? desktop.origins.connect : web_settings.origins.connect;
     const auto http_origins = configured_origins ? http_origin_texts(*configured_origins) : std::vector<std::string>{};
-    const auto compiled = compile(project, target, options, scratch, true, "app-child" + suffix, &http_origins);
+    // Build for this system using its installed launcher, a PE on Windows (W31).
+    const auto compiled = compile(project, target, options, scratch, true, tool::executable_file("app-child"), &http_origins);
     if (std::ranges::find(bundle.capabilities, Capability::HttpClient) != bundle.capabilities.end()) {
         bundle.requirements.emplace("http_client_origins", 1);
         bundle.origins["connect"] = http_origins;
@@ -899,10 +901,13 @@ BuildResult build_desktop(Project& project, const std::string& name, const Targe
     fs::remove_all(scratch);
     Assembly assembly(staging, std::numeric_limits<std::uint64_t>::max(), target.span);
     assembly.embed(web.directory, "web/");
-    const auto child = "bin/app-" + std::string(sha256_of(compiled.image).hex()) + suffix;
+    const auto child_digest = sha256_of(compiled.image);
+    const auto child = "bin/" + tool::executable_file("app-" + std::string(child_digest.hex()));
     assembly.add(child, compiled.image);
+#ifndef _WIN32
     fs::permissions(staging / child, fs::perms::owner_all | fs::perms::group_read | fs::perms::group_exec |
                                          fs::perms::others_read | fs::perms::others_exec);
+#endif
     std::vector<std::string> operations;
     for (const auto& op : desktop.operations) operations.push_back(op.value);
     std::ranges::sort(operations);
@@ -940,7 +945,7 @@ BuildResult build_desktop(Project& project, const std::string& name, const Targe
                      {"version", project.manifest.project.version.value},
                      {"web", Json{{"directory", "web"}, {"manifestDigest", std::string(sha256_of(web_manifest).hex())}}}};
     assembly.add("desktop.json", canonical(description));
-    bundle.image = {child, sha256_of(compiled.image)};
+    bundle.image = {child, child_digest};
     bundle.ui = sha256_of(web_manifest);
     if (!desktop.origins.external.empty()) bundle.origins["external"] = origin_texts(desktop.origins.external);
     if (options.dev) bundle.dev = true;
@@ -1125,7 +1130,7 @@ Project load_project(const fs::path& manifest_path) {
 
 std::optional<fs::path> find_manifest(const std::optional<std::string>& project, std::ostream& err) {
     if (project) {
-        fs::path path(*project);
+        auto path = platform::path_from_utf8(*project);
         std::error_code error;
         if (fs::is_directory(path, error)) path /= "neura.toml";
         if (!fs::is_regular_file(path, error)) {
@@ -1225,10 +1230,6 @@ BuildResult build_target(Project& project, const BuildOptions& options) {
         throw Diagnostic(found->second.span, "--source-map is not available for project builds in Neura 0.3.0")
             .with_code("E1029");
     }
-#ifdef _WIN32
-    if (found->second.kind.value == TargetKind::Desktop)
-        fail_E1031(found->second.kind.span, windows_desktop_unavailable);
-#endif
     const auto out = options.out ? fs::absolute(*options.out) : project.resolved.root / "dist" / options.target;
     switch (found->second.kind.value) {
     case TargetKind::Web: return build_web(project, found->first, found->second, options, out);

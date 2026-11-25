@@ -291,7 +291,7 @@ Options read_options(int argc, char** argv) {
             if (options.command == Command::Run) {
                 options.arguments.emplace_back(arg);
             } else {
-                options.files.push_back(fs::canonical(argv[i]));
+                options.files.push_back(fs::canonical(platform::path_from_utf8(arg)));
             }
         } else if (arg == "--") {
             positional_only = true;
@@ -387,9 +387,9 @@ Options read_options(int argc, char** argv) {
             if (options.command != Command::Check) throw std::runtime_error("--fix applies only to check");
             options.fix = true;
         } else if (compiles && arg == "-I") {
-            const auto root = fs::canonical(next());
+            const auto root = fs::canonical(platform::path_from_utf8(next()));
             if (!fs::is_directory(root)) {
-                throw std::runtime_error("source root is not a directory: " + root.string());
+                throw std::runtime_error("source root is not a directory: " + platform::native_utf8_path(root));
             }
             options.roots.push_back(root);
         } else if (arg == "--no-optimize") {
@@ -582,7 +582,7 @@ Options read_options(int argc, char** argv) {
         } else if (single_input && !options.files.empty()) {
             throw std::runtime_error("expected one input file");
         } else {
-            options.files.push_back(fs::canonical(argv[i]));
+            options.files.push_back(fs::canonical(platform::path_from_utf8(arg)));
         }
     }
     if (options.test_coverage) {

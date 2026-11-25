@@ -2487,10 +2487,8 @@ if(BUILD_TESTING AND NEURA_SDK)
         set_tests_properties(backend-secret-memory-supported PROPERTIES SKIP_RETURN_CODE 77)
     endif()
 
-    # The desktop window host and its Neura native child (docs/design/Desktop030.md). These tests need the
-    # pinned Electron 45.3.3 of hosts/desktop/engine.lock, Node and xvfb-run, so they are registered only when
-    # NEURA_DESKTOP_ENGINE names that Electron executable. Each starts X servers and Electron processes, so they
-    # run one at a time.
+    # The desktop suite uses pinned Electron and Node. Linux runs under Xvfb;
+    # Windows runs in a desktop session. The Electron tests share the desktop.
     set(NEURA_DESKTOP_ENGINE "" CACHE FILEPATH
         "The pinned Electron 45.3.3 executable; when set, the desktop tests are registered")
     if(NEURA_DESKTOP_ENGINE)
@@ -2499,18 +2497,18 @@ if(BUILD_TESTING AND NEURA_SDK)
         endif()
         find_program(NEURA_DESKTOP_NODE node REQUIRED)
         if(NOT WIN32)
-            # Windows has a desktop session of its own; X servers are for POSIX.
             find_program(NEURA_DESKTOP_XVFB_RUN xvfb-run REQUIRED)
         endif()
         set(neura_desktop_tests "${CMAKE_CURRENT_SOURCE_DIR}/tests/desktop")
         add_test(NAME desktop-native-child COMMAND "${NEURA_DESKTOP_NODE}" --test
-            "${neura_desktop_tests}/native_child_test.js")
-        add_test(NAME desktop-shell COMMAND "${Python3_EXECUTABLE}" "${neura_desktop_tests}/run_shell_test.py"
-            "${NEURA_DESKTOP_ENGINE}" --case shell --case child-mismatch --case child-close --case child-quit
+            "${neura_desktop_tests}/native_child_test.js" "${neura_desktop_tests}/bridge_test.js")
+        add_test(NAME desktop-shell COMMAND "${Python3_EXECUTABLE}" -X utf8 "${neura_desktop_tests}/run_shell_test.py"
+            "${NEURA_DESKTOP_ENGINE}" --node "${NEURA_DESKTOP_NODE}"
+            --case shell --case child-mismatch --case child-close --case child-quit
             --case child-crash)
-        add_test(NAME desktop-app COMMAND "${Python3_EXECUTABLE}" "${neura_desktop_tests}/run_app_test.py"
-            "${NEURA_DESKTOP_ENGINE}" --neura "$<TARGET_FILE:neura>")
-        add_test(NAME desktop-package COMMAND "${Python3_EXECUTABLE}" "${neura_desktop_tests}/run_package_test.py"
+        add_test(NAME desktop-app COMMAND "${Python3_EXECUTABLE}" -X utf8 "${neura_desktop_tests}/run_app_test.py"
+            "${NEURA_DESKTOP_ENGINE}" --node "${NEURA_DESKTOP_NODE}" --neura "$<TARGET_FILE:neura>")
+        add_test(NAME desktop-package COMMAND "${Python3_EXECUTABLE}" -X utf8 "${neura_desktop_tests}/run_package_test.py"
             "${NEURA_DESKTOP_ENGINE}" --neura "$<TARGET_FILE:neura>")
         set_tests_properties(desktop-native-child desktop-shell desktop-app desktop-package PROPERTIES
             RUN_SERIAL TRUE LABELS desktop WORKING_DIRECTORY "${neura_desktop_tests}")

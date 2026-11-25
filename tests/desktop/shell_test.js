@@ -9,6 +9,7 @@ const { app, BrowserWindow } = require('electron');
 const { launchDesktopShell, registerDesktopScheme, verifyWebBundle } = require('../../hosts/desktop/main');
 
 const scratch = process.env.NEURA_DESKTOP_TEST_SCRATCH;
+const windowsHost = process.platform === 'win32';
 app.setPath('userData', path.join(scratch, 'profile'));
 registerDesktopScheme();
 const applicationId = 'example.neura.shell';
@@ -78,10 +79,17 @@ async function verifyStartup({ directory, commit, manifest, settings }) {
     await assert.rejects(verifyWebBundle(settings), /missing file: boot\.fixture\.js/);
 
     const outside = path.join(scratch, 'outside.js');
-    await fs.writeFile(outside, script);
-    await fs.symlink(outside, changed);
+    if (windowsHost) {
+        // An unprivileged Windows test can create a directory junction.
+        await fs.mkdir(outside);
+        await fs.symlink(outside, changed, 'junction');
+    } else {
+        await fs.writeFile(outside, script);
+        await fs.symlink(outside, changed);
+    }
     await assert.rejects(verifyWebBundle(settings), /unsupported file type: boot\.fixture\.js/);
-    await fs.unlink(changed);
+    if (windowsHost) await fs.rmdir(changed);
+    else await fs.unlink(changed);
     await fs.writeFile(changed, script);
 
     await assert.rejects(verifyWebBundle(await commit({ ...manifest, files: [...manifest.files, manifest.files[0]] })), /duplicate file/);
@@ -208,11 +216,18 @@ async function verifyShell({ directory, settings }) {
     }
 }
 
-async function run() {
+function verifyEngine() {
     assert.equal(process.versions.electron, '45.3.3');
-    // Never the user's own desktop: no Wayland display, and Electron on the virtual X display.
-    assert.equal(process.env.WAYLAND_DISPLAY, undefined);
-    assert.equal(app.commandLine.getSwitchValue('ozone-platform'), 'x11');
+    if (windowsHost) {
+        assert.equal(process.arch, 'x64');
+    } else {
+        assert.equal(process.env.WAYLAND_DISPLAY, undefined);
+        assert.equal(app.commandLine.getSwitchValue('ozone-platform'), 'x11');
+    }
+}
+
+async function run() {
+    verifyEngine();
     const fixture = await makeBundle();
     await verifyStartup(fixture);
     await verifyShell(fixture);
@@ -220,10 +235,7 @@ async function run() {
 }
 
 async function runNative(mode) {
-    assert.equal(process.versions.electron, '45.3.3');
-    // Never the user's own desktop: no Wayland display, and Electron on the virtual X display.
-    assert.equal(process.env.WAYLAND_DISPLAY, undefined);
-    assert.equal(app.commandLine.getSwitchValue('ozone-platform'), 'x11');
+    verifyEngine();
     const { settings } = await makeBundle();
     const latch = path.join(scratch, 'permit-hello');
     const registryDigest = digest('{"operations":[]}\n');

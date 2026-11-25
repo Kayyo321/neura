@@ -5,9 +5,7 @@
 
 This page is the reference for Neura desktop applications as implemented: the window host's application runner, the native child written with [`Std.Desktop`](Stdlib-Design#115-stddesktop), bridge calls, windows, menus, dialogs and granted files, packages, and the measured budgets. The [desktop design](https://github.com/Kayyo321/neura/blob/main/docs/design/Desktop030.md) keeps the rules not yet implemented and the reasons; the wire formats and host services are in [Providers](Providers).
 
-*Status:* Neura 0.3.0, qualified on Linux x86-64 under Xvfb with the pinned Electron 45.3.3, implemented by autonomous agents and awaiting owner confirmation. **No Neura component renders in a desktop window yet:** the renderer's NVM and components (`desktop.mount`) need the browser runtime and components of the application platform, so the pages of the tests are fixture scripts that call the bridge. Windows and macOS runners, `.dmg`, `.msix`, signing and `neura contracts` (generated dispatchers) are not implemented.
-
-On Windows 0.3.0 the project commands report `the desktop host is unavailable on Windows in Neura 0.3.0` for desktop build, dev, run and package. Windows desktop hosting is deferred with the PE launcher.
+*Status:* Linux x86-64 is qualified under Xvfb with the pinned Electron 45.3.3. The 0.3.1 Win64 build, run and dev commands use the same host with a PE child and await desktop session qualification. The renderer tests use fixture pages that call the bridge. Renderer-side Neura components (`desktop.mount`) need a renderer NVM. macOS runners, `.dmg`, `.msix`, signing and `neura contracts` (generated dispatchers) are not implemented.
 
 ## Writing the native child
 
