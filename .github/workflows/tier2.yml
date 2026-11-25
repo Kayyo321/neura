@@ -219,7 +219,7 @@ jobs:
       # busy").
       #
       # The stack is raised to 1 GiB because sanitized frames are several
-      # times larger: backend-reference runs test programs 400 calls deep in
+      # times larger: the reference library shards run test programs 400 calls deep in
       # an evaluator that recurses on the native stack, and overflows the
       # default 8 MiB before the evaluator's own depth limit stops it.
       #
