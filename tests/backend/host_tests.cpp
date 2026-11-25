@@ -1169,6 +1169,27 @@ NEURA_TEST(host, mdns_loopback_exchange_collects_only_matching_multicast) {
           "bind a different source port");
     const unsigned char ttl = 255;
     check(::setsockopt(peer.fd, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof ttl) == 0, "mDNS outbound TTL");
+#ifdef __linux__
+    // The responder sends from its group-bound socket, so the querier's
+    // wildcard socket is the only one here that a unicast to port 5353 reaches.
+    const int responder_fd = peer.fd;
+#else
+    // macOS refuses to send from a socket bound to a multicast address
+    // (EADDRNOTAVAIL), so the response comes from a second port-5353 socket
+    // that has not joined the group and so does not receive the query.
+    Socket sender;
+    check(::setsockopt(sender.fd, SOL_SOCKET, SO_REUSEADDR, &enabled, sizeof enabled) == 0, "share sender port");
+#ifdef SO_REUSEPORT
+    check(::setsockopt(sender.fd, SOL_SOCKET, SO_REUSEPORT, &enabled, sizeof enabled) == 0, "share sender port");
+#endif
+    sockaddr_in wildcard = group;
+    wildcard.sin_addr.s_addr = htonl(INADDR_ANY);
+    check(::bind(sender.fd, reinterpret_cast<sockaddr*>(&wildcard), sizeof wildcard) == 0, "bind mDNS sender");
+    check(::setsockopt(sender.fd, IPPROTO_IP, IP_MULTICAST_IF, &membership.imr_interface,
+                       sizeof membership.imr_interface) == 0, "send responses via loopback");
+    check(::setsockopt(sender.fd, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof ttl) == 0, "response TTL");
+    const int responder_fd = sender.fd;
+#endif
     const std::string query("\0\0\0\0\0\1\0\0\0\0\0\0\x04h3md\x05local\0\0\1\0\1", 28);
     auto response = query;
     response[2] = static_cast<char>(0x84);
@@ -1190,8 +1211,12 @@ NEURA_TEST(host, mdns_loopback_exchange_collects_only_matching_multicast) {
             const auto size = ::recv(peer.fd, data.data(), data.size(), MSG_DONTWAIT);
             if (size < 0 || std::string_view(data.data(), static_cast<std::size_t>(size)) != query) continue;
             sent[0] = send(other_port.fd, wrong_port, group);
-            sent[1] = send(peer.fd, wrong_destination, unicast);
-            sent[2] = send(peer.fd, response, group);
+#ifdef __linux__
+            sent[1] = send(responder_fd, wrong_destination, unicast);
+#else
+            sent[1] = true; // The same-port unicast is sent on Linux only; see below.
+#endif
+            sent[2] = send(responder_fd, response, group);
             return;
         }
     });
@@ -1207,7 +1232,14 @@ NEURA_TEST(host, mdns_loopback_exchange_collects_only_matching_multicast) {
     };
     check(contains(response), "received the loopback responder's exact datagram");
     check(!contains(wrong_port), "multicast from a non-mDNS source port was discarded");
+#ifdef __linux__
     check(!contains(wrong_destination), "same-port unicast was discarded");
+#else
+    // Not checked off Linux. The system's mDNSResponder holds *:5353 with
+    // SO_REUSEPORT, as does the sender above, and a unicast is delivered to
+    // only one of them, so the datagram might never reach the querier and
+    // the check could pass without testing the querier's filter.
+#endif
     for (const auto window : {std::int64_t{-1}, std::int64_t{0}, std::int64_t{5'000'000'001}, INT64_MAX}) {
         expect_error(host.call("neura.net.mdns.exchange", {bytes(query), i64(window), text("127.0.0.1")}),
                      host_error::invalid_input, "mDNS window must be positive and at most five seconds");
