@@ -130,6 +130,34 @@ class Run:
         self.lines.append(" ".join([operation, source, target.name, *map(str, arguments)]))
         self.checks.append((name, target, check))
 
+    def tier0_identity(self, neura, image, stride):
+        """Reruns every `stride`-th operation at --tier=0 and compares its output, or its error, byte for byte
+        with the default tier's. Returns the number of differences."""
+        lines = []
+        pairs = []
+        for index in range(0, len(self.lines), stride):
+            fields = self.lines[index].split(" ")
+            fields[2] = "tier0-" + fields[2]
+            lines.append(" ".join(fields))
+            pairs.append((self.checks[index][0], self.work / self.lines[index].split(" ")[2],
+                          self.work / fields[2]))
+        manifest = self.work / "manifest-tier0.txt"
+        manifest.write_text("\n".join(lines) + "\n")
+        result = subprocess.run([str(pathlib.Path(neura).resolve()), "run", "--tier=0", "--max-steps", str(MaxSteps),
+                                 str(pathlib.Path(image).resolve()), "--", manifest.name],
+                                capture_output=True, text=True, timeout=3600, cwd=self.work)
+        if result.returncode != 0 or result.stdout.strip() != f"ran {len(lines)}":
+            sys.exit(f"tier 0 harness failed ({result.returncode}): {result.stdout}{result.stderr}")
+        differences = 0
+        for name, default, tier0 in pairs:
+            for suffix in ("", ".error"):
+                a, b = pathlib.Path(str(default) + suffix), pathlib.Path(str(tier0) + suffix)
+                if a.exists() != b.exists() or (a.exists() and a.read_bytes() != b.read_bytes()):
+                    differences += 1
+                    print(f"FAIL tier 0 differs from the default tier: {name}")
+        print(f"{len(pairs) - differences} of {len(pairs)} operations identical at --tier=0")
+        return differences
+
     def execute(self, neura, image):
         manifest = self.work / "manifest.txt"
         manifest.write_text("\n".join(self.lines) + "\n")
@@ -569,7 +597,10 @@ def main():
     add_limits(run, data)
     add_code_lengths(run)
     add_garbage(run, data)
-    return 1 if run.execute(args.neura, args.image) else 0
+    failures = run.execute(args.neura, args.image)
+    # Every 8th operation again at tier 0: the outputs and errors must not depend on the execution tier.
+    failures += run.tier0_identity(args.neura, args.image, 8)
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":
