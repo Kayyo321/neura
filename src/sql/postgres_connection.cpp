@@ -10,8 +10,8 @@
 #include "sql/sql_providers.hpp"
 
 #ifdef NEURA_SQL_POSTGRES
+#include "platform/socket.hpp"
 #include <libpq-fe.h>
-#include <poll.h>
 #endif
 
 #include <charconv>
@@ -104,16 +104,19 @@ bool all_loopback(const ParsedOptions& parsed) {
 
 // Waits for the connection's socket: 1 ready, 0 when the wait ended, -1 on
 // an error. Polls in slices so that a cancel request is seen.
-int wait_socket(PGconn* connection, bool write, const Wait& wait) {
-    const int socket = PQsocket(connection);
-    if (socket < 0) return -1;
+int wait_socket(PGconn* connection, short events, const Wait& wait) {
+    // PQsocket exposes an int, with -1 for no socket. On Windows this is the
+    // same conversion to SOCKET that libpq's own FD_SET uses in PQsocketPoll.
+    const auto socket = static_cast<platform::native_socket>(PQsocket(connection));
+    if (socket == platform::invalid_socket) return -1;
+    platform::PollItem entry{socket, events, 0};
     for (;;) {
-        if (wait.expired() || wait.cancel_requested()) return 0;
+        if (wait.cancel_requested()) return 0;
         const int left = milliseconds_left(wait);
-        pollfd entry{socket, static_cast<short>(POLLIN | (write ? POLLOUT : 0)), 0};
-        const int ready = ::poll(&entry, 1, std::min(left, 50));
-        if (ready > 0) return 1;
-        if (ready < 0 && errno != EINTR) return -1;
+        if (left == 0) return 0;
+        const int ready = platform::poll(std::span(&entry, 1), std::min(left, 50));
+        if (ready > 0) return (entry.revents & platform::poll_invalid) ? -1 : 1;
+        if (ready < 0 && !platform::last_socket_error().interrupted()) return -1;
     }
 }
 
@@ -393,7 +396,7 @@ public:
                 }
                 return result;
             }
-            const int ready = wait_socket(connection_, false, wait);
+            const int ready = wait_socket(connection_, platform::poll_in, wait);
             if (ready < 0) {
                 broken_ = true;
                 if (status.ok()) status = lost("the connection was lost").status;
@@ -489,7 +492,7 @@ private:
         Status ignored;
         for (;;) {
             if (!PQisBusy(connection_)) return PQgetResult(connection_);
-            if (wait_socket(connection_, false, wait) <= 0 || !PQconsumeInput(connection_)) {
+            if (wait_socket(connection_, platform::poll_in, wait) <= 0 || !PQconsumeInput(connection_)) {
                 broken_ = true;
                 return nullptr;
             }
@@ -513,7 +516,7 @@ private:
             const int pending = PQflush(connection_);
             if (pending == 0) return true;
             if (pending < 0) return false;
-            if (wait_socket(connection_, true, wait) <= 0) return false;
+            if (wait_socket(connection_, platform::poll_in | platform::poll_out, wait) <= 0) return false;
             if (!PQconsumeInput(connection_)) return false;
         }
     }
@@ -705,7 +708,9 @@ Status open_postgres(const PoolConfig& config, const Wait& wait, std::unique_ptr
     for (PostgresPollingStatusType polling = PGRES_POLLING_WRITING;;) {
         if (polling == PGRES_POLLING_OK) break;
         if (polling == PGRES_POLLING_FAILED) return fail(trimmed(PQerrorMessage(raw)));
-        const int ready = wait_socket(raw, polling == PGRES_POLLING_WRITING, wait);
+        // PQconnectPoll can replace the socket when moving to another address.
+        const short events = polling == PGRES_POLLING_WRITING ? platform::poll_out : platform::poll_in;
+        const int ready = wait_socket(raw, events, wait);
         if (ready == 0) return fail("the connection did not complete in time");
         if (ready < 0) return fail(trimmed(PQerrorMessage(raw)));
         polling = PQconnectPoll(raw);
