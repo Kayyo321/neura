@@ -73,7 +73,7 @@ let WireTests = module (
         // Compressed flag on an identity call.
         last compressed = new framing.Frame(1, bytes_of("01"));
         test.assert_equal<int>(13, code_of(test.assert_err<uint8[list]>(
-            framing.message_of(compressed, framing.Compression.Identity))));
+            framing.message_of(compressed, framing.Compression.Identity, 100))));
     };
 
     // python3: v(3)+b'abc' 03616263; v(300) ac02
@@ -101,6 +101,58 @@ let WireTests = module (
         test.assert_none<framing.Compression>(framing.compression_of("snappy"));
         test.assert_equal_string("01", hex.encode(test.assert_ok<uint8[list]>(
             framing.compress(framing.Compression.Identity, bytes_of("01")))));
+    };
+
+    // python3: gzip.compress(d, mtime=0), zlib.compress(d) and a raw DEFLATE stream of d = b"hello grpc hello grpc".
+    export let test_gzip_and_deflate_messages = func {
+        last text = "hello grpc hello grpc";
+        last gzip = framing.Compression.Gzip;
+        last deflate = framing.Compression.Deflate;
+        test.assert_equal_string(text, strings.from_bytes_lossy(test.assert_ok<uint8[list]>(framing.decompress(gzip,
+            bytes_of("1f8b08000000000002ffcb48cdc9c957482f2a4856c8803301da6b114d15000000"), 100))));
+        // deflate is the zlib format (doc/compression.md; RFC 9110 section 8.4.1.2) ...
+        test.assert_equal_string(text, strings.from_bytes_lossy(test.assert_ok<uint8[list]>(framing.decompress(deflate,
+            bytes_of("789ccb48cdc9c957482f2a4856c880330156d507e1"), 100))));
+        // ... so raw DEFLATE is refused with INTERNAL ("MUST NOT send raw deflate data").
+        test.assert_equal<int>(13, code_of(test.assert_err<uint8[list]>(framing.decompress(deflate,
+            bytes_of("cb48cdc9c957482f2a4856c8803301"), 100))));
+        // What this library sends: a gzip member and a zlib stream (78 9C), each read back.
+        last message = strings.to_bytes(text);
+        last zipped = test.assert_ok<uint8[list]>(framing.compress(gzip, message));
+        test.assert_equal_string("1f8b0800", hex.encode(slice(zipped, 0, 4)));
+        test.assert_equal_string(text, strings.from_bytes_lossy(test.assert_ok<uint8[list]>(
+            framing.decompress(gzip, zipped, 100))));
+        last wrapped = test.assert_ok<uint8[list]>(framing.compress(deflate, message));
+        test.assert_equal_string("789c", hex.encode(slice(wrapped, 0, 2)));
+        test.assert_equal_string(text, strings.from_bytes_lossy(test.assert_ok<uint8[list]>(
+            framing.decompress(deflate, wrapped, 100))));
+        // The decompressed size is bounded by the receive limit: RESOURCE_EXHAUSTED, as for a framed message
+        // over the limit; malformed data is INTERNAL.
+        last zeros: uint8[list] = new;
+        for (let i = 0; i < 100000; i++) {
+            zeros.append(0);
+        }
+        last bomb = test.assert_ok<uint8[list]>(framing.compress(gzip, zeros));
+        test.assert(bomb.length < 1000);
+        test.assert_equal<int>(8, code_of(test.assert_err<uint8[list]>(framing.decompress(gzip, bomb, 1000))));
+        test.assert_equal<int>(8, code_of(test.assert_err<uint8[list]>(framing.message_of(new framing.Frame(1, bomb),
+            gzip, 1000))));
+        test.assert_equal<int>(100000, test.assert_ok<uint8[list]>(framing.decompress(gzip, bomb, 100000)).length);
+        test.assert_equal<int>(13, code_of(test.assert_err<uint8[list]>(framing.decompress(gzip, bytes_of("1f8b0800"),
+            100))));
+        // A compressed frame on a gzip call is decompressed; an uncompressed one is taken as it is.
+        test.assert_equal_string(text, strings.from_bytes_lossy(test.assert_ok<uint8[list]>(framing.message_of(
+            new framing.Frame(1, zipped), gzip, 100))));
+        test.assert_equal_string(text, strings.from_bytes_lossy(test.assert_ok<uint8[list]>(framing.message_of(
+            new framing.Frame(0, message), gzip, 100))));
+    };
+
+    let slice = func(bytes: uint8[list], start: int, end: int) -> uint8[list] {
+        last out: uint8[list] = new;
+        for (let i = start; i < end; i++) {
+            out.append(bytes[i]);
+        }
+        return out;
     };
 
     // python3: frame(0x80, b'grpc-status: 0\r\ngrpc-message: ok\r\n')

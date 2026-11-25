@@ -1,0 +1,12 @@
+// status: 134
+// stderr: invalid argument: max_size
+let framing = import:Std.Net.Rpc.Framing;
+let program = import:Std.Program;
+
+// A message decoder needs a limit of zero or more.
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last decoder = new framing.MessageDecoder(-1, false);
+        return decoder.to_string() == "" ? program.ExitCode.Ok : program.ExitCode.Failure;
+    };
+);

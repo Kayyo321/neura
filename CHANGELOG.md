@@ -39,9 +39,11 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - `Handshake.dtls_peer_certificate_chain` returns the verified peer chain of a DTLS 1.3 transport, including a client certificate verified by a DTLS server.
 - An internal DEFLATE, zlib and gzip implementation, `Std.Encoding.Internal.Deflate`, has bounded output and the reference decoder's checks. It is tested against Python's `zlib` in both directions. Only library modules can import it. [Stdlib 13.1](docs/lang/Stdlib.md#131-stdencoding)
 - `Std.Net.Realtime.Ws` compresses messages with permessage-deflate (RFC 7692). `PermessageDeflate.DeflateCodec` compresses and decompresses. `WebSocket` negotiates the extension when the new `WebSocketOptions.permessage_deflate` is set: a client sends `PermessageDeflate.ClientOffer`, and a server accepts the first acceptable offer. A compressed message is limited by `max_message_size` after decompression, with the same status 1009 failure. Malformed compressed data fails with status 1007, and RSV1 on a continuation frame with 1002.
+- `Std.Net.Rpc` compresses and decompresses messages with `gzip` and `deflate`, where `deflate` is the zlib format as gRPC requires. `Call.encode_request` and `encode_response` take an optional compression. Servers decode `gzip` and `deflate` requests instead of answering UNIMPLEMENTED, and clients decode compressed responses. A decompressed message is bounded by the receive limit, with RESOURCE_EXHAUSTED. Both sides send `grpc-accept-encoding`.
 
 ### Changed
 
+- `Std.Net.Rpc.Framing.decompress` and `message_of` take the largest message size as a new last argument. gRPC requests and responses now carry `grpc-accept-encoding`.
 - `PermessageDeflate.DeflateCodec.decompress` takes the largest message size as a second argument. `MessageAssembler` rejects RSV1 on a continuation frame. `WebSocket.connect` accepts a permessage-deflate answer when the options enable it, instead of failing with status 1010.
 - `Std.Text.Strings.join` accepts parts and separators up to the maximum text length and reports when the accumulated byte count exceeds that limit.
 - In a `let` or `const` initializer, bare `law()` starts a law declaration and requires a claim. Parenthesize the callee as `(law)()` to call a zero-argument function named `law`.
