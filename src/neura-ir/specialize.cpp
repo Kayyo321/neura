@@ -427,6 +427,8 @@ private:
         instances_.emplace(name, instance);
         instance_depth_[instance] = 1 + depth(arguments);
         instance_of_[instance] = {generic, arguments};
+        if (!arguments.empty() && pointer_class(program_, instance) != PointerKind::None)
+            program_.pointer_pointees.emplace_back(instance, arguments.front());
 
         Substitution substitution;
         const auto generics = program_.symbols[generic].generics;

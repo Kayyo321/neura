@@ -67,25 +67,12 @@ inline bool contains_native_type(const IrProgram& program, const IrType& type) {
            std::ranges::any_of(type.arguments, [&](const auto& argument) { return contains_native_type(program, argument); });
 }
 
-// After specialization the class type has no source type arguments. For
-// ConstPointer the private backing class still gives the exact value type.
+// The pointee of a specialized pointer class: its type argument, which
+// specialization records because the class type no longer carries it.
+// Null before specialization and for any other class.
 inline const IrType* pointer_value_type(const IrProgram& program, SymbolId pointer) {
-    for (const auto& field : program.symbols) {
-        if (field.kind != SymbolKind::Field || field.owner != pointer || field.name != "backing" ||
-            !cell_class(program, field.type.symbol))
-            continue;
-        if (!field.type.arguments.empty()) return &field.type.arguments.front();
-        for (const auto& value : program.symbols) {
-            if (value.kind != SymbolKind::Field || value.owner != field.type.symbol || value.name != "value")
-                continue;
-            if (value.type.kind == TypeKind::Object && value.type.name.starts_with('&')) {
-                for (const auto& boxed : program.symbols)
-                    if (boxed.kind == SymbolKind::Field && boxed.owner == value.type.symbol && boxed.name == "$value")
-                        return &boxed.type;
-            }
-            return &value.type;
-        }
-    }
+    for (const auto& [instance, pointee] : program.pointer_pointees)
+        if (instance == pointer) return &pointee;
     return nullptr;
 }
 
