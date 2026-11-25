@@ -1,0 +1,17 @@
+let multipart = import:Std.Net.Http.Multipart;
+let test = import:Std.Test;
+let variant = import:Std.Reflect.Dynamic.Variant;
+
+// Multipart linked together with the reflect model (Std.Reflect.Dynamic.Variant). The #ThreadSafe class
+// MultipartLimits must stay task-safe: its to_string once went through Console.vformat, whose object arm makes
+// the type-wide task-safety check reach the reflect model's to_string (E0608; lanes/net/RULINGS-07.md).
+let MultipartWithReflectTests = module (
+    export let test_limits_text_with_the_reflect_model_linked = func {
+        test.assert_equal_string("MultipartLimits{parts=1000, header_bytes=16384, header_fields=100}",
+            new multipart.MultipartLimits().to_string());
+        test.assert_equal_string("MultipartLimits{parts=2, header_bytes=3, header_fields=4}",
+            new multipart.MultipartLimits(2, 3, 4).to_string());
+        // A use of the reflect model, so it is linked.
+        test.assert(variant.of<int>(7).to_string().byte_length > 0);
+    };
+);

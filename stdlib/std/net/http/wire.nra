@@ -138,9 +138,12 @@ export let Wire = module (
         /// @brief The limits as text.
         export let.override to_string = func -> string {
             last known = strings.trim(methods);
-            return $"Limits{{head={max_head_bytes}, fields={max_header_fields}, body={max_body_bytes}, "
-                + $"chunk_line={max_chunk_line_bytes}, trailer={max_trailer_bytes}, bare_lf={allow_bare_lf}, "
-                + $"methods={known}}}";
+            // Concatenation, not `$"…"`: interpolation goes through Console.vformat, whose object arm makes the
+            // task-safety check of this #ThreadSafe class reach every `to_string` in the program (E0608).
+            return "Limits{head=" .. max_head_bytes.to_string() .. ", fields=" .. max_header_fields.to_string()
+                .. ", body=" .. max_body_bytes.to_string() .. ", chunk_line=" .. max_chunk_line_bytes.to_string()
+                .. ", trailer=" .. max_trailer_bytes.to_string() .. ", bare_lf=" .. allow_bare_lf.to_string()
+                .. ", methods=" .. known .. "}";
         };
     );
 
