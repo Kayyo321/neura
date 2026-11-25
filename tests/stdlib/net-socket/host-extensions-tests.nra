@@ -1,4 +1,5 @@
 // test-options: --allow-net
+// host-dependent-counts: test_readiness_backend_change runs a connecting task beside an accepting one, and the order in which the host completes their accept, connect, write and read decides how long both tasks' frames are live together, so the peak heap cells of two live runs can differ while their output and steps agree
 let duration = import:Std.Time.Duration;
 let errors = import:Std.Core.Error;
 let event_loop = import:Std.Net.Socket.EventLoop;
