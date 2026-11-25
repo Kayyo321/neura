@@ -135,6 +135,7 @@ jobs:
 
       - name: Test
         env:
+          NEURA_DECOMPILER_CORPUS_PROFILE: "1"
           NEURA_REFERENCE_PROFILE: "1"
         run: >
           ctest --test-dir build --parallel "$(nproc)" --no-tests=error

@@ -6,7 +6,11 @@
 #include "lift/hints.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <cstdlib>
 #include <fstream>
+#include <iostream>
+#include <utility>
 
 namespace neura::testing {
 
@@ -343,6 +347,11 @@ const std::vector<CorpusImage>& image_corpus(const Environment& environment) {
     if (!corpus.empty()) {
         return corpus;
     }
+    using Clock = std::chrono::steady_clock;
+    const bool profile = std::getenv("NEURA_DECOMPILER_CORPUS_PROFILE") != nullptr;
+    const auto now = [profile] { return profile ? Clock::now() : Clock::time_point{}; };
+    const auto started = now();
+    Clock::duration lowering{};
     struct Program {
         std::string label;
         std::vector<fs::path> files;
@@ -372,16 +381,22 @@ const std::vector<CorpusImage>& image_corpus(const Environment& environment) {
                         {examples / "modules" / "multi-file"}});
     std::sort(programs.begin(), programs.end(), [](const Program& a, const Program& b) { return a.label < b.label; });
     for (const auto& program : programs) {
+        auto roots = program.roots;
+        for (const auto& file : program.files) {
+            roots.push_back(file.parent_path());
+        }
+        const auto lower_started = now();
+        auto lowered = lower_files(program.files, roots);
+        lowering += now() - lower_started;
         for (const bool optimize : {true, false}) {
             for (const bool source_map : {true, false}) {
                 backend::BuildOptions options;
                 options.optimize = optimize;
                 options.source_map = source_map;
-                auto roots = program.roots;
-                for (const auto& file : program.files) {
-                    roots.push_back(file.parent_path());
-                }
-                const auto conversion = backend::build(lower_files(program.files, roots), options);
+                // Build mutates its own copy. The final variant can take the
+                // original lowered program once no other variant needs it.
+                const auto conversion = (optimize || source_map) ? backend::build(lowered, options)
+                                                                 : backend::build(std::move(lowered), options);
                 corpus.push_back({program.label + (optimize ? "" : " unoptimized") + (source_map ? "" : " no-map"),
                                   nvr::encode(conversion.image), true, optimize, source_map});
             }
@@ -393,6 +408,13 @@ const std::vector<CorpusImage>& image_corpus(const Environment& environment) {
     auto extra = nvr_bytes::hello_sections();
     extra.push_back({"XTRA", 0, {1, 2, 3}});
     corpus.push_back({"fixture with an unknown optional section", nvr_bytes::assemble(extra), false, false, false});
+    if (profile) {
+        const auto ms = [](Clock::duration elapsed) {
+            return std::chrono::duration<double, std::milli>(elapsed).count();
+        };
+        std::cout << "  image-corpus programs=" << programs.size() << " images=" << corpus.size()
+                  << " lowering_ms=" << ms(lowering) << " preparation_ms=" << ms(now() - started) << '\n';
+    }
     return corpus;
 }
 

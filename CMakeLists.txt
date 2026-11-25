@@ -2176,16 +2176,20 @@ if(BUILD_TESTING AND NEURA_SDK)
             TIMEOUT "${NEURA_REFERENCE_TEST_TIMEOUT}" COST 528)
     endforeach()
 
-    foreach(suite IN ITEMS lossless lift behavior)
+    foreach(suite IN ITEMS lossless lift)
         add_test(NAME decompiler-${suite}
             COMMAND neura_backend_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()
-    # decompiler-behavior takes a few minutes in a Release build and more than
-    # an hour under the address and undefined-behavior sanitizers, so that
-    # configuration sets a longer limit, as it does for backend-reference.
+    # Keep the behavior cases independent. Each uses the former suite's
+    # timeout, with the sanitizer workflow's longer limit where configured.
     set(NEURA_DECOMPILER_BEHAVIOR_TEST_TIMEOUT 3600 CACHE STRING
-        "CTest limit, in seconds, for the decompiler-behavior test")
-    set_tests_properties(decompiler-behavior PROPERTIES TIMEOUT "${NEURA_DECOMPILER_BEHAVIOR_TEST_TIMEOUT}")
+        "CTest limit, in seconds, for each decompiler behavior test")
+    add_test(NAME decompiler-behavior-trace-replay COMMAND neura_backend_tests behavior
+        "${CMAKE_CURRENT_SOURCE_DIR}" resynthesized_images_replay_the_original_trace)
+    add_test(NAME decompiler-behavior-scalar-equivalence COMMAND neura_backend_tests behavior
+        "${CMAKE_CURRENT_SOURCE_DIR}" resynthesized_functions_agree_exhaustively)
+    set_tests_properties(decompiler-behavior-trace-replay decompiler-behavior-scalar-equivalence
+        PROPERTIES TIMEOUT "${NEURA_DECOMPILER_BEHAVIOR_TEST_TIMEOUT}")
 
     # Lifted blocks (src/lift): the structural and overflow proofs, and the
     # lowered blocks against the reference evaluator over a program corpus.
@@ -2659,7 +2663,8 @@ if(BUILD_TESTING)
     # their seconds on the x86_64 Linux CI runner (release trial 16).
     set(neura_test_costs
         stdlib-crypto-pqc 300 stdlib-crypto-pqc-slh-dsa-sign-shake-small 400
-        stdlib-crypto-pqc-slh-dsa-sign-sha2-small 300 stdlib-crypto-pqc-slh-dsa-sign-fast 200 decompiler-behavior 540
+        stdlib-crypto-pqc-slh-dsa-sign-sha2-small 300 stdlib-crypto-pqc-slh-dsa-sign-fast 200
+        decompiler-behavior-trace-replay 290 decompiler-behavior-scalar-equivalence 112
         stdlib-crypto-asymmetric 480 app-ui-reconcile 450 stdlib-character 390 backend-tier3 380
         program-fuzz 370 lifecycle-update 360 decompiler-lift 350 stdlib-crypto-pki 330
         expressions-equivalence 300 stdlib-crypto-advanced 290 lift-corpus 260 stdlib-crypto-token 250

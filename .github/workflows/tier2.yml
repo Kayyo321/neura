@@ -188,7 +188,8 @@ jobs:
       # the 0.3.0 suite ran out of time here without a sanitizer report. With
       # the scale, each backend-reference-library shard inherits the former
       # suite's 5.5-hour limit (it ran for more than 3),
-      # decompiler-behavior 3 hours (it took 2.6), program-fuzz 2 hours
+      # each decompiler behavior case inherits 3 hours (the former suite took
+      # 2.6), and program-fuzz 2 hours
       # (it took 1). Keep the previous lifetime suite limit of 5 hours for
       # each independent fixture until the split entries have sanitizer data.
       # With NEURA_TEST_SANITIZERS they decompile only where a check needs the names.
