@@ -235,7 +235,7 @@ std::vector<std::uint8_t> link_windows_c_import(const Options& options, std::str
     if (!symbols.empty()) write_contents(exports, definitions);
 
     std::vector<std::string> compile{platform::native_utf8_path(compiler), "/nologo", "/c", "/TC", "/std:c11", "/MT",
-                                     "/O2", "/utf-8", "/Fo" + platform::native_utf8_path(object),
+                                     "/O2", "/Brepro", "/utf-8", "/Fo" + platform::native_utf8_path(object),
                                      platform::native_utf8_path(source)};
     for (const auto& dir : include_dirs) compile.push_back("/I" + dir);
     for (const auto& dir : options.c_import.include_dirs) compile.push_back("/I" + dir);
