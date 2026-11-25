@@ -328,7 +328,7 @@ let current = p.read();   // 20
 - `clone()` cannot create a dangling reference.
 - `write()` accepts only values of the declared type.
 - A non-nil `Pointer<T>` always refers to valid managed storage.
-- Mutable pointers follow the [task transfer rules](#type-erasure-and-native-code), including moves through a join result.
+- Pointers follow the [task transfer rules](#type-erasure-and-native-code), including moves through a join result.
 
 A `Pointer<T>` binding may itself be `nil` under Neura's existing class-reference rules. Dereferencing a nil pointer produces a defined runtime trap, never an unchecked memory access.
 
@@ -493,9 +493,9 @@ A list view and its subviews hold the structural version recorded at constructio
 
 Static use of a managed pointer at the `Std.DynamicForeign` boundary is an error. For an erased argument, native argument packing checks the object's runtime class and uses its existing argument-layout failure for a managed pointer before a foreign call.
 
-Mutable `Pointer<T>` and `ListPointer<T>` values are never shared between live tasks. A join result moves them from the finished task to the joining task. A `ConstPointer<T>` with a deeply immutable transferable value may cross to another task on the scheduler. Isolated parallel work uses its own heap and cannot use a live view of the original storage.
+`Pointer<T>`, `ConstPointer<T>`, and `ListPointer<T>` values are never shared between live tasks. Each class is `#NotThreadSafe`. Giving one to a spawned task, sending one on a channel or in a `select` send arm, or passing one to a parallel item produces E0602. Reading one through a `const` global from a spawned call or a parallel worker produces E0601. A join result moves them from the finished task to the joining task. Isolated parallel work uses its own heap and cannot use a live view of the original storage.
 
-`ConstPointer<FrozenList<T>>` can be used within a task. Sending it to another task produces E0602 because `FrozenList<T>` has private list backing that does not meet the task-transfer rules. Shared frozen backing across tasks is a proposed future extension.
+**0.3.1 decision (revised).** A `ConstPointer<T>` stays in its task even when `T` is deeply immutable. The storage it reads remains writable through any `Pointer<T>` to the same cell. If another task held the view, what it read would depend on the schedule, which is a data race under the [memory model](Concurrency.md#54-memory-model). To give another task what a view reads, give it the value: `view.read()` is transferable when `T` is. Sharing an immutable object by reference between tasks is planned for `SharedPointer<T>` over an `#Immutable` `T`.
 
 ---
 

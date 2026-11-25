@@ -51,8 +51,9 @@ export let Pointer = module (
         export let clone = func -> Pointer<T> => new(backing);
     );
 
-    /// @brief A read-only view that keeps a cell's storage live.
-    .[Final, Since("0.3.1")]
+    /// @brief A read-only view that keeps a cell's storage live. A Pointer to the same storage can still change it, so
+    /// the view stays in the task that holds it.
+    .[Final, NotThreadSafe, Since("0.3.1")]
     export let ConstPointer = class<T>:ManagedPointer (
         last backing: cell.Cell<T>;
 

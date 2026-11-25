@@ -204,7 +204,7 @@ A value given to another task through a spawn (the callee value, a receiver, and
 | A function value, when every closure of its type that the program creates has transferable captures | A function value for which some closure of its type captures an object, array, or list |
 | The handles of `Std.Concurrent`: channel endpoints, `Timer`, `AtomicInt64`, `Semaphore`, `Guarded<T>`, and the other classes declared in `std/concurrent/` other than `Task` and `Scope` | `Task<T>` and `Scope` (scope-bound, section 4.3) |
 | An instance of an `#Immutable` class whose fields are transferable ([Types](Types.md#immutable-classes)) | An instance of a class marked `#NotThreadSafe`, or of a class that extends one |
-| An instance of a monitor (section 8.1) | |
+| An instance of a monitor (section 8.1) | The views of `Std.Core.Pointer`: `Pointer<T>`, `ConstPointer<T>`, and `ListPointer<T>`, which are `#NotThreadSafe` ([Pointer contract](Neura0.3.1.md#type-erasure-and-native-code)) |
 
 The check is recursive and on static types, and it runs on the specialized program: a generic function is checked at each specialization, and a type that reaches itself is transferable when its other parts are. A named function has no captures, and a closure is transferable when its captures are. The rule for a function value is the union rule of section 5.2 applied to values. Copying a closure does not copy what it captured: a closure that captures an object aliases that object ([Core language](CoreLanguage.md#function-values-and-closures)), which is why such a closure is not transferable.
 
@@ -297,7 +297,7 @@ These are the ordering guarantees a program may rely on. An effect A is *visible
 - A is inside one `Guarded<T>.with` call and B is inside a later one on the same guard;
 - A is inside one call of a synchronized method on an instance, and B is inside a later call of a synchronized method on the same instance (section 8.1).
 
-Isolation means there is nothing else to order: two tasks have no other common state. An `#Immutable` instance that two tasks share never changes after its constructor returns, and the constructor ran before the spawn or send that shared it. The reference scheduler's FIFO order is deterministic but is not part of this model (section 3).
+Isolation means there is nothing else to order: two tasks have no other common state. An `#Immutable` instance that two tasks share never changes after its constructor returns, and the constructor ran before the spawn or send that shared it. A read-only view of storage that can still change would be common state, so a `ConstPointer` stays in its task even when its value type is immutable. The reference scheduler's FIFO order is deterministic but is not part of this model (section 3).
 
 ## 6. Channels and `select`
 

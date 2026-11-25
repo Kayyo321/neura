@@ -21,25 +21,25 @@ The following public declarations are taken from the module source; each links t
   Shares access to a deeply immutable stored value.
 - **Pointer.Pointer** · [`export let clone = func -> Pointer<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/pointer.nra#L51)
   Returns another mutable view of the same storage.
-- **Pointer** · [`export let ConstPointer = class<T>:ManagedPointer`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/pointer.nra#L56)
-  A read-only view that keeps a cell's storage live. Tagged `#Final`. Since 0.3.1.
-- **Pointer.ConstPointer** · [`export let read = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/pointer.nra#L65)
+- **Pointer** · [`export let ConstPointer = class<T>:ManagedPointer`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/pointer.nra#L57)
+  A read-only view that keeps a cell's storage live. A Pointer to the same storage can still change it, so the view stays in the task that holds it. Tagged `#Final`, `#NotThreadSafe`. Since 0.3.1.
+- **Pointer.ConstPointer** · [`export let read = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/pointer.nra#L66)
   Reads the stored value. T must be deeply immutable.
-- **Pointer.ConstPointer** · [`export let clone = func -> ConstPointer<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/pointer.nra#L68)
+- **Pointer.ConstPointer** · [`export let clone = func -> ConstPointer<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/pointer.nra#L69)
   Returns another read-only view of the same storage.
-- **Pointer** · [`export let ListPointer = class<T>:ManagedPointer`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/pointer.nra#L73)
+- **Pointer** · [`export let ListPointer = class<T>:ManagedPointer`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/pointer.nra#L74)
   A non-copying, bounds-checked view of a contiguous array or list region. Tagged `#Final`, `#NotThreadSafe`. Since 0.3.1.
-- **Pointer.ListPointer** · [`export let init = func(values: T[], start: int, end: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/pointer.nra#L80)
+- **Pointer.ListPointer** · [`export let init = func(values: T[], start: int, end: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/pointer.nra#L81)
   Creates a view of [start, end) in a fixed-length array.
-- **Pointer.ListPointer** · [`export let len = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/pointer.nra#L116)
+- **Pointer.ListPointer** · [`export let len = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/pointer.nra#L117)
   Returns the number of elements in the view.
-- **Pointer.ListPointer** · [`export let value_at = func(index: int) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/pointer.nra#L122)
+- **Pointer.ListPointer** · [`export let value_at = func(index: int) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/pointer.nra#L123)
   Reads the element at a checked index relative to this view.
-- **Pointer.ListPointer** · [`export let set = func(index: int, value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/pointer.nra#L131)
+- **Pointer.ListPointer** · [`export let set = func(index: int, value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/pointer.nra#L132)
   Replaces the element at a checked index without changing the list version.
-- **Pointer.ListPointer** · [`export let sub = func(start: int, end: int) -> ListPointer<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/pointer.nra#L144)
+- **Pointer.ListPointer** · [`export let sub = func(start: int, end: int) -> ListPointer<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/pointer.nra#L145)
   Creates a checked subview of [start, end) relative to this view.
-- **Pointer.ListPointer** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/pointer.nra#L154)
+- **Pointer.ListPointer** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/pointer.nra#L155)
   Reports whether the view contains no elements.
 <!-- END SOURCE API -->
 

@@ -260,39 +260,87 @@ let invoke_generic = func<T>(value: T) {
         self.assertEqual(built.returncode, 0, built.stderr)
         self.assertTrue(rebuilt.read_bytes() == self.image.read_bytes())
 
-    def test_const_pointer_can_cross_an_ordinary_task(self):
-        declarations = '''
-let consume = func(view: ConstPointer<int64> = nil) {
-    if (view) {
-        console.println("{}", view.read());
-    } else {
-        console.println("nil");
+    def reject(self, text, code, message, use, notes=()):
+        """Checks one rejection: its code, message, primary line, and notes."""
+        self.source.write_text(text, encoding="utf-8")
+        result = self.command("check", "--error-format=json", self.source)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        diagnostic = next(json.loads(line) for line in result.stderr.splitlines()
+                          if line.startswith("{") and json.loads(line)["severity"] == "error")
+        self.assertEqual(diagnostic["code"], code, result.stderr)
+        self.assertIn(message, diagnostic["message"])
+        primary = next(span for span in diagnostic["spans"] if span["primary"])
+        self.assertEqual(primary["line"], next(i for i, line in enumerate(text.splitlines(), 1) if use in line),
+                         result.stderr)
+        for note in notes:
+            self.assertTrue(any(note in item for item in diagnostic["notes"]), result.stderr)
+        self.assertFalse(any("monitor" in item for item in diagnostic["notes"]), result.stderr)
+        return diagnostic
+
+    def test_const_pointer_stays_in_its_task(self):
+        # A Pointer to the same storage can still change it, so a read view is
+        # not shared with another task, whatever its value type.
+        view_note = "a ConstPointer reads storage that a Pointer in its task can still change"
+        declarations = POINTER + ENTRY + '''
+let channels = import:Std.Concurrent.Channel;
+let parallel = import:Std.Concurrent.Parallel;
+let consume = func(view: ConstPointer<int64>) -> int64 => view.read();
+'''
+        cases = (
+            ("spawn", "given to a spawned task", '''
+let reject = func(view: ConstPointer<int64>) {
+    scope { spawn consume(view); }
+};
+''', "spawn consume"),
+            ("nil", "given to a spawned task", '''
+let reject = func {
+    let view: ConstPointer<int64> = nil;
+    scope { spawn consume(view); }
+};
+''', "spawn consume"),
+            ("channel", "a channel's element type", '''
+let reject = func {
+    let [out, incoming, closer] = channels.open<ConstPointer<int64>>(1);
+};
+''', "channels.open"),
+            ("item", "given to a parallel item", '''
+let reject = func(views: ConstPointer<int64>[]) {
+    let _ = parallel.map<ConstPointer<int64>, int64>(views, consume, parallel.limits(1000, 1000));
+};
+''', "parallel.map"),
+        )
+        for name, message, body, use in cases:
+            with self.subTest(path=name):
+                diagnostic = self.reject(declarations + body, "E0602", message, use, (view_note,))
+                self.assertTrue(any(span.get("label") == "'ConstPointer<int64>' is marked #NotThreadSafe here"
+                                    for span in diagnostic["spans"]), diagnostic)
+        # A read view in a const global is not task-safe for a spawned call.
+        self.reject(declarations + '''
+let writable: Pointer<int64> = new(cell.of<int64>(3));
+const view: ConstPointer<int64> = writable.as_const();
+let read_view = func() -> int64 => view.read();
+let reject = func {
+    scope { spawn read_view(); }
+};
+''', "E0601", "not task-safe", "spawn read_view")
+
+    def test_const_pointer_cannot_be_sent(self):
+        view_note = "a ConstPointer reads storage that a Pointer in its task can still change"
+        declarations = POINTER + "let channels = import:Std.Concurrent.Channel;\n"
+        # A sender that comes from elsewhere: the value sent is checked at the
+        # send, as a plain send and as a select arm.
+        self.reject(declarations + '''
+let reject = func(view: ConstPointer<int64>, out: channels.Sender<ConstPointer<int64>>) {
+    out.send(view);
+};
+''', "E0602", "sent on a channel", "out.send(view)", (view_note,))
+        self.reject(declarations + '''
+let reject = func(view: ConstPointer<int64>, out: channels.Sender<ConstPointer<int64>>) {
+    select {
+        out.send(view) => {},
     }
 };
-'''
-        paths = (
-            ("ordinary", '''
-        let ptr: Pointer<int64> = new(cell.of<int64>(7));
-        let readonly = ptr.as_const();
-''', "7\n"),
-            ("boxed", '''
-        let storage = cell.of<int64>(7);
-        let borrowed: &int64 = storage.value;
-        borrowed = 8;
-        let ptr: Pointer<int64> = new(storage);
-        let readonly = ptr.as_const();
-        destroy storage;
-''', "8\n"),
-            ("nil-only", "        let readonly: ConstPointer<int64> = nil;\n", "nil\n"),
-        )
-        for name, initialization, expected in paths:
-            with self.subTest(storage=name):
-                self.build(program(initialization + '''
-        scope {
-            spawn consume(readonly);
-        }
-''', declarations))
-                self.run_modes(0, expected)
+''', "E0602", "sent on a channel", "select {", (view_note,))
 
     def test_mutable_pointer_and_view_move_through_join(self):
         source = pathlib.Path(__file__).with_name("join-move.nra").read_text(encoding="utf-8")
@@ -323,8 +371,7 @@ let consume = func(view: ConstPointer<frozen.FrozenList<int>>) {
         self.assertEqual(diagnostic["code"], "E0602", result.stderr)
         self.assertEqual(diagnostic["spans"][0]["line"],
                          next(i for i, line in enumerate(source.splitlines(), 1) if "spawn consume" in line))
-        self.assertTrue(any("pointee type" in note and "FrozenList<int32>" in note
-                            for note in diagnostic["notes"]), result.stderr)
+        self.assertTrue(any("a ConstPointer reads storage" in note for note in diagnostic["notes"]), result.stderr)
 
     def test_artifact_roundtrip(self):
         declarations = '''
@@ -341,9 +388,7 @@ let read = func(view: ConstPointer<int>, items: ListPointer<int>) {
         destroy storage;
         let values: int[] = [13, 21];
         let items: ListPointer<int> = new(values, 0, 2);
-        scope {
-            spawn observe(readonly);
-        }
+        observe(readonly);
         read(readonly, items);
 ''', declarations + '''
 let observe = func(view: ConstPointer<int>) {

@@ -288,13 +288,7 @@ bool TaskAnalysis::class_transferable(SymbolId cls, bool item) const {
         });
     };
     bool result = false;
-    if (pointer_class(program_, cls) == PointerKind::Const) {
-        // Scheduler tasks share a heap on one thread. An isolated parallel
-        // item cannot receive a live read view of another heap's storage.
-        const auto* value = pointer_value_type(program_, cls);
-        result = !item && value && value->kind != TypeKind::TypeParameter &&
-                 !mutable_part(program_, *value) && transferable_in(*value, false);
-    } else if (signature_layout(cls)) {
+    if (signature_layout(cls)) {
         // Section 5.2's union rule, applied to values: a function value is
         // transferable when every closure of its type that the program can
         // create is.
@@ -368,10 +362,8 @@ void TaskAnalysis::explain_class(Diagnostic& error, const IrType& type) const {
     const auto& item = symbol(cls);
     if (item.kind != SymbolKind::Class) return;
     if (pointer_class(program_, cls) == PointerKind::Const) {
-        if (const auto* pointee = pointer_value_type(program_, cls); pointee && !transferable(*pointee)) {
-            error.note("pointee type '" + display(*pointee) + "' does not meet the task-transfer rules");
-            return;
-        }
+        error.note("a ConstPointer reads storage that a Pointer in its task can still change, so it stays in that "
+                   "task; give the other task the value it reads instead");
     }
     if (const auto marked = not_thread_safe_class(cls); marked != no_symbol) {
         error.label(tag_span(symbol(marked), TagId::NotThreadSafe).value_or(symbol(marked).span),

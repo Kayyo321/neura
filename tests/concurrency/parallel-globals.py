@@ -59,7 +59,7 @@ def run(*args, status=0):
 with tempfile.TemporaryDirectory(prefix="neura-parallel-globals-") as scratch:
     root = Path(scratch)
     for name, declarations, binding, reason in (
-        ("pointer", POINTER, "view", "cannot be copied into a parallel item"),
+        ("pointer", POINTER, "view", "is not transferable"),
         ("monitor", MONITOR, "monitor", "cannot be copied into a parallel item"),
         ("frozen", FROZEN, "list", "is not transferable"),
     ):
@@ -77,8 +77,19 @@ with tempfile.TemporaryDirectory(prefix="neura-parallel-globals-") as scratch:
             assert f"uses the binding '{binding}'" in message and reason in message, diagnostic
             assert f"reaches 'read_{name}'" in message, diagnostic
 
+    # A read view stays in its task: a spawned call cannot read it either.
+    shared_view = root / "shared-view.nra"
+    shared_view.write_text(application(POINTER, """scope {
+            let pointer_result = spawn read_pointer();
+            console.print_line(pointer_result.join().to_string());
+        }"""), encoding="utf-8")
+    result = run("check", "--error-format=json", shared_view, status=1)
+    diagnostic = json.loads(result.stderr.splitlines()[0])
+    assert diagnostic["code"] == "E0601", diagnostic
+    assert "uses the binding 'view'" in diagnostic["message"] and "is not transferable" in diagnostic["message"], diagnostic
+
     good = root / "copy-or-share.nra"
-    good.write_text(application(POINTER + MONITOR + """
+    good.write_text(application(MONITOR + """
 .Immutable
 .Final
 let Fixed = class ( export last value = 7; );
@@ -86,9 +97,8 @@ const fixed = new Fixed();
 let work = func(n: int) -> int => n + fixed.value;
 """, """let shared_total = 0;
         scope {
-            let pointer_result = spawn read_pointer();
             let monitor_result = spawn read_monitor();
-            shared_total = pointer_result.join() + monitor_result.join();
+            shared_total = monitor_result.join();
         }
         console.print_line(shared_total.to_string());
         let copied = parallel.map<int, int>([1, 2], work, parallel.limits(100000, 1000));
@@ -98,6 +108,7 @@ let work = func(n: int) -> int => n + fixed.value;
         run("build", *optimize, good, "-o", image)
         for workers in ("1", "4"):
             result = run("run", "--runtime=off", "--parallel-workers", workers, image)
-            assert result.stdout == "8\n8\n", result
+            assert result.stdout == "5\n8\n", result
 
-print("3 const global types rejected for parallel workers; spawn sharing and immutable copies preserved")
+print("3 const global types rejected for parallel workers, a read view rejected for tasks; spawn sharing and "
+      "immutable copies preserved")
