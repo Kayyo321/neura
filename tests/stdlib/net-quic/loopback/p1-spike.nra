@@ -46,6 +46,11 @@ let read_text = func(stream: streams.QuicStream) -> string => match (stream.read
     result.Result.Err(failure) => "<" .. describe(failure) .. ">",
 };
 
+let read_detail = func(stream: streams.QuicStream) -> string => match (stream.read(64)) {
+    result.Result.Ok(_) => "<data>",
+    result.Result.Err(failure) => describe(failure) .. ": " .. errors.message(failure),
+};
+
 let send_text = func(stream: streams.QuicStream, text: string) -> string => match (stream.write(strings.to_bytes(text))) {
     result.Result.Ok(_) => "sent",
     result.Result.Err(failure) => "<" .. describe(failure) .. ">",
@@ -104,7 +109,7 @@ let announced_reader = func(name: string, stream: streams.QuicStream, started: c
 };
 
 let client = func(port: int, certificate: string, go: channels.Receiver<int>, done: channels.Receiver<int>,
-    notes: channels.Sender<string>) {
+    closed: channels.Sender<int>, notes: channels.Sender<string>) {
     let target = new socket_addr.SocketAddr(ip.IpAddr.V4(ipv4.localhost()), port);
     let settings = quic_config(tls_settings(false, certificate, ""));
     match (connections.connect(target, settings, optional.Optional<tickets.SessionTicket>.None, new)) {
@@ -133,6 +138,7 @@ let client = func(port: int, certificate: string, go: channels.Receiver<int>, do
                             }
                             let _ = done.receive();
                             let _ = connection.close_with(7, "spike done");
+                            closed.send(1);
                             notes.send("closed stream after close: " .. send_text(first, "late"));
                             match (connections.connect(target, settings, optional.Optional<tickets.SessionTicket>.None, new)) {
                                 result.Result.Ok(again) => {
@@ -184,7 +190,7 @@ let print_queued = func(lines: channels.Receiver<string>) {
 };
 
 let serve = func(endpoint: endpoints.QuicEndpoint, go: channels.Sender<int>, done: channels.Sender<int>,
-    lines: channels.Sender<string>) {
+    closed: channels.Receiver<int>, lines: channels.Sender<string>) {
     match (endpoint.accept()) {
         result.Result.Err(failure) => {
             lines.send("server accept failed: " .. errors.message(failure));
@@ -232,6 +238,9 @@ let serve = func(endpoint: endpoints.QuicEndpoint, go: channels.Sender<int>, don
                             forward(b_result[1], lines);
                             forward(c_result[1], lines);
                             done.send(1);
+                            // The peer's application close code reaches the reader (check 5 of A1-0).
+                            let _ = closed.receive();
+                            lines.send("read after the peer closed: " .. read_detail(second));
                         },
                         result.Result.Err(failure) => {
                             lines.send("server accept b failed: " .. describe(failure));
@@ -266,9 +275,10 @@ export let Main = module:program.Entry (
                 let done = channels.open<int>(1);
                 let lines = channels.open<string>(32);
                 let notes = channels.open<string>(32);
+                let closed = channels.open<int>(1);
                 scope {
-                    spawn client(endpoint.address().port, certificate, go[1], done[1], notes[0]);
-                    serve(endpoint, go[0], done[0], lines[0]);
+                    spawn client(endpoint.address().port, certificate, go[1], done[1], closed[0], notes[0]);
+                    serve(endpoint, go[0], done[0], closed[1], lines[0]);
                 }
                 lines[2].close();
                 print_queued(lines[1]);

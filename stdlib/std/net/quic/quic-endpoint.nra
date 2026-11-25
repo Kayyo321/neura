@@ -54,9 +54,9 @@ export let QuicEndpoint = module (
 
         /// @brief Closes the endpoint and every connection it accepted, and releases the port.
         export let close = func -> Result<Unit> {
-            return match (host.close(id, 0, "")) {
-                host.DoneOutcome.Ok => bytes.ok(),
-                host.DoneOutcome.Error(code) => Result<Unit>.Err(host.error_of(code, "close failed", bound.to_string())),
+            return match (host.close(id, 0, "", 0)) {
+                host.CloseOutcome.Ok(_) => bytes.ok(),
+                host.CloseOutcome.Error(code) => Result<Unit>.Err(host.error_of(code, "close failed", bound.to_string())),
             };
         };
 

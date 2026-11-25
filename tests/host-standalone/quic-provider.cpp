@@ -261,7 +261,7 @@ int main(int argc, char** argv) {
         // A pending read whose connection is closed by another caller.
         const auto orphan = f.start("stream_read", {number(server), number(stream), int32_value(16),
                                                     number(10 * seconds)});
-        assert(f.now("close", {number(server), number(9), text("closing")}).success);
+        assert(f.now("close", {number(server), number(9), text("closing"), number(2 * seconds)}).success);
         expect_code(f.take(orphan), host_error::not_found, "pending read of a closed connection");
         std::cout << "PASS a pending read ends when another caller closes its connection\n";
 
@@ -273,7 +273,7 @@ int main(int argc, char** argv) {
                      std::to_string(client_read_answer.value.bits)) << ")\n";
 
         // A closed ID never reaches the object that reuses its slot.
-        const auto closed_client = f.now("close", {number(client), number(0), text("")});
+        const auto closed_client = f.now("close", {number(client), number(0), text(""), number(2 * seconds)});
         if (!closed_client.success) {
             std::cerr << "client close failed with " << closed_client.value.bits << '\n';
             return 1;
@@ -285,7 +285,7 @@ int main(int argc, char** argv) {
                     "stale connection ID after its slot was reused");
         assert(f.now("open_stream", {number(again), scalar(1)}).success);
         std::cout << "PASS a reused slot gets a new generation; the stale ID is refused\n";
-        assert(f.now("close", {number(endpoint), number(0), text("")}).success);
+        assert(f.now("close", {number(endpoint), number(0), text(""), number(2 * seconds)}).success);
     }
     fs::remove_all(dir);
     return 0;

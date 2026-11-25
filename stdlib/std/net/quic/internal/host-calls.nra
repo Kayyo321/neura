@@ -31,8 +31,8 @@ export let HostCalls = module (
     /// @brief The byte count accepted for sending, the peer's ending and its code as for reads, or a host error
     /// code.
     export let WriteOutcome = enum (Ok([int, int, int64]), Error(uint32));
-    /// @brief Success, or a host error code.
-    export let DoneOutcome = enum (Ok, Error(uint32));
+    /// @brief Whether a close ended in OpenSSL's terminated state before its timeout, or a host error code.
+    export let CloseOutcome = enum (Ok(bool), Error(uint32));
 
     /// @brief Listens on a numeric address with a certificate and key file and the ALPN protocols to accept.
     export let listen = func(host: string, port: int, certificate: string, key: string, alpn: string[list])
@@ -62,8 +62,11 @@ export let HostCalls = module (
     export let stream_write = func(connection: int64, stream: int64, data: uint8[list], fin: bool,
         timeout_nanos: int64) -> WriteOutcome host("neura.net.quic.stream_write", 1);
 
-    /// @brief Closes a connection with an application code and reason, or an endpoint and its connections.
-    export let close = func(id: int64, code: int64, reason: string) -> DoneOutcome host("neura.net.quic.close", 1);
+    /// @brief Closes a connection with an application code and reason, after its streams' buffered data, and
+    /// waits up to `timeout_nanos` (zero: two seconds) for it to terminate; or closes an endpoint and its
+    /// connections at once. Every ID of the closed objects is refused from the start.
+    export let close = func(id: int64, code: int64, reason: string, timeout_nanos: int64) -> CloseOutcome
+        host("neura.net.quic.close", 1);
 
     /// @brief The error of a failed QUIC host call: `Closed` for an ID the provider no longer holds,
     /// `quic.busy` for a second pending operation in one direction, and the shared mapping otherwise.

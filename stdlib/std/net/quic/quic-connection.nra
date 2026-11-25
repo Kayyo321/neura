@@ -133,13 +133,19 @@ export let QuicConnection = module (
             Result<Optional<SessionTicket>>.Err(limited("session tickets"));
 
         /// @brief Closes the connection with application error 0 (CONNECTION_CLOSE).
-        export let close = func -> Result<Unit> => close_with(0, "");
+        export let close = func -> Result<Unit> {
+            close_with(0, "")?;
+            return bytes.ok();
+        };
 
-        /// @brief Closes the connection with an application error code (0 through 2^62 - 1) and a reason.
-        export let close_with = func(code: int64, reason: string) -> Result<Unit> {
-            return match (host.close(id, code, reason)) {
-                host.DoneOutcome.Ok => bytes.ok(),
-                host.DoneOutcome.Error(failure) => Result<Unit>.Err(host.error_of(failure, "QUIC close failed", label)),
+        /// @brief Closes the connection with an application error code (0 through 2^62 - 1) and a reason, after
+        /// the streams' buffered data. Every handle of the connection fails with `Closed` from the start.
+        /// `true` when the connection terminated within the default timeout (or two seconds without one),
+        /// `false` when it was released before that.
+        export let close_with = func(code: int64, reason: string) -> Result<bool> {
+            return match (host.close(id, code, reason, timeout_nanos)) {
+                host.CloseOutcome.Ok(terminated) => Result<bool>.Ok(terminated),
+                host.CloseOutcome.Error(failure) => Result<bool>.Err(host.error_of(failure, "QUIC close failed", label)),
             };
         };
 

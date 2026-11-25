@@ -11,7 +11,9 @@ replays it with every capability denied, and checks the trace:
 2. the replay reproduces the output and touches no host service;
 3. a closed connection's ID fails with Closed, also after a later connection
    reused its provider slot with a new generation;
-4. a second read on a stream with a read pending fails at once (quic.busy).
+4. a second read on a stream with a read pending fails at once (quic.busy);
+5. the peer's application close code reaches a reader, and the trace records
+   it in the read's success value ([bytes, ending 2, code 7]).
 """
 
 import argparse
@@ -73,6 +75,15 @@ def check_generations(trace):
     assert len(stale) == 1, "the stale handle was used after the slot was reused"
 
 
+def check_close_payload(trace):
+    lines = trace.read_text().splitlines()
+    closes = [i for i, line in enumerate(lines) if line.startswith("request neura.net.quic.close") and ", 7, " in line]
+    assert len(closes) == 1, closes
+    reads = [i for i, line in enumerate(lines) if line.startswith("request neura.net.quic.stream_read") and i > closes[0]]
+    answers = [lines[i + 1] for i in reads]
+    assert any(re.fullmatch(r"ok \[0, 2, 7\]", answer) for answer in answers), answers
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--neura", type=pathlib.Path, required=True)
@@ -98,6 +109,7 @@ def main():
             assert live == expected, (attempt, live)
             ticks = check_parked_together(trace)
             check_generations(trace)
+            check_close_payload(trace)
             print(f"  run {attempt}: accept_stream and two reads pending together, delivered at ticks {ticks}",
                   flush=True)
         print(f"PASS live runs ({args.runs}): output, three tasks parked at once, generation-checked IDs", flush=True)

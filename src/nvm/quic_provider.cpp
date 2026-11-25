@@ -146,6 +146,16 @@ public:
         return held ? held->get() : nullptr;
     }
 
+    // Removes the object without destroying it: its ID is refused from now on.
+    std::optional<Object> take(std::int64_t id) {
+        auto* slot = live(id);
+        if (!slot) return std::nullopt;
+        auto object = std::move(slot->object);
+        slot->object.reset();
+        free_.push_back(static_cast<std::size_t>((id & ((std::int64_t{1} << slot_bits) - 1)) - 1));
+        return object;
+    }
+
     bool erase(std::int64_t id) {
         auto* slot = live(id);
         if (!slot) return false;
@@ -803,29 +813,63 @@ public:
         return pending_of(operation, request.now, timeout);
     }
 
-    HostCompletion close(const HostRequest& request) {
+    // Closes a connection: it leaves the table at once, so every operation
+    // on its ID, pending or later, answers NotFound; then CONNECTION_CLOSE
+    // with the code and reason is sent, after the streams' buffered data
+    // (SSL_shutdown_ex flushes streams first). Completes with true once
+    // OpenSSL reports the connection terminated, or with false when the
+    // timeout passes first. An endpoint closes at once with the connections
+    // it accepted, which share its socket.
+    std::variant<HostCompletion, PendingOperation> close(const HostRequest& request, bool blocking) {
         if (!granted_->net) return denied();
         const auto id = as_int64(request.arguments.at(0));
         const auto code = as_int64(request.arguments.at(1));
         const auto& reason = request.arguments.at(2).bytes;
+        const auto timeout = as_int64(request.arguments.at(3));
         // The reason may be empty; it travels in CONNECTION_CLOSE, so it is bounded and has no NUL.
-        if (code < 0 || reason.size() > 1024 || reason.find('\0') != std::string::npos) {
+        if (code < 0 || timeout < 0 || reason.size() > 1024 || reason.find('\0') != std::string::npos) {
             return fail(host_error::invalid_input);
         }
-        if (auto* connection = state_->objects.find<Connection>(id)) {
-            SSL_SHUTDOWN_EX_ARGS close_args{static_cast<std::uint64_t>(code), reason.c_str()};
-            static_cast<void>(SSL_shutdown_ex(connection->ssl->ssl, SSL_SHUTDOWN_FLAG_NO_BLOCK, &close_args,
-                                              sizeof close_args));
-            static_cast<void>(SSL_handle_events(connection->ssl->ssl));
-        } else if (!state_->objects.find<Endpoint>(id)) {
-            return fail(host_error::not_found);
-        } else {
-            // Connections accepted from this endpoint share its socket: they
-            // end with it.
+        if (state_->objects.find<Endpoint>(id)) {
             for (const auto child : state_->objects.children_of(id)) state_->objects.erase(child);
+            state_->objects.erase(id);
+            return HostCompletion::ok(scalar(1));
         }
-        state_->objects.erase(id);
-        return HostCompletion::ok();
+        auto taken = state_->objects.take(id);
+        if (!taken) return fail(host_error::not_found);
+        auto closing = std::make_shared<std::unique_ptr<Connection>>(
+            std::move(std::get<std::unique_ptr<Connection>>(*taken)));
+        auto state = state_;
+        auto words = std::make_shared<std::string>(reason);
+        const auto endpoint = (*closing)->endpoint;
+        auto operation = std::make_shared<Operation>();
+        operation->engine = [closing]() -> SSL* { return *closing ? (*closing)->ssl->ssl : nullptr; };
+        operation->interest = [state, closing]() -> PosixWait::Interest {
+            return *closing ? state->interest(**closing) : PosixWait::Interest{};
+        };
+        operation->progress = [closing]() {
+            return !*closing || reports((*closing)->ssl->ssl, SSL_POLL_EVENT_ECD);
+        };
+        operation->settle = [closing](std::uint32_t) {
+            closing->reset();
+            return HostCompletion::ok(scalar(0)); // The timeout passed first: released without termination.
+        };
+        operation->retry = [closing, words, code]() -> std::optional<HostCompletion> {
+            if (!*closing) return HostCompletion::ok(scalar(0));
+            auto* ssl = (*closing)->ssl->ssl;
+            SSL_SHUTDOWN_EX_ARGS close_args{static_cast<std::uint64_t>(code), words->c_str()};
+            static_cast<void>(SSL_handle_events(ssl));
+            if (SSL_shutdown_ex(ssl, SSL_SHUTDOWN_FLAG_NO_BLOCK, &close_args, sizeof close_args) != 1) {
+                return std::nullopt;
+            }
+            closing->reset();
+            return HostCompletion::ok(scalar(1));
+        };
+        (void)endpoint;
+        const auto bound = timeout > 0 ? timeout : 2 * 1'000'000'000LL;
+        if (blocking) return run_blocking(operation, bound);
+        if (auto done = operation->retry()) return *done;
+        return pending_of(operation, request.now, bound);
     }
 
 private:
@@ -911,7 +955,7 @@ void add_quic_services(const QuicAdder& add, const QuicOverlapAdder& overlap, St
                                           read_result);
     const auto write_signature = signature("neura.net.quic.stream_write",
                                            {int64(), int64(), byte_list(), boolean(), int64()}, write_result);
-    const auto close_signature = signature("neura.net.quic.close", {int64(), int64(), text()}, void_type());
+    const auto close_signature = signature("neura.net.quic.close", {int64(), int64(), text(), int64()}, boolean());
 #if defined(NEURA_NVM_TLS) && !defined(OPENSSL_NO_QUIC)
     auto state = tables.quic->state;
     auto services = std::make_shared<Services>(capabilities, prefixes, state);
@@ -919,7 +963,6 @@ void add_quic_services(const QuicAdder& add, const QuicOverlapAdder& overlap, St
     add(listen_signature, [services](const HostRequest& request) { return services->listen(request); }, background);
     add(open_signature, [services](const HostRequest& request) { return services->open_stream(request); },
         background);
-    add(close_signature, [services](const HostRequest& request) { return services->close(request); }, background);
     const auto waiting = [&](HostSignature service,
                              std::variant<HostCompletion, PendingOperation> (Services::*start)(const HostRequest&,
                                                                                                 bool)) {
@@ -935,6 +978,7 @@ void add_quic_services(const QuicAdder& add, const QuicOverlapAdder& overlap, St
     waiting(accept_stream_signature, &Services::accept_stream);
     waiting(read_signature, &Services::stream_read);
     waiting(write_signature, &Services::stream_write);
+    waiting(close_signature, &Services::close);
 #else
     const auto unsupported = [granted](const HostRequest&) {
         return granted->net ? fail(host_error::unsupported) : denied();
@@ -943,9 +987,8 @@ void add_quic_services(const QuicAdder& add, const QuicOverlapAdder& overlap, St
         -> std::variant<HostCompletion, PendingOperation> { return unsupported(request); };
     add(listen_signature, unsupported, nullptr);
     add(open_signature, unsupported, nullptr);
-    add(close_signature, unsupported, nullptr);
     for (auto service : {accept_signature, connect_signature, accept_stream_signature, read_signature,
-                         write_signature}) {
+                         write_signature, close_signature}) {
         overlap(std::move(service), unsupported, begin_unsupported, nullptr);
     }
 #endif
