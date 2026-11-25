@@ -341,10 +341,33 @@ int main(int argc, char** argv) {
             const auto quiet_handshake = f.wakeups(300);
             std::cout << "  (accept with a stalled client handshake: " << quiet_handshake << " wakeups in 300 ms)\n";
             assert(quiet_handshake < 40 && !f.done.contains(stalled_accept));
+
+            // A good client meanwhile is accepted although the stalled one is
+            // still in its handshake (RULINGS-06, bug 2).
+            const auto good = f.start("connect", {text("127.0.0.1"), int32_value(second_port), number(10 * seconds),
+                                                   text("localhost"), texts({"spike"}), text(cert)});
+            const auto good_client = first_int(f.take(good));
+            const auto good_server = first_int(f.take(stalled_accept));
+            const auto good_stream = f.now("open_stream", {number(good_client), scalar(1)});
+            assert(good_stream.success);
+            assert(f.take(f.start("stream_write", {number(good_client), number(as_int64(good_stream.value)), text("g"),
+                                                   scalar(0), number(10 * seconds)})).success);
+            const auto arrived = f.take(f.start("accept_stream", {number(good_server), number(10 * seconds)}));
+            assert(arrived.success && as_int64(arrived.value.elements.at(0)) == as_int64(good_stream.value));
+            std::cout << "PASS a good client is accepted while a stalled client is still in its handshake\n";
+
+            // Closing the endpoint while one of its connections is closing and
+            // an accept is pending (RULINGS-06, bug 1): the closing connection
+            // keeps the shared socket until it ends, the accept is refused.
+            const auto closing = f.start("close", {number(good_server), number(3), text("bye"), number(2 * seconds)});
+            const auto waiting = f.start("accept", {number(second_endpoint), number(10 * seconds)});
+            assert(f.now("close", {number(second_endpoint), number(0), text(""), number(2 * seconds)}).success);
+            expect_code(f.take(waiting), host_error::not_found, "accept pending when its endpoint closed");
+            const auto ended = f.take(closing);
+            assert(ended.success);
+            assert(f.now("close", {number(good_client), number(0), text(""), number(2 * seconds)}).success);
+            std::cout << "PASS closing an endpoint under a closing connection and a pending accept\n";
         }
-        f.pending.cancel(stalled_accept);
-        expect_code(f.take(stalled_accept), host_error::cancelled, "cancelled accept");
-        assert(f.now("close", {number(second_endpoint), number(0), text(""), number(2 * seconds)}).success);
     }
     fs::remove_all(dir);
     return 0;

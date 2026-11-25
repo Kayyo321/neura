@@ -87,22 +87,44 @@ struct Stream {
     bool writing = false;
 };
 
-struct Endpoint {
+// An endpoint's UDP socket, listener and context. The endpoint and every
+// connection it produced share it, so the socket is closed only when the last
+// of them is gone: closing an endpoint can never leave a connection that is
+// still closing or handshaking on a descriptor number another socket reuses.
+struct Port {
     platform::native_socket socket = platform::invalid_socket;
     SSL_CTX* context = nullptr;
     std::unique_ptr<Ssl> listener;
     std::string alpn_wire;
-    bool accepting = false;
-    ~Endpoint() {
+    Port() = default;
+    Port(const Port&) = delete;
+    Port& operator=(const Port&) = delete;
+    ~Port() {
         listener.reset();
         if (context) SSL_CTX_free(context);
         if (socket != platform::invalid_socket) BIO_closesocket(static_cast<int>(socket));
     }
 };
 
+struct Connection;
+
+// Connections still in their handshake are held at most this many at a time;
+// further ones wait in OpenSSL's own queue.
+constexpr std::size_t max_handshaking = 64;
+
+struct Endpoint {
+    std::shared_ptr<Port> port;
+    // Connections taken from the listener whose handshake has not finished.
+    // An accept completes with whichever finishes first, so one stalled
+    // client never holds up the others.
+    std::vector<std::unique_ptr<Connection>> handshaking;
+    bool accepting = false;
+};
+
 struct Connection {
-    // A client connection owns its context and UDP socket; a server one
-    // shares the endpoint's.
+    // A server connection keeps its endpoint's port alive (declared first, so
+    // released last); a client connection owns its context and UDP socket.
+    std::shared_ptr<Port> port;
     SSL_CTX* context = nullptr;
     platform::native_socket socket = platform::invalid_socket;
     std::int64_t endpoint = 0;
@@ -252,21 +274,30 @@ struct QuicState final : BackgroundWork {
     void run() override {
         objects.each([](auto& object) {
             if (auto* ssl = handle(object)) static_cast<void>(SSL_handle_events(ssl));
+            handshakes(object);
         });
     }
 
-    static SSL* handle(Endpoint& endpoint) { return endpoint.listener ? endpoint.listener->ssl : nullptr; }
+    static void handshakes(Connection&) {}
+    static void handshakes(Endpoint& endpoint) {
+        for (auto& connection : endpoint.handshaking) static_cast<void>(SSL_handle_events(connection->ssl->ssl));
+    }
+
+    static SSL* handle(Endpoint& endpoint) {
+        return endpoint.port && endpoint.port->listener ? endpoint.port->listener->ssl : nullptr;
+    }
     static SSL* handle(Connection& connection) { return connection.ssl ? connection.ssl->ssl : nullptr; }
 
-    PosixWait::Interest interest(Endpoint& endpoint) { return interest_of(handle(endpoint), endpoint.socket); }
+    PosixWait::Interest interest(Endpoint& endpoint) {
+        return interest_of(handle(endpoint), endpoint.port ? endpoint.port->socket : platform::invalid_socket);
+    }
     PosixWait::Interest interest(Connection& connection) {
         return interest_of(handle(connection), socket_of(connection));
     }
 
-    platform::native_socket socket_of(Connection& connection) {
+    static platform::native_socket socket_of(Connection& connection) {
         if (connection.socket != platform::invalid_socket) return connection.socket;
-        auto* endpoint = objects.find<Endpoint>(connection.endpoint);
-        return endpoint ? endpoint->socket : platform::invalid_socket;
+        return connection.port ? connection.port->socket : platform::invalid_socket;
     }
 };
 
@@ -312,7 +343,7 @@ std::string selected_alpn(SSL* ssl) {
 
 int select_alpn(SSL*, const unsigned char** out, unsigned char* out_length, const unsigned char* offered,
                 unsigned int offered_length, void* argument) {
-    const auto& wire = static_cast<Endpoint*>(argument)->alpn_wire;
+    const auto& wire = static_cast<Port*>(argument)->alpn_wire;
     unsigned char* chosen = nullptr;
     if (SSL_select_next_proto(&chosen, out_length, reinterpret_cast<const unsigned char*>(wire.data()),
                               static_cast<unsigned int>(wire.size()), offered, offered_length) !=
@@ -446,8 +477,10 @@ public:
         auto certificate = args.at(2).bytes;
         auto key = args.at(3).bytes;
         auto endpoint = std::make_unique<Endpoint>();
-        endpoint->alpn_wire = alpn_wire(args.at(4));
-        if (port < 0 || port > 65535 || !usable_text(host) || endpoint->alpn_wire.empty()) {
+        endpoint->port = std::make_shared<Port>();
+        auto& shared = *endpoint->port;
+        shared.alpn_wire = alpn_wire(args.at(4));
+        if (port < 0 || port > 65535 || !usable_text(host) || shared.alpn_wire.empty()) {
             return fail(host_error::invalid_input);
         }
         if (const auto error = tls_material::read(*granted_, *prefixes_, certificate)) return fail(error);
@@ -459,22 +492,22 @@ public:
 #endif
         const int descriptor = BIO_socket(BIO_ADDR_family(address.get()), SOCK_DGRAM, IPPROTO_UDP, BIO_SOCK_NONBLOCK);
         if (descriptor < 0) return fail(socket_error());
-        endpoint->socket = static_cast<platform::native_socket>(descriptor);
-        platform::set_no_inherit(endpoint->socket);
+        shared.socket = static_cast<platform::native_socket>(descriptor);
+        platform::set_no_inherit(shared.socket);
         if (BIO_bind(descriptor, address.get(), BIO_SOCK_REUSEADDR) != 1) return fail(socket_error());
-        endpoint->context = SSL_CTX_new(OSSL_QUIC_server_method());
-        if (!endpoint->context || !tls_material::identity(endpoint->context, certificate, key)) {
+        shared.context = SSL_CTX_new(OSSL_QUIC_server_method());
+        if (!shared.context || !tls_material::identity(shared.context, certificate, key)) {
             return fail(host_error::invalid_input);
         }
-        SSL_CTX_set_alpn_select_cb(endpoint->context, select_alpn, endpoint.get());
-        endpoint->listener = std::make_unique<Ssl>(SSL_new_listener(endpoint->context, 0));
-        BIO* datagram = endpoint->listener->ssl ? BIO_new_dgram(descriptor, BIO_NOCLOSE) : nullptr;
+        SSL_CTX_set_alpn_select_cb(shared.context, select_alpn, &shared);
+        shared.listener = std::make_unique<Ssl>(SSL_new_listener(shared.context, 0));
+        BIO* datagram = shared.listener->ssl ? BIO_new_dgram(descriptor, BIO_NOCLOSE) : nullptr;
         if (!datagram) return fail(host_error::other);
-        SSL_set_bio(endpoint->listener->ssl, datagram, datagram);
-        if (SSL_set_blocking_mode(endpoint->listener->ssl, 0) != 1 || SSL_listen(endpoint->listener->ssl) != 1) {
+        SSL_set_bio(shared.listener->ssl, datagram, datagram);
+        if (SSL_set_blocking_mode(shared.listener->ssl, 0) != 1 || SSL_listen(shared.listener->ssl) != 1) {
             return fail(host_error::other);
         }
-        const auto bound = local_port(endpoint->socket);
+        const auto bound = local_port(shared.socket);
         if (bound < 0) return fail(socket_error());
         const auto id = state_->objects.insert(std::move(endpoint));
         if (!id) return fail(host_error::other);
@@ -491,7 +524,6 @@ public:
         if (endpoint->accepting) return fail(host_error::busy);
         endpoint->accepting = true;
         auto state = state_;
-        auto accepted = std::make_shared<std::unique_ptr<Connection>>();
         auto operation = std::make_shared<Operation>();
         const auto release = [state, id] {
             if (auto* live = state->objects.find<Endpoint>(id)) live->accepting = false;
@@ -508,49 +540,58 @@ public:
             release();
             return fail(code);
         };
-        operation->progress = [state, id, accepted]() {
+        // Ready when a new connection is queued, or a handshaking one finished
+        // or failed, which the listener's event processing may have done.
+        operation->progress = [state, id]() {
             auto* live = state->objects.find<Endpoint>(id);
             if (!live) return true;
-            // A connection taken from the listener and still in its handshake:
-            // ready once the handshake finished or the connection failed, which
-            // the listener's event processing may have brought about.
-            if (*accepted) {
-                auto* ssl = (*accepted)->ssl->ssl;
-                return SSL_is_init_finished(ssl) == 1 || reports(ssl, SSL_POLL_EVENT_EC);
+            for (const auto& connection : live->handshaking) {
+                auto* ssl = connection->ssl->ssl;
+                if (SSL_is_init_finished(ssl) == 1 || reports(ssl, SSL_POLL_EVENT_EC)) return true;
             }
-            return reports(QuicState::handle(*live), SSL_POLL_EVENT_IC | SSL_POLL_EVENT_EL);
+            return live->handshaking.size() < max_handshaking &&
+                   reports(QuicState::handle(*live), SSL_POLL_EVENT_IC | SSL_POLL_EVENT_EL);
         };
-        operation->retry = [state, id, accepted, release]() -> std::optional<HostCompletion> {
+        operation->retry = [state, id, release]() -> std::optional<HostCompletion> {
             auto* live = state->objects.find<Endpoint>(id);
-            if (!live) {
-                return fail(host_error::not_found);
-            }
+            if (!live) return fail(host_error::not_found);
             auto* listener = QuicState::handle(*live);
             static_cast<void>(SSL_handle_events(listener));
-            if (!*accepted) {
+            while (live->handshaking.size() < max_handshaking) {
                 SSL* incoming = SSL_accept_connection(listener, SSL_ACCEPT_CONNECTION_NO_BLOCK);
-                if (!incoming) return std::nullopt;
-                *accepted = std::make_unique<Connection>();
-                (*accepted)->ssl = std::make_unique<Ssl>(incoming);
-                (*accepted)->endpoint = id;
+                if (!incoming) break;
+                auto connection = std::make_unique<Connection>();
+                connection->port = live->port;
+                connection->ssl = std::make_unique<Ssl>(incoming);
+                connection->endpoint = id;
                 static_cast<void>(SSL_set_blocking_mode(incoming, 0));
                 static_cast<void>(SSL_set_default_stream_mode(incoming, SSL_DEFAULT_STREAM_MODE_NONE));
+                live->handshaking.push_back(std::move(connection));
             }
-            auto* ssl = (*accepted)->ssl->ssl;
-            ERR_clear_error();
-            const int done = SSL_accept(ssl);
-            if (done != 1) {
+            // The first connection, in arrival order, whose handshake finished.
+            // A failed one is dropped; the endpoint keeps listening.
+            for (auto at = live->handshaking.begin(); at != live->handshaking.end();) {
+                auto* ssl = (*at)->ssl->ssl;
+                ERR_clear_error();
+                const int done = SSL_accept(ssl);
+                if (done == 1) {
+                    auto connection = std::move(*at);
+                    live->handshaking.erase(at);
+                    connection->alpn = selected_alpn(connection->ssl->ssl);
+                    const auto alpn = connection->alpn;
+                    const auto inserted = state->objects.insert(std::move(connection));
+                    release();
+                    if (!inserted) return fail(host_error::other);
+                    return HostCompletion::ok(tuple_value({int64_value(*inserted), bytes_value(alpn)}));
+                }
                 const int reason = SSL_get_error(ssl, done);
-                if (reason == SSL_ERROR_WANT_READ || reason == SSL_ERROR_WANT_WRITE) return std::nullopt;
-                accepted->reset(); // A failed handshake is dropped; the endpoint keeps listening.
-                return std::nullopt;
+                if (reason == SSL_ERROR_WANT_READ || reason == SSL_ERROR_WANT_WRITE) {
+                    ++at;
+                } else {
+                    at = live->handshaking.erase(at);
+                }
             }
-            (*accepted)->alpn = selected_alpn(ssl);
-            const auto alpn = (*accepted)->alpn;
-            const auto connection = state->objects.insert(std::move(*accepted));
-            release();
-            if (!connection) return fail(host_error::other);
-            return HostCompletion::ok(tuple_value({int64_value(*connection), bytes_value(alpn)}));
+            return std::nullopt;
         };
         if (blocking) return run_blocking(operation, timeout);
         if (auto done = operation->retry()) return *done;
