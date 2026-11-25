@@ -3,8 +3,9 @@ let.promote _ = import:Std.Core.Result;
 let kernels = import:Std.Internal.Kernels.Digest;
 
 /// @brief DEFLATE compression and decompression (RFC 1951), raw and inside the zlib (RFC 1950) and gzip
-/// (RFC 1952) formats. Internal: only library source may import it. Std.Net.Realtime.Ws.PermessageDeflate,
-/// Std.Net.Rpc.Framing and Std.Crypto.Token.Jwe build on it (Stdlib.md section 13).
+/// (RFC 1952) formats. Internal: only library source may import it. It is meant for
+/// Std.Net.Realtime.Ws.PermessageDeflate, Std.Net.Rpc.Framing and Std.Crypto.Token.Jwe, which do not use it yet
+/// (Stdlib.md section 13.1).
 ///
 /// Decompression accepts every valid stream: stored, fixed-Huffman and dynamic-Huffman blocks. It follows the
 /// checks of zlib's reference decoder puff.c: a dynamic block's code-length code must be complete, its

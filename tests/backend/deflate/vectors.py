@@ -82,8 +82,9 @@ def corpus():
                 mixed.append(mixed[-distance])
         else:
             mixed.extend(rng.randbytes(rng.randrange(1, 200)))
-    # Byte frequencies in a Fibonacci sequence give Huffman codes deeper than 15 bits, so the compressor must
-    # shorten them (zlib's gen_bitlen overflow step).
+    # Byte frequencies in a Fibonacci sequence: a heavily skewed literal distribution. The compressor's
+    # matches change each block's frequencies, so this does not reach the 15-bit code limit; the code-lengths
+    # cases below test the limit directly.
     weights, a, b = [], 1, 1
     for _ in range(22):
         weights.append(a)
@@ -116,21 +117,25 @@ class Run:
         self.work = work
         self.lines = []
         self.checks = []
+        # The block type of the first block of each raw stream the module compressed.
+        self.block_types = set()
 
     def add(self, operation, data, arguments, check, name):
         index = len(self.lines)
-        source = self.work / f"{index:04d}.in"
+        # Names relative to the work directory keep the manifest, and so the step count, independent of where
+        # the build tree is.
+        source = f"{index:04d}.in"
         target = self.work / f"{index:04d}.out"
-        source.write_bytes(data)
-        self.lines.append(" ".join([operation, str(source), str(target), *map(str, arguments)]))
+        (self.work / source).write_bytes(data)
+        self.lines.append(" ".join([operation, source, target.name, *map(str, arguments)]))
         self.checks.append((name, target, check))
 
     def execute(self, neura, image):
         manifest = self.work / "manifest.txt"
         manifest.write_text("\n".join(self.lines) + "\n")
-        result = subprocess.run([str(neura), "run", "--max-steps", str(MaxSteps), "--stats", str(image), "--",
-                                 str(manifest)],
-                                capture_output=True, text=True, timeout=3600)
+        result = subprocess.run([str(pathlib.Path(neura).resolve()), "run", "--max-steps", str(MaxSteps), "--stats",
+                                 str(pathlib.Path(image).resolve()), "--", manifest.name],
+                                capture_output=True, text=True, timeout=3600, cwd=self.work)
         print(result.stderr.strip())
         if result.returncode != 0 or result.stdout.strip() != f"ran {len(self.lines)}":
             sys.exit(f"harness failed ({result.returncode}): {result.stdout}{result.stderr}")
@@ -143,7 +148,11 @@ class Run:
             if problem:
                 failures += 1
                 print(f"FAIL {name}: {problem}")
-        print(f"{len(self.checks) - failures} of {len(self.checks)} DEFLATE checks passed")
+        if self.block_types != {0, 1, 2}:
+            failures += 1
+            print(f"FAIL block types: the compressor's first blocks used only types {sorted(self.block_types)}")
+        print(f"{len(self.checks) - failures} of {len(self.checks)} DEFLATE checks passed; "
+              f"first-block types seen: {sorted(self.block_types)}")
         return failures
 
 
@@ -237,8 +246,12 @@ def add_module_to_python(run, data):
     def gzip_header(output):
         return None if output[:10] == bytes.fromhex("1f8b08000000000000ff") else f"gzip header {output[:10].hex()}"
 
+    def block_type(output):
+        run.block_types.add((output[0] >> 1) & 3)
+        return None
+
     for name, value in data.items():
-        run.add("deflate-raw", value, [], expect_python(lambda o: zlib.decompress(o, -15), value),
+        run.add("deflate-raw", value, [], expect_python(lambda o: zlib.decompress(o, -15), value, block_type),
                 f"module raw {name}")
         run.add("deflate-zlib", value, [], expect_python(zlib.decompress, value, zlib_header), f"module zlib {name}")
         run.add("deflate-gzip", value, [], expect_python(gzip.decompress, value, gzip_header), f"module gzip {name}")
