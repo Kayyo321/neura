@@ -415,7 +415,7 @@ def diagnostics(args, seeds):
             require(trace, f"{case.name}, seed {seed}: no forced sparse and full frame captures")
             print(f"{case.name}, seed {seed}: {len(trace)} matched sparse and full frame captures")
             modes = (
-                ("tier-stats", STANDARD, ("--tier-stats",), {}),
+                ("tier-stats", SPARSE_FRAMES, ("--tier-stats",), {}),
                 ("tier-stats-parallel", STANDARD, ("--tier-stats", "--parallel-workers", "2"), {}),
                 ("profile", PROFILE, ("--profile",), {}),
                 ("native-shadow", STANDARD, (), {"NEURA_TIER_CHECK": "2", "NEURA_TIER_CHECK_HEAP": "1"}),
@@ -428,8 +428,11 @@ def diagnostics(args, seeds):
                 if name in {"tier-stats", "tier-stats-parallel"}:
                     timed = re.search(rb"^tier: time: ", outcome[2], re.M) is not None
                     require(timed == (name == "tier-stats"), f"{name}: unexpected tier clock state")
+                if name == "tier-stats":
+                    require(events == trace, f"{name}, seed {seed}: differs from ordinary sparse frame recovery")
                 if events:
-                    print(f"{name}, seed {seed}: {len(events)} captures with full frames")
+                    frames = "sparse" if variant == SPARSE_FRAMES else "full"
+                    print(f"{name}, seed {seed}: {len(events)} captures with {frames} frames")
                     continue
                 # The region checker can execute Tier 3 IR without native
                 # probes. Require program execution or a check-specific
