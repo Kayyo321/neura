@@ -294,7 +294,7 @@ let p: Pointer<int64> = new(storage);
 
 A `Pointer<T>` references a managed storage cell.
 
-**0.3.1 decision.** Creating the first pointer to a live `Cell<T>` acquires a separate, private handle to its storage. The cell and pointer see the same values until the cell is destroyed. `destroy cell` invalidates every cell alias and runs its normal cleanup. The pointer and its clones retain the storage until their last holder becomes unreachable. A cell that never acquires a pointer uses its original representation and allocation costs.
+**0.3.1 decision.** Each pointer created from a live `Cell<T>` acquires its own private handle to the cell's storage. Clones and read-only views share the handle of the pointer they come from. The cell and pointer see the same values until the cell is destroyed. `destroy cell` invalidates every cell alias and runs its normal cleanup. The pointer and its clones retain the storage until their last holder becomes unreachable. A cell that never acquires a pointer uses its original representation and allocation costs.
 
 ### API
 

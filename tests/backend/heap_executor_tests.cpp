@@ -187,13 +187,21 @@ NEURA_TEST(heap, retained_cell_storage_executes_in_every_tier_and_round_trips) {
             nvm::RunLimits limits;
             limits.tier = tier;
             limits.jit = mode;
-            // The empty arguments array, the original Cell and one retained
-            // handle. Repeated retention must need neither handles nor cells.
-            limits.max_handles = 3;
+            // The empty arguments array, the original Cell and two retained
+            // handles: each retain of the Cell takes a fresh handle, and
+            // retaining a retained handle takes none. No retain adds cells.
+            limits.max_handles = 4;
             const auto run = finish(image, limits);
             check(run.event.kind == nvm::Event::Kind::Completed, describe(run, image));
             check_equal(run.event.status, 42, "the retained handle still reads the original storage");
             check_equal(run.peak, std::uint64_t{3}, "retention did not allocate another object");
+            // One handle fewer: the second retain of the Cell reaches the
+            // limit, whether or not an earlier storage handle was collected.
+            limits.max_handles = 3;
+            const auto limited = finish(image, limits);
+            check(limited.event.kind == nvm::Event::Kind::Trapped &&
+                      limited.event.trap.kind == nvm::TrapKind::HandleLimit,
+                  "the second retain of the Cell needs a handle of its own");
         }
     }
     auto older = bytes;

@@ -556,13 +556,15 @@ public:
 
     // A storage handle keeps the allocation alive independently of the
     // original handle. This is used only for Cell pointer storage, never for
-    // region entries. Both handles resolve to the same physical data while
-    // live, so existing checked field operations preserve direct aliases.
-    std::uint64_t retained_storage(std::uint64_t handle) const {
-        if (const auto alias = storage_aliases_.find(handle); alias != storage_aliases_.end())
-            return alias->second.storage ? handle : alias->second.peer;
-        return 0;
-    }
+    // region entries. Every handle of one allocation resolves to the same
+    // physical data while live, so existing checked field operations
+    // preserve direct aliases.
+    //
+    // Retaining an original handle always reserves a fresh storage handle,
+    // and retaining a storage handle returns it. Handle consumption is then
+    // a function of the program's retains alone, never of whether a
+    // collection has swept an earlier storage handle.
+    std::uint64_t retained_storage(std::uint64_t handle) const { return is_storage_handle(handle) ? handle : 0; }
 
     bool is_storage_handle(std::uint64_t handle) const {
         const auto alias = storage_aliases_.find(handle);
@@ -570,22 +572,46 @@ public:
     }
 
     std::uint64_t retain_storage(std::uint64_t handle, Ref ref) {
-        if (const auto storage = retained_storage(handle)) return storage;
+        if (is_storage_handle(handle)) return handle;
         reserve_handle();
         const auto storage = last_handle() + 1;
-        storage_aliases_.emplace(handle, StorageAlias{storage, false, false});
+        const auto known = storage_aliases_.find(handle);
+        const auto group = known != storage_aliases_.end() ? known->second.group : handle;
+        auto& members = storage_groups_[group];
+        const auto rollback = [&] {
+            std::erase(members, storage);
+            if (known == storage_aliases_.end()) {
+                std::erase(members, handle);
+                storage_aliases_.erase(handle);
+            }
+            storage_aliases_.erase(storage);
+            if (members.empty()) storage_groups_.erase(group);
+        };
         try {
-            storage_aliases_.emplace(storage, StorageAlias{handle, true, false});
+            if (known == storage_aliases_.end()) {
+                storage_aliases_.emplace(handle, StorageAlias{group, false, false});
+                members.push_back(handle);
+            }
+            storage_aliases_.emplace(storage, StorageAlias{group, true, false});
+            members.push_back(storage);
         } catch (...) {
-            storage_aliases_.erase(handle);
+            rollback();
             throw;
         }
         return store_new(ref.entry_);
     }
 
     std::uint64_t cells_released_by(std::uint64_t handle, Ref ref) const {
+        return shared_handle(handle) ? 0 : cells(ref);
+    }
+
+    // The handles of one retained allocation, original first, then each
+    // storage handle in the order retained; each is live. For checks and
+    // tests.
+    std::vector<std::uint64_t> storage_group(std::uint64_t handle) const {
         const auto alias = storage_aliases_.find(handle);
-        return (alias == storage_aliases_.end() || alias->second.peer == 0) ? cells(ref) : 0;
+        if (alias == storage_aliases_.end()) return {};
+        return storage_groups_.at(alias->second.group);
     }
 
     // Frees a live handle. The executor has subtracted cells_released_by()
@@ -615,9 +641,7 @@ public:
     // Handles sharing an entry have distinct roots. The ordinary mark bit
     // is sufficient for all storage that has only one live handle.
     bool mark(std::uint64_t handle, Ref ref) {
-        if (const auto alias = storage_aliases_.find(handle);
-            alias != storage_aliases_.end() && alias->second.peer != 0)
-            return !std::exchange(alias->second.marked, true);
+        if (shared_handle(handle)) return !std::exchange(storage_aliases_.at(handle).marked, true);
         return mark(ref);
     }
 
@@ -1437,12 +1461,16 @@ private:
     }
 
     bool clear_mark(std::uint64_t handle, Entry* item) {
-        if (const auto alias = storage_aliases_.find(handle);
-            alias != storage_aliases_.end() && alias->second.peer != 0)
-            return std::exchange(alias->second.marked, false);
+        if (shared_handle(handle)) return std::exchange(storage_aliases_.at(handle).marked, false);
         const bool marked = (item->flags & marked_flag) != 0;
         item->flags &= static_cast<std::uint8_t>(~marked_flag);
         return marked;
+    }
+
+    // Whether `handle` shares its entry with another live handle.
+    bool shared_handle(std::uint64_t handle) const {
+        const auto alias = storage_aliases_.find(handle);
+        return alias != storage_aliases_.end() && storage_groups_.at(alias->second.group).size() > 1;
     }
 
     void drop_handle(std::uint64_t handle, Entry* item) {
@@ -1451,15 +1479,26 @@ private:
             release(item);
             return;
         }
-        const auto survivor = storage_aliases_.find(alias->second.peer);
+        const auto group = storage_groups_.find(alias->second.group);
         storage_aliases_.erase(alias);
-        if (survivor == storage_aliases_.end()) {
+        std::erase(group->second, handle);
+        if (group->second.empty()) {
+            storage_groups_.erase(group);
             release(item);
             return;
         }
-        if (survivor->second.marked) item->flags |= marked_flag;
-        if (survivor->second.storage) survivor->second.peer = 0;
-        else storage_aliases_.erase(survivor);
+        if (group->second.size() > 1) return;
+        // One handle is left: it goes back to the entry's own mark bit. A
+        // sweep runs in handle order, so a survivor it has not reached yet
+        // carries its mark into the header.
+        const auto survivor = group->second.front();
+        auto& kept = storage_aliases_.at(survivor);
+        if (std::exchange(kept.marked, false)) item->flags |= marked_flag;
+        if (!kept.storage) {
+            // An original handle alone is an ordinary handle again.
+            storage_aliases_.erase(survivor);
+            storage_groups_.erase(group);
+        }
     }
 
     void release_all() {
@@ -1489,12 +1528,17 @@ private:
     static_assert(std::is_standard_layout_v<Page>);
 
     struct StorageAlias {
-        std::uint64_t peer;
+        // The original handle of the allocation, which names the group even
+        // after the original handle is dropped.
+        std::uint64_t group;
         bool storage;
         bool marked;
     };
-    // Empty in programs that have never created a pointer.
+    // Both are empty in programs that have never created a pointer. A group
+    // lists the live handles of one retained allocation, original first,
+    // then its storage handles in the order retained.
     std::map<std::uint64_t, StorageAlias> storage_aliases_;
+    std::map<std::uint64_t, std::vector<std::uint64_t>> storage_groups_;
 
     Blocks blocks_;
     // Owns the pages it points to (null: a page that does not exist).

@@ -397,6 +397,42 @@ let Proofs = module (
         self.assertEqual(built.returncode, 0, built.stderr)
         self.assertEqual(artifact_image.read_bytes(), self.image.read_bytes())
 
+    def test_handle_consumption_ignores_collection(self):
+        # Each retain of a Cell takes its own storage handle, so a collection
+        # that sweeps an earlier pointer's storage cannot change the handle a
+        # later allocation gets (the trap detail names it).
+        self.build(program('''
+        let storage = cell.of<int64>(1);
+        let first = touch(storage);
+        let total = churn(10);
+        let second = touch(storage);
+        let victim = cell.of<int64>(5);
+        destroy victim;
+        if (first + second + total < 0) {
+            return program.ExitCode.Failure;
+        }
+        let unreachable = victim.value;
+''', '''
+let touch = func(storage: cell.Cell<int64>) -> int64 {
+    let view: Pointer<int64> = new(storage);
+    return view.read();
+};
+
+let churn = func(rounds: int) -> int64 {
+    let total: int64 = 0;
+    for (let i: int = 0; i < rounds; i++) {
+        let junk = cell.of<int64>(i as int64);
+        total += junk.value;
+    }
+    return total;
+};
+'''))
+        details = set()
+        for limit in ("40", "60", "100000"):
+            for result in self.run_modes(139, "", "invalid reference handle", limits=("--max-heap-cells", limit)).values():
+                details.add(re.search(r"handle \d+", result.stderr).group(0))
+        self.assertEqual(len(details), 1, details)
+
     def test_static_rejections(self):
         cases = [
             ("E0451", "unknown allocation site", '''
