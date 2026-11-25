@@ -1,0 +1,10 @@
+error[E0602]: a value of type [AtomicInt64, int32] is not transferable, so it cannot be given to a parallel item
+ --> $DIR/handle-nested-item.nra:9:13
+  |
+9 | ...  let _ = parallel.map<[atomics.AtomicInt64, int], int64>([[counter, 1]], bump, parallel.l...
+  |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ not transferable
+  |
+  = note: a value of type [AtomicInt64, int32] holds a value of type AtomicInt64
+  = note: tasks share a Std.Concurrent handle, but a parallel item runs in a heap of its own and receives copies, so a handle cannot enter one
+
+For more information about this error, try `neura explain E0602`.

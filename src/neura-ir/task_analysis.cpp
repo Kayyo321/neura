@@ -416,6 +416,44 @@ void TaskAnalysis::explain_class(Diagnostic& error, const IrType& type) const {
     }
 }
 
+// For a value that tasks may share but a parallel item may not: the part
+// that keeps it out, named when it is nested in a tuple, an enum payload or a
+// field, then the reason for that part.
+void TaskAnalysis::item_cause(Diagnostic& error, const IrType& type) const {
+    std::set<std::string> seen;
+    auto part = type;
+    for (;;) {
+        if (!seen.insert(display(part)).second) break;
+        std::optional<IrType> inner;
+        const auto blocking = [&](const IrType& candidate) {
+            if (inner || transferable_in(candidate, true)) return;
+            inner = candidate;
+        };
+        if (part.kind == TypeKind::Tuple) {
+            for (const auto& element : part.arguments) blocking(element);
+        } else if (part.kind == TypeKind::Enum && valid(part.symbol)) {
+            if (const auto found = variants_.find(part.symbol); found != variants_.end())
+                for (const auto variant : found->second)
+                    for (const auto& payload : symbol(variant).payload_types) blocking(payload);
+        } else if (part.kind == TypeKind::Object && valid(part.symbol) && !concurrent_handle(part.symbol) &&
+                   pointer_class(program_, part.symbol) == PointerKind::None &&
+                   !has_attribute(symbol(part.symbol), AttributeId::ClassShareable)) {
+            for (const auto field : all_fields(part.symbol)) {
+                if (transferable_in(symbol(field).type, true)) continue;
+                error.label(symbol(field).span, "'" + symbol(part.symbol).name + "' holds a value of type " +
+                                                    display(symbol(field).type) + " here");
+                inner = symbol(field).type;
+                break;
+            }
+        }
+        if (!inner) break;
+        if (part.kind != TypeKind::Object)
+            error.note("a value of type " + display(part) + " holds a value of type " + display(*inner));
+        part = *inner;
+    }
+    item_note(error, part);
+}
+
 // Why a value that tasks may share cannot enter a parallel item, which runs
 // in a heap of its own and receives copies.
 void TaskAnalysis::item_note(Diagnostic& error, const IrType& type) const {
@@ -770,7 +808,7 @@ void TaskAnalysis::check() const {
                                             role).with_code("E0602").label("not transferable");
                     capture_note(error, type);
                     explain_class(error, type);
-                    if (item && transferable(type)) item_note(error, type);
+                    if (item && transferable(type)) item_cause(error, type);
                     throw error;
                 };
                 if (node.text == "transfer.check" && node.operands.size() == 1) {
