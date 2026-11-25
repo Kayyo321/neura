@@ -293,6 +293,7 @@ set(neura_nvm_sources
     src/nvm/scalar_text.cpp
     src/nvm/socket_provider.cpp
     src/nvm/doq_provider.cpp
+    src/nvm/quic_provider.cpp
     src/nvm/tls_provider.cpp
     src/nvm/client_socket.cpp
     src/nvm/http_fetch_provider.cpp
@@ -2313,6 +2314,12 @@ if(BUILD_TESTING AND NEURA_SDK)
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/net-tls/dtls-loopback.py"
             --neura "$<TARGET_FILE:neura>" --openssl "${NEURA_SERVER_TEST_OPENSSL}")
         set_tests_properties(stdlib-net-dtls-loopback PROPERTIES TIMEOUT 180)
+        # The general QUIC provider through the driver (lane net-a A1-0).
+        add_executable(neura_quic_provider_tests tests/host-standalone/quic-provider.cpp)
+        target_link_libraries(neura_quic_provider_tests PRIVATE neura_nvm)
+        neura_target_defaults(neura_quic_provider_tests)
+        add_test(NAME host-quic-provider COMMAND neura_quic_provider_tests "${NEURA_SERVER_TEST_OPENSSL}")
+        set_tests_properties(host-quic-provider PROPERTIES TIMEOUT 60)
     endif()
     file(GLOB stdlib_areas LIST_DIRECTORIES true CONFIGURE_DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/*")

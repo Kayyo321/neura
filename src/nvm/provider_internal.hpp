@@ -43,6 +43,7 @@ struct UpcallDeleter {
 // A TLS stream (tls_provider.cpp); destroyed with TlsDeleter.
 struct TlsStream;
 struct TlsConnectJobs;
+struct QuicTables;
 struct TlsDeleter {
     void operator()(TlsStream* stream) const;
 };
@@ -97,6 +98,8 @@ struct StandardServices::Tables {
     };
     Native native;
     std::shared_ptr<provider::TlsConnectJobs> tls_connect_jobs;
+    // QUIC endpoints and connections of neura.net.quic.* (quic_provider.cpp).
+    std::shared_ptr<provider::QuicTables> quic;
 };
 
 namespace provider {
@@ -178,6 +181,14 @@ inline HostCompletion cancelled_answer() { return fail(host_error::cancelled); }
 
 void add_fs_services(const Adder& add, StandardServices::Tables& tables, const Capabilities& capabilities,
                      const std::vector<ResolvedPath>& prefixes);
+// The QUIC services (src/nvm/quic_provider.cpp). Each service shares the
+// provider's background work; every waiting one is cancellable at version 1.
+using QuicAdder = std::function<void(HostSignature, FunctionService::Handler, BackgroundWork*)>;
+using QuicOverlapAdder =
+    std::function<void(HostSignature, FunctionService::Handler, FunctionService::Begin, BackgroundWork*)>;
+void add_quic_services(const QuicAdder& add, const QuicOverlapAdder& overlap, StandardServices::Tables& tables,
+                       const Capabilities& capabilities, const std::vector<ResolvedPath>& prefixes);
+void close_quic(StandardServices::Tables& tables);
 void add_net_services(const Adder& add, const OverlapAdder& overlap, StandardServices::Tables& tables,
                       const Capabilities& capabilities);
 void add_ffi_services(const Adder& add, StandardServices::Tables& tables, const Capabilities& capabilities);
