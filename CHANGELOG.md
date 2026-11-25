@@ -62,6 +62,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ### Fixed
 
+- A program that uses `Sequence<T>` can call `Guarded.create<T>` for the same `T`. Sequence's own availability checks and element pulls captured lists and iterators with the type `func() -> T`, which made every initializer of that type untransferable (E0602). They now take a private argument, so their type differs.
 - Each `Pointer<T>` created from a live `Cell<T>` takes its own storage handle. Before, a pointer reused an earlier pointer's storage handle only if no collection had reclaimed it, so the handle numbers in later trap details and the point at which the handle limit was reached could depend on when the collector ran. [NVR 1.11](docs/runtime/NVR.md#managed-pointer-storage-111)
 - `NEURA_TIER_CHECK=2` compares which heap handles share an entry as pointer storage, and the runtime's heap consistency check verifies those groups.
 - Specialization preserves constructor overloads declared with `or` in generic classes.

@@ -1,0 +1,19 @@
+// Sequence's own producers do not share a function type with a guard's
+// initializer, so a program may use Sequence<Box> and Guarded.create<Box>
+// together: Sequence's closures capture lists and iterators, which would
+// otherwise make every func() -> Box closure untransferable.
+let guards = import:Std.Concurrent.Guarded;
+let sequences = import:Std.Collections.Sequence;
+
+let Box = class (
+    export let n: int = 0;
+);
+
+let run = func() -> int {
+    let items: Box[list] = new([new Box(), new Box()]);
+    let taken = sequences.from_list<Box>(items).take(1);
+    let made = sequences.generate<Box>(func() -> Box => new Box()).take(2);
+    let stepped = sequences.iterate<Box>(new Box(), func(previous: Box) -> Box => new Box()).take(2);
+    let guard = guards.create<Box>(func -> Box => new Box());
+    return guard.with<int>(func(state: Box) -> int => state.n);
+};
