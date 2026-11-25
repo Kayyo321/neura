@@ -134,4 +134,16 @@ if(NOT service_status STREQUAL "0" OR
     message(FATAL_ERROR "service fixture: status ${service_status}\n${service_stdout}\n${service_stderr}")
 endif()
 
-message(STATUS "concurrency schedules: exploration, reproduction, virtual time, and the service fixture passed")
+# Guarded state and atomics used as section 5.4 allows hold under every
+# schedule explored. The build is not optimized, so every field read happens
+# where it is written: eliminate-common-subexpressions may reuse a read across
+# a poll, which the memory model allows (docs/IrOptimization.md, "Tasks,
+# polls, and scheduler operations"), and that would hide a change that an
+# escaped reference made.
+neura(guarded test --no-optimize --schedules 50 --task-quantum 1 "${sources}/guarded-tests.nra")
+if(NOT guarded_status STREQUAL "0" OR
+   NOT guarded_stdout MATCHES "^PASS GuardedTests.test_guarded_updates_are_exclusive \\[50 schedules\\]\nPASS GuardedTests.test_atomic_additions_are_exact \\[50 schedules\\]\nPASS GuardedTests.test_guarded_with_a_transferable_state \\[1 schedule\\]\n")
+    message(FATAL_ERROR "guarded state: status ${guarded_status}\n${guarded_stdout}\n${guarded_stderr}")
+endif()
+
+message(STATUS "concurrency schedules: exploration, reproduction, virtual time, the service fixture, and guarded state passed")
