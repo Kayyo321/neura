@@ -162,16 +162,22 @@ int main(int argc, char** argv) {
                          "-days 2 -subj /CN=localhost -addext subjectAltName=DNS:localhost -keyout '" + key +
                          "' -out '" + cert + "' >/dev/null 2>&1";
     assert(std::system(command.c_str()) == 0);
+    const auto client_cert = (dir / "client.pem").string();
+    const auto client_key = (dir / "client.key").string();
+    const auto client_command = std::string(argv[1]) + " req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 "
+                                "-nodes -days 2 -subj /CN=quic-client -keyout '" + client_key + "' -out '" +
+                                client_cert + "' >/dev/null 2>&1";
+    assert(std::system(client_command.c_str()) == 0);
     {
         Fixture f;
         const auto listened = f.now("listen", {text("127.0.0.1"), int32_value(0), text(cert), text(key),
-                                               texts({"spike"})});
+                                               texts({"spike"}), number(30 * seconds), int32_value(1200), text("")});
         assert(listened.success);
         const auto endpoint = as_int64(listened.value.elements.at(0));
         const auto port = as_int32(listened.value.elements.at(1));
         const auto connect_args = [&] {
             return std::vector<HostValue>{text("127.0.0.1"), int32_value(port), number(10 * seconds),
-                                          text("localhost"), texts({"spike"}), text(cert)};
+                                          text("localhost"), texts({"spike"}), text(cert), number(30 * seconds), int32_value(1200), text(""), text("")};
         };
         const auto accepting = f.start("accept", {number(endpoint), number(10 * seconds)});
         const auto quiet_accept = f.wakeups(300);
@@ -349,14 +355,14 @@ int main(int argc, char** argv) {
         // A client that sends its first flight and stops: the endpoint's
         // pending accept stays quiet instead of spinning.
         const auto second_listen = f.now("listen", {text("127.0.0.1"), int32_value(0), text(cert), text(key),
-                                                    texts({"spike"})});
+                                                    texts({"spike"}), number(30 * seconds), int32_value(1200), text("")});
         assert(second_listen.success);
         const auto second_endpoint = as_int64(second_listen.value.elements.at(0));
         const auto second_port = as_int32(second_listen.value.elements.at(1));
         const auto stalled_accept = f.start("accept", {number(second_endpoint), number(10 * seconds)});
         {
             HostRequest stalled{901, 0, {text("127.0.0.1"), int32_value(second_port), number(10 * seconds),
-                                         text("localhost"), texts({"spike"}), text(cert)}};
+                                         text("localhost"), texts({"spike"}), text(cert), number(30 * seconds), int32_value(1200), text(""), text("")}};
             stalled.now = f.clock.now();
             // Never added to the driver: the client's Initial is sent and nothing follows.
             auto never_driven = f.begin.at("neura.net.quic.connect")(stalled);
@@ -368,7 +374,7 @@ int main(int argc, char** argv) {
             // A good client meanwhile is accepted although the stalled one is
             // still in its handshake (RULINGS-06, bug 2).
             const auto good = f.start("connect", {text("127.0.0.1"), int32_value(second_port), number(10 * seconds),
-                                                   text("localhost"), texts({"spike"}), text(cert)});
+                                                   text("localhost"), texts({"spike"}), text(cert), number(30 * seconds), int32_value(1200), text(""), text("")});
             const auto good_client = first_int(f.take(good));
             const auto good_server = first_int(f.take(stalled_accept));
             const auto good_stream = f.now("open_stream", {number(good_client), scalar(1)});
@@ -391,6 +397,74 @@ int main(int argc, char** argv) {
             assert(f.now("close", {number(good_client), number(0), text(""), number(2 * seconds)}).success);
             std::cout << "PASS closing an endpoint under a closing connection and a pending accept\n";
         }
+    }
+    {
+        // Mutual TLS, and the idle timeout requested as a transport parameter.
+        Fixture f;
+        const auto listened = f.now("listen", {text("127.0.0.1"), int32_value(0), text(cert), text(key),
+                                               texts({"spike"}), number(30 * seconds), int32_value(1350),
+                                               text(client_cert)});
+        assert(listened.success);
+        const auto endpoint = as_int64(listened.value.elements.at(0));
+        const auto port = as_int32(listened.value.elements.at(1));
+        const auto connect_with = [&](std::int64_t idle, std::string certificate, std::string private_key) {
+            return f.start("connect", {text("127.0.0.1"), int32_value(port), number(10 * seconds), text("localhost"),
+                                       texts({"spike"}), text(cert), number(idle), int32_value(1350),
+                                       text(std::move(certificate)), text(std::move(private_key))});
+        };
+        // Without a client certificate the server refuses the handshake: no connection is accepted.
+        const auto refused_accept = f.start("accept", {number(endpoint), number(seconds)});
+        const auto anonymous = connect_with(30 * seconds, "", "");
+        expect_code(f.take(refused_accept), host_error::timed_out, "accept of a client without a certificate");
+        static_cast<void>(f.take(anonymous));
+        // With one that chains to the client CA, it is accepted.
+        const auto accepting = f.start("accept", {number(endpoint), number(10 * seconds)});
+        const auto mutual = connect_with(300'000'000, client_cert, client_key);
+        const auto client = first_int(f.take(mutual));
+        const auto server = first_int(f.take(accepting));
+        (void)server;
+        std::cout << "PASS mutual TLS: a client without a certificate is refused, one with a trusted one accepted\n";
+        assert(f.now("close", {number(client), number(0), text(""), number(2 * seconds)}).success);
+
+        // The idle timeout: a client asks for 300 ms and its server then goes
+        // silent (a separate provider that nobody drives any more, as a peer
+        // that vanished). OpenSSL keeps a live peer from going idle, so only a
+        // silent one shows the timeout. The client's pending read reports
+        // TimedOut well before the read's own 20-second limit; RFC 9000
+        // section 10.1 lets the stack raise a short timeout to three probe
+        // timeouts.
+        Fixture g;
+        const auto silent_listen = g.now("listen", {text("127.0.0.1"), int32_value(0), text(cert), text(key),
+                                                    texts({"spike"}), number(30 * seconds), int32_value(1200),
+                                                    text("")});
+        assert(silent_listen.success);
+        const auto silent_port = as_int32(silent_listen.value.elements.at(1));
+        const auto silent_accept = g.start("accept", {number(as_int64(silent_listen.value.elements.at(0))),
+                                                      number(10 * seconds)});
+        const auto idle_connect = f.start("connect", {text("127.0.0.1"), int32_value(silent_port),
+                                                      number(10 * seconds), text("localhost"), texts({"spike"}),
+                                                      text(cert), number(300'000'000), int32_value(1200), text(""),
+                                                      text("")});
+        const auto handshake_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (!(f.done.contains(idle_connect) && g.done.contains(silent_accept))) {
+            assert(std::chrono::steady_clock::now() < handshake_deadline);
+            for (auto& answer : f.pending.poll()) f.done.emplace(answer.sequence, answer.completion);
+            for (auto& answer : g.pending.poll()) g.done.emplace(answer.sequence, answer.completion);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        const auto idle_client = first_int(f.take(idle_connect));
+        const auto idle_opened = f.now("open_stream", {number(idle_client), scalar(1)});
+        assert(idle_opened.success);
+        const auto started = std::chrono::steady_clock::now();
+        const auto idle_read = f.take(f.start("stream_read", {number(idle_client), number(as_int64(idle_opened.value)),
+                                                              int32_value(16), number(20 * seconds)}));
+        const auto waited = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() -
+                                                                                  started).count();
+        std::cout << "  (the silent peer's connection ended after " << waited << " ms)\n";
+        expect_code(idle_read, host_error::timed_out, "read on a connection whose peer went silent");
+        assert(waited < 15'000);
+        std::cout << "PASS a requested idle timeout ends a quiet connection\n";
+        assert(f.now("close", {number(endpoint), number(0), text(""), number(2 * seconds)}).success);
     }
     fs::remove_all(dir);
     return 0;

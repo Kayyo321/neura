@@ -71,7 +71,7 @@ constexpr std::size_t max_slots = (std::size_t{1} << slot_bits) - 1;
 // Peer-reported stream and connection endings, carried in the success value
 // of stream_read and stream_write so that their application codes reach the
 // library (a host binding's error is a bare uint32).
-enum class Ending : std::int32_t { None = 0, StreamReset = 1, PeerClosed = 2, TransportClosed = 3 };
+enum class Ending : std::int32_t { None = 0, StreamReset = 1, PeerClosed = 2, TransportClosed = 3, IdleTimeout = 4 };
 
 struct Ssl {
     SSL* ssl = nullptr;
@@ -354,6 +354,18 @@ int select_alpn(SSL*, const unsigned char** out, unsigned char* out_length, cons
     return SSL_TLSEXT_ERR_OK;
 }
 
+// The idle timeout (nanoseconds; zero: none) and the largest UDP payload this
+// side asks for, as QUIC transport parameters. On a listener they apply to
+// every connection it accepts (lane probe quic_probe5: a listener's values
+// reached the client as the server's transport parameters).
+bool request_transport(SSL* ssl, std::int64_t idle_nanos, std::int32_t payload) {
+    if (idle_nanos < 0 || payload < 1200 || payload > 65527) return false;
+    const auto idle_ms = static_cast<std::uint64_t>(idle_nanos / 1'000'000 + (idle_nanos % 1'000'000 != 0 ? 1 : 0));
+    return SSL_set_feature_request_uint(ssl, SSL_VALUE_QUIC_IDLE_TIMEOUT, idle_ms) == 1 &&
+           SSL_set_feature_request_uint(ssl, SSL_VALUE_QUIC_UDP_PAYLOAD_SIZE_MAX,
+                                        static_cast<std::uint64_t>(payload)) == 1;
+}
+
 bool verify_identity(SSL* ssl, const std::string& name) {
     auto* parameters = SSL_get0_param(ssl);
     X509_VERIFY_PARAM_set_hostflags(parameters, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
@@ -378,6 +390,10 @@ std::pair<Ending, std::int64_t> ending_of(SSL* connection, SSL* stream, bool rea
     }
     SSL_CONN_CLOSE_INFO info{};
     if (SSL_get_conn_close_info(connection, &info, sizeof info) == 1) {
+        // The idle timer ended the connection here: reported as TimedOut.
+        if ((info.flags & SSL_CONN_CLOSE_FLAG_LOCAL) != 0 && info.error_code == OSSL_QUIC_LOCAL_ERR_IDLE_TIMEOUT) {
+            return {Ending::IdleTimeout, -1};
+        }
         const bool transport = (info.flags & SSL_CONN_CLOSE_FLAG_TRANSPORT) != 0;
         return {transport ? Ending::TransportClosed : Ending::PeerClosed, static_cast<std::int64_t>(info.error_code)};
     }
@@ -476,6 +492,9 @@ public:
         const auto port = as_int32(args.at(1));
         auto certificate = args.at(2).bytes;
         auto key = args.at(3).bytes;
+        const auto idle = as_int64(args.at(5));
+        const auto payload = as_int32(args.at(6));
+        auto client_ca = args.at(7).bytes;
         auto endpoint = std::make_unique<Endpoint>();
         endpoint->port = std::make_shared<Port>();
         auto& shared = *endpoint->port;
@@ -485,6 +504,7 @@ public:
         }
         if (const auto error = tls_material::read(*granted_, *prefixes_, certificate)) return fail(error);
         if (const auto error = tls_material::read(*granted_, *prefixes_, key)) return fail(error);
+        if (const auto error = tls_material::read(*granted_, *prefixes_, client_ca)) return fail(error);
         const auto address = numeric_address(host, port);
         if (!address) return fail(host_error::invalid_input);
 #ifdef _WIN32
@@ -500,12 +520,19 @@ public:
             return fail(host_error::invalid_input);
         }
         SSL_CTX_set_alpn_select_cb(shared.context, select_alpn, &shared);
+        // Mutual TLS: a client must present a certificate that chains to the
+        // given CA file, or its handshake fails.
+        if (!client_ca.empty()) {
+            if (!tls_material::trust(shared.context, client_ca)) return fail(host_error::invalid_input);
+            SSL_CTX_set_verify(shared.context, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, nullptr);
+        }
         // Partial writes, so a write reports exactly the prefix OpenSSL took.
         SSL_CTX_set_mode(shared.context, SSL_MODE_ENABLE_PARTIAL_WRITE);
         shared.listener = std::make_unique<Ssl>(SSL_new_listener(shared.context, 0));
         BIO* datagram = shared.listener->ssl ? BIO_new_dgram(descriptor, BIO_NOCLOSE) : nullptr;
         if (!datagram) return fail(host_error::other);
         SSL_set_bio(shared.listener->ssl, datagram, datagram);
+        if (!request_transport(shared.listener->ssl, idle, payload)) return fail(host_error::invalid_input);
         if (SSL_set_blocking_mode(shared.listener->ssl, 0) != 1 || SSL_listen(shared.listener->ssl) != 1) {
             return fail(host_error::other);
         }
@@ -609,10 +636,17 @@ public:
         const auto& name = args.at(3).bytes;
         const auto wire = alpn_wire(args.at(4));
         auto ca_bundle = args.at(5).bytes;
-        if (port < 1 || port > 65535 || timeout < 0 || !usable_text(host) || !usable_text(name) || wire.empty()) {
+        const auto idle = as_int64(args.at(6));
+        const auto payload = as_int32(args.at(7));
+        auto client_certificate = args.at(8).bytes;
+        auto client_key = args.at(9).bytes;
+        if (port < 1 || port > 65535 || timeout < 0 || !usable_text(host) || !usable_text(name) || wire.empty() ||
+            client_certificate.empty() != client_key.empty()) {
             return fail(host_error::invalid_input);
         }
         if (const auto error = tls_material::read(*granted_, *prefixes_, ca_bundle)) return fail(error);
+        if (const auto error = tls_material::read(*granted_, *prefixes_, client_certificate)) return fail(error);
+        if (const auto error = tls_material::read(*granted_, *prefixes_, client_key)) return fail(error);
         const auto peer = numeric_address(host, port);
         if (!peer) return fail(host_error::invalid_input);
 #ifdef _WIN32
@@ -625,13 +659,16 @@ public:
         SSL_CTX_set_verify(owned.context, SSL_VERIFY_PEER, nullptr);
         SSL_CTX_set_mode(owned.context, SSL_MODE_ENABLE_PARTIAL_WRITE);
         if (!tls_material::trust(owned.context, ca_bundle)) return fail(host_error::permission_denied);
+        if (!client_certificate.empty() && !tls_material::identity(owned.context, client_certificate, client_key)) {
+            return fail(host_error::invalid_input);
+        }
         owned.ssl = std::make_unique<Ssl>(SSL_new(owned.context));
         auto* ssl = owned.ssl->ssl;
         if (!ssl || !verify_identity(ssl, name) ||
             SSL_set_alpn_protos(ssl, reinterpret_cast<const unsigned char*>(wire.data()),
                                 static_cast<unsigned int>(wire.size())) != 0 ||
             SSL_set_default_stream_mode(ssl, SSL_DEFAULT_STREAM_MODE_NONE) != 1 ||
-            SSL_set1_initial_peer_addr(ssl, peer.get()) != 1) {
+            SSL_set1_initial_peer_addr(ssl, peer.get()) != 1 || !request_transport(ssl, idle, payload)) {
             return fail(host_error::invalid_input);
         }
         const int descriptor = BIO_socket(BIO_ADDR_family(peer.get()), SOCK_DGRAM, IPPROTO_UDP, BIO_SOCK_NONBLOCK);
@@ -722,7 +759,9 @@ public:
                 SSL_CONN_CLOSE_INFO info{};
                 if (SSL_get_conn_close_info(ssl, &info, sizeof info) == 1) {
                     live->accepting = false;
-                    return fail(host_error::connection_reset);
+                    const bool idle = (info.flags & SSL_CONN_CLOSE_FLAG_LOCAL) != 0 &&
+                                      info.error_code == OSSL_QUIC_LOCAL_ERR_IDLE_TIMEOUT;
+                    return fail(idle ? host_error::timed_out : host_error::connection_reset);
                 }
                 return std::nullopt;
             }
@@ -788,6 +827,7 @@ public:
             const auto [ending, code] = ending_of(ssl, stream, true);
             release();
             if (ending == Ending::None) return fail(failure_of(ssl));
+            if (ending == Ending::IdleTimeout) return fail(host_error::timed_out);
             return HostCompletion::ok(ending_value(bytes_value({}), ending, code));
         };
         if (blocking) return run_blocking(operation, timeout);
@@ -867,6 +907,7 @@ public:
                 const auto [ending, code] = ending_of(ssl, stream, false);
                 release();
                 if (ending == Ending::None) return fail(failure_of(ssl));
+                if (ending == Ending::IdleTimeout) return fail(host_error::timed_out);
                 return answer(ending, code, false);
             }
             if (!fin) {
@@ -887,6 +928,7 @@ public:
                 const auto [ending, code] = ending_of(ssl, stream, false);
                 if (ending == Ending::None) return std::nullopt;
                 release();
+                if (ending == Ending::IdleTimeout) return fail(host_error::timed_out);
                 return answer(ending, code, false);
             }
             release();
@@ -1025,11 +1067,13 @@ void add_quic_services(const QuicAdder& add, const QuicOverlapAdder& overlap, St
     const HostType stream_result = tuple({int64(), boolean()});
     const HostType read_result = tuple({byte_list(), int32(), int64()});
     const HostType write_result = tuple({int32(), int32(), int64(), boolean()});
-    const auto listen_signature = signature("neura.net.quic.listen", {text(), int32(), text(), text(), text_list()},
+    const auto listen_signature = signature("neura.net.quic.listen",
+                                            {text(), int32(), text(), text(), text_list(), int64(), int32(), text()},
                                             endpoint_result);
     const auto accept_signature = signature("neura.net.quic.accept", {int64(), int64()}, connection_result);
     const auto connect_signature = signature("neura.net.quic.connect",
-                                             {text(), int32(), int64(), text(), text_list(), text()},
+                                             {text(), int32(), int64(), text(), text_list(), text(), int64(), int32(),
+                                              text(), text()},
                                              connection_result);
     const auto open_signature = signature("neura.net.quic.open_stream", {int64(), boolean()}, int64());
     const auto accept_stream_signature = signature("neura.net.quic.accept_stream", {int64(), int64()}, stream_result);

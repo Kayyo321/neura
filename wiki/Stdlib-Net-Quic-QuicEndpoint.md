@@ -18,21 +18,21 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **QuicEndpoint** · [`export let QuicEndpoint = class implements Listener<SocketAddr, QuicConnection>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L26)
+- **QuicEndpoint** · [`export let QuicEndpoint = class implements Listener<SocketAddr, QuicConnection>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L28)
   A listening QUIC endpoint. Tagged `#Final`, `#Immutable`.
-- **QuicEndpoint.QuicEndpoint** · [`export let init = func(endpoint: int64, address: SocketAddr, default_timeout: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L35)
+- **QuicEndpoint.QuicEndpoint** · [`export let init = func(endpoint: int64, address: SocketAddr, default_timeout: int64, read_timeout: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L39)
   Use `bind`; the ID comes from the library.
-- **QuicEndpoint.QuicEndpoint** · [`export let address = func -> SocketAddr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L42)
+- **QuicEndpoint.QuicEndpoint** · [`export let address = func -> SocketAddr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L48)
   The bound address.
-- **QuicEndpoint.QuicEndpoint** · [`export let accept = func -> Result<QuicConnection>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L47)
+- **QuicEndpoint.QuicEndpoint** · [`export let accept = func -> Result<QuicConnection>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L53)
   Waits for the next connection and completes its handshake within the configured handshake timeout (`Listener`). Tagged `#NoDiscard`.
-- **QuicEndpoint.QuicEndpoint** · [`export let accept_within = func(timeout: Duration) -> Result<QuicConnection>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L52)
+- **QuicEndpoint.QuicEndpoint** · [`export let accept_within = func(timeout: Duration) -> Result<QuicConnection>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L58)
   As `accept`, within `timeout` (zero: none). A separate name, because `accept` implements `Listener` and an overload group cannot. Tagged `#NoDiscard`. Since 0.3.1.
-- **QuicEndpoint.QuicEndpoint** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L56)
+- **QuicEndpoint.QuicEndpoint** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L62)
   Closes the endpoint and every connection it accepted, and releases the port.
-- **QuicEndpoint.QuicEndpoint** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L64)
+- **QuicEndpoint.QuicEndpoint** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L70)
   Text such as "QuicEndpoint(0.0.0.0:443)".
-- **QuicEndpoint** · [`export let bind = func(address: SocketAddr, config: QuicConfig) -> Result<QuicEndpoint>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L78)
+- **QuicEndpoint** · [`export let bind = func(address: SocketAddr, config: QuicConfig) -> Result<QuicEndpoint>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L84)
   Listens for QUIC on `address` (port 0 asks for a free port) with a server configuration. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

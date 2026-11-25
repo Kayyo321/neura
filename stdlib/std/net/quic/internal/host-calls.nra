@@ -35,8 +35,9 @@ export let HostCalls = module (
     export let CloseOutcome = enum (Ok(bool), Error(uint32));
 
     /// @brief Listens on a numeric address with a certificate and key file and the ALPN protocols to accept.
-    export let listen = func(host: string, port: int, certificate: string, key: string, alpn: string[list])
-        -> EndpointOutcome host("neura.net.quic.listen", 1);
+    export let listen = func(host: string, port: int, certificate: string, key: string, alpn: string[list],
+        idle_timeout_nanos: int64, max_payload: int, client_ca_file: string) -> EndpointOutcome
+        host("neura.net.quic.listen", 1);
 
     /// @brief Waits for a connection; zero waits without limit.
     export let accept = func(endpoint: int64, timeout_nanos: int64) -> ConnectionOutcome
@@ -44,7 +45,8 @@ export let HostCalls = module (
 
     /// @brief Connects to a numeric address, verifying `server_name` against the CA file (empty: system trust).
     export let connect = func(host: string, port: int, timeout_nanos: int64, server_name: string,
-        alpn: string[list], ca_file: string) -> ConnectionOutcome host("neura.net.quic.connect", 1);
+        alpn: string[list], ca_file: string, idle_timeout_nanos: int64, max_payload: int, certificate: string,
+        key: string) -> ConnectionOutcome host("neura.net.quic.connect", 1);
 
     /// @brief Opens a stream of this side without waiting; `quic.busy` at the peer's stream limit.
     export let open_stream = func(connection: int64, bidirectional: bool) -> StreamOutcome

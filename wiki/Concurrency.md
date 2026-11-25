@@ -558,7 +558,7 @@ This shares no program state. Every operation on a handle is a host request, whi
 
 - **One pending operation per direction.** A resource takes at most one waiting operation of each kind at a time: for QUIC, one `accept` per endpoint, one `accept` of a stream per connection, and on each stream one read and one write. Another one fails at once with the Custom error `quic.busy` and is never queued, so the order of completions never depends on a hidden queue. Different streams, and a read and a write on one stream, run concurrently.
 - **Closing.** Any task may close a resource. Afterwards every operation on it, by any task and through any copy of the handle, fails with `IoErrorKind.Closed`, including operations already waiting, whose tasks wake with that error. The host never gives a closed resource's identifier to a later resource, so a stale handle cannot reach one.
-- **The QUIC handles.** `QuicEndpoint`, `QuicConnection` and `QuicStream` are `#Final` and `#Immutable`, with fields of transferable types. Their timeouts are fixed when they are created, and each waiting operation has a form that takes its own timeout.
+- **The QUIC handles.** `QuicEndpoint`, `QuicConnection` and `QuicStream` are `#Final` and `#Immutable`, with fields of transferable types. Their default timeout is fixed when they are created, from `QuicConfig.read_timeout`, and each waiting operation has a form that takes its own timeout: an overload, or for `QuicEndpoint`, whose `accept` implements `Listener`, `accept_within`.
 
 ## 9. `Std.Concurrent`
 

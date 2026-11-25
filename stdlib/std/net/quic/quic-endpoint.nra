@@ -15,7 +15,9 @@ let.promote _ = import:Std.Core.Unit;
 ///
 /// `bind` needs a server configuration whose TLS settings hold the certificate and key, checked before any host
 /// call ("invalid argument: a QUIC endpoint needs a server configuration"), and a configuration the pinned QUIC
-/// stack can honour (`QuicConnection.check_limits`). One `accept` may be pending at a time; a second fails at
+/// stack can honour (`QuicConnection.check_limits`). A server configuration with a client CA file requires and
+/// verifies a client certificate (mutual TLS); the idle timeout and maximum datagram size are requested from
+/// every client as transport parameters. One `accept` may be pending at a time; a second fails at
 /// once with `quic.busy`. Closing the endpoint closes the connections it accepted, since they share its port;
 /// afterwards their operations fail with `IoErrorKind.Closed`.
 /// @see [Std.Net.Quic.QuicEndpoint](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Quic-QuicEndpoint)
@@ -28,14 +30,18 @@ export let QuicEndpoint = module (
         last id: int64;
         /// @brief The bound address with the chosen port.
         last bound: SocketAddr;
-        /// @brief The handshake timeout of `accept`, also the default timeout of accepted connections.
+        /// @brief The handshake timeout, the default timeout of `accept`.
         last timeout_nanos: int64;
+        /// @brief The configuration's `read_timeout`, the default timeout of accepted connections.
+        last read_nanos: int64;
 
         /// @brief Use `bind`; the ID comes from the library.
-        export let init = func(endpoint: int64, address: SocketAddr, default_timeout: int64) {
+        export let init = func(endpoint: int64, address: SocketAddr, default_timeout: int64,
+            read_timeout: int64) {
             id = endpoint;
             bound = address;
             timeout_nanos = default_timeout;
+            read_nanos = read_timeout;
         };
 
         /// @brief The bound address.
@@ -66,7 +72,7 @@ export let QuicEndpoint = module (
         let accept_nanos = func(nanos: int64) -> Result<QuicConnection> {
             return match (host.accept(id, nanos)) {
                 host.ConnectionOutcome.Ok(accepted) => Result<QuicConnection>.Ok(
-                    connection_of(accepted, bound.to_string(), false, timeout_nanos)),
+                    connection_of(accepted, bound.to_string(), false, read_nanos)),
                 host.ConnectionOutcome.Error(code) => Result<QuicConnection>.Err(
                     host.error_of(code, "QUIC accept failed", bound.to_string())),
             };
@@ -83,16 +89,17 @@ export let QuicEndpoint = module (
         last text = address.to_string();
         last settings = config.tls_config;
         return match (host.listen(address.host_text(), address.port, settings.certificate_file, settings.key_file,
-            settings.alpn())) {
+            settings.alpn(), support.timeout_nanos(config.idle_timeout), config.max_datagram_size as int,
+            settings.client_ca_file)) {
             host.EndpointOutcome.Ok(opened) => Result<QuicEndpoint>.Ok(endpoint_of(opened, address,
-                support.timeout_nanos(settings.handshake_timeout))),
+                support.timeout_nanos(settings.handshake_timeout), support.timeout_nanos(config.read_timeout))),
             host.EndpointOutcome.Error(code) => Result<QuicEndpoint>.Err(host.error_of(code, "QUIC bind failed", text)),
         };
     };
 
     /// @brief An endpoint from the host's [ID, port].
-    let endpoint_of = func(opened: [int64, int], address: SocketAddr, nanos: int64) -> QuicEndpoint {
+    let endpoint_of = func(opened: [int64, int], address: SocketAddr, nanos: int64, read_nanos: int64) -> QuicEndpoint {
         let [id, port] = opened;
-        return new QuicEndpoint(id, new SocketAddr(address.ip, port), nanos);
+        return new QuicEndpoint(id, new SocketAddr(address.ip, port), nanos, read_nanos);
     };
 );
