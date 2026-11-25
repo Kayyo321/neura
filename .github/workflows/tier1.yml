@@ -134,6 +134,8 @@ jobs:
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       - name: Test
+        env:
+          NEURA_REFERENCE_PROFILE: "1"
         run: >
           ctest --test-dir build --parallel "$(nproc)" --no-tests=error
           --output-on-failure --output-junit ctest-junit.xml
@@ -246,7 +248,7 @@ jobs:
         run: >
           ctest --test-dir build-windows-msvc --parallel 6 --no-tests=error
           --output-on-failure --output-junit ctest-junit.xml
-          -E "^(stdlib-crypto-asymmetric|stdlib-crypto-advanced|stdlib-crypto-pqc(-.*)?|stdlib-crypto-token|stdlib-crypto-enclave|stdlib-crypto-pki|stdlib-character|backend-reference|lifetime-programs-.*)$"
+          -E "^(stdlib-crypto-asymmetric|stdlib-crypto-advanced|stdlib-crypto-pqc(-.*)?|stdlib-crypto-token|stdlib-crypto-enclave|stdlib-crypto-pki|stdlib-character|backend-reference-.*|lifetime-programs-.*)$"
       - name: Require every selected test to have run
         if: ${{ !cancelled() }}
         run: python scripts/check-test-report.py build-windows-msvc/ctest-junit.xml --minimum 315

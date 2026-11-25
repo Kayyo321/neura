@@ -2160,15 +2160,21 @@ if(BUILD_TESTING AND NEURA_SDK)
     endif()
 
     # Standard library tests under the reference evaluator and NVM.
-    add_test(NAME backend-reference COMMAND neura_backend_tests reference "${CMAKE_CURRENT_SOURCE_DIR}")
-    # The suite takes about 1470 seconds on GitHub's Intel macOS runners, which
-    # is too close to CTest's default limit of 1500 seconds. Under the address
-    # and undefined-behavior sanitizers it takes more than an hour on a GitHub
-    # runner, so that configuration sets a longer limit. A limit set here takes
-    # precedence over ctest --timeout.
     set(NEURA_REFERENCE_TEST_TIMEOUT 3600 CACHE STRING
-        "CTest limit, in seconds, for the backend-reference test")
-    set_tests_properties(backend-reference PROPERTIES TIMEOUT "${NEURA_REFERENCE_TEST_TIMEOUT}")
+        "CTest limit, in seconds, for each backend reference library shard")
+    add_test(NAME backend-reference-overloads COMMAND neura_backend_tests reference
+        "${CMAKE_CURRENT_SOURCE_DIR}" overloads_match_the_evaluator)
+    add_test(NAME backend-reference-primitive COMMAND neura_backend_tests reference
+        "${CMAKE_CURRENT_SOURCE_DIR}" primitive_references_match_the_evaluator)
+    set(reference_shards 5)
+    foreach(shard RANGE 1 ${reference_shards})
+        add_test(NAME backend-reference-library-${shard} COMMAND neura_backend_tests reference
+            "${CMAKE_CURRENT_SOURCE_DIR}" library_tests_match_the_evaluator)
+        # The original suite's scheduling weight was 2640 seconds.
+        set_tests_properties(backend-reference-library-${shard} PROPERTIES
+            ENVIRONMENT "NEURA_REFERENCE_SHARD=${shard}/${reference_shards}"
+            TIMEOUT "${NEURA_REFERENCE_TEST_TIMEOUT}" COST 528)
+    endforeach()
 
     foreach(suite IN ITEMS lossless lift behavior)
         add_test(NAME decompiler-${suite}
@@ -2652,7 +2658,7 @@ if(BUILD_TESTING)
     # the many short ones instead of running alone at the end. The costs are
     # their seconds on the x86_64 Linux CI runner (release trial 16).
     set(neura_test_costs
-        backend-reference 2640 stdlib-crypto-pqc 300 stdlib-crypto-pqc-slh-dsa-sign-shake-small 400
+        stdlib-crypto-pqc 300 stdlib-crypto-pqc-slh-dsa-sign-shake-small 400
         stdlib-crypto-pqc-slh-dsa-sign-sha2-small 300 stdlib-crypto-pqc-slh-dsa-sign-fast 200 decompiler-behavior 540
         stdlib-crypto-asymmetric 480 app-ui-reconcile 450 stdlib-character 390 backend-tier3 380
         program-fuzz 370 lifecycle-update 360 decompiler-lift 350 stdlib-crypto-pki 330
