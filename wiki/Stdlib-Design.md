@@ -1768,7 +1768,8 @@ HashML-DSA dispatch follows the NIST Computer Security Objects Register and requ
 | `Jwe` | Compact encryption with `DirectKey` (`dir`), `WrappingKey` (AES-KW), typed RSA-OAEP-256 keys, typed ECDH-ES recipients, `GcmWrappingKey`, and `Pbes2Key`. A recipient binds both key management and content encryption. Content profiles are AES-GCM and AES-CBC-HMAC. ECDH-ES uses the direct Concat KDF or A128/192/256KW with ephemeral P-256, P-384 or P-521. AES-GCMKW and PBES2 each cover the three JWA widths. `seal_with` takes explicit material for deterministic use and `seal` accepts OS entropy or a DRBG. `open` authenticates the original protected header and ciphertext before releasing plaintext. Compression (0.3.1) is `"zip":"DEF"`, which is raw DEFLATE (RFC 7516 section 4.1.3):
   - A compact token is sealed compressed when the caller's protected header asks for it.
   - On opening, the plaintext is inflated only after the tag check, to at most `MaxDecompressedSize` (4 MiB) bytes.
-  - Other `zip` values, `zip` in JWE JSON, and critical extensions are refused.
+  - `open_json` inflates the same way when `zip` is in the protected header. In the shared unprotected header or a recipient's header, `zip` is refused, since RFC 7516 requires it to be integrity protected.
+  - Other `zip` values and critical extensions are refused. This module produces no JWE JSON.
 
   `open_json` also supports flattened and general JWE JSON for the existing typed key profiles. |
 | `Paseto` | `Local` implements v4.local with XChaCha20 and keyed BLAKE2b. It accepts caller-supplied deterministic nonces, OS entropy, or a caller's DRBG. `PublicSigner` and `PublicVerifier` implement v4.public with Ed25519. Both modes authenticate the footer and caller-supplied implicit assertion. The payload is returned as bytes. |

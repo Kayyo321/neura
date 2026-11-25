@@ -128,8 +128,12 @@ export let JweJson = module (
         if (enc != expected_enc) {
             return jose.fail<Recipient>(InvalidJwe, "JWE recipients must use the expected content algorithm");
         }
-        if (jose.has(members, "crit") || jose.has(members, "zip")) {
-            return jose.fail<Recipient>(InvalidJwe, "JWE critical extensions and compression are unsupported");
+        if (jose.has(members, "crit")) {
+            return jose.fail<Recipient>(InvalidJwe, "JWE critical extensions are unsupported");
+        }
+        // RFC 7516 section 4.1.3: zip must be integrity protected, so it may occur only in the protected header.
+        if (jose.has(header, "zip")) {
+            return jose.fail<Recipient>(InvalidJwe, "JWE zip must be in the protected header");
         }
         last encrypted_key = jose.text_member(object, "encrypted_key", InvalidJwe)?;
         return Result<Recipient>.Ok(new Recipient(members, encrypted_key));
@@ -189,7 +193,11 @@ export let JweJson = module (
         if (jose.has(object, "protected")) {
             protected = protected_members(protected_segment)?;
         }
-        last shared = combine(protected, object_member(object, "unprotected")?)?;
+        last unprotected = object_member(object, "unprotected")?;
+        if (jose.has(unprotected, "zip")) {
+            return jose.fail<Envelope>(InvalidJwe, "JWE zip must be in the protected header");
+        }
+        last shared = combine(protected, unprotected)?;
         last recipient = select_recipient(object, shared, recipient_index, expected_enc)?;
         last iv = jose.required_text(object, "iv", InvalidJwe)?;
         last ciphertext = jose.required_text(object, "ciphertext", InvalidJwe)?;

@@ -34,10 +34,10 @@ let words = import:Std.Crypto.Internal.Words;
 ///
 /// Compression (`"zip":"DEF"`, RFC 7516 section 4.1.3) is raw DEFLATE (RFC 1951), applied to the plaintext
 /// before encryption and undone only after the authentication tag has been checked and the content decrypted.
-/// A compact token is sealed compressed when the caller's protected header carries `"zip":"DEF"`, and a
-/// compact token with it is opened and inflated to at most `MaxDecompressedSize` bytes. Any other `zip` value
-/// is refused. JWE JSON still refuses `zip`, since only the compact form's header is known to be protected
-/// as a whole here. The CBC-HMAC modes verify the full wire tag before attempting decryption.
+/// A compact token is sealed compressed when the caller's protected header carries `"zip":"DEF"`. A compact
+/// token or a JWE JSON with it is opened and inflated to at most `MaxDecompressedSize` bytes; in JWE JSON `zip`
+/// must be in the protected header, as section 4.1.3 requires. Any other `zip` value is refused. This module
+/// produces no JWE JSON, compressed or not. The CBC-HMAC modes verify the full wire tag before attempting decryption.
 /// For JSON opening a caller supplies the recipient index and expected external authenticated data.
 /// The tag and key-wrap-integrity comparisons are branch-free in source. The runtime does not guarantee
 /// constant time.

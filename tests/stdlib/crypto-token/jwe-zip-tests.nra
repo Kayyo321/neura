@@ -128,4 +128,41 @@ let JweZipTests = module (
         test.assert_equal_string("crypto.invalid_jwe", code(problem));
         test.assert_equal_string("decompressed JWE plaintext exceeds 4194304 bytes", message(problem));
     };
+
+    let json_claims = func -> string => "{\"sub\":\"json\",\"claims\":\"" + strings.repeat("xyzxyz", 30) + "\"}";
+
+    // Flattened JWE JSON sealed by Node with "zip":"DEF" in the protected header, without and with external AAD.
+    let node_json = func -> string => "{\"protected\":\"eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIiwiemlwIjoiREVGIn0\",\"iv\":\"4OHi4-Tl5ufo"
+        + "6err\",\"ciphertext\":\"n5TjrbiSOHkKKbCBDc6pyQvs9yvT0n9KNinGZ355gZxT\",\"tag\":\"D7MOsutVUPEhdmT"
+        + "ZEf4_TA\"}";
+
+    let node_json_with_aad = func -> string => "{\"protected\":\"eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIiwiemlwIjoiREVGIn0\",\"iv\":\"8PHy8_T19vf4"
+        + "-fr7\",\"ciphertext\":\"wlBpLjFoYCZV3TlV3Zgz_N6olQ4VUf3K_P6fuit7exEc\",\"tag\":\"RCx_cGHJLHAPXNc"
+        + "T3xluLg\",\"aad\":\"ZXh0ZXJuYWw\"}";
+
+    export let test_opens_independent_compressed_jwe_json = func {
+        test.assert_equal_string(json_claims(), test.assert_ok(strings.from_bytes(test.assert_ok(
+            jwe.open_json(key(), node_json(), 0)))));
+        test.assert_equal_string(json_claims(), test.assert_ok(strings.from_bytes(test.assert_ok(
+            jwe.open_json(key(), node_json_with_aad(), 0, strings.to_bytes("external"))))));
+        // Wrong external AAD: authentication fails before any inflation.
+        test.assert_equal_string("crypto.authentication_failed", code(test.assert_err(
+            jwe.open_json(key(), node_json_with_aad(), 0, strings.to_bytes("other")))));
+    };
+
+    // RFC 7516 section 4.1.3: zip must be integrity protected. With a protected header that lacks zip, zip in the
+    // shared unprotected header or a recipient's header is refused as invalid before any decryption; without that
+    // check the result would be crypto.authentication_failed (the protected header changed).
+    export let test_jwe_json_zip_must_be_protected = func {
+        last plain_protected = "eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIn0"; // {"alg":"dir","enc":"A256GCM"}
+        last changed = strings.replace_first(node_json(), "eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIiwiemlwIjoiREVGIn0",
+            plain_protected);
+        test.assert_equal_string("crypto.authentication_failed", code(test.assert_err(jwe.open_json(key(), changed, 0))));
+        last unprotected = strings.replace_first(changed, "{", "{\"unprotected\":{\"zip\":\"DEF\"},");
+        test.assert_equal_string("JWE zip must be in the protected header", message(test.assert_err(
+            jwe.open_json(key(), unprotected, 0))));
+        last in_header = strings.replace_first(changed, "{", "{\"header\":{\"zip\":\"DEF\"},");
+        test.assert_equal_string("JWE zip must be in the protected header", message(test.assert_err(
+            jwe.open_json(key(), in_header, 0))));
+    };
 );

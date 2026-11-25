@@ -43,7 +43,8 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - `Std.Crypto.Token.Jwe` supports compression in compact tokens, `"zip":"DEF"` (RFC 7516 section 4.1.3, raw DEFLATE):
   - `seal_with` compresses before encryption when the caller's protected header asks for it.
   - `open` inflates only after the tag check, to at most the new `Jwe.MaxDecompressedSize` (4 MiB).
-  - Other `zip` values and `zip` in JWE JSON are still refused.
+  - `open_json` inflates the same way when `zip` is in the protected header; elsewhere in JWE JSON it is refused.
+  - Other `zip` values are still refused.
 
 ### Changed
 
