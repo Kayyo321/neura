@@ -1714,7 +1714,7 @@ struct LoopbackTlsKeys {
     LoopbackTlsKeys() {
         const auto command = "openssl req -x509 -newkey rsa:2048 -nodes -keyout '" + key + "' -out '" + certificate +
                              "' -days 2 -subj /CN=localhost -addext subjectAltName=IP:127.0.0.1,DNS:localhost "
-                             ">/dev/null 2>&1";
+                             "-addext basicConstraints=critical,CA:TRUE -addext subjectKeyIdentifier=hash >/dev/null 2>&1";
         check(std::system(command.c_str()) == 0, "generate loopback TLS certificate with openssl");
     }
 };
@@ -2555,7 +2555,7 @@ NEURA_TEST(host, tls_public_endpoints_verify_live_svid) {
     const auto certificate = material.dir / "client.pem";
     const auto extensions = material.dir / "client.ext";
     write_text_file(extensions, "basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\n"
-        "extendedKeyUsage=clientAuth,serverAuth\nsubjectAltName=URI:spiffe://example.test/service\n");
+        "extendedKeyUsage=clientAuth,serverAuth\nsubjectAltName=URI:spiffe://example.test/service\nauthorityKeyIdentifier=keyid\n");
     const auto make_request = "openssl req -newkey rsa:2048 -nodes -keyout '" + client_key + "' -out '" + request +
         "' -subj /CN=loopback-svid >/dev/null 2>&1";
     const auto sign = "openssl x509 -req -in '" + request + "' -CA '" + material.certificate + "' -CAkey '" +
