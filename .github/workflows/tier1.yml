@@ -238,17 +238,15 @@ jobs:
           python scripts/check-core-closure.py build-windows-msvc
           sh scripts/check-kernels.sh build-windows-msvc
           python scripts/check-windows-binaries.py build-windows-msvc
-      # Windows has no JIT, and on the interpreter the twelve tests left out
-      # here take most of the suite's time: about 400 of its 494 test-minutes
-      # on arm64 macOS, where stdlib-crypto-asymmetric alone ran for two
-      # hours. Tier 2 and release.yml run them on Windows, all but the crypto
-      # suites that x86-64 macOS also leaves out. This job runs the other 315
-      # of the 327 tests that CMake registers on Windows.
+      # Without the JIT these suites took about 400 of 494 test-minutes in an
+      # arm64 macOS run. Tier 2 and release.yml run the excluded lifetime
+      # fixtures and other slow entries on Windows, with the same crypto
+      # exceptions as x86-64 macOS. 315 is the historical minimum here.
       - name: Test
         run: >
           ctest --test-dir build-windows-msvc --parallel 6 --no-tests=error
           --output-on-failure --output-junit ctest-junit.xml
-          -E "^(stdlib-crypto-asymmetric|stdlib-crypto-advanced|stdlib-crypto-pqc(-.*)?|stdlib-crypto-token|stdlib-crypto-enclave|stdlib-crypto-pki|stdlib-character|backend-reference|lifetime-programs)$"
+          -E "^(stdlib-crypto-asymmetric|stdlib-crypto-advanced|stdlib-crypto-pqc(-.*)?|stdlib-crypto-token|stdlib-crypto-enclave|stdlib-crypto-pki|stdlib-character|backend-reference|lifetime-programs-.*)$"
       - name: Require every selected test to have run
         if: ${{ !cancelled() }}
         run: python scripts/check-test-report.py build-windows-msvc/ctest-junit.xml --minimum 315

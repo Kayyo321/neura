@@ -1598,7 +1598,7 @@ The modules of `Std.Concurrent` are implemented. [Concurrency](Concurrency) spec
 - The registrations are an immutable list that `subscribe` and `unsubscribe` replace, so `emit` copies nothing. `subscribe` and `unsubscribe` allocate; `emit` does not, beyond what handlers do.
 - The three classes are not transferable, so giving one to a task is [E0602](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0602.md).
 - `emit` is not called under a monitor guard ([E0550](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0550.md)): in a `#Synchronized` method, in a lambda passed directly to `Guarded.with`, or in a function either of them reaches through calls the compiler resolves. A call through a function value is not followed, so the check is a check of the known call graph and not a proof.
-- Tests: `stdlib-events`, and `lifetime-programs` for delivery in every execution mode.
+- Tests include `stdlib-events` and the `lifetime-programs-events-*` entries for delivery in every execution mode.
 
 ## 21. `Std.Crypto`
 

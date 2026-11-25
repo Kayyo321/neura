@@ -1745,16 +1745,24 @@ if(BUILD_TESTING AND NEURA_SDK)
     set_tests_properties(matching-programs PROPERTIES TIMEOUT 180)
     # Programs of the lifetime milestone (docs/design/Lifetime030.md), each
     # in every build and execution mode with the same output, steps and peak
-    # cells, and their NeuraIR version.
-    add_test(NAME lifetime-programs COMMAND "${Python3_EXECUTABLE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/lifetime/programs.py" "$<TARGET_FILE:neura>"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/lifetime/programs")
-    # Under the address and undefined-behavior sanitizers the programs run
-    # several times slower in every mode, so that configuration sets a
-    # longer limit, as it does for backend-reference.
+    # cells, and their NeuraIR version. Give every fixture an independent
+    # entry so CTest can schedule the full checks in parallel.
     set(NEURA_LIFETIME_PROGRAMS_TEST_TIMEOUT 900 CACHE STRING
-        "CTest limit, in seconds, for the lifetime-programs test")
-    set_tests_properties(lifetime-programs PROPERTIES TIMEOUT "${NEURA_LIFETIME_PROGRAMS_TEST_TIMEOUT}")
+        "CTest limit, in seconds, for each lifetime program test")
+    set(lifetime_programs_dir "${CMAKE_CURRENT_SOURCE_DIR}/tests/lifetime/programs")
+    file(GLOB lifetime_program_outputs CONFIGURE_DEPENDS LIST_DIRECTORIES false "${lifetime_programs_dir}/*.expected")
+    if(NOT lifetime_program_outputs)
+        message(FATAL_ERROR "No lifetime program fixtures in ${lifetime_programs_dir}")
+    endif()
+    foreach(output IN LISTS lifetime_program_outputs)
+        get_filename_component(fixture "${output}" NAME_WLE)
+        add_test(NAME "lifetime-programs-${fixture}" COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/lifetime/programs.py" "$<TARGET_FILE:neura>"
+            "${lifetime_programs_dir}" "${fixture}")
+        # Seed first-run scheduling with the recent whole-suite average per program.
+        set_tests_properties("lifetime-programs-${fixture}" PROPERTIES
+            TIMEOUT "${NEURA_LIFETIME_PROGRAMS_TEST_TIMEOUT}" COST 60)
+    endforeach()
     # E0475 and E0550 when a program is built from a .nir module whose call
     # was retargeted after lowering checked it.
     add_test(NAME lifetime-nir-checks COMMAND "${Python3_EXECUTABLE}"
@@ -2644,7 +2652,7 @@ if(BUILD_TESTING)
     # the many short ones instead of running alone at the end. The costs are
     # their seconds on the x86_64 Linux CI runner (release trial 16).
     set(neura_test_costs
-        backend-reference 2640 lifetime-programs 900 stdlib-crypto-pqc 300 stdlib-crypto-pqc-slh-dsa-sign-shake-small 400
+        backend-reference 2640 stdlib-crypto-pqc 300 stdlib-crypto-pqc-slh-dsa-sign-shake-small 400
         stdlib-crypto-pqc-slh-dsa-sign-sha2-small 300 stdlib-crypto-pqc-slh-dsa-sign-fast 200 decompiler-behavior 540
         stdlib-crypto-asymmetric 480 app-ui-reconcile 450 stdlib-character 390 backend-tier3 380
         program-fuzz 370 lifecycle-update 360 decompiler-lift 350 stdlib-crypto-pki 330

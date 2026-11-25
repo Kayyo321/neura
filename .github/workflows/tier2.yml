@@ -188,9 +188,9 @@ jobs:
       # the 0.3.0 suite ran out of time here without a sanitizer report. With
       # the scale, backend-reference gets 5.5 hours (it ran for more than 3),
       # decompiler-behavior 3 hours (it took 2.6), program-fuzz 2 hours
-      # (it took 1) and lifetime-programs 5 hours (3 were not enough while it
-      # decompiled every image; with NEURA_TEST_SANITIZERS it decompiles only
-      # where a check needs the names).
+      # (it took 1). Keep the previous lifetime suite limit of 5 hours for
+      # each independent fixture until the split entries have sanitizer data.
+      # With NEURA_TEST_SANITIZERS they decompile only where a check needs the names.
       - name: Configure
         run: >
           cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DNEURA_TEST_FRAME_HOOKS=ON
@@ -281,7 +281,7 @@ jobs:
       # The crypto suites that x86-64 macOS leaves out are left out here too:
       # without the JIT stdlib-crypto-asymmetric alone runs for hours
       # (docs/ContinuousIntegration.md, "Tests that run on fewer targets").
-      # 321 = the 327 tests CMake registers on Windows, less those 6.
+      # The historical floor is 321, the original 327 Windows tests less those six.
       - name: Test
         run: >
           ctest --test-dir build-${{ matrix.preset }} --parallel 6 --no-tests=error
