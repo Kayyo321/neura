@@ -531,12 +531,14 @@ def native_cases(args, root, cert, key, other_cert, other_key):
                 url = f"http://127.0.0.1:{peer.port}{path}"
                 expect(invoke(api, url, mode), expected, f"{api}-{case}")
         redirect_cases(invoke, api, cert, key)
-        # Bound but deliberately not listening, so refusal has no port-reuse race.
+        # A port freed just before the request: nothing listens on it, so Linux and
+        # macOS both refuse the connection. A bound socket that never listens is
+        # refused on Linux, but macOS drops the SYN and the connect times out.
         with socket.socket() as reserved:
             reserved.bind(("127.0.0.1", 0))
             url = f"http://127.0.0.1:{reserved.getsockname()[1]}/"
-            expect(invoke(api, url), "Io:ConnectionRefused", f"{api}-refused")
-            expect(invoke(api, url, granted=False), "Io:CapabilityDenied", f"{api}-http-client-default-denied")
+        expect(invoke(api, url), "Io:ConnectionRefused", f"{api}-refused")
+        expect(invoke(api, url, granted=False), "Io:CapabilityDenied", f"{api}-http-client-default-denied")
         with socket.socket() as unused:
             unused.bind(("127.0.0.1", 0))
             unused.listen(1)

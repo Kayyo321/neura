@@ -173,6 +173,10 @@ def main():
                     arguments = ["--", case, address, "" if case == "untrusted" else str(cert), name]
                     options = ["--record", str(trace)] if case == "round-trip" else []
                     if case == "refused":
+                        # Nothing listens on a closed port, so Linux and macOS both refuse the
+                        # connection. A bound socket that never listens is refused on Linux, but
+                        # macOS drops the SYN and the connect times out.
+                        listener.close()
                         actual = run(runner + arguments)
                     else:
                         listener.listen(1)
