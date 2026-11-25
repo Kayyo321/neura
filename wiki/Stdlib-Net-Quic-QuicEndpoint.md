@@ -27,7 +27,7 @@ The following public declarations are taken from the module source; each links t
 - **QuicEndpoint.QuicEndpoint** · [`export let accept = func -> Result<QuicConnection>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L47)
   Waits for the next connection and completes its handshake within the configured handshake timeout (`Listener`). Tagged `#NoDiscard`.
 - **QuicEndpoint.QuicEndpoint** · [`export let accept_within = func(timeout: Duration) -> Result<QuicConnection>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L52)
-  As `accept`, within `timeout` (zero: none). A separate name, because `accept` implements `Listener` and an overload group cannot. Tagged `#NoDiscard`.
+  As `accept`, within `timeout` (zero: none). A separate name, because `accept` implements `Listener` and an overload group cannot. Tagged `#NoDiscard`. Since 0.3.1.
 - **QuicEndpoint.QuicEndpoint** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L56)
   Closes the endpoint and every connection it accepted, and releases the port.
 - **QuicEndpoint.QuicEndpoint** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L64)

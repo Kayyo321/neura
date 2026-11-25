@@ -48,7 +48,7 @@ export let QuicEndpoint = module (
 
         /// @brief As `accept`, within `timeout` (zero: none). A separate name, because `accept` implements
         /// `Listener` and an overload group cannot.
-        .NoDiscard
+        .[NoDiscard, Since("0.3.1")]
         export let accept_within = func(timeout: Duration) -> Result<QuicConnection> =>
             accept_nanos(support.timeout_nanos(timeout));
 

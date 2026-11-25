@@ -11,6 +11,7 @@ let.promote _ = import:Std.Net.Quic.SessionTicket;
 let.promote _ = import:Std.Net.Core.SocketAddr;
 let stream_ids = import:Std.Net.Quic.StreamId;
 let support = import:Std.Net.Socket.Internal.Support;
+let tls = import:Std.Net.Tls.TlsConfig;
 let.promote _ = import:Std.Core.Unit;
 
 /// @brief A QUIC connection (RFC 9000) over the pinned OpenSSL 4.1 QUIC stack, as an immutable handle that any
@@ -31,7 +32,14 @@ let.promote _ = import:Std.Core.Unit;
 .Since("0.3.0")
 export let QuicConnection = module (
     /// @brief The stream limit the pinned stack advertises; any other configured limit is unsupported.
+    .Since("0.3.1")
     export const StackStreamLimit: int64 = 100;
+    /// @brief The idle timeout the connections use, the stack's default; any other configured value is refused.
+    .Since("0.3.1")
+    export const StackIdleTimeoutNanos: int64 = 30000000000;
+    /// @brief The maximum UDP payload the connections send, the stack's default; any other value is refused.
+    .Since("0.3.1")
+    export const StackDatagramSize: int64 = 1200;
 
     /// @brief One QUIC connection.
     .[Final, Immutable]
@@ -58,11 +66,12 @@ export let QuicConnection = module (
         };
 
         /// @brief The default timeout of waiting operations; zero waits without limit.
+        .Since("0.3.1")
         export let timeout = func -> Duration => of_nanos(timeout_nanos);
 
         /// @brief Opens a stream of this side, bidirectional or send-only, without waiting. Fails with
         /// `quic.busy` at the peer's stream limit.
-        .NoDiscard
+        .[NoDiscard, Since("0.3.1")]
         export let open = func(bidirectional: bool) -> Result<QuicStream> {
             return match (host.open_stream(id, bidirectional)) {
                 host.StreamOutcome.Ok(stream) => Result<QuicStream>.Ok(new QuicStream(id, stream, true,
@@ -73,7 +82,7 @@ export let QuicConnection = module (
         };
 
         /// @brief Waits for the next stream the peer opens, with the default timeout or `timeout`.
-        .NoDiscard
+        .[NoDiscard, Since("0.3.1")]
         export let accept = func -> Result<QuicStream> => accept_within(timeout_nanos)
             or func(timeout: Duration) -> Result<QuicStream> => accept_within(support.timeout_nanos(timeout));
 
@@ -142,6 +151,7 @@ export let QuicConnection = module (
         /// the streams' buffered data. Every handle of the connection fails with `Closed` from the start.
         /// `true` when the connection terminated within the default timeout (or two seconds without one),
         /// `false` when it was released before that.
+        .Since("0.3.1")
         export let close_with = func(code: int64, reason: string) -> Result<bool> {
             return match (host.close(id, code, reason, timeout_nanos)) {
                 host.CloseOutcome.Ok(terminated) => Result<bool>.Ok(terminated),
@@ -200,6 +210,7 @@ export let QuicConnection = module (
 
     /// @brief A connection handle from the host's [ID, ALPN]. Library use: `QuicEndpoint.accept` builds its
     /// connections with it.
+    .Since("0.3.1")
     export let connection_of = func(opened: [int64, string], address: string, is_client: bool, nanos: int64)
         -> QuicConnection {
         let [id, protocol] = opened;
@@ -208,7 +219,7 @@ export let QuicConnection = module (
 
     /// @brief `Ok` when the pinned QUIC stack can honour `config`, else the typed `Unsupported` of the first
     /// setting it cannot.
-    .NoDiscard
+    .[NoDiscard, Since("0.3.1")]
     export let check_limits = func(config: QuicConfig) -> Result<Unit> {
         if (config.max_datagram_frame_size > 0) {
             return Result<Unit>.Err(limited("RFC 9221 datagrams"));
@@ -222,8 +233,27 @@ export let QuicConnection = module (
         if (config.max_bidirectional_streams != StackStreamLimit || config.max_unidirectional_streams != StackStreamLimit) {
             return Result<Unit>.Err(limited("stream limits other than " .. StackStreamLimit.to_string()));
         }
+        // Not offered yet, refused rather than ignored.
+        last settings = config.tls_config;
+        if (config.idle_timeout.to_nanos() != StackIdleTimeoutNanos) {
+            return Result<Unit>.Err(not_offered("an idle timeout other than 30 seconds"));
+        }
+        if (config.max_datagram_size != StackDatagramSize) {
+            return Result<Unit>.Err(not_offered("a maximum datagram size other than 1200 bytes"));
+        }
+        if (settings.client_ca_file != "" || (settings.role == tls.TlsRole.Client && settings.certificate_file != "")) {
+            return Result<Unit>.Err(not_offered("mutual TLS"));
+        }
+        if (settings.kernel_offload) {
+            return Result<Unit>.Err(not_offered("kernel TLS offload"));
+        }
         return bytes.ok();
     };
+
+    /// @brief A typed `Unsupported` for a setting `Std.Net.Quic` does not honour yet.
+    let not_offered = func(feature: string) -> errors.Error =>
+        errors.Error.Io { kind: errors.IoErrorKind.Unsupported, message: feature
+            .. " is not offered by Std.Net.Quic yet", path: "" };
 
     /// @brief A typed `Unsupported` for a feature the pinned QUIC stack lacks.
     let limited = func(feature: string) -> errors.Error =>

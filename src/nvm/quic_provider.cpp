@@ -378,7 +378,8 @@ bool reports(SSL* ssl, std::uint64_t events) {
     item.events = events;
     timeval zero{};
     std::size_t ready = 0;
-    if (SSL_poll(&item, 1, sizeof item, &zero, SSL_POLL_FLAG_NO_HANDLE_EVENTS, &ready) != 1) return true;
+    // A failed poll leaves the operation to its socket and timers; it never makes it busy-wait.
+    if (SSL_poll(&item, 1, sizeof item, &zero, SSL_POLL_FLAG_NO_HANDLE_EVENTS, &ready) != 1) return false;
     return ready > 0 && (item.revents & events) != 0;
 }
 
@@ -508,9 +509,16 @@ public:
             return fail(code);
         };
         operation->progress = [state, id, accepted]() {
-            if (*accepted) return true; // Its handshake runs on its own connection's timers and datagrams.
             auto* live = state->objects.find<Endpoint>(id);
-            return !live || reports(QuicState::handle(*live), SSL_POLL_EVENT_IC | SSL_POLL_EVENT_EL);
+            if (!live) return true;
+            // A connection taken from the listener and still in its handshake:
+            // ready once the handshake finished or the connection failed, which
+            // the listener's event processing may have brought about.
+            if (*accepted) {
+                auto* ssl = (*accepted)->ssl->ssl;
+                return SSL_is_init_finished(ssl) == 1 || reports(ssl, SSL_POLL_EVENT_EC);
+            }
+            return reports(QuicState::handle(*live), SSL_POLL_EVENT_IC | SSL_POLL_EVENT_EL);
         };
         operation->retry = [state, id, accepted, release]() -> std::optional<HostCompletion> {
             auto* live = state->objects.find<Endpoint>(id);
@@ -841,7 +849,6 @@ public:
             std::move(std::get<std::unique_ptr<Connection>>(*taken)));
         auto state = state_;
         auto words = std::make_shared<std::string>(reason);
-        const auto endpoint = (*closing)->endpoint;
         auto operation = std::make_shared<Operation>();
         operation->engine = [closing]() -> SSL* { return *closing ? (*closing)->ssl->ssl : nullptr; };
         operation->interest = [state, closing]() -> PosixWait::Interest {
@@ -865,7 +872,6 @@ public:
             closing->reset();
             return HostCompletion::ok(scalar(1));
         };
-        (void)endpoint;
         const auto bound = timeout > 0 ? timeout : 2 * 1'000'000'000LL;
         if (blocking) return run_blocking(operation, bound);
         if (auto done = operation->retry()) return *done;
@@ -980,6 +986,7 @@ void add_quic_services(const QuicAdder& add, const QuicOverlapAdder& overlap, St
     waiting(write_signature, &Services::stream_write);
     waiting(close_signature, &Services::close);
 #else
+    (void)prefixes;
     const auto unsupported = [granted](const HostRequest&) {
         return granted->net ? fail(host_error::unsupported) : denied();
     };

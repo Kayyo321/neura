@@ -115,6 +115,19 @@ struct Fixture {
         }
     }
 
+    // How many times the driver's wait returned within `milliseconds` while
+    // nothing completes: a pending operation that made the driver spin would
+    // give thousands.
+    int wakeups(int milliseconds) {
+        const auto end = clock.now() + std::int64_t{milliseconds} * 1'000'000;
+        int count = 0;
+        while (clock.now() < end) {
+            for (auto& answer : pending.wait(end)) done.emplace(answer.sequence, answer.completion);
+            ++count;
+        }
+        return count;
+    }
+
     HostCompletion take(std::uint64_t id) {
         until({id});
         auto answer = done.at(id);
@@ -161,6 +174,9 @@ int main(int argc, char** argv) {
                                           text("localhost"), texts({"spike"}), text(cert)};
         };
         const auto accepting = f.start("accept", {number(endpoint), number(10 * seconds)});
+        const auto quiet_accept = f.wakeups(300);
+        std::cout << "  (accept with no client: " << quiet_accept << " driver wakeups in 300 ms)\n";
+        assert(quiet_accept < 40 && f.done.empty());
         const auto connecting = f.start("connect", connect_args());
         const auto client = first_int(f.take(connecting));
         const auto server = first_int(f.take(accepting));
@@ -232,6 +248,19 @@ int main(int argc, char** argv) {
         }
         std::cout << "PASS accept_stream and two reads pending together complete in one driver check\n";
 
+        // An idle connection with a read pending on each side is quiet.
+        const auto idle_server = f.start("stream_read", {number(server), number(second), int32_value(16),
+                                                         number(10 * seconds)});
+        const auto idle_client = f.start("stream_read", {number(client), number(second), int32_value(16),
+                                                         number(10 * seconds)});
+        const auto quiet_idle = f.wakeups(300);
+        std::cout << "  (idle connection, a read pending on each side: " << quiet_idle << " wakeups in 300 ms)\n";
+        assert(quiet_idle < 40 && !f.done.contains(idle_server) && !f.done.contains(idle_client));
+        f.pending.cancel(idle_server);
+        f.pending.cancel(idle_client);
+        expect_code(f.take(idle_server), host_error::cancelled, "cancelled idle read");
+        expect_code(f.take(idle_client), host_error::cancelled, "cancelled idle read");
+
         // A write larger than the peer's stream window stays pending; a second
         // write on that stream is refused at once, a read is not.
         const std::string big(2 * 1024 * 1024, 'b');
@@ -244,6 +273,13 @@ int main(int argc, char** argv) {
                     host_error::busy, "second write on a stream with a write pending");
         const auto client_read = f.start("stream_read", {number(client), number(stream), int32_value(16),
                                                          number(10 * seconds)});
+        // While the peer's window fills, acknowledgments wake the driver; once
+        // it is full and acknowledged, the blocked write is quiet.
+        const auto filling = f.wakeups(1000);
+        const auto quiet_blocked = f.wakeups(300);
+        std::cout << "  (write blocked by flow control: " << filling << " wakeups while the window filled, then "
+                  << quiet_blocked << " in 300 ms)\n";
+        assert(quiet_blocked < 40 && !f.done.contains(blocked));
         std::size_t received = 0;
         while (received < big.size()) {
             const auto chunk = f.take(f.start("stream_read", {number(server), number(stream), int32_value(1 << 20),
@@ -286,6 +322,29 @@ int main(int argc, char** argv) {
         assert(f.now("open_stream", {number(again), scalar(1)}).success);
         std::cout << "PASS a reused slot gets a new generation; the stale ID is refused\n";
         assert(f.now("close", {number(endpoint), number(0), text(""), number(2 * seconds)}).success);
+
+        // A client that sends its first flight and stops: the endpoint's
+        // pending accept stays quiet instead of spinning.
+        const auto second_listen = f.now("listen", {text("127.0.0.1"), int32_value(0), text(cert), text(key),
+                                                    texts({"spike"})});
+        assert(second_listen.success);
+        const auto second_endpoint = as_int64(second_listen.value.elements.at(0));
+        const auto second_port = as_int32(second_listen.value.elements.at(1));
+        const auto stalled_accept = f.start("accept", {number(second_endpoint), number(10 * seconds)});
+        {
+            HostRequest stalled{901, 0, {text("127.0.0.1"), int32_value(second_port), number(10 * seconds),
+                                         text("localhost"), texts({"spike"}), text(cert)}};
+            stalled.now = f.clock.now();
+            // Never added to the driver: the client's Initial is sent and nothing follows.
+            auto never_driven = f.begin.at("neura.net.quic.connect")(stalled);
+            assert(std::holds_alternative<PendingOperation>(never_driven));
+            const auto quiet_handshake = f.wakeups(300);
+            std::cout << "  (accept with a stalled client handshake: " << quiet_handshake << " wakeups in 300 ms)\n";
+            assert(quiet_handshake < 40 && !f.done.contains(stalled_accept));
+        }
+        f.pending.cancel(stalled_accept);
+        expect_code(f.take(stalled_accept), host_error::cancelled, "cancelled accept");
+        assert(f.now("close", {number(second_endpoint), number(0), text(""), number(2 * seconds)}).success);
     }
     fs::remove_all(dir);
     return 0;

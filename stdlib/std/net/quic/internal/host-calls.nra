@@ -3,10 +3,10 @@ let host_error = import:Std.Core.Internal.HostError;
 let.promote _ = import:Std.Core.Result;
 let.promote _ = import:Std.Core.Unit;
 
-/// @brief The host calls of `Std.Net.Quic` and handles over them. Library use only.
+/// @brief The host calls of `Std.Net.Quic`. Library use only.
 ///
-/// A QUIC endpoint, connection or stream lives in the host provider. The library holds `#Immutable` handles of
-/// its IDs, so a handle crosses a spawn or a channel and any task may wait on it (Concurrency.md, "Host
+/// A QUIC endpoint, connection or stream lives in the host provider. `QuicEndpoint`, `QuicConnection` and
+/// `QuicStream` are `#Immutable` handles of its IDs, so a handle crosses a spawn or a channel and any task may wait on it (Concurrency.md, "Host
 /// resource handles"). The provider allows one pending operation per direction: one accept per endpoint, one
 /// `accept_stream` per connection, and one read and one write per stream. A second one fails at once with the
 /// Custom error `quic.busy`; it is never queued. An ID the provider no longer holds, because the handle was
@@ -81,49 +81,4 @@ export let HostCalls = module (
         }
         return host_error.io(code, message, path);
     };
-
-    /// @brief An endpoint the provider holds.
-    .[Final, Immutable]
-    export let EndpointHandle = class (
-        /// @brief The provider's endpoint ID.
-        export last id: int64;
-        /// @brief The bound port.
-        export last port: int;
-
-        /// @brief Stores the ID and port.
-        export let init = func(endpoint: int64, bound: int) {
-            id = endpoint;
-            port = bound;
-        };
-    );
-
-    /// @brief A connection the provider holds.
-    .[Final, Immutable]
-    export let ConnectionHandle = class (
-        /// @brief The provider's connection ID.
-        export last id: int64;
-        /// @brief The ALPN protocol the handshake selected.
-        export last alpn: string;
-
-        /// @brief Stores the ID and protocol.
-        export let init = func(connection: int64, protocol: string) {
-            id = connection;
-            alpn = protocol;
-        };
-    );
-
-    /// @brief One stream of a connection.
-    .[Final, Immutable]
-    export let StreamHandle = class (
-        /// @brief The provider's connection ID.
-        export last connection: int64;
-        /// @brief The QUIC stream ID.
-        export last stream: int64;
-
-        /// @brief Stores the connection and stream IDs.
-        export let init = func(owner: int64, id: int64) {
-            connection = owner;
-            stream = id;
-        };
-    );
 );

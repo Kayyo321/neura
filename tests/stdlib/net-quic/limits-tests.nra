@@ -53,6 +53,37 @@ let LimitsTests = module (
             strings.join(messages, "|"));
     };
 
+    export let test_settings_not_yet_offered_are_refused = func {
+        last messages: string[list] = new;
+        last limit = connections.StackStreamLimit;
+        last builder = tls.builder();
+        builder.set_versions(tls.TlsVersion.Tls13, tls.TlsVersion.Tls13);
+        builder.set_alpn(new(["h3"]));
+        last plain = result.expect<tls.TlsConfig>(builder.build_client(), "tls");
+        messages.append(connect_failure(result.expect<config.QuicConfig>(config.create(plain, limit, limit, 0,
+            duration.of_seconds(10), 1200, config.CongestionAlgorithm.NewReno, false), "config"), new));
+        messages.append(connect_failure(result.expect<config.QuicConfig>(config.create(plain, limit, limit, 0,
+            duration.of_seconds(30), 1350, config.CongestionAlgorithm.NewReno, false), "config"), new));
+        builder.set_certificate("client.pem", "client.key");
+        last mutual = result.expect<tls.TlsConfig>(builder.build_client(), "tls");
+        messages.append(connect_failure(result.expect<config.QuicConfig>(config.create(mutual, limit, limit, 0,
+            duration.of_seconds(30), 1200, config.CongestionAlgorithm.NewReno, false), "config"), new));
+        test.assert_equal_string("Unsupported: an idle timeout other than 30 seconds is not offered by Std.Net.Quic yet|"
+            + "Unsupported: a maximum datagram size other than 1200 bytes is not offered by Std.Net.Quic yet|"
+            + "Unsupported: mutual TLS is not offered by Std.Net.Quic yet", strings.join(messages, "|"));
+        last server_builder = tls.builder();
+        server_builder.set_versions(tls.TlsVersion.Tls13, tls.TlsVersion.Tls13);
+        server_builder.set_alpn(new(["h3"]));
+        server_builder.set_certificate("server.pem", "server.key");
+        server_builder.set_client_ca_file("clients.pem");
+        last verifying = result.expect<tls.TlsConfig>(server_builder.build_server(), "tls");
+        last refused = test.assert_err<endpoints.QuicEndpoint>(endpoints.bind(
+            result.expect<socket_addr.SocketAddr>(socket_addr.parse("127.0.0.1:0"), "address"),
+            result.expect<config.QuicConfig>(config.create(verifying, limit, limit, 0, duration.of_seconds(30), 1200,
+                config.CongestionAlgorithm.NewReno, false), "config")));
+        test.assert_equal_string("Unsupported: mutual TLS is not offered by Std.Net.Quic yet", error.message(refused));
+    };
+
     export let test_bind_checks_the_same_limits = func {
         last refused = test.assert_err<endpoints.QuicEndpoint>(endpoints.bind(
             result.expect<socket_addr.SocketAddr>(socket_addr.parse("127.0.0.1:0"), "address"),
