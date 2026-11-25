@@ -3,8 +3,11 @@
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 import signal
+import subprocess
+import sys
 import tempfile
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -39,6 +42,39 @@ def run_pair(folder):
     assert verified["before"][0]["timing_state"] == "struck"
     assert [row["fork"] for row in clean["before"]] == [0, 1]
     assert PHASES.metrics(clean, schedule) == {"wall_ratio": 1, "cpu_ratio": 1}
+
+
+def check_source_phase_boundary(folder):
+    clock_keys = ("source_through_encoding_seconds", "source_through_encoding_cpu_seconds")
+
+    def action(label, directory):
+        # The before fork is disturbed only after encoding. The after fork
+        # has a gap through encoding that whole-process CPU can hide.
+        record = sample(struck=directory.name == "0-0-before")
+        record.update(zip(clock_keys, (0.5, 0.45 if directory.name == "0-0-after" else 0.5)))
+        return record
+
+    def admit(_):
+        return {"idle_enough": True}
+
+    def samples(record):
+        return [record]
+
+    action_args = (PHASES.SDK_LABELS, ARGS)
+    _, source_rows, source_schedule = PHASES.forks(
+        *action_args, folder / "source", action, samples, {}, admit=admit, clock_keys=clock_keys)
+    _, cold_rows, cold_schedule = PHASES.forks(
+        *action_args, folder / "cold", action, samples, {}, admit=admit)
+    assert source_schedule["status"] == cold_schedule["status"] == "complete"
+    assert source_schedule["extra_timed_forks"] == cold_schedule["extra_timed_forks"] == 1
+    assert source_rows["before"][0]["disturbed"] is False
+    assert source_rows["after"][0]["disturbed"] is True
+    assert cold_rows["before"][0]["disturbed"] is True
+    assert cold_rows["after"][0]["disturbed"] is False
+    saved = json.loads((folder / "source" / "0-0-before" / "record.json").read_text(encoding="utf-8"))
+    assert saved == source_rows["before"][0]
+    assert (saved["seconds"], saved["cpu_seconds"]) == (1.0, 0.95)
+    assert tuple(saved[key] for key in clock_keys) == (0.5, 0.5)
 
 
 def run_application(folder):
@@ -162,9 +198,11 @@ def check_stop_during_spawn(folder):
     env = {"NEURA_HELD_OUT_STOP": str(stop)}
     leader = Mock(pid=1234)
     mask_before = signal.pthread_sigmask(signal.SIG_BLOCK, [])
+    pass_fds = (17,)
 
     def spawn(*_args, **kwargs):
         assert kwargs["start_new_session"]
+        assert kwargs["pass_fds"] == pass_fds
         assert signal.pthread_sigmask(signal.SIG_BLOCK, []) == mask_before
         stop.touch()
         signal.raise_signal(signal.SIGALRM)
@@ -177,7 +215,7 @@ def check_stop_during_spawn(folder):
     with PHASES.alarm_handler(handle_stop), patch.object(PHASES.subprocess, "Popen", side_effect=spawn), \
             patch.object(PHASES.os, "killpg") as kill, patch.object(PHASES.os, "wait4") as wait:
         try:
-            PHASES.timed(["synthetic-child"], env)
+            PHASES.timed(["synthetic-child"], env, pass_fds=pass_fds)
         except PHASES.StopRequested:
             pass
         else:
@@ -187,6 +225,74 @@ def check_stop_during_spawn(folder):
         wait.assert_not_called()
         assert signal.getsignal(signal.SIGALRM) is handle_stop
         assert signal.pthread_sigmask(signal.SIG_BLOCK, []) == mask_before
+
+
+def check_descriptor_receipt(folder):
+    child = folder / "receipt-child.py"
+    child.write_text('''import json
+import sys
+
+descriptor = int(sys.argv[1].removeprefix("--report-fd="))
+mode = sys.argv[2]
+print("program output")
+print("program diagnostics", file=sys.stderr)
+with open(descriptor, "wb") as receipt:
+    if mode == "malformed":
+        receipt.write(b"{")
+    elif mode == "not-an-object":
+        receipt.write(b"[]")
+    elif mode != "missing":
+        receipt.write((json.dumps({"version": 1, "payload": "x" * 262144}) + "\\n").encode())
+sys.exit(7 if mode == "failure" else 0)
+''', encoding="utf-8")
+    receipt_path = folder / "execution.json"
+    expected = {"version": 1, "payload": "x" * 262144}
+    expected_bytes = (json.dumps(expected) + "\n").encode()
+    record = {"fixture": "synthetic"}
+
+    def anonymous_descriptor(name):
+        assert name == "neura-held-out-receipt"
+        with tempfile.TemporaryFile() as stream:
+            return os.dup(stream.fileno())
+
+    def run_child(command, env, cwd, *, pass_fds):
+        (descriptor,) = pass_fds
+        assert command[2] == f"--report-fd={descriptor}"
+        assert not receipt_path.exists()
+        result = subprocess.run(command, env=env, cwd=cwd, pass_fds=pass_fds, capture_output=True, timeout=10)
+        assert not receipt_path.exists()
+        return record, result
+
+    def run(mode, **options):
+        receipt_path.unlink(missing_ok=True)
+        return PHASES.companion_receipt([sys.executable, str(child), mode], {}, folder, receipt_path, **options)
+
+    with patch.object(PHASES.os, "memfd_create", side_effect=anonymous_descriptor, create=True), \
+            patch.object(PHASES, "timed", side_effect=run_child):
+        for mode, status, options in (("success", 0, {}), ("failure", 7, {"allow_failure": True})):
+            observed, process, receipt = run(mode, **options)
+            assert observed == record and process.returncode == status and receipt == expected
+            assert process.stdout == b"program output\n" and process.stderr == b"program diagnostics\n"
+            assert receipt_path.read_bytes() == expected_bytes
+        for mode, message, retained in (("failure", "companion failed", expected_bytes),
+                                        ("missing", "companion failed", None),
+                                        ("malformed", "invalid companion receipt", b"{"),
+                                        ("not-an-object", "invalid companion receipt object", b"[]")):
+            try:
+                run(mode)
+            except SystemExit as error:
+                assert message in str(error)
+            else:
+                raise AssertionError(f"{mode} companion receipt was accepted")
+            assert (receipt_path.read_bytes() if receipt_path.exists() else None) == retained
+    with patch.object(PHASES.os, "memfd_create", side_effect=anonymous_descriptor, create=True), \
+            patch.object(PHASES, "timed", side_effect=PHASES.StopRequested("synthetic STOP")):
+        try:
+            run("success")
+        except PHASES.StopRequested:
+            assert not receipt_path.exists()
+        else:
+            raise AssertionError("interrupted receipt was accepted")
 
 
 def check_resume(folder):
@@ -207,14 +313,16 @@ def main():
         folder = Path(scratch)
         run_denied(folder / "denied")
         run_pair(folder / "pair")
+        check_source_phase_boundary(folder)
         run_application(folder / "apps")
         check_partial_gate(folder)
         check_compile_overlap()
         check_tier_witness()
         check_suite_stderr()
         check_stop_during_spawn(folder)
+        check_descriptor_receipt(folder)
         check_resume(folder / "occupied")
-    print("held-out scheduling, qualification, tier diagnostics, output and STOP checks passed")
+    print("held-out scheduling, qualification, tier diagnostics, receipt transport, output and STOP checks passed")
 
 
 if __name__ == "__main__":

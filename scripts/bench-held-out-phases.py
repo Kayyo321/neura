@@ -24,6 +24,7 @@ GOVERNOR = Path("/sys/devices/system/cpu/cpu7/cpufreq/scaling_governor")
 RETRY_BUDGET = 2
 ADMISSION_BUDGET = 3
 IDLE_SECONDS = 4
+SOURCE_CLOCKS = ("source_through_encoding_seconds", "source_through_encoding_cpu_seconds")
 VERIFY_MODES = (
     ("tier0-reference", "0", "off", "off"),
     ("tier1-lifted", "1", "off", "off"),
@@ -92,7 +93,7 @@ def alarm_handler(handler):
         signal.signal(signal.SIGALRM, previous)
 
 
-def timed(command, env, cwd=ROOT):
+def timed(command, env, cwd=ROOT, *, pass_fds=()):
     """Match the existing wall/wait4 boundary with optional STOP interruption."""
     check_stop(env)
     stop_path = env.get("NEURA_HELD_OUT_STOP")
@@ -110,7 +111,7 @@ def timed(command, env, cwd=ROOT):
             with alarm_handler(defer_stop) if stop_path else nullcontext():
                 start = time.monotonic_ns()
                 child = subprocess.Popen(command, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=stdout,
-                                         stderr=stderr, start_new_session=bool(stop_path))
+                                         stderr=stderr, start_new_session=bool(stop_path), pass_fds=pass_fds)
             if stop_during_spawn:
                 raise StopRequested(f"STOP requested at {stop_path}")
             check_stop(env)
@@ -144,6 +145,30 @@ def checked(command, env, cwd=ROOT):
     require(process.returncode == 0,
             f"{command[0]} exited {process.returncode}\n{process.stderr.decode('utf-8', errors='replace')}")
     return record, process
+
+
+def companion_receipt(command, env, cwd, path, *, allow_failure=False):
+    # A memory-backed descriptor can hold a large receipt without blocking
+    # the child while the parent waits. Publish the raw receipt after reaping.
+    path.unlink(missing_ok=True)
+    with os.fdopen(os.memfd_create("neura-held-out-receipt"), "rb") as stream:
+        descriptor = stream.fileno()
+        record, process = timed([*command[:2], f"--report-fd={descriptor}", *command[2:]], env, cwd,
+                                pass_fds=(descriptor,))
+        stream.seek(0)
+        payload = stream.read()
+    if payload:
+        temporary = path.with_suffix(".tmp")
+        temporary.write_bytes(payload)
+        temporary.replace(path)
+    require(payload and (process.returncode == 0 or allow_failure),
+            f"{path}: {command[1]} companion failed\n{process.stderr.decode(errors='replace')}")
+    try:
+        receipt = json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise SystemExit(f"bench-held-out: {path}: invalid companion receipt: {error}") from None
+    require(isinstance(receipt, dict), f"{path}: invalid companion receipt object")
+    return record, process, receipt
 
 
 def stage_fixtures(manifest, cases, original_names, folder, env):
@@ -191,6 +216,7 @@ def sdk_provenance(binary, ref, env):
     abi = json.loads(abi.stdout)
     require(abi["version"] == 1 and re.fullmatch(r"[0-9a-f]{64}", abi["headers_sha256"]),
             f"missing ABI provenance for {companion}")
+    require(abi.get("receipt_fd_protocol") == 1, f"missing receipt descriptor protocol for {companion}")
     libs = linked_libraries(test, env)
     require(set(libs) == {"core", "sdk"} and libs == linked_libraries(companion, env) == linked_libraries(compiler, env)
             and {"core": libs["core"]} == linked_libraries(runner, env), f"mixed SDK linkage near {binary}")
@@ -263,7 +289,9 @@ def metrics(records, schedule):
             statistics.median(item["cpu_seconds"] for item in records["before"])}
 
 
-def forks(labels, args, folder, action, samples, env, limit_extra_forks=False, admit=cpu_preflight):
+def forks(labels, args, folder, action, samples, env, limit_extra_forks=False, admit=cpu_preflight,
+          *, clock_keys=("seconds", "cpu_seconds")):
+    wall_key, cpu_key = clock_keys
     order = [(fork, label) for fork in range(args.runs) for label in (labels if fork % 2 == 0 else labels[::-1])]
     accepted = {}
     verified = {label: [] for label in labels}
@@ -290,7 +318,7 @@ def forks(labels, args, folder, action, samples, env, limit_extra_forks=False, a
         record.update(fork=fork, attempt=round_index, arm=label)
         affected = False
         for sample in samples(record):
-            sample["disturbed"] = distorted(sample["seconds"], sample["cpu_seconds"]) if args.cpu7 else None
+            sample["disturbed"] = distorted(sample[wall_key], sample[cpu_key]) if args.cpu7 else None
             affected = affected or sample["disturbed"]
         state = "struck" if affected else "clean"
         record["timing_state"] = state
@@ -592,15 +620,14 @@ def measure(case, extension, args, sdks, harness, command_for, max_steps, manage
         receipt = directory / "build.json"
         image = directory / "workload.nvr"
         catalog = directory / "suite.json"
-        command = [sdks[label]["companion"], "suite-build" if suite else "program-build", str(receipt), str(image)]
+        command = [sdks[label]["companion"], "suite-build" if suite else "program-build", str(image)]
         if suite:
             command += [str(catalog), *options]
         else:
             command += case.get("build_options", [])
-        record, process = checked([*command, case["source"]], env, sources)
-        timing = read_json(receipt)
+        record, process, timing = companion_receipt([*command, case["source"]], env, sources, receipt)
         require(timing["version"] == 1 and timing["compile_ns"] > 0, f"{name}: invalid source compile receipt")
-        record.update(timing, image=str(image), image_sha256=digest(image), image_bytes=image.stat().st_size,
+        record.update(timing, receipt=str(receipt), image=str(image), image_sha256=digest(image), image_bytes=image.stat().st_size,
                       source_through_encoding_seconds=(timing["encoded_at_ns"] - record["start_ns"]) / 1e9)
         require(0 < record["source_through_encoding_seconds"] <= record["seconds"] and
                 (record["source_through_encoding_cpu_seconds"] or 0) > 0, f"{name}: compilation clocks disagree")
@@ -610,7 +637,8 @@ def measure(case, extension, args, sdks, harness, command_for, max_steps, manage
             record.update(catalog=str(catalog), catalog_sha256=digest(catalog), source_compile_stderr=str(diagnostics))
         return record
 
-    source, source_verified, source_schedule = forks(SDK_LABELS, args, folder / "source", build_image, lambda r: [r], env)
+    source, source_verified, source_schedule = forks(SDK_LABELS, args, folder / "source", build_image, lambda r: [r], env,
+                                                      clock_keys=SOURCE_CLOCKS)
     images = {}
     catalog_paths = {}
     source_diagnostics = {}
@@ -705,8 +733,7 @@ def measure(case, extension, args, sdks, harness, command_for, max_steps, manage
 
     def execute(label, directory, action, runtime_options=options, heap_probe=False):
         receipt = directory / "execution.json"
-        receipt.unlink(missing_ok=True)
-        command = [sdks[label]["companion"], action, str(receipt)]
+        command = [sdks[label]["companion"], action]
         if action == "warm":
             command += [str(args.warmups), str(args.samples)]
         if suite:
@@ -716,10 +743,7 @@ def measure(case, extension, args, sdks, harness, command_for, max_steps, manage
         command += [*runtime_options, str(images[label])]
         if not suite:
             command += ["--", *case["arguments"]]
-        record, process = timed(command, env, sources)
-        require(receipt.is_file() and (process.returncode == 0 or heap_probe),
-                f"{name}: {action} companion failed\n{process.stderr.decode(errors='replace')}")
-        raw = read_json(receipt)
+        record, process, raw = companion_receipt(command, env, sources, receipt, allow_failure=heap_probe)
         require(raw["version"] == 1 and raw["parallel_workers"] == workers, f"{name}: bad execution receipt or worker count")
         require(len(raw["invocations"]) == (args.warmups + args.samples if action == "warm" else 1),
                 f"{name}: incomplete {action} fork")
