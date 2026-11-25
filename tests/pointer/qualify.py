@@ -554,6 +554,27 @@ let reject = func {
                             span["line"] == next(i for i, line in enumerate(lines, 1) if "expose<Mutable>" in line)
                             for span in diagnostic["spans"]), result.stderr)
 
+    def test_pointer_images_declare_nvr_1_11(self):
+        # The writer selects 1.11 for retain-cell-storage itself and for the
+        # stale-view trap (writer.cpp, required_minor_version), with no task
+        # and no TRNS cell layout in the image.
+        for name, body in (
+            ("pointer", "        let ptr: Pointer<int64> = new(cell.of<int64>(1));\n"
+                        "        console.println(\"{}\", ptr.as_const().read());\n"),
+            ("list view", "        let list: int64[list] = new([1, 2]);\n"
+                          "        let view: ListPointer<int64> = new(list, 0, 2);\n"
+                          "        console.println(\"{}\", view.value_at(1));\n"),
+        ):
+            with self.subTest(image=name):
+                self.build(program(body))
+                header = self.image.read_bytes()[:8]
+                self.assertEqual(header[:4], b"NEUR")
+                self.assertEqual(int.from_bytes(header[4:6], "little"), 1)
+                self.assertEqual(int.from_bytes(header[6:8], "little"), 11)
+        # The same program without a pointer needs an earlier minor version.
+        self.build(program("        console.println(\"{}\", 1);\n"))
+        self.assertLess(int.from_bytes(self.image.read_bytes()[6:8], "little"), 11)
+
     def test_static_rejections(self):
         cases = [
             ("E0451", "unknown allocation site", '''
