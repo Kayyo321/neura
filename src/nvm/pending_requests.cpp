@@ -793,9 +793,11 @@ void PendingRequests::check(int timeout_ms, std::optional<std::uint64_t> only) {
     for (const auto& check : checks) {
         auto& entry = *check.entry;
         const auto& operation = entry.operation;
-        if (!now && operation.deadline != none) now = clock_.now();
+        if (!now && (operation.deadline != none || operation.wake_at)) now = clock_.now();
         const bool due = operation.deadline != none && operation.deadline <= *now;
-        if (!check.ready && !due) continue;
+        // A provider timer that has come due: attempt again, but never expire.
+        const bool woken = operation.wake_at && operation.wake_at(*now) <= *now;
+        if (!check.ready && !due && !woken) continue;
         auto answer = operation.attempt(false);
         if (!answer && due) answer = operation.expire();
         if (answer) entry.answer = std::move(*answer);
@@ -826,22 +828,38 @@ std::vector<PendingRequests::Done> PendingRequests::wait(std::optional<std::int6
     auto earliest = clock_deadline.value_or(none);
     bool has_native_wait = false;
     bool retry_soon = false;
+    // The earliest provider wake-up (PendingOperation::wake_at). It stays
+    // none, and every wait below is as it was, when no operation sets one.
+    auto wake = none;
+    std::optional<std::int64_t> wake_now;
     for (const auto& [sequence, entry] : entries_) {
         const auto& operation = entry.operation;
         earliest = std::min(earliest, operation.deadline);
+        if (operation.wake_at) {
+            if (!wake_now) wake_now = clock_.now();
+            wake = std::min(wake, operation.wake_at(*wake_now));
+        }
         if (waits_natively(operation.wait_source)) {
             has_native_wait = true;
         } else if (std::holds_alternative<ExternalWait>(operation.wait_source) || operation.deadline == none) {
             retry_soon = true;
         }
     }
+    // A wake-up bounds the real wait only; it is never a clock deadline.
+    const int wake_ms = wake == none ? -1 : milliseconds_until(wake, *wake_now);
+    const auto bounded = [wake_ms](int timeout_ms) {
+        if (wake_ms < 0) return timeout_ms;
+        return timeout_ms < 0 ? wake_ms : std::min(timeout_ms, wake_ms);
+    };
     if (clock_.virtual_time()) {
         if (earliest != none) {
             clock_.wait_until(earliest);
         } else if (has_native_wait) {
-            check(retry_soon ? retry_ms : -1);
+            check(bounded(retry_soon ? retry_ms : -1));
         } else if (retry_soon) {
             pause_briefly();
+        } else if (wake_ms > 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(wake_ms));
         }
         check(0);
         return collect();
@@ -849,6 +867,13 @@ std::vector<PendingRequests::Done> PendingRequests::wait(std::optional<std::int6
 
     int timeout_ms = earliest == none ? -1 : milliseconds_until(earliest, clock_.now());
     if (retry_soon) timeout_ms = timeout_ms < 0 ? retry_ms : std::min(timeout_ms, retry_ms);
+    if (wake != none && !has_native_wait && !retry_soon && (earliest == none || wake < earliest)) {
+        // Only a provider wake-up is due before anything else: sleep until it.
+        std::this_thread::sleep_for(std::chrono::milliseconds(wake_ms));
+        check(0);
+        return collect();
+    }
+    timeout_ms = bounded(timeout_ms);
     if (has_native_wait) {
         check(timeout_ms);
     } else {

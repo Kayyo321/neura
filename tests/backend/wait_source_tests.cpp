@@ -165,6 +165,51 @@ void external_cancel_and_deadline() {
     completed(pending.poll(), 4, 25);
 }
 
+// PendingOperation::wake_at: a provider timer makes the driver attempt
+// again without readiness, never expires the operation, and never moves a
+// virtual clock.
+void provider_wake_ups() {
+    Clock clock;
+    clock.time = 1'000;
+    PendingRequests pending(clock);
+    const auto signal = std::make_shared<ExternalSignal>();
+    auto timed = with_source(ExternalWait{signal});
+    int attempts = 0;
+    std::int64_t wake = PendingOperation::no_deadline;
+    timed.wake_at = [&](std::int64_t) { return wake; };
+    timed.attempt = [&](bool) -> std::optional<HostCompletion> {
+        if (++attempts == 2) return value(30);
+        return std::nullopt;
+    };
+    pending.add(30, std::move(timed), false);
+    check(pending.poll().empty() && attempts == 0, "an unset wake-up attempted the operation");
+    wake = 2'000;
+    check(pending.poll().empty() && attempts == 0, "a future wake-up attempted the operation");
+    wake = 1'000;
+    check(pending.poll().empty() && attempts == 1, "a due wake-up did not attempt the operation");
+    completed(pending.wait(std::nullopt), 30, 30);
+    check(clock.time == 1'000, "a wake-up moved the virtual clock");
+
+    // A wake-up that keeps moving never expires the operation; the deadline does.
+    auto bounded = with_source(ExternalWait{std::make_shared<ExternalSignal>()});
+    int woken = 0;
+    bool expired = false;
+    bounded.deadline = 5'000;
+    bounded.wake_at = [](std::int64_t now) { return now; };
+    bounded.attempt = [&](bool) -> std::optional<HostCompletion> {
+        ++woken;
+        return std::nullopt;
+    };
+    bounded.expire = [&] {
+        expired = true;
+        return value(31);
+    };
+    pending.add(31, std::move(bounded), false);
+    check(pending.poll().empty() && woken == 1 && !expired, "a wake-up expired the operation");
+    completed(pending.wait(std::nullopt), 31, 31);
+    check(expired && clock.time == 5'000, "the deadline did not expire a woken operation");
+}
+
 #ifdef _WIN32
 
 class ManualEvent {
@@ -521,6 +566,29 @@ void native_events() {
     }
 }
 
+// A live clock: the driver sleeps until the wake-up, not until readiness,
+// and does not spin while it waits.
+void live_wake_up() {
+    LiveClock clock;
+    PendingRequests pending(clock);
+    Pipe quiet;
+    auto timer = with_source(PosixWait{{quiet.reader(), PosixWait::Events::Read}});
+    const auto due = clock.now() + 20'000'000;
+    int attempts = 0;
+    timer.wake_at = [due](std::int64_t) { return due; };
+    timer.attempt = [&](bool) -> std::optional<HostCompletion> {
+        ++attempts;
+        if (clock.now() >= due) return value(40);
+        return std::nullopt;
+    };
+    pending.add(40, std::move(timer), false);
+    std::vector<PendingRequests::Done> done;
+    while (done.empty()) done = pending.wait(std::nullopt);
+    completed(done, 40, 40);
+    check(clock.now() >= due, "the wake-up was attempted early");
+    check(attempts <= 3, "the driver spun before the wake-up");
+}
+
 #endif
 
 } // namespace
@@ -540,6 +608,7 @@ int main() {
         many_handles();
         native_sockets();
         closed_sockets();
+        provider_wake_ups();
 #else
 #ifdef __linux__
         if (backend == IoBackend::IoUring) {
@@ -559,6 +628,8 @@ int main() {
         polled_and_external();
         external_cancel_and_deadline();
         native_events();
+        provider_wake_ups();
+        live_wake_up();
 #endif
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

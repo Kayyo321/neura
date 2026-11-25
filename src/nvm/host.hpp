@@ -156,6 +156,15 @@ struct PendingOperation {
     // The completion when the deadline passes before the operation finishes.
     // Required when there is a deadline.
     std::function<HostCompletion()> expire{};
+    // Optional, unset by default. Given the task clock's reading, the reading
+    // at which attempt(false) must run again although the wait source is not
+    // ready, or no_deadline for none. The provider recomputes it on every
+    // call from its own timers (a QUIC connection's loss, acknowledgment and
+    // idle timers). Reaching it never expires the operation: only `deadline`
+    // does. A live driver bounds its wait by it. Under virtual time it is a
+    // real-time bound on the native wait and never moves the virtual clock.
+    // Neither steps nor the trace depend on it.
+    std::function<std::int64_t(std::int64_t now)> wake_at{};
 };
 
 class HostService {
