@@ -1,0 +1,12 @@
+error[E0601]: a function given to a guard is not task-safe: it uses the reassignable binding 'counter'
+  --> $DIR/guarded-unrelated-closure.nra:20:17
+   |
+17 |         counter += 1;
+   |         ------- uses the reassignable binding 'counter' here
+...
+20 |     let guard = guards.create<Box>(func -> Box => new Box());
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this call must be task-safe
+   |
+   = note: `neura check --task-safety` reports for every function whether it is task-safe, and why not
+
+For more information about this error, try `neura explain E0601`.
