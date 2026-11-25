@@ -21,6 +21,7 @@ import pathlib
 import re
 import subprocess
 import tempfile
+import threading
 
 
 def run(command, expect=0):
@@ -84,6 +85,33 @@ def check_close_payload(trace):
     assert any(re.fullmatch(r"ok \[0, 2, 7\]", answer) for answer in answers), answers
 
 
+def no_tasks(neura, root, cert, key, mode, size):
+    """Images without tasks: nothing services a connection between calls, so
+    a client that writes and then closes, or that just ends, relies on close
+    and on the run's end flushing what OpenSSL accepted."""
+    images = {}
+    here = pathlib.Path(__file__).parent / "loopback"
+    for name in ("no-task-server", "no-task-client"):
+        images[name] = root / f"{name}.nvr"
+        if not images[name].exists():
+            run([str(neura), "build", str(here / f"{name}.nra"), "-o", str(images[name])])
+    server = subprocess.Popen([str(neura), "run", "--allow-net", "--allow-fs", str(images["no-task-server"]), "--",
+                               str(cert), str(key), str(size)], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              text=True)
+    try:
+        line = server.stdout.readline()
+        port = re.fullmatch(r"PORT (\d+)\n", line)
+        assert port, line
+        client = run([str(neura), "run", "--allow-net", "--allow-fs", str(images["no-task-client"]), "--",
+                      port.group(1), str(cert), str(size), mode])
+        out, err = server.communicate(timeout=60)
+    finally:
+        if server.poll() is None:
+            server.kill()
+    assert server.returncode == 0, (server.returncode, out, err)
+    return client, out
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--neura", type=pathlib.Path, required=True)
@@ -121,6 +149,12 @@ def main():
                         "--task-quantum", "3", str(image)] + program)
         assert replayed == expected, replayed
         print("PASS replay with every capability denied reproduces the run", flush=True)
+        size = 300000
+        for mode, expected in (("close", "client closed"), ("exit", "client ends without closing")):
+            client, server = no_tasks(args.neura, root, cert, key, mode, size)
+            assert client == f"client wrote {size} bytes\n{expected}\n", client
+            assert server == f"server read {size} bytes\n", server
+        print("PASS without tasks, close and the run's end both deliver every byte written", flush=True)
 
 
 if __name__ == "__main__":

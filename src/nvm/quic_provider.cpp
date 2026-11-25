@@ -37,6 +37,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -1052,7 +1053,27 @@ struct QuicTables {
 
 void close_quic(StandardServices::Tables& tables) {
 #if defined(NEURA_NVM_TLS) && !defined(OPENSSL_NO_QUIC)
-    if (tables.quic) tables.quic->state->objects.clear();
+    if (!tables.quic) return;
+    auto& state = *tables.quic->state;
+    // The run ended: every connection still open is closed as close() would,
+    // after its streams' buffered data, so a program that wrote and ended
+    // without closing still delivers what OpenSSL accepted. Two seconds in all
+    // bound it; then everything is released.
+    std::vector<SSL*> open;
+    state.objects.each([&](auto& object) {
+        if constexpr (std::is_same_v<std::decay_t<decltype(object)>, Connection>) {
+            if (object.ssl && object.ssl->ssl) open.push_back(object.ssl->ssl);
+        }
+    });
+    const auto deadline = SteadyClock::now() + std::chrono::seconds(2);
+    while (!open.empty() && SteadyClock::now() < deadline) {
+        state.run();
+        std::erase_if(open, [](SSL* ssl) {
+            return SSL_shutdown_ex(ssl, SSL_SHUTDOWN_FLAG_NO_BLOCK, nullptr, 0) == 1;
+        });
+        if (!open.empty()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    state.objects.clear();
 #else
     (void)tables;
 #endif

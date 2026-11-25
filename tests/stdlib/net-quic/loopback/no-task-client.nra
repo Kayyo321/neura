@@ -1,0 +1,64 @@
+// A QUIC client in an image without tasks (quic-loopback.py): it writes the
+// given number of bytes on one stream and then either closes the connection or
+// just ends, which leaves the flushing to the run's end.
+let config = import:Std.Net.Quic.QuicConfig;
+let connections = import:Std.Net.Quic.QuicConnection;
+let console = import:Std.Io.Console;
+let durations = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let ip = import:Std.Net.Core.IpAddr;
+let ipv4 = import:Std.Net.Core.Ipv4Addr;
+let optional = import:Std.Core.Optional;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let socket_addr = import:Std.Net.Core.SocketAddr;
+let streams = import:Std.Net.Quic.QuicStream;
+let tickets = import:Std.Net.Quic.SessionTicket;
+let tls = import:Std.Net.Tls.TlsConfig;
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let port = result.expect<int>(int.parse(args[0]), "port");
+        let size = result.expect<int>(int.parse(args[2]), "size");
+        let builder = tls.builder();
+        builder.set_versions(tls.TlsVersion.Tls13, tls.TlsVersion.Tls13);
+        builder.set_alpn(new(["spike"]));
+        builder.set_server_name("localhost");
+        builder.set_ca_file(args[1]);
+        let settings = result.expect<tls.TlsConfig>(builder.build_client(), "tls");
+        let quic = result.expect<config.QuicConfig>(config.create(settings, connections.StackStreamLimit,
+            connections.StackStreamLimit, 0, durations.of_seconds(30), 1200, config.CongestionAlgorithm.NewReno,
+            false, durations.of_seconds(10)), "config");
+        let target = new socket_addr.SocketAddr(ip.IpAddr.V4(ipv4.localhost()), port);
+        let connection = result.expect<connections.QuicConnection>(connections.connect(target, quic,
+            optional.Optional<tickets.SessionTicket>.None, new), "connect");
+        let stream = result.expect<streams.QuicStream>(connection.open(true), "open");
+        let data: uint8[list] = new;
+        let i = 0;
+        while (i < size) {
+            data.append((i % 251) as uint8);
+            i = i + 1;
+        }
+        match (stream.write(data)) {
+            result.Result.Ok(_) => {
+                console.print_line("client wrote " .. size.to_string() .. " bytes");
+            },
+            result.Result.Err(failure) => {
+                console.print_line("client write failed: " .. errors.message(failure));
+            },
+        }
+        if (args[3] == "close") {
+            match (connection.close()) {
+                result.Result.Ok(_) => {
+                    console.print_line("client closed");
+                },
+                result.Result.Err(failure) => {
+                    console.print_line("client close failed: " .. errors.message(failure));
+                },
+            }
+        } else {
+            console.print_line("client ends without closing");
+        }
+        return program.ExitCode.Ok;
+    };
+);
