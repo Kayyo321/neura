@@ -40,6 +40,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ### Changed
 
+- E0602 for a value in a `select` send arm is reported at that value instead of at the `select`.
 - `ConstPointer<T>` is `#NotThreadSafe` and stays in its task, even when `T` is deeply immutable, because a `Pointer<T>` to the same storage can still change what it reads. Giving one to a spawned task, a channel, a `select` send arm, or a parallel item is E0602, and reading one through a `const` global from a spawned call is E0601. Give the task `view.read()` instead. NVR 1.11 images written before this change keep their `ConstPointer` transfers: the loader still accepts their `TRNS` cell layouts, and the compiler no longer writes any. [Pointer contract](docs/lang/Neura0.3.1.md#type-erasure-and-native-code)
 - `Std.Text.Strings.join` accepts parts and separators up to the maximum text length and reports when the accumulated byte count exceeds that limit.
 - In a `let` or `const` initializer, bare `law()` starts a law declaration and requires a claim. Parenthesize the callee as `(law)()` to call a zero-argument function named `law`.

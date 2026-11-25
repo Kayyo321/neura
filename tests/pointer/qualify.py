@@ -340,7 +340,7 @@ let reject = func(view: ConstPointer<int64>, out: channels.Sender<ConstPointer<i
         out.send(view) => {},
     }
 };
-''', "E0602", "sent on a channel", "select {", (view_note,))
+''', "E0602", "sent on a channel", "out.send(view) =>", (view_note,))
 
     def test_mutable_pointer_and_view_move_through_join(self):
         source = pathlib.Path(__file__).with_name("join-move.nra").read_text(encoding="utf-8")

@@ -726,9 +726,10 @@ void TaskAnalysis::check() const {
             }
             if (node.op == IrOp::SchedulerCall) {
                 // What a channel carries is given to another task (5.1).
-                const auto require = [&](const IrType& type, const char* role, bool item = false) {
+                const auto require = [&](const IrType& type, const char* role, bool item = false,
+                                         const Span* at = nullptr) {
                     if (transferable_in(type, item)) return;
-                    auto error = Diagnostic(user_site(body.owner, node.span),
+                    auto error = Diagnostic(user_site(body.owner, at ? *at : node.span),
                                             "a value of type " + display(type) + " is not transferable, so it cannot be " +
                                             role).with_code("E0602").label("not transferable");
                     capture_note(error, type);
@@ -767,7 +768,10 @@ void TaskAnalysis::check() const {
                 } else if (node.text.starts_with("select")) {
                     for (std::size_t i = 0; i + 1 < node.operands.size();) {
                         const bool send = node.operands[i].text == "1";
-                        if (send && i + 2 < node.operands.size()) require(node.operands[i + 2].type, "sent on a channel");
+                        if (send && i + 2 < node.operands.size()) {
+                            // Reported at the value of the arm, not at the select.
+                            require(node.operands[i + 2].type, "sent on a channel", false, &node.operands[i + 2].span);
+                        }
                         i += send ? 3 : 2;
                     }
                 }
