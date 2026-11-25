@@ -119,7 +119,8 @@ export let QuicConnection = module (
         .NoDiscard
         export let finish_stream = func(stream: int64) -> Result<Unit> {
             return Result<Unit>.Err(state_error(stream, "is receive-only for this side")) unless stream_ids.may_send(stream, client);
-            return handle(stream).finish();
+            handle(stream).finish()?;
+            return bytes.ok();
         };
 
         /// @brief Unsupported: the pinned QUIC stack has no RFC 9221 datagrams.

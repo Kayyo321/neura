@@ -500,6 +500,8 @@ public:
             return fail(host_error::invalid_input);
         }
         SSL_CTX_set_alpn_select_cb(shared.context, select_alpn, &shared);
+        // Partial writes, so a write reports exactly the prefix OpenSSL took.
+        SSL_CTX_set_mode(shared.context, SSL_MODE_ENABLE_PARTIAL_WRITE);
         shared.listener = std::make_unique<Ssl>(SSL_new_listener(shared.context, 0));
         BIO* datagram = shared.listener->ssl ? BIO_new_dgram(descriptor, BIO_NOCLOSE) : nullptr;
         if (!datagram) return fail(host_error::other);
@@ -621,6 +623,7 @@ public:
         owned.context = SSL_CTX_new(OSSL_QUIC_client_method());
         if (!owned.context) return fail(host_error::other);
         SSL_CTX_set_verify(owned.context, SSL_VERIFY_PEER, nullptr);
+        SSL_CTX_set_mode(owned.context, SSL_MODE_ENABLE_PARTIAL_WRITE);
         if (!tls_material::trust(owned.context, ca_bundle)) return fail(host_error::permission_denied);
         owned.ssl = std::make_unique<Ssl>(SSL_new(owned.context));
         auto* ssl = owned.ssl->ssl;
@@ -810,23 +813,40 @@ public:
         found->second.writing = true;
         auto state = state_;
         auto sent = std::make_shared<std::size_t>(0);
+        auto concluded = std::make_shared<bool>(false);
         const auto release = [state, id, number] {
             if (auto* live = state->objects.find<Connection>(id)) {
                 if (auto at = live->streams.find(number); at != live->streams.end()) at->second.writing = false;
             }
         };
+        const auto answer = [sent](Ending ending, std::int64_t code, bool acknowledged) {
+            return HostCompletion::ok(tuple_value({int32_value(static_cast<std::int32_t>(*sent)),
+                                                   int32_value(static_cast<std::int32_t>(ending)), int64_value(code),
+                                                   scalar(acknowledged ? 1 : 0)}));
+        };
         auto operation = connection_operation(id);
-        // An early end reports the prefix OpenSSL accepted, as a cancelled
-        // or timed-out neura.net.write does; with nothing accepted, the code.
-        operation->settle = [release, sent](std::uint32_t code) {
+        // An early end reports the prefix OpenSSL accepted, as a cancelled or
+        // timed-out neura.net.write does; with nothing accepted, the code. A
+        // finish whose FIN is queued but whose data the peer has not yet
+        // acknowledged ends with acknowledged false.
+        operation->settle = [release, sent, concluded, answer](std::uint32_t code) {
             release();
-            if (*sent > 0) {
-                return HostCompletion::ok(ending_value(int32_value(static_cast<std::int32_t>(*sent)), Ending::None, -1));
-            }
+            if (*concluded || *sent > 0) return answer(Ending::None, -1, false);
             return fail(code);
         };
-        operation->progress = stream_progress(state, id, number, SSL_POLL_EVENT_W | SSL_POLL_EVENT_EW);
-        operation->retry = [state, id, number, data, fin, sent, release]() -> std::optional<HostCompletion> {
+        const auto writable = stream_progress(state, id, number, SSL_POLL_EVENT_W | SSL_POLL_EVENT_EW);
+        operation->progress = [state, id, number, concluded, writable]() {
+            if (!*concluded) return writable();
+            auto* live = state->objects.find<Connection>(id);
+            if (!live) return true;
+            const auto at = live->streams.find(number);
+            if (at == live->streams.end()) return true;
+            std::uint64_t used = 0;
+            return SSL_get_stream_write_buf_used(at->second.ssl->ssl, &used) != 1 || used == 0 ||
+                   reports(live->ssl->ssl, SSL_POLL_EVENT_EC) || reports(at->second.ssl->ssl, SSL_POLL_EVENT_EW);
+        };
+        operation->retry = [state, id, number, data, fin, sent, concluded, release,
+                            answer]() -> std::optional<HostCompletion> {
             auto* live = state->objects.find<Connection>(id);
             if (!live) return fail(host_error::not_found);
             auto at = live->streams.find(number);
@@ -847,15 +867,30 @@ public:
                 const auto [ending, code] = ending_of(ssl, stream, false);
                 release();
                 if (ending == Ending::None) return fail(failure_of(ssl));
-                return HostCompletion::ok(
-                    ending_value(int32_value(static_cast<std::int32_t>(*sent)), ending, code));
+                return answer(ending, code, false);
             }
-            if (fin && SSL_stream_conclude(stream, 0) != 1) {
+            if (!fin) {
                 release();
-                return fail(failure_of(ssl));
+                return answer(Ending::None, -1, false);
+            }
+            if (!*concluded) {
+                if (SSL_stream_conclude(stream, 0) != 1) {
+                    release();
+                    return fail(failure_of(ssl));
+                }
+                *concluded = true;
+            }
+            // finish: wait until the stream's send buffer is empty, i.e. the
+            // peer acknowledged every byte, or the peer ended the stream.
+            std::uint64_t used = 0;
+            if (SSL_get_stream_write_buf_used(stream, &used) == 1 && used != 0) {
+                const auto [ending, code] = ending_of(ssl, stream, false);
+                if (ending == Ending::None) return std::nullopt;
+                release();
+                return answer(ending, code, false);
             }
             release();
-            return HostCompletion::ok(ending_value(int32_value(static_cast<std::int32_t>(*sent)), Ending::None, -1));
+            return answer(Ending::None, -1, true);
         };
         if (blocking) return run_blocking(operation, timeout);
         if (auto done = operation->retry()) return *done;
@@ -989,7 +1024,7 @@ void add_quic_services(const QuicAdder& add, const QuicOverlapAdder& overlap, St
     const HostType connection_result = tuple({int64(), text()});
     const HostType stream_result = tuple({int64(), boolean()});
     const HostType read_result = tuple({byte_list(), int32(), int64()});
-    const HostType write_result = tuple({int32(), int32(), int64()});
+    const HostType write_result = tuple({int32(), int32(), int64(), boolean()});
     const auto listen_signature = signature("neura.net.quic.listen", {text(), int32(), text(), text(), text_list()},
                                             endpoint_result);
     const auto accept_signature = signature("neura.net.quic.accept", {int64(), int64()}, connection_result);

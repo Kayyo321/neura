@@ -294,6 +294,29 @@ int main(int argc, char** argv) {
         assert(written.success && as_int32(written.value.elements.at(0)) == static_cast<std::int32_t>(big.size()));
         std::cout << "PASS one pending write per stream; a read in the other direction runs meanwhile\n";
 
+        // finish waits until the peer acknowledged every byte, or its deadline
+        // (RULINGS-06, bug 3): acknowledged true for a small write the peer's
+        // transport acknowledges; false when the data cannot all be sent
+        // within the deadline because the peer's window is closed.
+        const auto acked_open = f.now("open_stream", {number(client), scalar(1)});
+        assert(acked_open.success);
+        const auto acked = f.take(f.start("stream_write", {number(client), number(as_int64(acked_open.value)),
+                                                           text("z"), scalar(1), number(5 * seconds)}));
+        assert(acked.success && as_bool(acked.value.elements.at(3)));
+        const auto stuck_open = f.now("open_stream", {number(client), scalar(1)});
+        assert(stuck_open.success);
+        const auto stuck = f.take(f.start("stream_write", {number(client), number(as_int64(stuck_open.value)),
+                                                           text(std::string(3 * 1024 * 1024, 's')), scalar(1),
+                                                           number(seconds / 2)}));
+        if (!stuck.success || as_bool(stuck.value.elements.at(3))) {
+            std::cerr << "stuck finish: success=" << stuck.success << " value=" << stuck.value.bits;
+            if (stuck.success) std::cerr << " sent=" << as_int32(stuck.value.elements.at(0)) << " acknowledged="
+                                         << as_bool(stuck.value.elements.at(3));
+            std::cerr << '\n';
+            return 1;
+        }
+        std::cout << "PASS finish reports whether the peer acknowledged everything before its deadline\n";
+
         // A pending read whose connection is closed by another caller.
         const auto orphan = f.start("stream_read", {number(server), number(stream), int32_value(16),
                                                     number(10 * seconds)});

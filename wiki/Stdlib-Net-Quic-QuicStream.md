@@ -32,9 +32,9 @@ The following public declarations are taken from the module source; each links t
   Up to `maximum` (1 or more) bytes, or `None` once the peer finished the stream. Uses the connection's default timeout, or `timeout` (zero: none). Tagged `#NoDiscard`.
 - **QuicStream.QuicStream** · [`export let write = func(data: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-stream.nra#L62)
   Sends all of `data`; complete once the provider has accepted every byte for sending. Uses the connection's default timeout, or `timeout`. Tagged `#NoDiscard`.
-- **QuicStream.QuicStream** · [`export let finish = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-stream.nra#L68)
-  Finishes this side of the stream (a STREAM frame with FIN). Tagged `#NoDiscard`.
-- **QuicStream.QuicStream** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-stream.nra#L71)
+- **QuicStream.QuicStream** · [`export let finish = func -> Result<bool>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-stream.nra#L70)
+  Finishes this side of the stream (a STREAM frame with FIN) and waits, within the default timeout or `timeout`, until the peer has acknowledged every byte written to it. `true` when it did, `false` when the timeout passed first (the FIN is still sent). Without a timeout it waits for the acknowledgment. Tagged `#NoDiscard`.
+- **QuicStream.QuicStream** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-stream.nra#L74)
   Text such as "QuicStream(4, 127.0.0.1:4433)".
 <!-- END SOURCE API -->
 

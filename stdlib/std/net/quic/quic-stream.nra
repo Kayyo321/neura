@@ -59,13 +59,16 @@ export let QuicStream = module (
         /// @brief Sends all of `data`; complete once the provider has accepted every byte for sending. Uses the
         /// connection's default timeout, or `timeout`.
         .NoDiscard
-        export let write = func(data: uint8[list]) -> Result<Unit> => write_within(data, false, timeout_nanos)
+        export let write = func(data: uint8[list]) -> Result<Unit> => write_within(data, timeout_nanos)
             or func(data: uint8[list], timeout: Duration) -> Result<Unit> =>
-                write_within(data, false, support.timeout_nanos(timeout));
+                write_within(data, support.timeout_nanos(timeout));
 
-        /// @brief Finishes this side of the stream (a STREAM frame with FIN).
+        /// @brief Finishes this side of the stream (a STREAM frame with FIN) and waits, within the default timeout
+        /// or `timeout`, until the peer has acknowledged every byte written to it. `true` when it did, `false` when
+        /// the timeout passed first (the FIN is still sent). Without a timeout it waits for the acknowledgment.
         .NoDiscard
-        export let finish = func -> Result<Unit> => write_within(new, true, timeout_nanos);
+        export let finish = func -> Result<bool> => finish_within(timeout_nanos)
+            or func(timeout: Duration) -> Result<bool> => finish_within(support.timeout_nanos(timeout));
 
         /// @brief Text such as "QuicStream(4, 127.0.0.1:4433)".
         export let.override to_string = func -> string => "QuicStream(" .. id.to_string() .. ", " .. label .. ")";
@@ -81,12 +84,28 @@ export let QuicStream = module (
             };
         };
 
-        let write_within = func(data: uint8[list], fin: bool, nanos: int64) -> Result<Unit> {
-            return match (host.stream_write(connection, id, data, fin, nanos)) {
+        let write_within = func(data: uint8[list], nanos: int64) -> Result<Unit> {
+            return match (host.stream_write(connection, id, data, false, nanos)) {
                 host.WriteOutcome.Ok(written) => write_result(written, data.length),
                 host.WriteOutcome.Error(code) => Result<Unit>.Err(host.error_of(code, "QUIC stream write failed",
                     label)),
             };
+        };
+
+        let finish_within = func(nanos: int64) -> Result<bool> {
+            return match (host.stream_write(connection, id, new, true, nanos)) {
+                host.WriteOutcome.Ok(written) => finish_result(written),
+                host.WriteOutcome.Error(code) => Result<bool>.Err(host.error_of(code, "QUIC stream finish failed",
+                    label)),
+            };
+        };
+
+        let finish_result = func(written: [int, int, int64, bool]) -> Result<bool> {
+            let [count, ending, code, acknowledged] = written;
+            if (ending != 0) {
+                return Result<bool>.Err(ended(ending, code));
+            }
+            return Result<bool>.Ok(acknowledged);
         };
 
         let read_result = func(read: [uint8[list], int, int64]) -> Result<Optional<uint8[list]>> {
@@ -98,8 +117,8 @@ export let QuicStream = module (
                 : Optional<uint8[list]>.Some(data));
         };
 
-        let write_result = func(written: [int, int, int64], expected: int) -> Result<Unit> {
-            let [count, ending, code] = written;
+        let write_result = func(written: [int, int, int64, bool], expected: int) -> Result<Unit> {
+            let [count, ending, code, acknowledged] = written;
             if (ending != 0) {
                 return Result<Unit>.Err(ended(ending, code));
             }

@@ -28,9 +28,9 @@ export let HostCalls = module (
     /// @brief Bytes read (empty at FIN), how the peer ended the stream or connection (0 not, 1 stream reset,
     /// 2 application close, 3 transport close) and its code (-1 when none), or a host error code.
     export let ReadOutcome = enum (Ok([uint8[list], int, int64]), Error(uint32));
-    /// @brief The byte count accepted for sending, the peer's ending and its code as for reads, or a host error
-    /// code.
-    export let WriteOutcome = enum (Ok([int, int, int64]), Error(uint32));
+    /// @brief The byte count accepted for sending, the peer's ending and its code as for reads, and, for a write
+    /// with FIN, whether the peer acknowledged every byte before the timeout; or a host error code.
+    export let WriteOutcome = enum (Ok([int, int, int64, bool]), Error(uint32));
     /// @brief Whether a close ended in OpenSSL's terminated state before its timeout, or a host error code.
     export let CloseOutcome = enum (Ok(bool), Error(uint32));
 
