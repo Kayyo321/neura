@@ -312,8 +312,13 @@ bool TaskAnalysis::class_transferable(SymbolId cls, bool item) const {
                 return !created_.contains(layout) || parts(layout);
             });
         }
-    } else if (capture_layout(cls) || concurrent_handle(cls)) {
+    } else if (capture_layout(cls)) {
         result = parts(cls);
+    } else if (concurrent_handle(cls)) {
+        // A handle is an identity of this run's scheduler state, shared by
+        // reference. A parallel item runs in a heap of its own and would
+        // receive a copy whose updates are lost, so a handle cannot enter one.
+        result = !item && parts(cls);
     } else if (not_thread_safe_class(cls) != no_symbol) {
         result = false;
     } else if (has_tag(symbol(cls), TagId::Immutable)) {
