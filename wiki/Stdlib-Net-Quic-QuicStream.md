@@ -24,8 +24,8 @@ The following public declarations are taken from the module source; each links t
   The QUIC stream ID (RFC 9000 section 2.1).
 - **QuicStream.QuicStream** · [`export last local: bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-stream.nra#L33)
   True when this side opened the stream.
-- **QuicStream.QuicStream** · [`export let init = func(owner: int64, stream: int64, opened_here: bool, default_timeout: int64, address: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-stream.nra#L40)
-  Use `QuicConnection.open` or `accept`; the IDs come from the library.
+- **QuicStream.QuicStream** · [`export let init = func(seal: host.Seal, owner: int64, stream: int64, opened_here: bool, default_timeout: int64, address: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-stream.nra#L40)
+  Use `QuicConnection.open` or `accept`: only the library holds the seal and the provider's IDs.
 - **QuicStream.QuicStream** · [`export let bidirectional = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-stream.nra#L50)
   Whether data can flow both ways on this stream.
 - **QuicStream.QuicStream** · [`export let read = func(maximum: int) -> Result<Optional<uint8[list]>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-stream.nra#L55)

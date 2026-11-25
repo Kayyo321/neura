@@ -36,8 +36,8 @@ export let QuicStream = module (
         /// @brief The connection's address text, for messages.
         last label: string;
 
-        /// @brief Use `QuicConnection.open` or `accept`; the IDs come from the library.
-        export let init = func(owner: int64, stream: int64, opened_here: bool, default_timeout: int64,
+        /// @brief Use `QuicConnection.open` or `accept`: only the library holds the seal and the provider's IDs.
+        export let init = func(seal: host.Seal, owner: int64, stream: int64, opened_here: bool, default_timeout: int64,
             address: string) {
             connection = owner;
             id = stream;

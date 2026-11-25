@@ -20,8 +20,8 @@ The following public declarations are taken from the module source; each links t
 
 - **QuicEndpoint** · [`export let QuicEndpoint = class implements Listener<SocketAddr, QuicConnection>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L28)
   A listening QUIC endpoint. Tagged `#Final`, `#Immutable`.
-- **QuicEndpoint.QuicEndpoint** · [`export let init = func(endpoint: int64, address: SocketAddr, default_timeout: int64, read_timeout: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L39)
-  Use `bind`; the ID comes from the library.
+- **QuicEndpoint.QuicEndpoint** · [`export let init = func(seal: host.Seal, endpoint: int64, address: SocketAddr, default_timeout: int64, read_timeout: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L39)
+  Use `bind`: only the library holds the seal and the provider's ID.
 - **QuicEndpoint.QuicEndpoint** · [`export let address = func -> SocketAddr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L48)
   The bound address.
 - **QuicEndpoint.QuicEndpoint** · [`export let accept = func -> Result<QuicConnection>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L53)

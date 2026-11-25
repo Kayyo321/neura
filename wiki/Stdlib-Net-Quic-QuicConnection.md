@@ -26,8 +26,8 @@ The following public declarations are taken from the module source; each links t
   True on the client side.
 - **QuicConnection.QuicConnection** · [`export last alpn: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L47)
   The ALPN protocol the handshake selected.
-- **QuicConnection.QuicConnection** · [`export let init = func(connection: int64, address: string, is_client: bool, protocol: string, default_timeout: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L52)
-  Use `connect` or `QuicEndpoint.accept`; the ID comes from the library.
+- **QuicConnection.QuicConnection** · [`export let init = func(seal: host.Seal, connection: int64, address: string, is_client: bool, protocol: string, default_timeout: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L52)
+  Use `connect` or `QuicEndpoint.accept`: only the library holds the seal and the provider's ID.
 - **QuicConnection.QuicConnection** · [`export let timeout = func -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L63)
   The default timeout of waiting operations; zero waits without limit. Since 0.3.1.
 - **QuicConnection.QuicConnection** · [`export let open = func(bidirectional: bool) -> Result<QuicStream>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L68)
@@ -60,7 +60,7 @@ The following public declarations are taken from the module source; each links t
   Text such as "QuicConnection(client, h3, 192.0.2.1:443)".
 - **QuicConnection** · [`export let connect = func(address: SocketAddr, config: QuicConfig, ticket: Optional<SessionTicket>, early_bytes: uint8[list]) -> Result<QuicConnection>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L185)
   Opens a QUIC connection to `address` with a client configuration: its TLS settings give the server name, CA file, ALPN and, for mutual TLS, the client certificate and key; its idle timeout and maximum datagram size are requested as transport parameters. The handshake is bounded by the TLS handshake timeout; later waiting operations use the configuration's `read_timeout`. A ticket, 0-RTT bytes, or a configuration the pinned stack cannot honour (see the module documentation) fail with `Unsupported` before any host call. Tagged `#NoDiscard`.
-- **QuicConnection** · [`export let connection_of = func(opened: [int64, string], address: string, is_client: bool, nanos: int64) -> QuicConnection`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L212)
+- **QuicConnection** · [`export let connection_of = func(seal: host.Seal, opened: [int64, string], address: string, is_client: bool, nanos: int64) -> QuicConnection`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L212)
   A connection handle from the host's [ID, ALPN]. Library use: `QuicEndpoint.accept` builds its connections with it. Since 0.3.1.
 - **QuicConnection** · [`export let check_limits = func(config: QuicConfig) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L221)
   `Ok` when the pinned QUIC stack can honour `config`, else the typed `Unsupported` of the first setting it cannot. Tagged `#NoDiscard`. Since 0.3.1.

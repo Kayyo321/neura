@@ -48,8 +48,8 @@ export let QuicConnection = module (
         /// @brief The default timeout of waiting operations in nanoseconds; zero waits without limit.
         last timeout_nanos: int64;
 
-        /// @brief Use `connect` or `QuicEndpoint.accept`; the ID comes from the library.
-        export let init = func(connection: int64, address: string, is_client: bool, protocol: string,
+        /// @brief Use `connect` or `QuicEndpoint.accept`: only the library holds the seal and the provider's ID.
+        export let init = func(seal: host.Seal, connection: int64, address: string, is_client: bool, protocol: string,
             default_timeout: int64) {
             id = connection;
             label = address;
@@ -67,7 +67,7 @@ export let QuicConnection = module (
         .[NoDiscard, Since("0.3.1")]
         export let open = func(bidirectional: bool) -> Result<QuicStream> {
             return match (host.open_stream(id, bidirectional)) {
-                host.StreamOutcome.Ok(stream) => Result<QuicStream>.Ok(new QuicStream(id, stream, true,
+                host.StreamOutcome.Ok(stream) => Result<QuicStream>.Ok(new QuicStream(host.Seal.Library, id, stream, true,
                     timeout_nanos, label)),
                 host.StreamOutcome.Error(code) => Result<QuicStream>.Err(
                     host.error_of(code, "QUIC stream open failed", label)),
@@ -167,11 +167,11 @@ export let QuicConnection = module (
 
         let accepted_stream = func(accepted: [int64, bool]) -> QuicStream {
             let [stream, bidirectional] = accepted;
-            return new QuicStream(id, stream, false, timeout_nanos, label);
+            return new QuicStream(host.Seal.Library, id, stream, false, timeout_nanos, label);
         };
 
         let handle = func(stream: int64) -> QuicStream =>
-            new QuicStream(id, stream, stream_ids.is_client_initiated(stream) == client, timeout_nanos,
+            new QuicStream(host.Seal.Library, id, stream, stream_ids.is_client_initiated(stream) == client, timeout_nanos,
                 label);
     );
 
@@ -200,7 +200,7 @@ export let QuicConnection = module (
         return match (host.connect(address.host_text(), address.port, nanos, tls_config.server_name, tls_config.alpn(),
             tls_config.ca_file, support.timeout_nanos(config.idle_timeout), config.max_datagram_size as int,
             tls_config.certificate_file, tls_config.key_file)) {
-            host.ConnectionOutcome.Ok(opened) => Result<QuicConnection>.Ok(connection_of(opened, text, true, support.timeout_nanos(config.read_timeout))),
+            host.ConnectionOutcome.Ok(opened) => Result<QuicConnection>.Ok(connection_of(host.Seal.Library, opened, text, true, support.timeout_nanos(config.read_timeout))),
             host.ConnectionOutcome.Error(code) => Result<QuicConnection>.Err(
                 host.error_of(code, "QUIC connect failed", text)),
         };
@@ -209,10 +209,10 @@ export let QuicConnection = module (
     /// @brief A connection handle from the host's [ID, ALPN]. Library use: `QuicEndpoint.accept` builds its
     /// connections with it.
     .Since("0.3.1")
-    export let connection_of = func(opened: [int64, string], address: string, is_client: bool,
+    export let connection_of = func(seal: host.Seal, opened: [int64, string], address: string, is_client: bool,
         nanos: int64) -> QuicConnection {
         let [id, protocol] = opened;
-        return new QuicConnection(id, address, is_client, protocol, nanos);
+        return new QuicConnection(seal, id, address, is_client, protocol, nanos);
     };
 
     /// @brief `Ok` when the pinned QUIC stack can honour `config`, else the typed `Unsupported` of the first

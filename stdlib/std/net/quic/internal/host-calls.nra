@@ -17,6 +17,10 @@ let.promote _ = import:Std.Core.Unit;
 /// application code, because a host binding's error is a bare code.
 .Since("0.3.1")
 export let HostCalls = module (
+    /// @brief The proof that a QUIC handle is built by the library: the handles' constructors take it, and only
+    /// library source can import this module, so a program cannot make a handle from a raw provider ID.
+    export let Seal = enum (Library);
+
     /// @brief An endpoint ID and its bound port, or a host error code.
     export let EndpointOutcome = enum (Ok([int64, int]), Error(uint32));
     /// @brief A connection ID and the selected ALPN protocol, or a host error code.
