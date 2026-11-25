@@ -22,11 +22,10 @@ namespace neura {
 // reference policy provenance is reserved for the class-hook milestone and
 // has no encoding here.
 //
-// No stage calls these functions yet and none rejects a program. The change
-// that enforces the region rules turns a finding into a diagnostic, on
-// lowering and again on the specialized, linked program. Until then the
-// analyses run in tests only, and the survey test lists what the repository's
-// programs would have to migrate.
+// check_storage() turns every finding into a diagnostic (E0451, E0452,
+// E0453 and E0479). The source loader runs it on the lowered program, and
+// every driver that specializes runs it again on the specialized, linked
+// program, before the optimizer.
 //
 // Values are tracked by origin: an array that a block creates (it belongs to
 // that block, or to the loop iteration that runs it), the parameter, global or
