@@ -397,6 +397,61 @@ let Proofs = module (
         self.assertEqual(built.returncode, 0, built.stderr)
         self.assertEqual(artifact_image.read_bytes(), self.image.read_bytes())
 
+    def test_reference_and_string_targets(self):
+        declarations = '''
+let Box = class (
+    export let count: int = 0;
+);
+'''
+        self.build(program('''
+        let first = new Box();
+        let boxes: Pointer<Box> = new(cell.of<Box>(first));
+        boxes.read().count = 5;
+        let alias = boxes.clone();
+        console.println("{} {}", first.count, alias.read() == first);
+        alias.write(new Box());
+        console.println("{} {}", boxes.read() == first, boxes.read().count);
+        let words: Pointer<string> = new(cell.of<string>("tea"));
+        let copy = words.read();
+        words.write(copy + " and cake");
+        console.println("{} | {} | {}", copy, words.read(), words.as_const().read());
+''', declarations))
+        self.assert_counts_agree(self.run_modes(0, "5 true\nfalse 0\ntea | tea and cake | tea and cake\n"))
+
+    def test_empty_views_and_stale_access(self):
+        self.build(program('''
+        let list: int64[list] = new([1, 2, 3]);
+        let empty: ListPointer<int64> = new(list, 3, 3);
+        let whole: ListPointer<int64> = new(list, 0, 3);
+        let none = whole.sub(1, 1);
+        console.println("{} {} {} {}", empty.len(), empty.is_empty(), none.is_empty(), whole.is_empty());
+        if (args.length != 0) {
+            if (args[0] == "empty-read") {
+                empty.value_at(0);
+            } else {
+                list.append(4);
+                if (args[0] == "stale-read") {
+                    whole.value_at(0);
+                } else if (args[0] == "stale-set") {
+                    whole.set(0, 9);
+                } else {
+                    whole.sub(0, 1);
+                }
+            }
+        }
+'''))
+        expected = "0 true true false\n"
+        self.assert_counts_agree(self.run_modes(0, expected))
+        self.run_modes(139, expected, "source bounds failure (trap reason 2)", ("empty-read",))
+        for case in ("stale-read", "stale-set", "stale-sub"):
+            self.run_modes(139, expected, "index out of bounds: stale ListPointer view", (case,))
+
+    def test_repeated_runs_are_identical(self):
+        self.build(pathlib.Path(__file__).with_name("join-move.nra").read_text(encoding="utf-8"))
+        runs = [self.run_modes(0, "6 2\n9\n") for _ in range(3)]
+        for name in runs[0]:
+            self.assertEqual(len({(run[name].stdout, run[name].stderr) for run in runs}), 1, name)
+
     def test_handle_consumption_ignores_collection(self):
         # Each retain of a Cell takes its own storage handle, so a collection
         # that sweeps an earlier pointer's storage cannot change the handle a
@@ -432,6 +487,27 @@ let churn = func(rounds: int) -> int64 {
             for result in self.run_modes(139, "", "invalid reference handle", limits=("--max-heap-cells", limit)).values():
                 details.add(re.search(r"handle \d+", result.stderr).group(0))
         self.assertEqual(len(details), 1, details)
+
+    def test_const_pointer_check_names_the_instantiation(self):
+        text = POINTER + '''
+let Mutable = class (export let field: int = 0;);
+let expose = func<T>(ptr: Pointer<T>) -> ConstPointer<T> => ptr.as_const();
+let reject = func {
+    let ptr: Pointer<Mutable> = new(cell.of<Mutable>(new Mutable()));
+    expose<Mutable>(ptr);
+};
+'''
+        self.source.write_text(text, encoding="utf-8")
+        result = self.command("check", "--error-format=json", self.source)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        diagnostic = json.loads(result.stderr.splitlines()[0])
+        self.assertEqual(diagnostic["code"], "E0580", result.stderr)
+        lines = text.splitlines()
+        primary = next(span for span in diagnostic["spans"] if span["primary"])
+        self.assertEqual(primary["line"], next(i for i, line in enumerate(lines, 1) if "ptr.as_const" in line))
+        self.assertTrue(any(span.get("label") == "instantiated here" and
+                            span["line"] == next(i for i, line in enumerate(lines, 1) if "expose<Mutable>" in line)
+                            for span in diagnostic["spans"]), result.stderr)
 
     def test_static_rejections(self):
         cases = [
@@ -505,6 +581,35 @@ let reject = func(ptr: ConstPointer<int>) {
     ptr.write(1);
 };
 ''', "ptr.write"),
+            ("E0602", "not transferable", '''
+let apply = func(step: func() -> int) -> int => step();
+let reject = func(ptr: Pointer<int>) {
+    let read = new func() -> int => ptr.read();
+    scope { spawn apply(read); }
+};
+''', "spawn apply"),
+            ("E0601", "not task-safe", '''
+let shared: Pointer<int> = new(cell.of<int>(1));
+let read = func() -> int => shared.read();
+let reject = func {
+    scope { spawn read(); }
+};
+''', "spawn read"),
+            ("E0602", "not transferable", '''
+let parallel = import:Std.Concurrent.Parallel;
+let read = func(view: ConstPointer<int>) -> int => view.read();
+let reject = func(views: ConstPointer<int>[]) {
+    let _ = parallel.map<ConstPointer<int>, int>(views, read, parallel.limits(1000, 1000));
+};
+''', "parallel.map"),
+            ("E0580", "deeply immutable", '''
+let Mutable = class (export let field: int = 0;);
+let reject = func {
+    let ptr: Pointer<Mutable> = new(cell.of<Mutable>(new Mutable()));
+    let make = ptr.as_const;
+    make();
+};
+''', "ptr.as_const"),
         ]
         for code, message, body, use in cases:
             with self.subTest(code=code, use=use):
