@@ -136,23 +136,11 @@ message(STATUS "Emitting ${example_count} examples with and without optimization
 # is still emitted on its own below.
 set(combined ${examples})
 list(FILTER combined EXCLUDE REGEX "/examples/(concurrency|apps/web-[^/]+)/")
-if(CMAKE_HOST_WIN32)
-    # The foreign example contributes a C import unit, whose link step is
-    # unavailable on Windows 0.3.0. Exercise its frontend and refusal below.
-    list(FILTER combined EXCLUDE REGEX "/examples/foreign/native[.]nra$")
-endif()
 check_both_modes("all examples" ${combined})
 set(roots -I "${SOURCE_DIR}/examples/guide" -I "${SOURCE_DIR}/examples/modules/multi-file")
 foreach(example IN LISTS examples)
     file(RELATIVE_PATH name "${SOURCE_DIR}" "${example}")
-    if(CMAKE_HOST_WIN32 AND name STREQUAL "examples/foreign/native.nra")
-        run_success(unused check ${roots} "${example}")
-        set(link_refusal "linking C imports is not supported on Windows in this release")
-        run_failure("${name} optimized emission" "${link_refusal}" emit-ir ${roots} "${example}")
-        run_failure("${name} unoptimized emission" "${link_refusal}" emit-ir --no-optimize ${roots} "${example}")
-    else()
-        check_both_modes("${name}" ${roots} "${example}")
-    endif()
+    check_both_modes("${name}" ${roots} "${example}")
 endforeach()
 
 # A fixture with rewrites shows the difference between the two modes. The

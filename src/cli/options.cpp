@@ -3,6 +3,7 @@
 #include "tool.hpp"
 
 #include "jit/jit.hpp"
+#include "platform/text.hpp"
 #include "util/diagnostic.hpp"
 #include "util/diagnostic_codes.hpp"
 #include "util/suggest.hpp"
@@ -528,7 +529,8 @@ Options read_options(int argc, char** argv) {
         } else if (runs && arg == "--stats") {
             options.stats = true;
         } else if (compiles && arg == "--c-include") {
-            options.c_import.include_dirs.push_back(fs::canonical(next()).string());
+            const auto directory = fs::canonical(platform::path_from_utf8(next()));
+            options.c_import.include_dirs.push_back(platform::native_utf8_path(directory));
         } else if (compiles && arg == "--c-define") {
             options.c_import.defines.emplace_back(next());
         } else if (compiles && arg == "--libclang") {

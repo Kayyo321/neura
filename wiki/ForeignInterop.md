@@ -83,8 +83,6 @@ The result is a `ForeignValue`. A pointer result is an `Address` segment of size
 
 `import:c("header.h", "library.a", ...)` imports the declarations of a C header as a module. Any further strings name static libraries (`.a`, `.lib`) or object files (`.o`, `.obj`) to link into the image. A header-only import such as `import:c("stdlib.h")` calls functions that the C library already provides.
 
-Windows 0.3.0 reads headers through libclang. A build that needs to link C imports fails with `linking C imports is not supported on Windows in this release`. Use `Std.DynamicForeign` to load an existing DLL.
-
 <!-- example: fragment: imports mathops.h and libmathops.a, which the page does not provide -->
 ```neura
 let mathops = import:c("mathops.h", "libmathops.a");
@@ -103,7 +101,12 @@ The module is named after the header in PascalCase, so `math-ops.h` becomes `Mat
 
 The compiler reads the header with libclang, which it loads at run time through the `third_party/neura-libclang` submodule. It generates the source of an ordinary Neura module whose functions call the header's functions through `Std.DynamicForeign`. That source then goes through the parser, lowering, optimization, and conversion like any other module. `neura c-bindings header.h` prints it.
 
-At build time, the tool links the libraries named by every C import with `--whole-archive`, plus wrappers for the headers' `static inline` functions, into one shared object. It uses the system C compiler (`--cc`, else `$CC`, else `cc`). The libraries must be compiled with `-fPIC`; a link failure reports the linker's message and that hint. The shared object goes into the image's [`NATV` section](NVR#imports-and-optional-source-maps) with the target it was linked for and the symbols the image uses. `neura run` loads it on the first call when the target matches, and unless native code is denied with `--deny-native` or `--deny-all`. A `.nir` file carries the linked object, so building from it needs neither the libraries nor a C compiler. Building twice with the same toolchain reproduces the image.
+At build time, the tool links the libraries and objects named by the C imports, along with wrappers for the headers' `static inline` functions, into one native library. It selects the C compiler from `--cc`, then `CC`, then the platform default.
+
+- On Linux and macOS the default is `cc`. Linux links archives with `--whole-archive`. macOS uses `-force_load` for each archive and a fixed install name for the resulting Mach-O library. Build the libraries with `-fPIC`. A link failure reports the linker's message and the `-fPIC` hint.
+- On Windows x86-64 use a developer environment with the Windows SDK and static CRT libraries. The default compiler is `cl.exe` when available, then `clang-cl.exe`. Inputs must be static x86-64 COFF archives or objects. Both `.lib` and `.a` can name an archive, and `.obj` and `.o` can name an object. C imports reject DLL import libraries and objects. Load an existing DLL with `SymbolLookup.library_lookup`. The linked result is a PE DLL with explicit exports for the C symbols the image uses, including the generated inline wrappers. Build the supplied C objects and libraries with the static CRT (`/MT`), which the compiler also uses for the shim. Header-only imports of external symbols use the existing native-library lookup. A `static inline` declaration requires linking its wrapper.
+
+The library goes into the image's [`NATV` section](NVR#imports-and-optional-source-maps) with the target it was linked for and the symbols the image uses. `neura run` loads it on the first call when the target matches and native code is allowed. Use `--deny-native` or `--deny-all` to deny native code. A `.nir` file carries the linked object, so building from it needs neither the libraries nor a C compiler. Building twice with the same inputs and toolchain reproduces the image.
 
 Only declarations written in the imported header itself are imported, not those of the headers it includes. Each one maps to Neura as follows:
 
@@ -142,7 +145,7 @@ Native code may call a stub only while a downcall from the same program is in pr
 
 ## Runtime services and tooling
 
-C imports need libclang 14 or newer and its builtin headers at compile time (`libclang1-19` and `libclang-common-19-dev` on Debian and Ubuntu; the Xcode Command Line Tools on macOS, which also provide the SDK with the C headers), found as [Tooling](Tooling#c-imports) describes, and a C compiler to link libraries. Running an image needs neither.
+C imports need libclang 14 or newer and its builtin headers at compile time. Debian and Ubuntu provide them in `libclang1-19` and `libclang-common-19-dev`. The Xcode Command Line Tools also provide the SDK with the C headers. Windows can use the libclang DLL from an LLVM or Visual Studio installation. Linking requires the platform C toolchain, and running the resulting image needs neither that toolchain nor libclang. [Tooling](Tooling#c-imports)
 
 
 The library binds the `neura.ffi.*` host services ([NVM](NVM#host-services)). Arguments and results travel as packed bytes in native byte order, described by a signature that names each C type. The runner calls native functions through libffi and loads libraries with the platform's loader.

@@ -887,6 +887,9 @@ add_library(neura_cli_sdk STATIC
     src/cli/commands_test.cpp
     src/cli/driver_sdk.cpp
 )
+if(WIN32)
+    target_sources(neura_cli_sdk PRIVATE src/cli/windows_c_import.cpp)
+endif()
 target_link_libraries(neura_cli_sdk PUBLIC neura_cli_core neura_compiler)
 neura_target_defaults(neura_cli_sdk)
 
@@ -2092,6 +2095,9 @@ if(BUILD_TESTING AND NEURA_SDK)
     # Tier 3's checkable variant under the region check of NEURA_TIER_CHECK=1.
     add_test(NAME backend-tier3-check COMMAND neura_backend_tests tier3_check "${CMAKE_CURRENT_SOURCE_DIR}")
     set_tests_properties(backend-tier3-check PROPERTIES ENVIRONMENT "NEURA_TIER_CHECK=1;NEURA_TIER3=interp")
+    add_test(NAME backend-tier2-portable-fallback COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/backend/check-tier2-fallback.py" "$<TARGET_FILE:neura>")
+    set_tests_properties(backend-tier2-portable-fallback PROPERTIES TIMEOUT 120)
     # These fixtures require x86-64 native Tier 3.
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND neura_host_arch STREQUAL "x86_64")
         add_test(NAME backend-tier3-nil-result COMMAND "${Python3_EXECUTABLE}"
@@ -2262,7 +2268,10 @@ if(BUILD_TESTING AND NEURA_SDK)
             PREFIX "lib"
             WINDOWS_EXPORT_ALL_SYMBOLS ON
             ARCHIVE_OUTPUT_NAME mathops-import)
-        set_target_properties(neura_test_mathops_static PROPERTIES PREFIX "lib" SUFFIX ".a")
+        # The generated C-import shim uses the release static CRT in every
+        # SDK build. The static fixture must use the same runtime in Debug.
+        set_target_properties(neura_test_mathops_static PROPERTIES PREFIX "lib" SUFFIX ".a"
+            MSVC_RUNTIME_LIBRARY MultiThreaded)
     endif()
     set(neura_native_test_dir "${CMAKE_CURRENT_BINARY_DIR}/native-tests")
     add_test(NAME backend-capabilities COMMAND ${CMAKE_COMMAND}
@@ -2515,6 +2524,18 @@ if(BUILD_TESTING AND NEURA_SDK)
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/c-import/c-import.cmake"
     )
     set_tests_properties(c-import PROPERTIES FIXTURES_REQUIRED stdlib)
+    if(WIN32)
+        add_test(NAME c-import-windows-coff COMMAND ${CMAKE_COMMAND}
+            "-DNEURA=${CMAKE_CURRENT_BINARY_DIR}/stdlib-install/prefix/bin/neura${CMAKE_EXECUTABLE_SUFFIX}"
+            "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+            "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/c-import-windows-coff-tests"
+            "-DC_COMPILER=${CMAKE_C_COMPILER}"
+            "-DCOFF_ARCHIVER=${CMAKE_AR}"
+            "-DPYTHON=${Python3_EXECUTABLE}"
+            "-DIMPORT_LIBRARY=$<TARGET_LINKER_FILE:neura_test_mathops_shared>"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/c-import/windows-coff.cmake")
+        set_tests_properties(c-import-windows-coff PROPERTIES FIXTURES_REQUIRED stdlib)
+    endif()
 
     set(native_replay_options)
     if(TARGET neura_launcher)
