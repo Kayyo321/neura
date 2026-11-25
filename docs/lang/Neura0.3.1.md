@@ -265,7 +265,7 @@ They do not replace the runtime's memory manager.
 
 The declarations and usage examples in this document describe the proposed API using Neura syntax.
 
-Version 0.3.1 implements `Pointer<T>`, `ConstPointer<T>`, and `ListPointer<T>`. The other six types are planned. Ownership transfer, restricted borrowing, weak and soft reachability, and atomic reference updates require additional compiler or runtime support.
+Version 0.3.1 implements `Pointer<T>`, `ConstPointer<T>`, and `ListPointer<T>`. It declares the other six types with the target types each accepts and its task-transfer rules, below. They have no public constructor yet, and their operations are planned. Ownership transfer, restricted borrowing, weak and soft reachability, and atomic reference updates require additional compiler or runtime support.
 
 They must not be implemented as ordinary wrappers if doing so would weaken their stated guarantees.
 
@@ -496,6 +496,17 @@ Static use of a managed pointer at the `Std.DynamicForeign` boundary is an error
 `Pointer<T>`, `ConstPointer<T>`, and `ListPointer<T>` values are never shared between live tasks. Each class is `#NotThreadSafe`. Giving one to a spawned task, sending one on a channel or in a `select` send arm, or passing one to a parallel item produces E0602. Reading one through a `const` global from a spawned call or a parallel worker produces E0601. A join result moves them from the finished task to the joining task. Isolated parallel work uses its own heap and cannot use a live view of the original storage.
 
 **0.3.1 decision (revised).** A `ConstPointer<T>` stays in its task even when `T` is deeply immutable. The storage it reads remains writable through any `Pointer<T>` to the same cell. If another task held the view, what it read would depend on the schedule, which is a data race under the [memory model](Concurrency.md#54-memory-model). To give another task what a view reads, give it the value: `view.read()` is transferable when `T` is. Sharing an immutable object by reference between tasks is planned for `SharedPointer<T>` over an `#Immutable` `T`.
+
+**Declared types (0.3.1).** The other six types are declared with these rules, which the compiler checks on each instantiation and at every task boundary:
+
+| Type | Target type | Between tasks |
+| --- | --- | --- |
+| `UniquePointer<T>` | A class or interface (E0418 otherwise) | Stays in its task (`#NotThreadSafe`); a join result moves it |
+| `SharedPointer<T>`, `WeakPointer<T>`, `SoftPointer<T>` | A class, interface, array, or list (E0418 otherwise) | Shared when `T` is deeply immutable and transferable; otherwise stays in its task (E0602) |
+| `AtomicPointer<T>` | An `#Immutable` class (E0418 for any other type, E0580 for a mutable class) | Shared |
+| `LockedPointer<T>` | Any type | Shared |
+
+None of them is a parallel item (E0602) or a `const` global that a parallel worker reads (E0601): a parallel item runs in a heap of its own and would receive a copy. Each is a managed pointer at the native boundary, in casts, and for `destroy`, like the three implemented types.
 
 ---
 

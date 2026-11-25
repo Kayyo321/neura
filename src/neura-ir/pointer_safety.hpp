@@ -8,7 +8,24 @@
 
 namespace neura {
 
-enum class PointerKind { None, Mutable, Const, List };
+enum class PointerKind { None, Mutable, Const, List, Unique, Shared, Weak, Soft, Atomic, Locked };
+
+// The source name of each pointer class, for diagnostics.
+inline std::string_view pointer_kind_name(PointerKind kind) {
+    switch (kind) {
+    case PointerKind::Mutable: return "Pointer";
+    case PointerKind::Const: return "ConstPointer";
+    case PointerKind::List: return "ListPointer";
+    case PointerKind::Unique: return "UniquePointer";
+    case PointerKind::Shared: return "SharedPointer";
+    case PointerKind::Weak: return "WeakPointer";
+    case PointerKind::Soft: return "SoftPointer";
+    case PointerKind::Atomic: return "AtomicPointer";
+    case PointerKind::Locked: return "LockedPointer";
+    case PointerKind::None: break;
+    }
+    return {};
+}
 
 // Only declarations descended from the trusted standard library file
 // have pointer-specific construction, storage, or transfer rules.
@@ -35,6 +52,12 @@ inline PointerKind pointer_class(const IrProgram& program, SymbolId id) {
     if (pointer_class_name(cls, "Pointer")) return PointerKind::Mutable;
     if (pointer_class_name(cls, "ConstPointer")) return PointerKind::Const;
     if (pointer_class_name(cls, "ListPointer")) return PointerKind::List;
+    if (pointer_class_name(cls, "UniquePointer")) return PointerKind::Unique;
+    if (pointer_class_name(cls, "SharedPointer")) return PointerKind::Shared;
+    if (pointer_class_name(cls, "WeakPointer")) return PointerKind::Weak;
+    if (pointer_class_name(cls, "SoftPointer")) return PointerKind::Soft;
+    if (pointer_class_name(cls, "AtomicPointer")) return PointerKind::Atomic;
+    if (pointer_class_name(cls, "LockedPointer")) return PointerKind::Locked;
     return PointerKind::None;
 }
 

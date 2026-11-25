@@ -291,6 +291,58 @@ private:
         return result;
     }
 
+    // The targets each pointer kind accepts (docs/lang/Neura0.3.1.md, section
+    // 2): UniquePointer owns a class instance; SharedPointer, WeakPointer, and
+    // SoftPointer share a managed object, which an array or list also is; an
+    // AtomicPointer holds a deeply immutable class instance; LockedPointer
+    // guards any value. Checked on each concrete instantiation.
+    void check_pointer_target(PointerKind pointer, const std::string& name, const IrType& target, const Span& where,
+                              const Origin& origin) {
+        if (target.kind == TypeKind::TypeParameter) return;
+        const bool object = target.kind == TypeKind::Object && !is_primitive_reference(target);
+        const bool interface = object && target.symbol < program_.symbols.size() &&
+                               symbol(target.symbol).kind == SymbolKind::Interface;
+        std::string needs;
+        switch (pointer) {
+        case PointerKind::Unique:
+            if (!object) needs = "a class or interface type, whose instance it owns";
+            break;
+        case PointerKind::Shared:
+        case PointerKind::Weak:
+        case PointerKind::Soft:
+            if (!object && target.kind != TypeKind::Array && target.kind != TypeKind::List)
+                needs = "a managed object type: a class, an interface, an array, or a list";
+            break;
+        case PointerKind::Atomic:
+            if (!object || interface) needs = "an #Immutable class type";
+            break;
+        default:
+            break;
+        }
+        const auto label = [&](Diagnostic& error) {
+            if (!origin.span.file.empty() && origin.span.offset != where.offset)
+                error.label(origin.span, "instantiated here");
+        };
+        if (!needs.empty()) {
+            auto error = Diagnostic(where, std::string(pointer_kind_name(pointer)) + " needs " + needs + ", not " +
+                                               type_text(target))
+                .with_code("E0418").label("in '" + name + "'");
+            label(error);
+            if (pointer != PointerKind::Atomic) error.help("hold a value in a LockedPointer, or in a Pointer to a Cell");
+            throw error;
+        }
+        if (pointer == PointerKind::Atomic) {
+            if (const auto problem = mutable_part(program_, target)) {
+                auto error = Diagnostic(where, "an AtomicPointer can hold only a deeply immutable value")
+                    .with_code("E0580").label("'" + name + "' would publish a mutable " + type_text(target));
+                if (problem->span) error.label(*problem->span, problem->text);
+                label(error);
+                error.help("mark the class #Immutable, or guard mutable state with a LockedPointer");
+                throw error;
+            }
+        }
+    }
+
     void check_limits(const std::string& name, std::size_t nesting, const Span& where, const Origin& origin) {
         // The instantiation that the program wrote, where the chain starts.
         const auto start = [&](Diagnostic& error) {
@@ -427,8 +479,10 @@ private:
         instances_.emplace(name, instance);
         instance_depth_[instance] = 1 + depth(arguments);
         instance_of_[instance] = {generic, arguments};
-        if (!arguments.empty() && pointer_class(program_, instance) != PointerKind::None)
+        if (const auto pointer = pointer_class(program_, instance); pointer != PointerKind::None && !arguments.empty()) {
             program_.pointer_pointees.emplace_back(instance, arguments.front());
+            check_pointer_target(pointer, display_name, arguments.front(), where, origin);
+        }
 
         Substitution substitution;
         const auto generics = program_.symbols[generic].generics;

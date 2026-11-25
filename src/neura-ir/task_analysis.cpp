@@ -305,7 +305,18 @@ bool TaskAnalysis::class_transferable(SymbolId cls, bool item) const {
         });
     };
     bool result = false;
-    if (signature_layout(cls)) {
+    if (const auto pointer = pointer_class(program_, cls);
+        pointer == PointerKind::Shared || pointer == PointerKind::Weak || pointer == PointerKind::Soft) {
+        // Tasks may share a pointer to a target that never changes. A parallel
+        // item runs in a heap of its own and cannot share it.
+        const auto* target = pointer_value_type(program_, cls);
+        result = !item && target && target->kind != TypeKind::TypeParameter && !mutable_part(program_, *target) &&
+                 transferable_in(*target, false);
+    } else if (pointer == PointerKind::Atomic || pointer == PointerKind::Locked) {
+        // Their targets are deeply immutable, or reached only under a guard;
+        // their identity is what tasks share, so an item cannot receive one.
+        result = !item;
+    } else if (signature_layout(cls)) {
         // Section 5.2's union rule, applied to values: a function value is
         // transferable when every closure of its type that the program can
         // create is.
@@ -383,9 +394,20 @@ void TaskAnalysis::explain_class(Diagnostic& error, const IrType& type) const {
     const auto cls = type.symbol;
     const auto& item = symbol(cls);
     if (item.kind != SymbolKind::Class) return;
-    if (pointer_class(program_, cls) == PointerKind::Const) {
+    const auto pointer = pointer_class(program_, cls);
+    if (pointer == PointerKind::Const) {
         error.note("a ConstPointer reads storage that a Pointer in its task can still change, so it stays in that "
                    "task; give the other task the value it reads instead");
+    } else if (pointer == PointerKind::Unique) {
+        error.note("a UniquePointer is the only owner of its target, so it stays in its task; a join result moves "
+                   "it to the joining task");
+    } else if (pointer == PointerKind::Shared || pointer == PointerKind::Weak || pointer == PointerKind::Soft) {
+        if (const auto* target = pointer_value_type(program_, cls)) {
+            error.note("a " + std::string(pointer_kind_name(pointer)) + " crosses tasks only when its target type is "
+                       "deeply immutable and transferable, and '" + display(*target) + "' is not; share mutable "
+                       "state through a LockedPointer");
+        }
+        return;
     }
     if (const auto marked = not_thread_safe_class(cls); marked != no_symbol) {
         error.label(tag_span(symbol(marked), TagId::NotThreadSafe).value_or(symbol(marked).span),

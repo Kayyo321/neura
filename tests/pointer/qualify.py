@@ -277,6 +277,129 @@ let invoke_generic = func<T>(value: T) {
         self.assertFalse(any("monitor" in item for item in diagnostic["notes"]), result.stderr)
         return diagnostic
 
+    KINDS_HEADER = POINTER + """let parallel = import:Std.Concurrent.Parallel;
+.Immutable
+let Fixed = class (
+    export last n: int = 0;
+);
+let Mutable = class (
+    export let n: int = 0;
+);
+"""
+    # One shareable and one task-local instantiation of each declared kind.
+    SHAREABLE = ("SharedPointer<Fixed>", "WeakPointer<Fixed>", "SoftPointer<Fixed>", "AtomicPointer<Fixed>",
+                 "LockedPointer<Mutable>")
+    TASK_LOCAL = ("UniquePointer<Mutable>", "SharedPointer<Mutable>", "WeakPointer<Mutable>", "SoftPointer<Mutable>")
+
+    def accept(self, text):
+        self.source.write_text(text, encoding="utf-8")
+        result = self.command("check", "--error-format=json", self.source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_declared_kinds_accept_their_targets(self):
+        self.accept(self.KINDS_HEADER + """
+let use = func(a: UniquePointer<Mutable>, b: SharedPointer<int[]>, c: WeakPointer<Mutable>, d: SoftPointer<int[list]>,
+               e: AtomicPointer<Fixed>, f: LockedPointer<int>, g: LockedPointer<Mutable>) {};
+""")
+        for name, code, message, declaration in (
+            ("unique value", "E0418", "UniquePointer needs a class or interface type", "UniquePointer<string>"),
+            ("shared value", "E0418", "SharedPointer needs a managed object type", "SharedPointer<int>"),
+            ("weak value", "E0418", "WeakPointer needs a managed object type", "WeakPointer<bool>"),
+            ("soft tuple", "E0418", "SoftPointer needs a managed object type", "SoftPointer<[int, int]>"),
+            ("atomic interface", "E0418", "AtomicPointer needs an #Immutable class type", "AtomicPointer<Shape>"),
+            ("atomic mutable", "E0580", "an AtomicPointer can hold only a deeply immutable value",
+             "AtomicPointer<Mutable>"),
+        ):
+            with self.subTest(target=name):
+                self.reject(self.KINDS_HEADER + """
+let Shape = interface (
+    let area = func -> int;
+);
+let use = func(pointer: """ + declaration + """) {};
+""", code, message, "let use = func(pointer:")
+
+    def test_declared_kinds_follow_the_transfer_rules(self):
+        for kind in self.SHAREABLE:
+            with self.subTest(spawn=kind):
+                self.accept(self.KINDS_HEADER + f"""
+let read = func(pointer: {kind}) {{}};
+let use = func(pointer: {kind}) {{
+    scope {{ spawn read(pointer); }}
+}};
+""")
+        for kind in self.TASK_LOCAL:
+            with self.subTest(spawn=kind):
+                diagnostic = self.reject(self.KINDS_HEADER + f"""
+let read = func(pointer: {kind}) {{}};
+let use = func(pointer: {kind}) {{
+    scope {{ spawn read(pointer); }}
+}};
+""", "E0602", "given to a spawned task", "spawn read")
+                self.assertTrue(diagnostic["notes"], diagnostic)
+        for kind in self.SHAREABLE + self.TASK_LOCAL:
+            with self.subTest(item=kind):
+                self.reject(self.KINDS_HEADER + f"""
+let read = func(pointer: {kind}) -> int => 1;
+let use = func(pointers: {kind}[]) {{
+    let _ = parallel.map<{kind}, int>(pointers, read, parallel.limits(1000, 1000));
+}};
+""", "E0602", "given to a parallel item", "parallel.map")
+            with self.subTest(worker_global=kind):
+                self.reject(self.KINDS_HEADER + f"""
+const shared: {kind} = nil;
+let read = func(n: int) -> int {{
+    if (shared) {{
+        return n;
+    }}
+    return 0;
+}};
+let use = func {{
+    let _ = parallel.map<int, int>([1], read, parallel.limits(1000, 1000));
+}};
+""", "E0601", "uses the binding 'shared'", "parallel.map")
+        # A const global read by a spawned call follows the task rule.
+        self.accept(self.KINDS_HEADER + """
+const shared: SharedPointer<Fixed> = nil;
+let read = func() -> bool => shared == nil;
+let use = func {
+    scope { spawn read(); }
+};
+""")
+        self.reject(self.KINDS_HEADER + """
+const shared: UniquePointer<Mutable> = nil;
+let read = func() -> bool => shared == nil;
+let use = func {
+    scope { spawn read(); }
+};
+""", "E0601", "uses the binding 'shared'", "spawn read")
+
+    def test_declared_kinds_keep_the_pointer_boundaries(self):
+        kinds = self.SHAREABLE + ("UniquePointer<Mutable>",)
+        for kind in kinds:
+            with self.subTest(constructor=kind):
+                self.reject(self.KINDS_HEADER + f"""
+let use = func {{
+    let pointer: {kind} = new();
+}};
+""", "E0507", "constructor is not exported", "= new()")
+            with self.subTest(destroy=kind):
+                self.reject(self.KINDS_HEADER + f"""
+let use = func(pointer: {kind}) {{
+    destroy pointer;
+}};
+""", "E0514", "managed pointer cannot be destroyed", "destroy pointer")
+            with self.subTest(native=kind):
+                self.reject(self.KINDS_HEADER + FOREIGN + f"""
+let use = func(pointer: {kind}) {{
+    native().invoke(pointer);
+}};
+""", "E0403", "not a native value", "invoke(pointer)")
+        self.reject(self.KINDS_HEADER + """
+let use = func(pointer: SharedPointer<Fixed>) {
+    let weak = pointer as WeakPointer<Fixed>;
+};
+""", "E0415", "cannot change a managed pointer", "as WeakPointer")
+
     def test_const_pointer_stays_in_its_task(self):
         # A Pointer to the same storage can still change it, so a read view is
         # not shared with another task, whatever its value type.

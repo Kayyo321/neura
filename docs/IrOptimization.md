@@ -229,7 +229,8 @@ Only `inline-calls`, `eliminate-common-subexpressions`, and `remove-pure-discard
 - a `Std.Concurrent` handle's state is reached only through its methods, which are calls, and the pass never reuses a call that polls;
 - a monitor's fields are reached only by its own synchronized methods, while they hold its guard;
 - guarded state is reached only inside `with`, which holds the guard across every poll in its body;
-- a pointer, list view or other mutable object stays in its task, or moves to another task only through a finished task's join result.
+- a pointer, list view or other mutable object stays in its task, or moves to another task only through a finished task's join result;
+- a shareable pointer of `Std.Core.Pointer` is reached only through its methods, which are calls; what a `SharedPointer`, `WeakPointer`, `SoftPointer` or `AtomicPointer` shares between tasks is `#Immutable` and never written, and a `LockedPointer`'s state is reached only under its guard, as guarded state is.
 
 A program that broke these rules could see a value in its unoptimized build that its optimized build does not. The compiler rejects the ways to do so that are known: a state given to `Guarded`'s constructor that is not transferable (E0602), a state wrapped in a second guard (E0602), a `create` initializer or `with` body that is not task-safe (E0601, E0608), and a `ConstPointer` given to another task (E0602). `concurrency-schedules` runs Guarded and AtomicInt64 programs without optimization under schedule exploration.
 

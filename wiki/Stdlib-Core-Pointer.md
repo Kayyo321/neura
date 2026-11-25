@@ -41,6 +41,18 @@ The following public declarations are taken from the module source; each links t
   Creates a checked subview of [start, end) relative to this view.
 - **Pointer.ListPointer** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/pointer.nra#L155)
   Reports whether the view contains no elements.
+- **Pointer** · [`export let UniquePointer = class<T>:ManagedPointer`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/pointer.nra#L161)
+  Exclusive ownership of a class instance (Neura0.3.1.md section 2.4). Declared with its target and task-transfer rules; it has no public constructor until its operations land. Tagged `#Final`, `#NotThreadSafe`. Since 0.3.1.
+- **Pointer** · [`export let SharedPointer = class<T>:ManagedPointer`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/pointer.nra#L170)
+  Shared ownership of a managed object (section 2.5). Tasks may share one whose target type is deeply immutable. It has no public constructor until its operations land. Tagged `#Final`. Since 0.3.1.
+- **Pointer** · [`export let WeakPointer = class<T>:ManagedPointer`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/pointer.nra#L179)
+  A non-owning reference to a shared object (section 2.6). It has no public constructor until its operations land. Tagged `#Final`. Since 0.3.1.
+- **Pointer** · [`export let SoftPointer = class<T>:ManagedPointer`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/pointer.nra#L188)
+  A cache reference to a shared object (section 2.7). It has no public constructor until its operations land. Tagged `#Final`. Since 0.3.1.
+- **Pointer** · [`export let AtomicPointer = class<T>:ManagedPointer`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/pointer.nra#L197)
+  An atomically replaced reference to a deeply immutable object (section 2.8). It has no public constructor until its operations land. Tagged `#Final`. Since 0.3.1.
+- **Pointer** · [`export let LockedPointer = class<T>:ManagedPointer`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/pointer.nra#L206)
+  State that tasks reach one at a time (section 2.9). It has no public constructor until its operations land. Tagged `#Final`. Since 0.3.1.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

@@ -19,6 +19,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ### Added
 
+- `Std.Core.Pointer` declares `UniquePointer<T>`, `SharedPointer<T>`, `WeakPointer<T>`, `SoftPointer<T>`, `AtomicPointer<T>`, and `LockedPointer<T>` with the target types each accepts (E0418, E0580) and their task-transfer rules. `SharedPointer`, `WeakPointer`, and `SoftPointer` over a deeply immutable target, `AtomicPointer`, and `LockedPointer` may be shared between tasks; none is a parallel item. They have no public constructor yet. [Pointer contract](docs/lang/Neura0.3.1.md#type-erasure-and-native-code)
 - `Std.Core.Pointer` adds managed `Pointer<T>`, `ConstPointer<T>`, and checked `ListPointer<T>` views. Storage and views remain live through their holders. [Pointer contract](docs/lang/Neura0.3.1.md#stdcorepointer)
 - The `nil-access` and `nil-argument` warnings report dereferences and transfers that may encounter a nil reference. A guard can prove a binding non-nil, and function result summaries survive separate compilation. [Nil warnings](docs/lang/CoreLanguage.md#nil-access-and-nil-argument-warnings)
 - Numeric literals accept apostrophe digit separators and fixed-width integer and floating-point suffixes.

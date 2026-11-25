@@ -154,4 +154,58 @@ export let Pointer = module (
         /// @brief Reports whether the view contains no elements.
         export let is_empty = func -> bool => len() == 0;
     );
+
+    /// @brief Exclusive ownership of a class instance (Neura0.3.1.md section 2.4). Declared with its target and
+    /// task-transfer rules; it has no public constructor until its operations land.
+    .[Final, NotThreadSafe, Since("0.3.1")]
+    export let UniquePointer = class<T>:ManagedPointer (
+        let init = func {
+            super.init();
+        };
+    );
+
+    /// @brief Shared ownership of a managed object (section 2.5). Tasks may share one whose target type is deeply
+    /// immutable. It has no public constructor until its operations land.
+    .[Final, Since("0.3.1")]
+    export let SharedPointer = class<T>:ManagedPointer (
+        let init = func {
+            super.init();
+        };
+    );
+
+    /// @brief A non-owning reference to a shared object (section 2.6). It has no public constructor until its
+    /// operations land.
+    .[Final, Since("0.3.1")]
+    export let WeakPointer = class<T>:ManagedPointer (
+        let init = func {
+            super.init();
+        };
+    );
+
+    /// @brief A cache reference to a shared object (section 2.7). It has no public constructor until its operations
+    /// land.
+    .[Final, Since("0.3.1")]
+    export let SoftPointer = class<T>:ManagedPointer (
+        let init = func {
+            super.init();
+        };
+    );
+
+    /// @brief An atomically replaced reference to a deeply immutable object (section 2.8). It has no public
+    /// constructor until its operations land.
+    .[Final, Since("0.3.1")]
+    export let AtomicPointer = class<T>:ManagedPointer (
+        let init = func {
+            super.init();
+        };
+    );
+
+    /// @brief State that tasks reach one at a time (section 2.9). It has no public constructor until its operations
+    /// land.
+    .[Final, Since("0.3.1")]
+    export let LockedPointer = class<T>:ManagedPointer (
+        let init = func {
+            super.init();
+        };
+    );
 );
