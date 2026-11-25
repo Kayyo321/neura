@@ -40,6 +40,10 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - An internal DEFLATE, zlib and gzip implementation, `Std.Encoding.Internal.Deflate`, has bounded output and the reference decoder's checks. It is tested against Python's `zlib` in both directions. Only library modules can import it. [Stdlib 13.1](docs/lang/Stdlib.md#131-stdencoding)
 - `Std.Net.Realtime.Ws` compresses messages with permessage-deflate (RFC 7692). `PermessageDeflate.DeflateCodec` compresses and decompresses. `WebSocket` negotiates the extension when the new `WebSocketOptions.permessage_deflate` is set: a client sends `PermessageDeflate.ClientOffer`, and a server accepts the first acceptable offer. A compressed message is limited by `max_message_size` after decompression, with the same status 1009 failure. Malformed compressed data fails with status 1007, and RSV1 on a continuation frame with 1002.
 - `Std.Net.Rpc` compresses and decompresses messages with `gzip` and `deflate`, where `deflate` is the zlib format as gRPC requires. `Call.encode_request` and `encode_response` take an optional compression. Servers decode `gzip` and `deflate` requests instead of answering UNIMPLEMENTED, and clients decode compressed responses. A decompressed message is bounded by the receive limit, with RESOURCE_EXHAUSTED. Both sides send `grpc-accept-encoding`.
+- `Std.Crypto.Token.Jwe` supports compression in compact tokens, `"zip":"DEF"` (RFC 7516 section 4.1.3, raw DEFLATE):
+  - `seal_with` compresses before encryption when the caller's protected header asks for it.
+  - `open` inflates only after the tag check, to at most the new `Jwe.MaxDecompressedSize` (4 MiB).
+  - Other `zip` values and `zip` in JWE JSON are still refused.
 
 ### Changed
 

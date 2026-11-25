@@ -1,0 +1,131 @@
+// test-options: --gpu=off --max-steps 1000000000
+let error = import:Std.Core.Error;
+let hex = import:Std.Encoding.Hex;
+let jwe = import:Std.Crypto.Token.Jwe;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+
+// JWE compression, "zip":"DEF" (RFC 7516 section 4.1.3): raw DEFLATE before encryption, inflation only after the
+// tag check. The independent tokens come from Node 24 (zlib.deflateRawSync and OpenSSL AES-256-GCM through
+// node:crypto); the script is recorded in lanes/net-b/RETURN-04.md.
+let JweZipTests = module (
+    let bytes = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let code = func(e: error.Error) -> string => match (e) {
+        error.Error.Custom(detail) => detail.code(),
+        _ => "",
+    };
+
+    let message = func(e: error.Error) -> string => match (e) {
+        error.Error.Custom(detail) => detail.message(),
+        _ => "",
+    };
+
+    let key = func -> jwe.DirectKey => new jwe.DirectKey(jwe.ContentEncryption.A256Gcm,
+        bytes("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"));
+
+    let zipped_header = func -> string => "{\"alg\":\"dir\",\"enc\":\"A256GCM\",\"zip\":\"DEF\"}";
+
+    let expected_claims = func -> string => "{\"sub\":\"compressed\",\"claims\":\"" + strings.repeat("abcabcabc", 20)
+        + "\"}";
+
+    // A token sealed by Node: raw DEFLATE of the claims under dir/A256GCM.
+    let node_token = func -> string => "eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIiwiemlwIjoiREVGIn0..oKGio6Slpqeoqaqr.TU5WAwiZsO0oq0j-LzDt8D7hCM"
+        + "LD_YwlUMIL0M35P02YaDW3BjRT.wdm3oIe6oOKULurFsabDzg";
+
+    export let test_opens_an_independent_compressed_token = func {
+        test.assert_equal_string(expected_claims(), test.assert_ok(strings.from_bytes(test.assert_ok(
+            jwe.open(key(), node_token())))));
+    };
+
+    export let test_seals_compressed_when_the_header_asks = func {
+        last plaintext = strings.to_bytes(expected_claims());
+        last iv = bytes("c0c1c2c3c4c5c6c7c8c9cacb");
+        last sealed = test.assert_ok(jwe.seal_with(key(), plaintext, iv, zipped_header()));
+        last plain = test.assert_ok(jwe.seal_with(key(), plaintext, iv));
+        // The compressed ciphertext segment is much shorter than the uncompressed one.
+        test.assert(strings.split(sealed, ".")[3].byte_length * 2 < strings.split(plain, ".")[3].byte_length);
+        test.assert_equal_string(expected_claims(), test.assert_ok(strings.from_bytes(test.assert_ok(
+            jwe.open(key(), sealed)))));
+        test.assert_equal_string(expected_claims(), test.assert_ok(strings.from_bytes(test.assert_ok(
+            jwe.open(key(), plain)))));
+    };
+
+    export let test_tag_is_checked_before_inflation = func {
+        // A changed tag or ciphertext fails authentication; nothing is inflated.
+        let segments = strings.split(node_token(), ".");
+        last tag = segments[4];
+        segments[4] = (strings.starts_with(tag, "A") ? "B" : "A") + strings.slice_from(tag, 1);
+        test.assert_equal_string("crypto.authentication_failed",
+            code(test.assert_err(jwe.open(key(), strings.join(segments, ".")))));
+        // Another zip value is refused before decryption.
+        last other = "{\"alg\":\"dir\",\"enc\":\"A256GCM\",\"zip\":\"GZIP\"}";
+        test.assert_equal_string("crypto.invalid_jwe", code(test.assert_err(jwe.seal_with(key(),
+            strings.to_bytes("x"), bytes("c0c1c2c3c4c5c6c7c8c9cacb"), other))));
+    };
+
+    // A token whose plaintext inflates to MaxDecompressedSize + 1 bytes (4 MiB + 1 of "a") fails once the limit
+    // is passed, with crypto.invalid_jwe.
+    export let test_decompressed_size_is_bounded = func {
+        test.assert_equal<int>(4194304, jwe.MaxDecompressedSize);
+        last bomb = "eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIiwiemlwIjoiREVGIn0..sLGys7S1tre4ubq7.dJTbq-zNu5xnLm7p0bndw4Q8Sd"
+            + "IVLo81Xs6C8VyC8hYFSyM6Y96muKVboEo8uYK1LW0Xxxs7QvBNimwwBJsg_7LoPrQKvGbaGdyiXp4G4jFGkMmyqHh13fX7eJArWQ"
+            + "-_Y6B-W87XNhZeThrcktrAgA22t5dz8806eAf32R4OLyJJraeOAw6TLmJVDSYsHzEbg71E0MtjQx2x8SPdScH8lPLSwfw_Z1Ux8B"
+            + "tDsk1E67EyUBCxnO5BvFUTS4GAg4leXdek8PUHRIsoNGzZB2AtlcophnBeNi3EUzZAlcM16Rx6AIl3kPEOZDMVhk2hQZpIl8pBB6"
+            + "Y5VqfQ-VIGl7VFQhd_QBCsFC_HR0vDU7umcVBEGNgf2Ka5AmS-PfMRSZww39JMQoB-HS65aU3LmCjiBZjfjSzrWb8EnkqGslSQSw"
+            + "z02uIsFZl9G3033y5XCqrTSwgciERJkJ3zPxwgHqb6A_DKf8MUTBfbviXhBLtP70LqOwXnve_UB8VxbNv8EFkHG826sfdBmRP26_"
+            + "aeVFxiTxu6hDsbEV6gE0NSto2B44K4JdfA7ruoGHgRs09QEB8tydqhHWZJr0UU7Ub4zLcJ5B-JR251L5f6kVgf5Jg_eoVorKoVbu"
+            + "RPReOgbDUHM8ju1DXZbmOh_8ybu_YwhevAf3mrFlViXGbsvIijmldQC4hyTYZe8IVqXIUAmfqV8pvAxobB7uBxRaYUVGqwdsQvIp"
+            + "xlSsyimrLi-7fufMU9DsbO6uQBjMHZUo5R-MejxLm9B6uqf1CnRwa-mnmYg7T1ksHk1b4_9etifaSE5VEcF9SP5uR6B03TiJMSDZ"
+            + "uZwCofZuHpYq4BrguKgwX_CHybBQ__OigOvEoed78Gerbz0gxPwlI8hc_pypQgcr0YEI8NQN_DsDW1o5_PR4nJHMxtvldoj57Jpk"
+            + "FvpO6YP6M22NL4uTND8-WjE0XBYL-R8NDWef0q1sUl0aqk9JIeA1XURSP-ocSFQnqIv9bxQqXgD-EMok9XNP9pLUU4iJ9Fy23sFt"
+            + "osYP-OZSmi4-pvswgJ1dGil5dma4UPhXi2emsR_T3q4DE80MuEzoIOyuCkmS655rsiYYKG5N4dUiR9ZH-p2brEZWFyGUgIwspdJq"
+            + "3fL7IyKCgZ61Fy_hGxgqfo7vDBBpw2bWuNd3jdRaRCXDJS5wg3I1HUbgsgRl9mT6xjfeVb7kRXf-5uNfq47MfCah6OPAKPsb1RPZ"
+            + "SzfluvXHtcyLqan_BZ5OWZr1Dv0sDUHCF4Hd54OmztVIOHA-U86xbrtBqIBRmmcFtm3b3YiRDqiedksIeUgKYss9Xr8cglHtMnhv"
+            + "hHA3IDxdNkDmyikZvYY-0pZhfwst6IbSoGS5uYVxqZjNfcr5NMAaf6DkICl350y9PBHKtceUYMgku-dqZHFzmO2aNf-k2tMhax1E"
+            + "6pmh93ERdiSEeESzda_8elmim8cAYJBcTEhWhuqi6MK1eMIAZj5R3zCbgIrCoRMeF7L4rTP006fOcfPN7DjXWfw69oWCO69wvt-E"
+            + "Xr53EkHh9tHVlojPevce1hiSzp3lfVY8UIHFf2FU1S4f0UdtJlvK0WmJCEZt1_S4lpL1iCbEzmFkZppNxK95-fqdm6eNfc7cyxXg"
+            + "92PJKgdv2-jRRSpobwWaUpBjHaiJOMxulYY_cxEOa5i-zbwzFPaRaqmDMAhtWYTw5cGs0nq4xZsURrd2E9ZidwC0dIvLZEx54tPv"
+            + "Mk5BJfm4exXE4IpMVw8cI2028AvRITPu1iG8f7c3yX-vFPXRQPK_3BOgcbSy5UWNe8vC9U1USGhTL6Kh3zhZ-rWtAk96HEwct6Vn"
+            + "aQGTk2hTAUToWzJPY_pME-v5ywiGeYktR0NBLtVZ9Ohcu5hBjGsHQKOgcNE_hiwyrMPbgW8LvzLyyL_UY63HIOnmJ5GnJK0gHe6F"
+            + "4-SzNs5zD7NoH7aI8IfIXUz3iqFKPGNhHbTkF1B-Nk8HMYEx_1M2Qt09i9hbx0yVkHp1tZHmbvfDgZqObtUtHWA-2kTxSLPeAcdS"
+            + "gHEKpgEY0RgnUky2LBgrn46KrZt2SWS_wKS0G0tOd5R2yzhMy0ZXmjOmRQv1L16axiZw8cqKOZS2oHLc2BbvQVh05FZrqqshOHLK"
+            + "bwj9Zn2vYTn1Uv8Lyfm92MwZE4Uw-I1Zm6sJJz_YgeBCBp11JYLOXXN4nzWM9gA6mgBKEwEYGOq9cWQDjZ6ukOeE23A9eVLW1adW"
+            + "cF9R3MfVtk0D6ajgIbKB5pV3EisL1J-LkAcxJPsznafK8MnJSirSrRf3QZPUvonGHXo3RbMg7SMVXVAyspHI5_8NCyCWcJFWi2tI"
+            + "PxxojKyd5aAbcCWwafRzgDN2JJYrkHXQlLA6YvAjFbyROv_m02bRs3Mcb9KbRtMxuapwRzfJGxxw8O2xrF_OFJrY1ydRbna9Cq0j"
+            + "ofCd8S7EW7RnePab0aaikNXFM6U6zBWSHOy8B9z8Af38iJASHL8RM_BnsQJTp03U4E8m8qnkCrvnw6Wu4hzAmJc3DgQi0h6IgoJq"
+            + "fhBhogt_SgHH3bpXbvwwM_KDKbtw2alYcv3mLyOZ4Qzuf_tdk_poOmMieKu360duAgEjO8UImVXKiLKYBRHXJ2h5BsKS0H0ukMKw"
+            + "rdiHxiYorPaAOwWkrGXASkEPqsxdN0okr6CB31XVjY37r-LuWz5jLQ68SxcFLyLno7zI0aS_t7Huzf2c2jrBVmB5LbAl1sPeMJj1"
+            + "fGO59NjmXbTTjlZ2Kg7U3-fGUnrXYqk-njiq7JSbS5ZoltUHIW4NJt5ZoJv9GXSd9AXm5Z29h9Jz-6pIf0GdtzKr4kQ6z07aTwu5"
+            + "vnFs-FZ9en8mc-f5JanmHUs02VR1Fhb6O7A8Vne_yLRj7mDhIL7OoxDijTX6xZwJgVA0PKoxtc-55jIpW_pf4J9gqkGSa6-_LMS5"
+            + "BLI5FH0Pm8bS4BkZ4pUxrhfIp8FCPx51XFOTCTDLPdHcWGoqy5bskUmr58AblOPdzxf6oc95ImoLhNi_RmEYy9LHJNKcXkt4t5Yy"
+            + "cts6zv0NiaSmEgPc2WbRHO-LDbtmyJ1QnlMDFpLnpR1tBkrggyULnE-giXKo2b2kON0HuWqLMmrjSmgrNg9sWUVk8fVLxjL_1B4S"
+            + "cjQC9z_GuTsmW7ko4Hl_CpArdxMWAtRNAnDKakeal5BRLxfe2hkp4K6qqr6WWGexwJth8cSPB1i_g_y0X_yO9AzNLA9DMCsATIdX"
+            + "RFc8rux881k6DeGUlxH5Up9Ndgzx4aFH8moEfpwDLMMrzi9b6ehwjpolcbl0EzxaI2fYIl57DimHORWNyY3eaqde39b9PCIyHqHl"
+            + "Vr_Bbu0RVWKtXvrjSePYsyAufgbWQVXQUE4ynskkR6FQlYpIJOdpiCLyVRWaCCAVE5Wk1NnQUZgIECdh0rri-ppOWH4POCurvXrz"
+            + "nSL3ORMKMb-n0P52aK2hhw4AHXm4YObxIBth00Cb9DPRVd2GVp1tWDkeWeRoEpdnTsje5Br8vPlVh3XRiEaigSl-TUvxMaaWgVeF"
+            + "fpWpYoFAr9ZO8uzSnQ3pvxTEIvXoGM2xNVEhI9mh-rrkVz1slMpBC3CxrnE4ne2Zt1UleORooyvRACKeTQzVe-BOCD6ZjZanbgem"
+            + "YmOL7Bu2qR5PY3TuzeJvG8kWyw1DqWsnI3MejoLPiiR37ISIyJvL1P0PC7-wocn6GKHFPNyGdUu5iVFLKd0ssNnR8QlopE2rBxIL"
+            + "6EpVQaPXldXGZzx0gJjc_uO3p6IPa9Vfd38HBBOkq-l8xE07DDHdWb4fnDZLCs6hVjQS3TU6MRtqaU4g9j1HrFuATrT0P97jGT9E"
+            + "HKIJ6p5yWP_L_d0HO-N_mLXOCqy8Z62hFikgCSzBZI5GOFkGlGfdPJBWsnl0q1gEPm978xgPifgFRtygMHIGQvjbgAZtkVYF4sug"
+            + "StKJ0d7fL-UMuOeSZrIZlONR7fnV3VVutDCpkzdJ3PrKKCoKnwlUt8gbsh5ZDBI0jd_D_6pcT_vQFbWKLbYY5JQVMbk6rPZU6Dp2"
+            + "w-kczYrx0cQneXP215MTo3Xf_4b0wK8ZxNGEh-Lrx4wBjfCa3IgK_b956rNXLfADoErEpUmq08Fp8dO8teaP2vz0pXI8RYZBYdW4"
+            + "z3XGoLh0tdr7DWJzhPvc-McX6UzrH8df-ZC7Q9COGJxae3T-7MSGAczydES7uJ_QrMhn0f6u6t9Y6YHSj3loqKxlYVV9VCvfjrbb"
+            + "p8Z5KC8pkKN_r6P8aHeeM_7ZXYCqocQcJrcghooAllAtyPDk2ypSdDVeyJ3_Zp5TWP70CPyrqtDQJnwdPGO3HlQPfN5n14hSXv2t"
+            + "AX1o986cvfr-G-OikOEuMuNDHCHNLs2P5BpbhUkMC21k7RSHa5P669sY3yusr2DjjRCvHK-MvMpvpkwvkSgcsAFlAcxCQqmItMbg"
+            + "NtJbEnEgniyM8b_XfYUf2aK_tcbMikFNoja9NFwyAMx-KHcLR_Jn6Qbk4Nd4x4CE-jv4d9utvI0yEZFzgHuMBPAmva4ZPydscKhl"
+            + "crknGkbbFsCS2nT_11mpAeNN9Yve25EscC4gRZZyYMoCXzN13FGcEmSspww4TN_WVU-0HrnbLeEsWMRhbcZ0r5pu9xw3TkojX54W"
+            + "sGejpPC3x8G-abBvzSZBOrxAR85DJGG4zjz9FkUAjZ6tZkXTXb_jiEvO0iyrSMJdYNaxdlJ46cWNtwqHdshMHeLc3Vscn9jzDvYu"
+            + "aFTDfR13nJuNTIWw7qi0ZMeZmNNzSpCl2Kpp4FqlN4QxHXYOmTXMY82zFNOqUIa8UfuscqBvdfuInXAdgNDM4RA3192HYXCeoieo"
+            + "ekiea-2KB2TFWRlmLqjmli6W-zDMoRNM-xkKs1YaT_BNJP4u4ESS-VMAymyuJNL-I4QX6oJ1bIGZpS5TKLe_217tH8LlvRM-Sr6y"
+            + "tXfU_u4Iff2ruRBgVsdqPgM5v6it0nc_MVeuojlf27EMmbguyQoc1OTZ0g5m43gxAArpfb8UVLwHDZjj4PahEPn8Dq_2-JpsZ6Ho"
+            + "U4gzLmvwD7zKcpBCkOWFJPI9eFi5Nsfdf_QVeKALPU7w75dQAeaCJLBLWixYzMgZI0VspQT3zqfU-Hds6kJZwXiVTwGX57a2138o"
+            + "CvNEW1w4pPUlJVkPtQ4HfjGRno-T5A7ZDa1eXYGQ4tUcUBB41tko_315lSTG6e6fb__GDiYEr1z9-4AxtgBB59928pmzUj6zcpHT"
+            + "e3n5iUIWrgBZkTmB95CkDyiCD3Qs6toHzXCRo7JgufhAdFlMQSNl5eXFBeKLjHmxr-AC8Yl5dGZu-jNuRvUCFZw0y3CDekpuVhvQ"
+            + "DqpUjEmjuw2XSqGb_I2BNxYO4-hJzvKCIRLJttcuZ5T3HPY8Jd6g5a9h2AxZhiHVij6hr8QPjHGEtBTQ3NkRSewfSNgOQe8f8cs5"
+            + "8iR7RAfzYz89WDNg._VrZlDFniR8huS_hqRgbmA";
+        last problem = test.assert_err(jwe.open(key(), bomb));
+        test.assert_equal_string("crypto.invalid_jwe", code(problem));
+        test.assert_equal_string("decompressed JWE plaintext exceeds 4194304 bytes", message(problem));
+    };
+);

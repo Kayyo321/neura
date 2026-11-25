@@ -91,7 +91,8 @@ let JweTests = module (
             "{\"alg\":\"none\",\"\\u0061lg\":\"dir\",\"enc\":\"A128GCM\"}",
             "{\"alg\":\"dir\",\"enc\":\"A128GCM\",\"crit\":[\"other\"],\"other\":true}",
             "{\"alg\":\"dir\",\"enc\":\"A128GCM\",\"crit\":[]}",
-            "{\"alg\":\"dir\",\"enc\":\"A128GCM\",\"zip\":\"DEF\"}"
+            "{\"alg\":\"dir\",\"enc\":\"A128GCM\",\"zip\":\"GZ\"}",
+            "{\"alg\":\"dir\",\"enc\":\"A128GCM\",\"zip\":7}"
         ];
         for (let protected in headers) {
             let segments = strings.split(direct[6], ".");
