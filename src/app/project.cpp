@@ -28,6 +28,7 @@
 #include <unistd.h>
 #endif
 #ifdef __APPLE__
+#include <Availability.h>
 #include <mach-o/dyld.h>
 #endif
 #ifdef _WIN32
@@ -1038,6 +1039,24 @@ std::string display_path(const fs::path& path) {
 #endif
 }
 
+#if NEURA_SPAWN_CHDIR && !defined(_WIN32)
+void add_spawn_chdir(posix_spawn_file_actions_t& actions, const fs::path& directory) {
+#if defined(__APPLE__) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 260000
+    if (__builtin_available(macOS 26.0, *)) {
+        ::posix_spawn_file_actions_addchdir(&actions, directory.c_str());
+        return;
+    }
+    // The older action is still needed on macOS versions before 26.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+    ::posix_spawn_file_actions_addchdir_np(&actions, directory.c_str());
+#if defined(__APPLE__) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 260000
+#pragma clang diagnostic pop
+#endif
+}
+#endif
+
 int spawn_and_wait(const std::vector<std::string>& arguments, const std::optional<fs::path>& directory) {
 #ifdef _WIN32
     // CreateProcessW from the argument vector, never through cmd.exe, in a
@@ -1071,7 +1090,7 @@ int spawn_and_wait(const std::vector<std::string>& arguments, const std::optiona
     posix_spawn_file_actions_t actions;
     posix_spawn_file_actions_init(&actions);
 #if NEURA_SPAWN_CHDIR
-    if (directory) posix_spawn_file_actions_addchdir_np(&actions, directory->c_str());
+    if (directory) add_spawn_chdir(actions, *directory);
 #else
     (void)directory;
 #endif
