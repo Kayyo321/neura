@@ -55,6 +55,10 @@ struct TierShadowHooks {
         HeapInitialized,
         // The first list, by handle: its version is one more.
         ListVersion,
+        // The first pointer storage handle (NVR 1.11), by handle: it is no
+        // longer marked as storage. It keeps its group, so nothing is
+        // released twice.
+        StorageHandle,
         // The live heap cells: one more.
         LiveCells,
         // The live stack cells (NVR 1.7): one more.

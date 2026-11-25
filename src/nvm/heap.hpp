@@ -605,6 +605,14 @@ public:
         return shared_handle(handle) ? 0 : cells(ref);
     }
 
+    // Clears the storage flag of a storage handle and leaves its group as it
+    // is. Only for the tier shadow's perturbation tests: the heap stays safe
+    // to collect and release, but check() reports the handle.
+    void forget_storage_flag_for_test(std::uint64_t handle) {
+        if (const auto alias = storage_aliases_.find(handle); alias != storage_aliases_.end())
+            alias->second.storage = false;
+    }
+
     // The handles of one retained allocation, original first, then each
     // storage handle in the order retained; each is live. For checks and
     // tests.
@@ -814,9 +822,10 @@ public:
     // disagreement. The handle table record names the page list; every page
     // counts its entries; the existing pages are in live_pages_; no handle
     // above last_handle() has an entry; every entry's header is well formed;
-    // and each size class's free blocks and bump range lie in chunks of that
-    // class, apart from every live entry's block. For NEURA_TIER3_VERIFY=1
-    // (after native code allocates) and tests; it decides nothing.
+    // every pointer storage group is consistent; and each size class's free
+    // blocks and bump range lie in chunks of that class, apart from every
+    // live entry's block. For NEURA_TIER3_VERIFY=1 (after native code
+    // allocates) and tests; it decides nothing.
     std::string check() const {
         const auto last = blocks_.native.last;
         if (handle_table_.pages != pages_.data() || handle_table_.count != pages_.size()) return "the handle table record";
@@ -845,6 +854,26 @@ public:
             }
             if (entries != stored->live) return "the live count of page " + std::to_string(page);
         }
+        // Pointer storage: every handle of a group is live, names the same
+        // entry, and carries no mark outside a collection; a group of one is
+        // a storage handle whose original is gone.
+        std::size_t grouped = 0;
+        for (const auto& [group, members] : storage_groups_) {
+            const auto text = "the storage group of handle " + std::to_string(group);
+            if (members.empty() || (members.size() == 1 && !is_storage_handle(members.front()))) return text;
+            const Entry* shared = nullptr;
+            for (std::size_t i = 0; i < members.size(); ++i) {
+                const auto member = members[i];
+                const auto alias = storage_aliases_.find(member);
+                const auto* item = find(member).entry_;
+                if (alias == storage_aliases_.end() || alias->second.group != group || alias->second.marked ||
+                    item == nullptr || (shared && item != shared) || (i > 0 && member <= members[i - 1]))
+                    return text;
+                shared = item;
+            }
+            grouped += members.size();
+        }
+        if (grouped != storage_aliases_.size()) return "a storage alias outside its group";
         if (Blocks::pooled) {
             std::sort(live_blocks.begin(), live_blocks.end(), std::less<>());
             // A block lies in the chunk that holds it; a bump range ends where
@@ -886,8 +915,9 @@ public:
     // frees compare equal word for word: the last handle and identity, every
     // page and its live count, every live entry's handle, place and words
     // (header, identity and flags and fields, or elements, capacity and
-    // version, and the place of a separate buffer), the page list, and each
-    // size class's free list and bump range. For tests.
+    // version, and the place of a separate buffer), the page list, the
+    // pointer storage groups, and each size class's free list and bump
+    // range. For tests.
     std::vector<std::uint64_t> snapshot() const {
         std::vector<std::uint64_t> out;
         const auto place = [&](const void* address) -> std::uint64_t {
@@ -948,6 +978,17 @@ public:
         out.push_back(live_pages_.size());
         out.insert(out.end(), live_pages_.begin(), live_pages_.end());
         out.push_back(released_pages_);
+        // Pointer storage groups, in group order, each with its handles and
+        // their storage flags.
+        out.push_back(storage_groups_.size());
+        for (const auto& [group, members] : storage_groups_) {
+            out.push_back(group);
+            out.push_back(members.size());
+            for (const auto member : members) {
+                out.push_back(member);
+                out.push_back(is_storage_handle(member) ? 1 : 0);
+            }
+        }
         for (std::size_t c = 0; c < allocator_class_count; ++c) {
             std::uint64_t at_next = 0, at_end = 0;
             place_range(blocks_.native.next[c], blocks_.native.end[c], at_next, at_end);

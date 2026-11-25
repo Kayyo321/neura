@@ -313,6 +313,12 @@ NEURA_TEST(tier, a_difference_planted_in_the_run_is_reported_by_name) {
     const auto rotation = build_program({concurrency_program(environment, "select-rotation")});
     const auto selects = perturbed_item(rotation, Perturb::TaskSelects, 0, "task selects");
     check(starts_with(selects, "task 0 selects: "), "a task's committed selects are named: " + selects);
+    // Which handles are pointer storage (NVR 1.11), which Heap::same does not
+    // read: two Pointers made from one live Cell.
+    const auto pointers = build_program({tier_program(environment, "pointer-storage")});
+    const auto storage = perturbed_item(pointers, Perturb::StorageHandle, 0, "storage handle");
+    check(starts_with(storage, "heap handle ") && contains(storage, " storage handle: "),
+          "a pointer storage handle is named: " + storage);
 }
 
 NEURA_TEST(tier, the_shadow_compares_the_storage_regions_that_programs_run) {

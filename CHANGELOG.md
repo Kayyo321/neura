@@ -59,6 +59,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 ### Fixed
 
 - Each `Pointer<T>` created from a live `Cell<T>` takes its own storage handle. Before, a pointer reused an earlier pointer's storage handle only if no collection had reclaimed it, so the handle numbers in later trap details and the point at which the handle limit was reached could depend on when the collector ran. [NVR 1.11](docs/runtime/NVR.md#managed-pointer-storage-111)
+- `NEURA_TIER_CHECK=2` compares which heap handles share an entry as pointer storage, and the runtime's heap consistency check verifies those groups.
 - Specialization preserves constructor overloads declared with `or` in generic classes.
 - A primitive reference can bind to a specialized generic field of the matching primitive type, such as `let r: &int64 = box.value` on `Box<int64>`.
 - `neura.process.generation` no longer fails on an unknown VMClock version or an unexpected read error; it falls back to the PID and vmgenid detectors and retries a transient VMClock open failure or a read shorter than the VMClock header, giving VMClock up only after three short reads in a row.

@@ -134,6 +134,10 @@ NEURA_TEST(heap, a_storage_group_of_three_keeps_one_mark_per_handle) {
     const auto entry = live(heap, cell);
     const auto first = heap.retain_storage(cell, entry);
     const auto second = heap.retain_storage(cell, entry);
+    const auto words = heap.snapshot();
+    const std::vector<std::uint64_t> group{1, cell, 3, cell, 0, first, 1, second, 1};
+    check(std::search(words.begin(), words.end(), group.begin(), group.end()) != words.end(),
+          "the snapshot records the storage group and its storage flags");
     check(heap.mark(second, live(heap, second)), "only the last storage handle is a root");
     check(!heap.mark(second, live(heap, second)), "a second mark of the same handle reports it marked");
     std::vector<std::pair<std::uint64_t, std::uint64_t>> swept;
