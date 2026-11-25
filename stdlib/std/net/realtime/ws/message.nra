@@ -1,5 +1,6 @@
 let close_status = import:Std.Net.Realtime.Ws.CloseStatus;
 let frames = import:Std.Net.Realtime.Ws.Frame;
+let permessage = import:Std.Net.Realtime.Ws.PermessageDeflate;
 let.promote _ = import:Std.Core.Optional;
 let.promote _ = import:Std.Core.Result;
 let strings = import:Std.Text.Strings;
@@ -13,6 +14,11 @@ let utf8 = import:Std.Encoding.Utf8;
 /// without an open message, or a new text or binary frame while one is open, fails with status 1002; text that
 /// is not UTF-8 fails with status 1007 (checked when the message completes); a message above the size limit
 /// fails with status 1009 as soon as a fragment crosses it.
+///
+/// With permessage-deflate (RFC 7692 section 6), RSV1 on a message's first frame marks it compressed. RSV1 on
+/// a continuation frame, or without the extension, fails with status 1002. A compressed message is
+/// decompressed when it completes, and the size limit applies to the decompressed bytes with the same 1009
+/// failure; the compressed bytes may exceed it by an eighth plus 64 bytes, room for DEFLATE's own overhead.
 /// @see [Std.Net.Realtime.Ws.Message](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-Ws-Message)
 .Since("0.3.0")
 export let Message = module (
@@ -30,14 +36,22 @@ export let Message = module (
     /// empty message is one empty final frame. A maximum below 1 traps with "invalid argument: max_fragment".
     .NoDiscard
     export let fragment = func(message: Message, max_fragment: int) -> frames.Frame[list] {
-        if (max_fragment < 1) {
-            trap_with_message("invalid argument: max_fragment");
-        }
-        last data = bytes_of(message);
         last first_code = match (message) {
             Message.Text(_) => frames.Text,
             Message.Binary(_) => frames.Binary,
         };
+        return fragment_payload(first_code, bytes_of(message), max_fragment, false);
+    };
+
+    /// @brief The frames of a message payload with opcode `first_code` (1 or 2), as `fragment` splits them, with
+    /// RSV1 set on the first frame when `compressed` (RFC 7692 section 6). A maximum below 1 traps with "invalid
+    /// argument: max_fragment".
+    .NoDiscard
+    export let fragment_payload = func(first_code: int, data: uint8[list], max_fragment: int, compressed: bool)
+        -> frames.Frame[list] {
+        if (max_fragment < 1) {
+            trap_with_message("invalid argument: max_fragment");
+        }
         last list: frames.Frame[list] = new;
         let start = 0;
         do {
@@ -47,7 +61,7 @@ export let Message = module (
                 piece.append(data[i]);
             }
             last code = start == 0 ? first_code : frames.Continuation;
-            list.append(new frames.Frame(end == data.length, false, false, false, code, piece));
+            list.append(new frames.Frame(end == data.length, compressed && start == 0, false, false, code, piece));
             start = end;
         } while (start < data.length);
         return list;
@@ -62,6 +76,10 @@ export let Message = module (
         let open_code: int = -1;
         /// @brief The bytes of the open message.
         let pending: uint8[list] = new;
+        /// @brief Whether the open message is compressed (RSV1 on its first frame).
+        let compressed: bool = false;
+        /// @brief The permessage-deflate codec, when the extension was agreed.
+        let codec: Optional<permessage.DeflateCodec> = Optional<permessage.DeflateCodec>.None;
 
         /// @brief An assembler that accepts messages of at most `max_size` bytes. A negative maximum traps
         /// with "invalid argument: max_message_size".
@@ -70,6 +88,12 @@ export let Message = module (
                 trap_with_message("invalid argument: max_message_size");
             }
             max_message_size = max_size;
+        };
+
+        /// @brief Decompresses messages whose first frame has RSV1 with the codec of an agreed
+        /// permessage-deflate.
+        export let use_deflate = func(agreed: permessage.DeflateCodec) {
+            codec = Optional<permessage.DeflateCodec>.Some(agreed);
         };
 
         /// @brief Whether a fragmented message is open.
@@ -88,14 +112,29 @@ export let Message = module (
                 if (open_code < 0) {
                     return fail(close_status.ProtocolError, "a continuation frame without an open message");
                 }
+                if (frame.rsv1) {
+                    return fail(close_status.ProtocolError, "RSV1 set on a continuation frame");
+                }
             } else {
                 if (open_code >= 0) {
                     return fail(close_status.ProtocolError, "a new data frame inside a fragmented message");
                 }
+                if (frame.rsv1 && not is_some<permessage.DeflateCodec>(codec)) {
+                    return fail(close_status.ProtocolError, "RSV1 set without permessage-deflate");
+                }
                 open_code = frame.opcode;
+                compressed = frame.rsv1;
                 pending = new;
             }
-            if (pending.length + frame.payload.length > max_message_size) {
+            if (compressed) {
+                // The compressed bytes may exceed the limit by DEFLATE's overhead; the decompressed size is
+                // checked when the message completes.
+                last allowance = (max_message_size as int64) + (max_message_size as int64) / 8 + 64;
+                if ((pending.length as int64) + (frame.payload.length as int64) > allowance) {
+                    return fail(close_status.MessageTooBig, "message exceeds the limit of "
+                        .. max_message_size.to_string() .. " bytes");
+                }
+            } else if (pending.length + frame.payload.length > max_message_size) {
                 return fail(close_status.MessageTooBig, "message exceeds the limit of "
                     .. max_message_size.to_string() .. " bytes");
             }
@@ -104,9 +143,25 @@ export let Message = module (
             }
             return Result<Optional<Message>>.Ok(Optional<Message>.None) unless frame.fin;
             last code = open_code;
-            last data = pending;
+            let data = pending;
             open_code = -1;
             pending = new;
+            if (compressed) {
+                compressed = false;
+                match (codec) {
+                    Optional.Some(active) => {
+                        match (active.decompress(data, max_message_size)) {
+                            Result.Ok(bytes) => {
+                                data = bytes;
+                            },
+                            Result.Err(problem) => {
+                                return Result<Optional<Message>>.Err(problem);
+                            },
+                        }
+                    },
+                    Optional.None => {},
+                }
+            }
             if (code == frames.Binary) {
                 return Result<Optional<Message>>.Ok(Optional<Message>.Some(Message.Binary(data)));
             }
@@ -121,6 +176,7 @@ export let Message = module (
         /// @brief Drops the open message and returns the failure.
         let fail = func(status: int, message: string) -> Result<Optional<Message>> {
             open_code = -1;
+            compressed = false;
             pending = new;
             return Result<Optional<Message>>.Err(close_status.failure(status, message));
         };

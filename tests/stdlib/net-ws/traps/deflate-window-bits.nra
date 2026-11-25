@@ -1,0 +1,12 @@
+// status: 134
+// stderr: invalid argument: window bits
+let deflate = import:Std.Net.Realtime.Ws.PermessageDeflate;
+let program = import:Std.Program;
+
+// A server policy may ask for a client window of 8 to 15 bits only.
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last config = new deflate.ServerConfig(true, false, false, 7);
+        return config.client_max_window_bits == 7 ? program.ExitCode.Ok : program.ExitCode.Failure;
+    };
+);

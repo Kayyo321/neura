@@ -153,7 +153,7 @@ Neura 0.3.1 completes the first networking slice in `Std.Net.Core`, `Dns`, `Sock
 
 The software keystore and offline verification of attestation evidence are supported and are not exceptions.
 
-`Std.Net.Http` supports server body I/O, native HTTP/1.1 and HTTP/2 client exchanges, HTTP/2 frames and HPACK. See [HTTP build options and capabilities](../runtime/NVM.md#http-client-services). HTTP/3, QPACK and MASQUE transport operations return typed `Unsupported` in 0.3.1. General QUIC, RPC, Realtime and Mesh remain in progress for 0.3.1. The internal DEFLATE, zlib and gzip implementation that permessage-deflate, gRPC compression and JWE `zip` need is in place ([Stdlib 13.1](Stdlib.md#131-stdencoding)); those three keep their stubs until they are wired to it.
+`Std.Net.Http` supports server body I/O, native HTTP/1.1 and HTTP/2 client exchanges, HTTP/2 frames and HPACK. See [HTTP build options and capabilities](../runtime/NVM.md#http-client-services). HTTP/3, QPACK and MASQUE transport operations return typed `Unsupported` in 0.3.1. General QUIC, RPC, Realtime and Mesh remain in progress for 0.3.1. The internal DEFLATE, zlib and gzip implementation is in place ([Stdlib 13.1](Stdlib.md#131-stdencoding)). WebSocket permessage-deflate (RFC 7692) uses it. gRPC compression and JWE `zip` keep their stubs until they are wired to it.
 
 Direct TLS uses OpenSSL 4.1.0. Windows needs runtime verification for Winsock TLS and HTTP, guest-generation polling and the locked-memory provider. Generic secret locking protects the retained encoded representation with Linux page locking and dump exclusion or Windows `VirtualLock` with Windows Error Reporting memory exclusion. The original value and its aliases use ordinary program storage.
 
