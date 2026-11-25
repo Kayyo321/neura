@@ -2,6 +2,9 @@
 
 #include "neura/version.hpp"
 #include "nvr/format.hpp"
+#include "platform/console.hpp"
+#include "platform/self.hpp"
+#include "platform/text.hpp"
 #include "runner/runner.hpp"
 
 #include <algorithm>
@@ -24,7 +27,7 @@ namespace {
 constexpr std::string_view triple = NEURA_LAUNCHER_TRIPLE;
 constexpr std::string_view toolchain_version = neura::version::full;
 
-[[gnu::used]] constinit const auto descriptor = []() consteval {
+consteval auto descriptor_bytes() {
     constexpr std::string_view magic = "NEURA-LAUNCHER-1";
     std::array<std::uint8_t, magic.size() + 4 + triple.size() + 1 + 2 + 2 + 4 + 4 + toolchain_version.size()> bytes{};
     std::size_t next = 0;
@@ -44,7 +47,11 @@ constexpr std::string_view toolchain_version = neura::version::full;
     number(toolchain_version.size(), 4);
     raw(toolchain_version);
     return bytes;
-}();
+}
+
+#ifndef _WIN32
+[[gnu::used]] constinit const auto descriptor = descriptor_bytes();
+#endif
 
 // Reads NEURA_RUN_OPTIONS. The variable can only restrict or observe: a
 // --deny option removes a group from `capabilities`, which starts as the
@@ -104,7 +111,7 @@ neura::runner::RunOptions run_options(const neura::launcher::Policy& policy, neu
         } else if (flag == "--trace-events") {
             const auto path = next();
             if (path.empty()) throw std::runtime_error("NEURA_RUN_OPTIONS: expected a value after --trace-events");
-            options.trace_events = std::filesystem::path(path);
+            options.trace_events = neura::platform::path_from_utf8(path);
         } else if (flag == "--trace-wall-time") {
             options.trace_wall_time = true;
         } else if (flag == "--deny-fs") {
@@ -148,7 +155,7 @@ neura::runner::RunOptions run_options(const neura::launcher::Policy& policy, neu
             if (path.empty()) {
                 throw std::runtime_error("NEURA_RUN_OPTIONS: expected a value after " + std::string(flag));
             }
-            (flag == "--record" ? options.record : options.replay) = std::filesystem::path(path);
+            (flag == "--record" ? options.record : options.replay) = neura::platform::path_from_utf8(path);
         } else {
             throw std::runtime_error("NEURA_RUN_OPTIONS: " + std::string(flag) +
                                      " is not accepted by a native executable");
@@ -160,37 +167,47 @@ neura::runner::RunOptions run_options(const neura::launcher::Policy& policy, neu
     return options;
 }
 
-// The file the launcher is running from. /proc/self/exe is exact but needs
+// On Linux, /proc/self/exe is exact but needs
 // procfs; a root file system without it falls back to the path the kernel
 // recorded when it started the executable. The program name is not used:
 // whoever starts the process chooses it, and it could name another
 // executable with a different policy.
-std::filesystem::path own_file(std::string& tried) {
+std::filesystem::path own_file() {
+#ifdef _WIN32
+    return neura::platform::executable_path();
+#else
     std::vector<std::string> candidates{"/proc/self/exe"};
 #ifdef __linux__
     if (const auto* execfn = reinterpret_cast<const char*>(getauxval(AT_EXECFN)); execfn && *execfn) {
         candidates.emplace_back(execfn);
     }
 #endif
+    std::string tried;
     for (const auto& candidate : candidates) {
         if (!tried.empty()) tried += ", ";
         tried += candidate;
         if (std::ifstream(candidate, std::ios::binary)) return candidate;
     }
-    return {};
+    throw std::runtime_error("could not open the executable file (tried " + tried + ")");
+#endif
 }
 
 } // namespace
 
+#ifdef _WIN32
+// The PE linker's /INCLUDE option retains this descriptor in the executable.
+extern "C" {
+extern constinit const auto neura_launcher_descriptor = descriptor_bytes();
+}
+#endif
+
 int main(int argc, char** argv) {
     const std::string_view name = argc > 0 && *argv[0] ? argv[0] : "neura-launcher";
     try {
-        std::string tried;
-        const auto file = own_file(tried);
-        if (file.empty()) {
-            throw std::runtime_error("could not open the executable file (tried " + tried + ")");
-        }
-        const auto executable = neura::launcher::read_container(file);
+        neura::platform::set_unattended_error_mode();
+        neura::platform::set_binary_stdio();
+        neura::platform::install_console_streams();
+        const auto executable = neura::launcher::read_container(own_file());
         auto capabilities = executable.policy.capabilities;
         const auto options = run_options(executable.policy, capabilities);
         const auto image = neura::nvr::load(executable.image);

@@ -431,11 +431,11 @@ Options read_options(int argc, char** argv) {
                 }
                 if (triple.empty() || triple == "." || triple == ".." ||
                     triple.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-") != std::string::npos) {
-                    throw std::runtime_error("--target expects an ELF target triple");
+                    throw std::runtime_error("--target expects a target triple");
                 }
                 options.native_target = triple;
             } else {
-                const fs::path file = next();
+                const auto file = platform::path_from_utf8(next());
                 if (options.launcher && *options.launcher != file) throw std::runtime_error("conflicting --launcher values");
                 options.launcher = file;
             }
@@ -469,7 +469,7 @@ Options read_options(int argc, char** argv) {
                 options.command != Command::Decompile) {
                 throw std::runtime_error("-o applies only to docs, emit-ir, build, inspect, disassemble, assemble, and decompile");
             }
-            options.output = fs::path(next());
+            options.output = platform::path_from_utf8(next());
         } else if (options.command == Command::Run && arg == "--profile") {
             options.limits.profile = true;
         } else if (arg == "--max-tasks" || arg == "--task-quantum" || arg == "--max-queued-messages" ||

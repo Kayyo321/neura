@@ -3,7 +3,7 @@
 
 [Wiki home](https://github.com/Kayyo321/neura/wiki) · [Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · [Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)
 
-`neura build --native` packages an NVR image with a launcher. The executable carries the program and the CPU runtime that executes it, so the file can run on a machine without an installed Neura toolchain. Both launcher flavors are verified on Linux x86-64. On Windows 0.3.0, build an `.nvr` image and launch it with `neura run`.
+`neura build --native` packages an NVR image with a launcher. The executable carries the program and the CPU runtime that executes it, so the file can run on a machine without an installed Neura toolchain. Both launcher flavors are verified on Linux x86-64. The Windows x86-64 SDK provides the default PE launcher, with Windows CI qualification pending. Use an `.exe` output name on Windows.
 
 ## 1. Terminology
 
@@ -43,21 +43,21 @@ Because the image is embedded unchanged, everything that inspects images keeps w
 - Payload compression, self-update, and installers. A packaged program has no installer or updater. The `neura` tool's own install, update, and uninstall commands concern the toolchain ([Install](Install)).
 - A library form. Embedding a program in another application is the [embedding API](Backend#running-an-image).
 - A GPU launcher (section 6.4).
-- Mach-O and PE containers (section 5.4).
+- Mach-O containers (section 5.4).
 
 ## 3. Rules
 
 - **Packaging.** `--native` packages an image with a launcher, and the NVM in the launcher evaluates the image's graphs (section 2).
 - **Image bytes.** The embedded image is byte for byte the image `neura build` writes for the same inputs and options. Every compiler stage runs unchanged (section 2). Its optional `LIFT` hints travel with it, so the launcher's faster tiers prove and use them as `neura run` does; `--no-lift-hints` leaves them out of the embedded image, from sources or from a built `.nvr`.
 - **Build requirements.** `neura build --native` needs no compiler, linker, or other external tool. It reads an installed launcher and writes the output itself (section 7.3). A program with C imports still needs the C compiler those imports need ([C imports](Tooling#c-imports)).
-- **Container.** The container is the launcher's bytes, then the payload, then a fixed 32-byte footer at the end of the file. The launcher's bytes are not modified (section 5.1).
+- **Container.** Packaging appends the payload and a fixed 32-byte footer to the launcher. It preserves an unsigned template's bytes and strips signing metadata from a signed PE template. Signing the result can append a certificate table after the footer (sections 5.1 and 5.4).
 - **Arguments.** Every command-line argument of a native executable belongs to the program. The launcher interprets none (section 6.2).
 - **Capabilities.** Capabilities are chosen when the executable is built and recorded in its policy. The default grants every group, as `neura run` does by default. `--deny-*` options at build time remove groups, and `--allow-fs=prefix,...` narrows files (section 4.2). Nothing at run time can widen the policy (section 6.3).
 - **Run-time options.** Settings that only restrict or observe a run come from the environment variable `NEURA_RUN_OPTIONS`, unless the executable was built with `--sealed`. Restricting includes lowering a limit and denying a group with a `--deny-*` option (section 6.4).
 - **Reproducibility.** The output bytes are a function of the launcher file, the image, and the policy. They contain no timestamps, paths, or host names. Building the same source label with the same options gives identical bytes from any working directory and from a copy at any absolute path.
 - **Reading back.** `run`, `disassemble`, and `decompile` accept a native executable in place of a `.nvr` file, and `neura inspect` reports the launcher, the policy, and the image (section 8).
-- **Launcher flavors.** There are two. The default links the platform C library dynamically and everything else statically. `--static` selects a fully static launcher without native interop (section 7.2).
-- **Targets.** Linux x86-64 is the verified target. Other ELF targets are selected with `--target`, and the build accepts them when a launcher for that target is installed; they are not verified. Mach-O and PE targets are not provided (section 5.4).
+- **Launcher flavors.** The default launcher includes the runtime and libffi. On Linux it uses the system C library. On Windows it links the CRT statically and uses Windows system DLLs. `--static` selects the Linux launcher flavor that also embeds the C library and omits native interop (section 7.2).
+- **Targets.** Linux x86-64 is verified. Windows x86-64 PE qualification is pending. `--target` selects another target when its launcher is installed (section 7.3).
 - **Native library target.** An image whose embedded native library was linked for a different target than the launcher is a build error (section 4.3).
 
 The reasons for these rules are in the [design notes](https://github.com/Kayyo321/neura/blob/main/docs/design/Standalone.md).
@@ -89,7 +89,7 @@ These are accepted only with `--native`.
 | `--max-tasks N`, `--task-quantum N`, `--max-queued-messages N`, `--max-pending-requests N`, `--parallel-workers N` | Record a task setting in the policy ([Concurrency](Concurrency#103-limits)). Without one, the policy records the default of `neura run`: 65,536 tasks, a quantum of 1,024, 1,048,576 queued messages, 4,096 pending requests, and 1 parallel worker. `--parallel-workers` is at most 1,024. The settings matter only to an image with tasks or a parallel map; they are recorded for every image. |
 | `--sealed` | The executable ignores `NEURA_RUN_OPTIONS` (section 6.4). |
 | `--static` | Use the static launcher (section 7.2). |
-| `--target <triple>` | Use the launcher for another ELF target, such as `aarch64-linux-gnu`. The default is the target of the `neura` that is running. Only Linux x86-64 is verified. |
+| `--target <triple>` | Use the installed launcher for the specified target, such as `x86_64-windows-msvc`. The default is the target of the `neura` that is running. |
 | `--launcher <file>` | Use this launcher file instead of searching (section 7.3). |
 
 Capability options apply in command-line order: `--deny-all --allow-net --allow-fs=data` records exactly the network and the files below `data`, and `--allow-net --deny-all` records nothing. `--allow-fs=prefix,...` narrows files to the prefixes, and several lists accumulate until `--deny-fs` or `--deny-all` clears them. A plain `--allow-fs` records every path and drops any list before it, so `--allow-fs=a --allow-fs` records every path and `--allow-fs --allow-fs=a` records only `a`.
@@ -108,8 +108,8 @@ Errors are printed as `neura: error: <text>` and exit with status 1. No output f
 | A `.nvr` input without `--native` | `build takes sources or one .nir file; packaging a .nvr needs --native` |
 | `--no-optimize` or `--no-source-map` with a `.nvr` input | `<option> cannot be applied to an image that is already built` |
 | No launcher found | `--native: no launcher for <triple> in <directory>; pass --launcher or install one` |
-| No launcher found, and the target is a macOS triple (`*-apple-darwin`) | `--native: Neura has no native launcher for macOS (<triple>); native executables are built for Linux targets only. Run the image with 'neura run' instead` |
-| Building on Windows in 0.3.0 | `--native: Windows has no native launcher in 0.3.0; run the image with 'neura run' instead` |
+| No launcher found, and the target is a macOS triple (`*-apple-darwin`) | `--native: Neura has no native launcher for macOS (<triple>); run the image with 'neura run' instead` |
+| `--static` with the default Windows launcher search | `--static: the fully static launcher requires Linux` |
 | The file is not a launcher | `--native: <file> is not a Neura launcher` |
 | The image needs a newer runtime | `--native: the image is NVR 1.<m>; this launcher runs up to 1.<n>` |
 | The image's embedded native library was linked for a different target than the launcher | `--native: the image's native library is for <triple>; the launcher is for <triple>` |
@@ -117,7 +117,7 @@ Errors are printed as `neura: error: <text>` and exit with status 1. No output f
 | `--target` or `--launcher` given twice with different values | `conflicting <option> values` |
 | `--target` names a different target than the launcher's descriptor | `--target: launcher is for <triple>, expected <triple>` |
 | `--static` with a launcher whose descriptor is the default flavor | `--static: <file> is a default launcher` |
-| `--target` is not a single directory name of letters, digits, periods, underscores, and hyphens | `--target expects an ELF target triple` |
+| `--target` is not a single directory name of letters, digits, periods, underscores, and hyphens | `--target expects a target triple` |
 | A `.nvr` input with other input files | `a .nvr input must be the only input file` |
 | `-I` with a `.nvr` input | `-I applies only to source inputs` |
 | A `.nvr` image of 4 GiB or more | `native executable: image must be smaller than 4 GiB` |
@@ -139,12 +139,12 @@ One note is printed to standard error without failing the build: for each capabi
 
 ```text
 +------------------+  offset 0
-| launcher         |  an ordinary executable for the target, unmodified
+| launcher         |  an ordinary executable for the target, unsigned on Windows
 +------------------+  payload offset = launcher size
 | policy           |
 | image            |  the .nvr bytes, unmodified
 +------------------+
-| footer, 32 bytes |  the last bytes of the file
+| footer, 32 bytes |  ends at EOF before signing
 +------------------+
 ```
 
@@ -188,7 +188,7 @@ A launcher carries one descriptor so that `neura build` can check it without run
 
 ### 5.3 Reading a container
 
-A reader takes the last 32 bytes, checks the magic and the container version, checks that the payload lies inside the file and ends exactly at the footer, and verifies the checksum, before it decodes the policy. It bounds every count by the bytes that remain before allocating, as the [NVR loader](NVR#writer-and-loader-requirements) does. Reserved bits that are set, bytes left over after the image, an image length that does not end at the footer, an empty or non-UTF-8 file-system prefix, and a payload that starts inside the launcher or is shorter than the fixed policy fields of its version are errors. The image then goes through the unchanged NVR loader, so an invalid image fails before any host import is invoked.
+A reader locates the 32-byte footer using EOF or the PE certificate table offset (section 5.4). It checks the magic and container version, checks that the payload ends exactly at the footer, and verifies the checksum before it decodes the policy. It bounds every count by the bytes that remain before allocating, as the [NVR loader](NVR#writer-and-loader-requirements) does. Reserved bits that are set, bytes left over after the image, an image length that does not end at the footer, an empty or non-UTF-8 file-system prefix, and a payload that starts inside the launcher or is shorter than the fixed policy fields of its version are errors. The image then goes through the unchanged NVR loader, so an invalid image fails before any host import is invoked.
 
 A reader accepts versions 1, 2 and 3, so an executable with an older container still runs:
 
@@ -203,10 +203,13 @@ The version decides how many policy bytes precede the image, so a policy under t
 
 ### 5.4 Consequences of the layout
 
-ELF loaders map only the segments the program headers name and ignore bytes after them, so the appended payload does not disturb the launcher and the launcher's bytes stay identical to the installed file. Two consequences follow:
+ELF loaders map the segments named by program headers. The appended payload stays outside them. Stripping a packaged ELF executable discards the payload, so use the installed launcher and keep the packaged executable intact.
 
-- `strip`, and any tool that rewrites the ELF file, discards the payload. The result is a bare launcher, which reports that it has no program (section 6.1). Launchers are installed already stripped; a native executable must not be stripped again.
-- A tool that appends its own data after the footer hides the footer. Mach-O code signing and PE Authenticode both have rules about trailing data, so a native executable is not provided for those formats, which would need a different container.
+On Windows, the payload and footer form an overlay after the last PE section. The PE Security directory gives the attribute certificate table's file offset and size. The Authenticode image hash covers the overlay and skips the PE checksum, the Security directory entry, and the certificate table. [Microsoft PE format, The Attribute Certificate Table](https://learn.microsoft.com/windows/win32/debug/pe-format#the-attribute-certificate-table-image-only), [Microsoft PE format, Authenticode PE Image Hash](https://learn.microsoft.com/windows/win32/debug/pe-format#authenticode-pe-image-hash).
+
+When packaging from a signed PE template, the builder copies through the bytes before the certificate table and clears the Security directory and PE checksum before appending the payload and footer. The resulting `.exe` is unsigned until signed after packaging. [Code signing policy](CodeSigning#windows-native-executables).
+
+With an empty Security directory the footer ends at EOF. With a table it ends immediately before the table or its zero padding of up to seven bytes. An offset without eight-byte alignment, a table overlapping a PE section, or a table extending beyond EOF is a corrupt-container error.
 
 ## 6. Run-time behavior
 
@@ -214,7 +217,7 @@ ELF loaders map only the segments the program headers name and ignore bytes afte
 
 In order:
 
-1. The launcher opens its own file and reads the container (section 5.3). It reads the footer and the payload, not the launcher's own bytes. On Linux it uses the first of these that can be opened: `/proc/self/exe`, then the path the kernel recorded when it started the executable (`AT_EXECFN`). A root file system without procfs therefore works. The program name is never used to find the file: whoever starts the process chooses it, and it could name a different executable with a different policy. When none can be opened, the start-up error is `could not open the executable file (tried <list>)`, naming each candidate.
+1. The launcher opens its own file and reads the container (section 5.3). On Linux it tries `/proc/self/exe`, then the kernel's executable path (`AT_EXECFN`), so a root file system without procfs works. When neither can be opened, it reports `could not open the executable file (tried <list>)`. On Windows it uses `GetModuleFileNameW` and a file handle to resolve the path, and redirected standard streams use binary mode. The executable path comes from the operating system independently of the program name passed to `main`.
 2. Unless the policy is sealed, it reads `NEURA_RUN_OPTIONS` (section 6.4).
 3. It loads and validates the image, binds the image's imports to the standard providers under the policy's capabilities, and provides the image's embedded native library, if any, to the native provider.
 4. It runs the entry function with the program's arguments.
@@ -265,7 +268,7 @@ An operator sometimes needs to bound or record a deployed program without rebuil
 
 - The [concurrency](Concurrency#143-command-line) and [GPU](GpuExecution#14-command-line) pages describe further run options. A native executable accepts such an option through this variable only when it restricts or observes a run.
 - The task limits and the worker count apply to images with tasks or a parallel map and are accepted for any image. `--no-gpu` and `--gpu=off` are accepted because they request the CPU evaluation the launcher always uses; `--gpu=auto` and `--gpu=always` are rejected, since launchers have no GPU backend. A sealed executable keeps exactly the settings its policy records, the quantum included.
-- The launcher answers `SIGQUIT` with a task dump on standard error, as `neura run` does, whatever the variable holds. The dump shares the runner's code with `neura run`.
+- On Linux, the launcher answers `SIGQUIT` with a task dump on standard error, as `neura run` does, whatever the variable holds. The dump shares the runner's code with `neura run`.
 
 ### 6.5 Native libraries and bundled files
 
@@ -281,21 +284,21 @@ A launcher is `src/launcher/main.cpp` linked with `neura_nvm` and `neura_nvr` an
 
 | Flavor | Links | Use |
 | --- | --- | --- |
-| Default | The platform C library dynamically; libffi, the C++ runtime, and everything else statically | Any image. Runs wherever the target's C library is present. |
-| Static (`--static`) | Everything statically. The native provider is compiled out, and every `neura.ffi.*` service is registered to fail with code 13 (`Unsupported`). Host names are not resolved. | Images without native interop, in minimal containers and images with no C library. |
+| Default | Static libffi and C++ runtime. Linux uses the system C library. Windows uses the static CRT and system DLLs. | Images for the matching target, including C imports. |
+| Static (`--static`, Linux) | Everything statically. The native provider binds `neura.ffi.*` to code 13 (`Unsupported`). Host connections use numeric addresses or `localhost`. | Images without native interop, in minimal file systems. |
 
-Dynamic loading needs a dynamic C library, which is why native interop and a fully static file exclude each other. Name resolution is excluded for the same reason: in a static program the C library's resolver loads, at run time, the name-service libraries of the C library it was linked with, which the machine that runs the executable may not have. A static executable therefore connects and listens on numeric IPv4 and IPv6 addresses and on `localhost`, and any other host name fails with `Unsupported`. A program that must resolve names uses the default flavor.
+On Linux, the fully static flavor avoids the system C library's dynamic loader and name-service libraries. It connects and listens on numeric IPv4 and IPv6 addresses and on `localhost`, and any other host name fails with `Unsupported`. A program that needs native interop or host-name resolution uses the default flavor.
 
 ### 7.3 Build, install, and search
 
 | Target | Role |
 | --- | --- |
 | `neura_runner` | Static library: the runner's host set-up, trace and output files, and trap reporting. Links `neura_nvm`. |
-| `neura_launcher` | Executable. Links `neura_runner`. Installed stripped. |
+| `neura_launcher` | Executable. Links `neura_runner`. Linux installs a stripped ELF file. Windows installs a PE with the launcher descriptor, version resource and UTF-8 manifest. |
 | `neura_launcher_static` | Executable, built when the CMake option `NEURA_STATIC_LAUNCHER` is `ON`, or `AUTO` and a static C library is found. |
 | `neura` | Links `neura_runner`. Provides `build --native` and `inspect`. |
 
-`cmake --install` places launchers at `<prefix>/lib/neura/launchers/<triple>/neura-launcher` and `neura-launcher-static`, where `<triple>` is the form `nvm::native_target_triple()` returns, such as `x86_64-linux-gnu`. A `neura` in a build directory directly inside the checkout finds them below that build directory, as it finds the standard library there.
+`cmake --install` places launchers under `<prefix>/lib/neura/launchers/<triple>/`. Linux uses `neura-launcher` and `neura-launcher-static`. Windows uses `neura-launcher.exe` under `x86_64-windows-msvc`. A `neura` in a build directory directly inside the checkout finds launchers below that build directory, as it finds the standard library there.
 
 `neura build --native` uses `--launcher <file>` when given. Otherwise it looks in the launcher directory of the `neura` that is running, under the triple from `--target` or its own. A launcher for another target comes from building Neura for that target and copying its launcher directory; the image needs no rebuilding, because an image moves between hosts unchanged ([NVM](NVM#toolchain-and-distribution)). With an explicit launcher and no `--target`, its descriptor determines the target and flavor. An explicit target must match the descriptor, and `--static` requires a static descriptor. Target strings must be single directory names made of letters, digits, periods, underscores, and hyphens.
 
@@ -348,8 +351,10 @@ CTest entries, with the evidence each gives:
 | `native-container` | Every truncation of the payload and footer, a wrong checksum, reserved bits, trailing bytes, container versions 0 and 4, a bare launcher, a stripped executable, and crafted payloads (empty or non-UTF-8 file-system prefix, a prefix count or length beyond the payload, an image length that lies, a zero-length payload, a payload offset inside the launcher, a zero task setting, 1,025 parallel workers, a version 1 policy under a version 2 footer, a version 2 policy under a version 3 footer, and the reverse of each) each fail at start-up with status 1 and before any host import is invoked. Version 1 and version 2 containers run, and so does one that records 1,024 workers. | Exhaustive (truncations), structural |
 | `native-install` | From an installed toolchain, an executable is built, copied to an empty directory with no toolchain on the path, and run. With `--static`, it runs with no shared library available, in a root holding only the executable (no procfs) and in a root with procfs. Those two runs need an unprivileged user namespace; on a host that forbids one the test runs the static executable alone in its directory and prints `empty-root checks NOT RUN` as a warning, or fails when `NEURA_USERNS_REQUIRED=1` is set, as [continuous integration](ContinuousIntegration) sets it. When no static launcher was built, the test prints `static launcher: NOT BUILT, static checks not run` as a warning. | End to end |
 | `native-c-import` | An image with a `NATV` section runs with the default policy and fails as documented under `--deny-native`; the static launcher's default policy omits native code, and a static executable refuses a host name while connecting to a numeric address and to `localhost`; a library for another target is a build error. | End to end on Linux x86-64 |
+| `native-pe-container` | An unsigned PE and a PE with a synthetic certificate table return identical images. Malformed tables and padding are rejected. Packaging from a signed template drops the table, clears the Security directory and checksum, and keeps the image readable. | Portable byte-level tests |
+| `native-pe-*` on Windows | Installed build and copied launch, Unicode and space paths, inspect and replay, sealed policy, checksum rejection, system DLL dependencies and size, image and launcher identity, and a Neura-only build without a linker. | Windows x86-64 CI |
 
-On a platform without a launcher, CMake registers none of these except `native-replay`, without its launcher comparison, and prints a status line naming them.
+The portable PE container test runs without a launcher. Other native-executable tests require a launcher, and `native-replay` retains its image checks on hosts without one.
 
 The existing image tests are the evidence for the image itself. These tests establish only that packaging preserves it.
 

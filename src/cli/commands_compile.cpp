@@ -20,13 +20,13 @@
 #include "neura-ir/tags.hpp"
 #include "neura-ir/task_analysis.hpp"
 #include "neura-ir/verifier.hpp"
+#include "platform/text.hpp"
 #include "tooling/formatter.hpp"
 #include "tooling/json.hpp"
 #include "util/line_endings.hpp"
 #include "util/source_map.hpp"
 
 #ifdef _WIN32
-#include "platform/text.hpp"
 #include "windows_c_import.hpp"
 #endif
 
@@ -346,34 +346,35 @@ void note_denied_imports(const neura::nvr::Image& image, const neura::nvm::Capab
 }
 
 void package_native(const Options& options, std::span<const std::uint8_t> bytes) {
-#ifdef _WIN32
-    (void)options;
-    (void)bytes;
-    throw std::runtime_error("--native: Windows has no native launcher in 0.3.0; run the image with 'neura run' instead");
-#else
     constexpr const char* static_interop_error =
         "--static: the image uses native interop, which the static launcher does not provide";
     if (options.static_launcher && options.allow_native_requested) throw std::runtime_error(static_interop_error);
     const auto triple = options.native_target.value_or(neura::nvm::native_target_triple());
+    const bool windows_target = triple.ends_with("-windows-msvc");
+    if (windows_target && options.static_launcher && !options.launcher) {
+        throw std::runtime_error("--static: the fully static launcher requires Linux");
+    }
     auto prefix = options.executable.parent_path();
     if (prefix.filename() == "bin") prefix = prefix.parent_path();
     const auto directory = prefix / "lib/neura/launchers" / triple;
-    const auto file = options.launcher.value_or(directory / (options.static_launcher ? "neura-launcher-static" : "neura-launcher"));
+    std::string name = options.static_launcher ? "neura-launcher-static" : "neura-launcher";
+    if (windows_target) name += ".exe";
+    const auto file = options.launcher.value_or(directory / name);
+    const auto file_text = platform::native_utf8_path(file);
     if (!fs::is_regular_file(file)) {
-        if (options.launcher) throw std::runtime_error("--native: " + file.string() + " is not a Neura launcher");
+        if (options.launcher) throw std::runtime_error("--native: " + file_text + " is not a Neura launcher");
         if (triple.ends_with("-apple-darwin")) {
             throw std::runtime_error("--native: Neura has no native launcher for macOS (" + triple +
-                                     "); native executables are built for Linux targets only. Run the image with "
-                                     "'neura run' instead");
+                                     "); run the image with 'neura run' instead");
         }
-        throw std::runtime_error("--native: no launcher for " + triple + " in " + directory.string() +
+        throw std::runtime_error("--native: no launcher for " + triple + " in " + platform::native_utf8_path(directory) +
                                  "; pass --launcher or install one");
     }
     const auto launcher = read_file(file);
     const auto descriptor = neura::launcher::read_descriptor(launcher);
     if (!descriptor || descriptor->nvr_major != neura::nvr::major_version ||
         (!options.launcher && (descriptor->triple != triple || descriptor->flavor != unsigned{options.static_launcher}))) {
-        throw std::runtime_error("--native: " + file.string() + " is not a Neura launcher");
+        throw std::runtime_error("--native: " + file_text + " is not a Neura launcher");
     }
     const auto policy_version = options.capabilities.http_client_origins
         ? neura::launcher::container_version : neura::launcher::unscoped_container_version;
@@ -385,7 +386,7 @@ void package_native(const Options& options, std::span<const std::uint8_t> bytes)
         throw std::runtime_error("--target: launcher is for " + descriptor->triple + ", expected " + triple);
     }
     if (options.static_launcher && descriptor->flavor == 0) {
-        throw std::runtime_error("--static: " + file.string() + " is a default launcher");
+        throw std::runtime_error("--static: " + file_text + " is a default launcher");
     }
     if (bytes.size() >= 8 && has_image_magic(bytes)) {
         const unsigned major = bytes[4] | (unsigned{bytes[5]} << 8);
@@ -411,7 +412,6 @@ void package_native(const Options& options, std::span<const std::uint8_t> bytes)
     const neura::launcher::Policy policy{capabilities, options.limits, options.sealed};
     neura::launcher::write_executable(*options.output, launcher, bytes, policy);
     note_denied_imports(image, policy.capabilities);
-#endif
 }
 
 int build_to_file(const Options& options, benchmark::BuildTiming* timing) {

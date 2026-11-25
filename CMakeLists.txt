@@ -419,11 +419,10 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             message(FATAL_ERROR "NEURA_STATIC_LAUNCHER needs a static C library")
         endif()
     endif()
-elseif(WIN32 AND COMMAND neura_windows_launchers)
-    # The PE launcher (cmake/windows/launchers.cmake).
-    neura_windows_launchers()
 elseif(NEURA_STATIC_LAUNCHER STREQUAL "ON")
     message(FATAL_ERROR "NEURA_STATIC_LAUNCHER requires Linux")
+elseif(WIN32)
+    neura_windows_hook(launchers)
 endif()
 
 set(NEURA_GPU "AUTO" CACHE STRING "GPU graph execution: AUTO, ON, or OFF")
@@ -1293,6 +1292,13 @@ if(BUILD_TESTING)
     foreach(suite IN ITEMS int128 line-endings)
         add_test(NAME util-${suite} COMMAND neura_util_tests ${suite})
     endforeach()
+
+    # Synthetic PE files exercise the container reader on every native host.
+    add_executable(neura_pe_container_tests tests/native/pe_container_cases.cpp)
+    target_link_libraries(neura_pe_container_tests PRIVATE neura_runner)
+    neura_target_defaults(neura_pe_container_tests)
+    add_test(NAME native-pe-container COMMAND neura_pe_container_tests
+        "$<TARGET_FILE_DIR:neura_pe_container_tests>/native-pe-container-test.exe")
 endif()
 
 add_library(neura_project STATIC EXCLUDE_FROM_ALL
@@ -2538,7 +2544,7 @@ if(BUILD_TESTING AND NEURA_SDK)
     endif()
 
     set(native_replay_options)
-    if(TARGET neura_launcher)
+    if(TARGET neura_launcher AND NOT WIN32)
         list(APPEND native_replay_options "-DNATIVE_TOOLCHAIN=$<TARGET_FILE:neura>")
     endif()
     add_test(NAME native-replay COMMAND ${CMAKE_COMMAND}

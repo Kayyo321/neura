@@ -136,7 +136,7 @@ Three rules apply to every package. New code includes Windows headers only throu
 | W27 | Server host | decided | [Server host](../runtime/ServerHost.md) |
 | W28 | TLS, HTTP/2, PostgreSQL and TLS trust | deferred to 0.3.1 | [Server host](../runtime/ServerHost.md), [Install](../Install.md), [SQL](../runtime/Sql.md) |
 | W29 | `neurad` | decided | [Service030](Service030.md), [Service](../runtime/Service.md) |
-| W30 | Native executables | deferred to 0.3.1 | [Standalone executables](../lang/Standalone.md), [Standalone design](Standalone.md) |
+| W30 | Native executables | Win64 PE in 0.3.1, qualification pending | [Standalone executables](../lang/Standalone.md), [Standalone design](Standalone.md) |
 | W31 | Desktop | deferred to 0.3.1 | [Desktop030](Desktop030.md), [Providers](../runtime/Providers.md) |
 | W32 | Project tools | decided | [Projects](../apps/Projects.md), [Projects030](Projects030.md) |
 | W33 | GPU | decided | [GPU execution](../lang/GpuExecution.md) |
@@ -376,7 +376,9 @@ This keeps the supervisor's poll-based design: `AF_UNIX` sockets can be waited o
 
 ### W30: Native executables
 
-The PE launcher is deferred to 0.3.1. `neura build --native` refuses on Windows with `--native: Windows has no native launcher in 0.3.0; run the image with 'neura run' instead`. Building an `.nvr` image and running it through `neura run` are available.
+The 0.3.1 Win64 SDK builds and installs `neura-launcher.exe` under `lib/neura/launchers/x86_64-windows-msvc/`. MSVC and clang-cl link it with `link.exe`. It links the runner, NVM, CRT and pinned libffi statically, carries its launcher descriptor and UTF-8 manifest, and uses Windows system DLLs. `neura build --native` copies that template and appends the image container. A Neura-only build needs the SDK and operates without a linker. The resulting executable runs independently of the SDK.
+
+The payload and footer stay in the PE overlay. The Security directory names the certificate table by file offset. The reader looks for the footer at EOF without a table, or before the table and its zero padding of up to seven bytes. Packaging clears the template's signing metadata and produces an unsigned `.exe`. Windows CI covers isolated execution, Unicode paths, inspection and replay, sealed policy, checksum, byte identity, and PE dependency closure. Portable tests exercise the synthetic certificate table, signed-template packaging and malformed directory bounds. [Native executable layout](../lang/Standalone.md#54-consequences-of-the-layout).
 
 ### W31: Desktop
 
@@ -452,11 +454,11 @@ Each case below has a defined refusal; none is left to fail in an unspecified wa
 | Item | Reason | Refusal |
 | --- | --- | --- |
 | Native JIT | Win64 code generation and calling conventions await qualification | `--jit=auto` uses the interpreter. `--jit=on` fails with `Windows has no JIT in 0.3.0` |
-| Native executable generation | The PE launcher is deferred to 0.3.1 | `neura build --native` reports `Windows has no native launcher in 0.3.0` |
+| Native executable generation in the 0.3.0 archive | The PE launcher is a 0.3.1 addition (W30) | The 0.3.0 command reports `Windows has no native launcher in 0.3.0` |
 | Server TLS, HTTP/2, `Std.Net.Tls` and PostgreSQL | OpenSSL, nghttp2 and libpq integration is deferred to 0.3.1 | TLS listener startup, HTTP/2 enablement and PostgreSQL pool setup name the Windows 0.3.0 limit. `Std.Net.Tls` reports that TLS is unavailable in the runtime |
 | Desktop host and desktop project operations | The Windows Electron host and its native child need qualification | Desktop build, dev, run and package report `the desktop host is unavailable on Windows in Neura 0.3.0` |
 | The server host's fork-based worker zygote (`--worker-start zygote`) | Windows has no fork, and cloning a Win32 process that uses the CRT and Winsock is unsupported, so a pre-forked worker cannot be made safely | The existing `--worker-start zygote needs Linux`; the default on Windows is exec, as on macOS |
-| The fully static launcher (`neura build --native --static`, `neura-launcher-static`, `NEURA_STATIC_LAUNCHER=ON`) | The fully static launcher requires Linux | The general `--native` refusal applies. CMake keeps `NEURA_STATIC_LAUNCHER requires Linux` |
+| The fully static launcher (`neura build --native --static`, `neura-launcher-static`, `NEURA_STATIC_LAUNCHER=ON`) | The fully static flavor requires Linux | The Windows launcher search reports `--static: the fully static launcher requires Linux`. CMake reports `NEURA_STATIC_LAUNCHER requires Linux` |
 | Unix-domain datagram sockets and the abstract namespace (`neura.net.unix.datagram`, `unix.send_to`, `unix.receive_from`, `@` names) | Windows `AF_UNIX` implements only stream sockets and has no abstract namespace | 13 (`Unsupported`), as macOS answers for abstract names; the standard library's documentation and tests say so |
 | Linux-only socket services: pipe, splice, MPTCP, `TCP_USER_TIMEOUT`, `SO_REUSEPORT` | No Windows equivalent; macOS answers the same way today | 13 (`Unsupported`), documented in [NVM](../runtime/NVM.md) |
 | The epoll and io_uring backends (`NEURA_IO_BACKEND`, `nvm-wait-source-epoll`, `nvm-wait-source-io-uring`) | Linux kernel interfaces | `NEURA_IO_BACKEND` is ignored on Windows, as documented; the two CTest entries stay Linux-only |
