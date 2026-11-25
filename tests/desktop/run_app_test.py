@@ -131,9 +131,9 @@ def run_killed(command, env, scratch):
 
 def dismiss_error_dialog(text):
     if WINDOWS:
-        from windows_desktop import close_window, error_dialog
+        from windows_desktop import close_window, visible_window
         owner = re.search(r"^DIALOG_PID=(\d+)\n", text, re.MULTILINE)
-        if owner and (found := error_dialog(int(owner[1]), "Neura desktop application ended")):
+        if owner and (found := visible_window(int(owner[1]), "Neura desktop application ended", "#32770")):
             print(f"app-trap-dialog: the native error window {found} belongs to host {owner[1]}")
             close_window(found)
             return found

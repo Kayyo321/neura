@@ -13,7 +13,9 @@ neura-server-host.exe; otherwise that case says that it is not run.
 usage: package.py <neura> <source directory> <scratch directory>
 """
 
+import filecmp
 import gzip
+import json
 import os
 from pathlib import Path
 import shutil
@@ -158,9 +160,30 @@ def main():
         if WINDOWS:
             result = run('package', '--target', 'desktop', cwd=project, env=env)
             package = project / 'dist/stock-0.1.0-desktop.zip'
-            refused(result, 'E1033', 'the desktop host is unavailable on Windows in Neura 0.3.0',
-                    'Windows desktop delivery requires the ZIP packager')
-            check(not package.exists(), 'the refused Windows desktop delivery leaves no archive')
+            check(result.returncode == 0 and package.is_file(), 'package the desktop target as a Windows ZIP')
+            if result.returncode == 0 and package.is_file():
+                inputs = next((line for line in result.stdout.splitlines() if line.startswith('inputs: Python ')), '')
+                check('Pillow ' in inputs and 'zlib ' in inputs, 'the packager reports its reproducibility inputs')
+                print(inputs)
+                bundle_copy = SCRATCH / 'copie du paquet 編'
+                shutil.copytree(project / 'dist/desktop', bundle_copy)
+                again = SCRATCH / 'deuxième paquet 猫.zip'
+                repeated = run('package', '--target', 'desktop', '--format', 'zip', '--bundle', bundle_copy,
+                               '-o', again, cwd=project, env=env)
+                check(repeated.returncode == 0 and again.is_file() and filecmp.cmp(package, again, shallow=False),
+                      'a Windows ZIP is identical with explicit Unicode bundle and output paths')
+                if repeated.returncode:
+                    print(repeated.stdout + repeated.stderr)
+                with zipfile.ZipFile(package) as archive:
+                    root = 'stock/resources/app/'
+                    desktop = json.loads(archive.read(root + 'desktop.json'))
+                    child = desktop['child']['executable']
+                    check(child.endswith('.exe') and archive.read(root + child).startswith(b'MZ'),
+                          'the archived desktop child is a PE executable')
+                    check({'stock/stock.exe', root + 'web/bundle.json', 'stock/LICENSES/PROVIDERS.txt'}
+                          <= set(archive.namelist()), 'the desktop package has the host, web bundle and notices')
+            else:
+                print(result.stdout + result.stderr)
         else:
             result = run('package', '--target', 'desktop', '--format', 'tar.gz', cwd=project, env=env)
             package = project / 'dist/stock-0.1.0-desktop.tar.gz'

@@ -27,6 +27,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - On x86-64 Windows, `import:c(...)` links static COFF libraries and objects into a reproducible embedded DLL using `cl` or `clang-cl`. [C imports](docs/lang/ForeignInterop.md#c-imports)
 - On x86-64 Windows, `neura build --native` packages standalone PE executables with the runtime, image and policy. The packaged executable can be signed with Authenticode after the build. [Native executables](docs/lang/Standalone.md)
 - On x86-64 Windows, `neura build`, `neura run` and `neura dev` support desktop projects with the pinned Electron 45.3.3 host and a native PE child. [Desktop projects](docs/apps/Projects.md#running-a-bundle)
+- On x86-64 Windows, `neura package --target <desktop>` produces a reproducible ZIP with Electron, the PE child, application assets, icons and notices. [Desktop packages](docs/apps/Desktop.md#packages)
 - `Std.Fs.Fs.FileMetadata.init` defaults `modified_at` to `nil` for an unavailable modification time. `Std.Log.Logger.Logger.init` defaults `time_source` to `nil` for untimestamped records.
 - `if (let binding = value; condition)` evaluates one binding or destructuring before the condition, with its names scoped to the condition and branches. `else if` may have its own initializer.
 - Class and interface references can be tested directly in conditions and with `!` or `not`. The tests use normal nil comparisons and preserve reference reads and runtime safety checks.

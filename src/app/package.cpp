@@ -33,10 +33,11 @@ constexpr std::string_view usage =
     "usage: neura package [--project <manifest>] --target <name> [--format <format>] [--bundle <directory>]\n"
     "                     [-o <file>] [--sign]\n"
     "\n"
-    "Wraps the target's built bundle (dist/<name> unless --bundle) for delivery. A server target gives a .tar.gz\n"
-    "holding the bundle, neura-run, neura-server-host and the core library; `run` in it serves the bundle. A\n"
-    "desktop target gives a .tar.gz, .deb or .zip through the desktop packager (--format, from the manifest's\n"
-    "packaging.formats by default). Build the bundle first with `neura build --target <name>`.\n";
+    "Wraps the target's built bundle (dist/<name> unless --bundle) for delivery. A server target gives an archive\n"
+    "with the bundle, neura-run, neura-server-host, the core library and a run script (.zip on Windows, .tar.gz\n"
+    "elsewhere). A desktop target gives a .tar.gz, .deb or .zip. The default format is zip on Windows and the\n"
+    "manifest's first packaging.formats entry elsewhere (tar.gz when none is set). Build the bundle first with\n"
+    "`neura build --target <name>`.\n";
 
 [[noreturn]] void cannot_package(const Span& site, std::string message) {
     throw Diagnostic(site, std::move(message)).with_code("E1033");
@@ -466,7 +467,7 @@ fs::path package_desktop(const app::Project& project, const Target& target, cons
     const auto engine = engine_text && !engine_text->empty() && platform::is_valid_utf8(*engine_text)
                             ? platform::path_from_utf8(*engine_text)
                             : fs::path();
-    if (engine.empty() || !fs::exists(engine, error)) {
+    if (engine.empty() || !fs::is_regular_file(engine, error)) {
         cannot_package(target.kind.span, "a desktop package needs the pinned Electron 45.3.3 engine: set "
                                          "NEURA_DESKTOP_ENGINE to its executable (electron.exe)");
     }
@@ -478,10 +479,12 @@ fs::path package_desktop(const app::Project& project, const Target& target, cons
         cannot_package(target.kind.span, "the desktop packager needs Python 3: neither python.exe on PATH nor the "
                                          "Python launcher (py.exe) was found");
     }
-    for (auto argument : {app::argument_path(*script), std::string("--engine"), app::argument_path(engine.parent_path()),
-                          std::string("--package"), app::argument_path(bundle), std::string("--name"),
-                          project.manifest.project.name.value, std::string("--icon"), app::argument_path(paths.icon->value),
-                          std::string("--format"), format, std::string("-o"), app::argument_path(output)})
+    // Keep redirected packager output in UTF-8 too, including paths outside the active code page.
+    for (auto argument : {std::string("-X"), std::string("utf8"), app::argument_path(*script), std::string("--engine"),
+                          app::argument_path(engine.parent_path()), std::string("--package"), app::argument_path(bundle),
+                          std::string("--name"), project.manifest.project.name.value, std::string("--icon"),
+                          app::argument_path(paths.icon->value), std::string("--format"), format,
+                          std::string("-o"), app::argument_path(output)})
         command->push_back(std::move(argument));
     if (test_hooks) {
         command->emplace_back("--test-hooks");
@@ -576,11 +579,8 @@ int package(const std::vector<std::string>& arguments) {
         if (format && (*format == "dmg" || *format == "msix" ||
                        (target.kind.value == TargetKind::Desktop && foreign(*format))))
             foreign_format(target.kind.span, *format);
-#ifdef _WIN32
-        if (target.kind.value == TargetKind::Desktop) cannot_package(target.kind.span,
-            "the desktop host is unavailable on Windows in Neura 0.3.0");
-#endif
-        const auto bundle = bundle_option ? fs::absolute(*bundle_option) : loaded.resolved.root / "dist" / *target_name;
+        const auto bundle = bundle_option ? fs::absolute(detail::path_from_text(*bundle_option))
+                                          : loaded.resolved.root / "dist" / *target_name;
         if (!app::is_bundle_directory(bundle)) {
             cannot_package(target.kind.span, "no built bundle in " + app::display_path(bundle) + "; build it with `neura build "
                                              "--target " + *target_name + "`");
@@ -608,7 +608,7 @@ int package(const std::vector<std::string>& arguments) {
                 cannot_package(target.kind.span, "a server package on Windows is a .zip; --format " + *format +
                                                      " is not one");
             }
-            const auto out = output ? fs::absolute(*output)
+            const auto out = output ? fs::absolute(detail::path_from_text(*output))
                                     : loaded.resolved.root / "dist" / (identity.name.value + "-" + identity.version.value +
                                                                        "-" + *target_name + ".zip");
             result = package_server_zip(loaded, target, bundle, out);
@@ -616,7 +616,7 @@ int package(const std::vector<std::string>& arguments) {
             if (format && *format != "tar.gz") {
                 cannot_package(target.kind.span, "a server package is a .tar.gz; --format " + *format + " is not one");
             }
-            const auto out = output ? fs::absolute(*output)
+            const auto out = output ? fs::absolute(detail::path_from_text(*output))
                                     : loaded.resolved.root / "dist" / (identity.name.value + "-" + identity.version.value +
                                                                        "-" + *target_name + ".tar.gz");
             result = package_server(loaded, target, bundle, out);
@@ -631,7 +631,7 @@ int package(const std::vector<std::string>& arguments) {
             std::string chosen = format ? *format : settings.packaging.formats.empty() ? "tar.gz"
                                                                                       : settings.packaging.formats.front().value;
 #endif
-            const auto out = output ? fs::absolute(*output)
+            const auto out = output ? fs::absolute(detail::path_from_text(*output))
                                     : loaded.resolved.root / "dist" / (identity.name.value + "-" + identity.version.value +
                                                                        "-" + *target_name + "." + chosen);
             result = package_desktop(loaded, target, *target_name, bundle, chosen, out, false);

@@ -103,7 +103,7 @@ def wait_for_job(job, seconds):
 
 
 @contextmanager
-def fixture_job(command, **kwargs):
+def fixture_job(command, *, pid_file=None, **kwargs):
     """Contain the fixture tree from its first spawn and check it before cleanup."""
     job = checked(kernel.CreateJobObjectW(None, None))
     limits = JobExtendedLimit(basic=JobLimit(flags=JOB_KILL_ON_CLOSE))
@@ -111,10 +111,15 @@ def fixture_job(command, **kwargs):
         checked(kernel.SetInformationJobObject(job, JOB_EXTENDED_LIMIT, ctypes.byref(limits), ctypes.sizeof(limits)))
         # The helper waits on stdin so assignment precedes every Electron spawn. It forwards the exit code
         # and passes along the inherited output handles.
-        gate = ("import subprocess, sys\n"
+        gate = ("from pathlib import Path\n"
+                "import subprocess, sys\n"
                 "if sys.stdin.buffer.read(1) != b'1': sys.exit(1)\n"
-                "sys.exit(subprocess.call(sys.argv[1:], stdin=subprocess.DEVNULL))")
-        with subprocess.Popen([sys.executable, "-c", gate, *command], stdin=subprocess.PIPE, **kwargs) as process:
+                "child = subprocess.Popen(sys.argv[2:], stdin=subprocess.DEVNULL)\n"
+                "if sys.argv[1]: Path(sys.argv[1]).write_text(f'{child.pid}\\n', encoding='ascii')\n"
+                "sys.exit(child.wait())")
+        pid_path = str(pid_file) if pid_file else ""
+        with subprocess.Popen([sys.executable, "-c", gate, pid_path, *command], stdin=subprocess.PIPE,
+                              **kwargs) as process:
             try:
                 with process_handle(process.pid, PROCESS_SET_QUOTA | PROCESS_TERMINATE) as handle:
                     checked(kernel.AssignProcessToJobObject(job, handle))
@@ -135,7 +140,7 @@ def fixture_job(command, **kwargs):
         kernel.CloseHandle(job)
 
 
-def error_dialog(pid, title):
+def visible_window(pid, title, class_name=None):
     windows = []
 
     @window_callback
@@ -144,8 +149,9 @@ def error_dialog(pid, title):
         user.GetWindowThreadProcessId(window, ctypes.byref(owner))
         if owner.value == pid and user.IsWindowVisible(window):
             buffer = ctypes.create_unicode_buffer(256)
-            user.GetClassNameW(window, buffer, len(buffer))
-            if buffer.value == "#32770":
+            if class_name is not None:
+                user.GetClassNameW(window, buffer, len(buffer))
+            if class_name is None or buffer.value == class_name:
                 user.GetWindowTextW(window, buffer, len(buffer))
                 if buffer.value == title:
                     windows.append(window)

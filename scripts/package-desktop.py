@@ -15,13 +15,14 @@ PNG icon. The application tree is
 
 A .tar.gz holds that tree. A .deb installs it under /opt/<name>, with a
 command in /usr/bin, a desktop entry and the hicolor icons. A .zip holds the
-tree of a Windows engine (the directory must hold electron.exe); it is only
-the container: this tool cannot build or check the Windows native child.
+tree of a Windows engine (the directory must hold electron.exe) with the
+native child from the Windows desktop build.
 
 Entries are sorted, owned by 0:0 and dated at SOURCE_DATE_EPOCH (default 0;
 a .zip records 1980-01-01, its earliest date), and gzip records no name or
-time, so the same inputs, Python and Pillow give the same bytes. The package
-contains no .nra source and no SDK tool. Nothing is signed. .dmg and .msix are
+time, so repeat runs with the same inputs give the same bytes. The tool
+reports the Python, Pillow and zlib versions used. The package contains no
+.nra source and no SDK tool. Nothing is signed. .dmg and .msix are
 built on macOS and Windows and are refused here, as is signing.
 
 --test-hooks adds a scripted dialog driver (a JSON list of answers) that the
@@ -40,6 +41,7 @@ import stat
 import sys
 import tarfile
 import zipfile
+import zlib
 
 ROOT = Path(__file__).resolve().parent.parent
 HOST = ROOT / "hosts" / "desktop"
@@ -90,7 +92,7 @@ def icons(source, sizes, windows):
     try:
         from PIL import Image
     except ImportError:
-        fail("icons need Pillow (python3-pil)")
+        fail("icons need Pillow (Pillow on PyPI or python3-pil on Debian)")
     with Image.open(source) as image:
         if image.format != "PNG" or image.size != (1024, 1024):
             fail(f"the icon must be a 1,024 by 1,024 PNG: {source}")
@@ -309,6 +311,9 @@ def main():
     hooks = ", TEST HOOKS (not a release package)" if args.test_hooks else ""
     print(f"{args.output}: {len(archive)} bytes, sha256 {hashlib.sha256(archive).hexdigest()}, "
           f"tree {tree.hexdigest()}, {len(entries)} files, unsigned{hooks}")
+    # Pillow was loaded by icons() above.
+    from PIL import __version__ as pillow_version
+    print(f"inputs: Python {sys.version.split()[0]}, Pillow {pillow_version}, zlib {zlib.ZLIB_RUNTIME_VERSION}")
 
 
 if __name__ == "__main__":
