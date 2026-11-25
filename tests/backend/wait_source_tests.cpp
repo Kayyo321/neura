@@ -210,6 +210,33 @@ void provider_wake_ups() {
     check(expired && clock.time == 5'000, "the deadline did not expire a woken operation");
 }
 
+// BackgroundWork: run on every full check, never on a cancellation's own
+// check, and its wake-up bounds the native wait without delivering anything.
+void background_work() {
+    struct Counting final : BackgroundWork {
+        int runs = 0;
+        std::int64_t wake = PendingOperation::no_deadline;
+        std::vector<PosixWait::Interest> interests() override { return {}; }
+        std::int64_t wake_at(std::int64_t) override { return wake; }
+        void run() override { ++runs; }
+    } work;
+    Clock clock;
+    PendingRequests pending(clock);
+    pending.add_background(&work);
+    pending.add_background(&work);
+    check(pending.poll().empty() && work.runs == 1, "background work did not run once per check");
+    auto cancellable = with_source(ExternalWait{std::make_shared<ExternalSignal>()});
+    cancellable.attempt = [](bool cancelled) -> std::optional<HostCompletion> {
+        if (cancelled) return value(50);
+        return std::nullopt;
+    };
+    pending.add(50, std::move(cancellable), true);
+    pending.cancel(50);
+    check(work.runs == 1, "a cancellation's own check ran background work");
+    completed(pending.poll(), 50, 50, true);
+    check(work.runs == 2, "background work missed a check");
+}
+
 #ifdef _WIN32
 
 class ManualEvent {
@@ -609,6 +636,7 @@ int main() {
         native_sockets();
         closed_sockets();
         provider_wake_ups();
+        background_work();
 #else
 #ifdef __linux__
         if (backend == IoBackend::IoUring) {
@@ -629,6 +657,7 @@ int main() {
         external_cancel_and_deadline();
         native_events();
         provider_wake_ups();
+        background_work();
         live_wake_up();
 #endif
     } catch (const std::exception& error) {

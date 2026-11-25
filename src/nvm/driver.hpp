@@ -44,6 +44,10 @@ public:
         bool cancelled = false;
     };
 
+    // Runs `work` on every check from now on (HostService::background). A
+    // work added twice runs once.
+    void add_background(BackgroundWork* work);
+
     // Keeps request `sequence`, which `service.begin` answered with `started`.
     void add(std::uint64_t sequence, std::variant<HostCompletion, PendingOperation> started, bool cancellable);
     // The task waiting for `sequence` asked to cancel. A cancellable
@@ -88,6 +92,7 @@ private:
     TaskClock& clock_;
     IoBackend backend_;
     std::map<std::uint64_t, Entry> entries_;
+    std::vector<BackgroundWork*> background_;
 };
 
 // What the driver asks of its caller. Every function may be empty except

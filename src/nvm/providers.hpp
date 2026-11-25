@@ -269,12 +269,16 @@ public:
     std::variant<HostCompletion, PendingOperation> begin(const HostRequest& request) override {
         return begin_ ? begin_(request) : HostService::begin(request);
     }
+    BackgroundWork* background() const override { return background_; }
+    // Shares the provider's background work, which outlives the service.
+    void set_background(BackgroundWork* work) { background_ = work; }
 
 private:
     HostSignature signature_;
     Handler handler_;
     Begin begin_;
     bool cancellable_ = false;
+    BackgroundWork* background_ = nullptr;
 };
 
 // The standard providers of neura run and neura test (Stdlib.md section 4.5):

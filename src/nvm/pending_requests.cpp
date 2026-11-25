@@ -748,6 +748,12 @@ void PendingRequests::add(std::uint64_t sequence, std::variant<HostCompletion, P
     }
 }
 
+void PendingRequests::add_background(BackgroundWork* work) {
+    if (work && std::find(background_.begin(), background_.end(), work) == background_.end()) {
+        background_.push_back(work);
+    }
+}
+
 void PendingRequests::cancel(std::uint64_t sequence) {
     const auto found = entries_.find(sequence);
     if (found == entries_.end()) return;
@@ -784,7 +790,19 @@ void PendingRequests::check(int timeout_ms, std::optional<std::uint64_t> only) {
             check.external = external->signal.get();
         }
     }
+    // Background work is watched and run on every full check, never on the
+    // check of one cancellation.
+    if (!only) {
+        for (auto* work : background_) {
+            for (const auto& interest : work->interests()) {
+                if (interest.descriptor >= 0) static_cast<void>(native.add(interest));
+            }
+        }
+    }
     native.wait(timeout_ms, backend_);
+    if (!only) {
+        for (auto* work : background_) work->run();
+    }
     for (auto& check : checks) {
         check.ready = check.native_index ? native.ready(*check.native_index) : !check.external || check.external->take();
     }
@@ -832,6 +850,13 @@ std::vector<PendingRequests::Done> PendingRequests::wait(std::optional<std::int6
     // none, and every wait below is as it was, when no operation sets one.
     auto wake = none;
     std::optional<std::int64_t> wake_now;
+    for (auto* work : background_) {
+        for (const auto& interest : work->interests()) {
+            if (interest.descriptor >= 0) has_native_wait = true;
+        }
+        if (!wake_now) wake_now = clock_.now();
+        wake = std::min(wake, work->wake_at(*wake_now));
+    }
     for (const auto& [sequence, entry] : entries_) {
         const auto& operation = entry.operation;
         earliest = std::min(earliest, operation.deadline);
