@@ -405,6 +405,25 @@ void TaskAnalysis::explain_class(Diagnostic& error, const IrType& type) const {
     }
 }
 
+// Why a value that tasks may share cannot enter a parallel item, which runs
+// in a heap of its own and receives copies.
+void TaskAnalysis::item_note(Diagnostic& error, const IrType& type) const {
+    const auto cls = type.kind == TypeKind::Object && valid(type.symbol) ? type.symbol : no_symbol;
+    if (cls != no_symbol && pointer_class(program_, cls) != PointerKind::None) {
+        error.note("a managed pointer refers to storage in the run's heap, but a parallel item runs in a heap of its "
+                   "own and receives copies, so a pointer cannot enter one");
+    } else if (cls != no_symbol && concurrent_handle(cls)) {
+        error.note("tasks share a Std.Concurrent handle, but a parallel item runs in a heap of its own and receives "
+                   "copies, so a handle cannot enter one");
+    } else if (cls != no_symbol && has_attribute(symbol(cls), AttributeId::ClassShareable)) {
+        error.note("tasks share an instance of a monitor, but a parallel item runs in a heap of its own and receives "
+                   "copies, so a monitor cannot enter one");
+    } else {
+        error.note("tasks share this value, but a parallel item runs in a heap of its own and receives copies, so it "
+                   "cannot enter one");
+    }
+}
+
 std::optional<TaskAnalysis::Reason> TaskAnalysis::direct(const IrNode& node) const {
     if (node.op == IrOp::Load && valid(node.symbol) && symbol(node.symbol).kind == SymbolKind::Global) {
         const auto& global = symbol(node.symbol);
@@ -722,10 +741,7 @@ void TaskAnalysis::check() const {
                                             role).with_code("E0602").label("not transferable");
                     capture_note(error, type);
                     explain_class(error, type);
-                    if (item && transferable(type)) {
-                        error.note("tasks share an instance of a monitor, but a parallel item runs in a heap of its "
-                                   "own and receives copies, so a monitor cannot enter one");
-                    }
+                    if (item && transferable(type)) item_note(error, type);
                     throw error;
                 };
                 if (node.text == "transfer.check" && node.operands.size() == 1) {

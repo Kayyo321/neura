@@ -117,6 +117,7 @@ private:
     // A diagnostic for a value that is not transferable: when its class was
     // meant to be shared, why it is not.
     void explain_class(Diagnostic& error, const IrType& type) const;
+    void item_note(Diagnostic& error, const IrType& type) const;
 
     const IrSymbol& symbol(SymbolId id) const { return program_.symbols[id]; }
     bool valid(SymbolId id) const { return id < program_.symbols.size(); }
