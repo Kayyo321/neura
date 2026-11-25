@@ -1,0 +1,21 @@
+let console = import:Std.Io.Console;
+let harness = import:Std.TestSupport.DeflateHarness;
+let program = import:Std.Program;
+let.promote _ = import:Std.Core.Result;
+
+// Runs the manifest named by the first argument through the DEFLATE harness and prints how many operations
+// ran (tests/backend/deflate.cmake).
+let DeflateVectors = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        match (harness.run(args[0])) {
+            Result.Ok(count) => {
+                console.print_line("ran " .. count.to_string());
+                return program.ExitCode.Ok;
+            },
+            Result.Err(failure) => {
+                console.print_line("manifest failure: " .. failure.to_string());
+                return program.ExitCode.Failure;
+            },
+        }
+    };
+);

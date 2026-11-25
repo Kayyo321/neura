@@ -1,0 +1,1263 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+let kernels = import:Std.Internal.Kernels.Digest;
+
+/// @brief DEFLATE compression and decompression (RFC 1951), raw and inside the zlib (RFC 1950) and gzip
+/// (RFC 1952) formats. Internal: only library source may import it. Std.Net.Realtime.Ws.PermessageDeflate,
+/// Std.Net.Rpc.Framing and Std.Crypto.Token.Jwe build on it (Stdlib.md section 13).
+///
+/// Decompression accepts every valid stream: stored, fixed-Huffman and dynamic-Huffman blocks. It follows the
+/// checks of zlib's reference decoder puff.c: a dynamic block's code-length code must be complete, its
+/// literal/length and distance codes must be complete unless they hold a single one-bit code, it must code the
+/// end of block, and no symbol, length or distance outside RFC 1951 is accepted. A distance beyond the data
+/// decoded so far, or beyond the window, is rejected. Every decompressor takes the largest output it may
+/// produce; it stops with an error as soon as more would be needed, so the work and memory a peer can cause
+/// are bounded by that limit and by the input. Malformed data fails with an Encoding error whose offset is the
+/// input byte being read when the problem was found. Exceeding the output limit fails with the Custom error
+/// `OutputLimitCode`.
+///
+/// Compression finds repeated strings with hash chains (3-byte hash, greedy matching, 64 candidates at most)
+/// and codes each block as stored, fixed or dynamic Huffman, whichever is shortest. Its output depends only
+/// on its input. The zlib header is 78 9C; the gzip header has no name, no time (MTIME 0) and OS 255.
+///
+/// `Inflater` and `Deflater` keep their window between calls for context takeover (RFC 7692). A call to
+/// `Inflater.inflate` must end on a block boundary, as a permessage-deflate payload with its 00 00 FF FF tail
+/// does.
+.Since("0.3.1")
+export let Deflate = module (
+    /// @brief The smallest window, in bits, of an Inflater or a Deflater (RFC 7692 section 7.1.2).
+    export const MinWindowBits: int = 8;
+    /// @brief The largest window, in bits: 32 KiB.
+    export const MaxWindowBits: int = 15;
+    /// @brief The code of the Custom error that a decompressor returns when the output would exceed its limit.
+    export const OutputLimitCode: string = "encoding.deflate.output_limit";
+
+    /// @brief The longest code of a literal/length or distance code.
+    const MaxBits: int = 15;
+    /// @brief The longest code of the code-length code.
+    const MaxCodeLengthBits: int = 7;
+    /// @brief Symbols in the literal/length alphabet that a block may use.
+    const LiteralLengthSymbols: int = 286;
+    /// @brief Symbols in the distance alphabet that a block may use.
+    const DistanceSymbols: int = 30;
+    /// @brief Hash table size of the compressor: 2^15 buckets.
+    const HashSize: int = 32768;
+    /// @brief Candidates the compressor compares at one position.
+    const MaxChain: int = 64;
+    /// @brief The longest match.
+    const MaxMatch: int = 258;
+    /// @brief Symbols the compressor collects before it ends a block.
+    const BlockSymbols: int = 16384;
+    /// @brief The most bytes of one stored block.
+    const StoredMax: int = 65535;
+    /// @brief The absolute position at which a Deflater moves its positions back, well below 2^31.
+    const RebaseAt: int = 1073741824;
+    /// @brief The modulus of Adler-32.
+    const AdlerBase: int64 = 65521;
+
+    /// @brief The order in which a dynamic block sends the code-length code lengths (RFC 1951 section 3.2.7).
+    let code_length_order = func -> int[list] => new([16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]);
+
+    /// @brief The Encoding error of malformed data at an input offset.
+    let malformed = func(offset: int, text: string) -> Error => Error.Encoding { offset: offset, message: text };
+
+    /// @brief The error of output beyond the limit.
+    let over_limit = func(limit: int) -> Error =>
+        custom(OutputLimitCode, "decompressed data exceeds the limit of " .. limit.to_string() .. " bytes");
+
+    /// @brief A new list of `count` copies of `value`.
+    let filled = func(count: int, value: int) -> int[list] {
+        let out: int[list] = new;
+        for (let i = 0; i < count; i++) {
+            out.append(value);
+        }
+        return out;
+    };
+
+    /// @brief The base length of literal/length symbol 257 + `index` (RFC 1951 section 3.2.5).
+    let length_base = func(index: int) -> int {
+        if (index < 8) {
+            return index + 3;
+        }
+        if (index == 28) {
+            return 258;
+        }
+        last k = index - 4;
+        return ((4 + (k % 4)) << (k / 4)) + 3;
+    };
+
+    /// @brief The extra bits of literal/length symbol 257 + `index`.
+    let length_extra = func(index: int) -> int => index < 8 || index == 28 ? 0 : (index - 4) / 4;
+
+    /// @brief The base distance of distance symbol `index`.
+    let distance_base = func(index: int) -> int => index < 4 ? index + 1 : ((2 + (index & 1)) << (index / 2 - 1)) + 1;
+
+    /// @brief The extra bits of distance symbol `index`.
+    let distance_extra = func(index: int) -> int => index < 4 ? 0 : index / 2 - 1;
+
+    /// @brief The index of the highest set bit of a positive value.
+    let top_bit = func(value: int) -> int {
+        let bit = 0;
+        let rest = value;
+        while (rest > 1) {
+            rest = rest >> 1;
+            bit++;
+        }
+        return bit;
+    };
+
+    /// @brief The literal/length symbol of a match length from 3 to 258.
+    let length_symbol = func(length: int) -> int {
+        last l = length - 3;
+        if (l < 8) {
+            return 257 + l;
+        }
+        if (length == 258) {
+            return 285;
+        }
+        last nb = top_bit(l);
+        return 257 + 4 * (nb - 1) + ((l >> (nb - 2)) & 3);
+    };
+
+    /// @brief The distance symbol of a distance from 1 to 32768.
+    let distance_symbol = func(distance: int) -> int {
+        last d = distance - 1;
+        if (d < 4) {
+            return d;
+        }
+        last nb = top_bit(d);
+        return 2 * nb + ((d >> (nb - 1)) & 1);
+    };
+
+    /// @brief The code lengths of the fixed literal/length code (RFC 1951 section 3.2.6).
+    let fixed_literal_lengths = func -> int[list] {
+        let lengths: int[list] = new;
+        for (let i = 0; i < 288; i++) {
+            lengths.append(i < 144 ? 8 : i < 256 ? 9 : i < 280 ? 7 : 8);
+        }
+        return lengths;
+    };
+
+    /// @brief The Adler-32 checksum (RFC 1950 section 8) of the bytes.
+    let adler32 = func(bytes: uint8[list]) -> int64 {
+        let a: int64 = 1;
+        let b: int64 = 0;
+        let i = 0;
+        while (i < bytes.length) {
+            last end = i + 5552 < bytes.length ? i + 5552 : bytes.length;
+            while (i < end) {
+                a += bytes[i] as int64;
+                b += a;
+                i++;
+            }
+            a = a % AdlerBase;
+            b = b % AdlerBase;
+        }
+        return (b << 16) | a;
+    };
+
+    /// @brief The 32-bit word at the offset, most significant byte first.
+    let load32_be = func(bytes: uint8[list], at: int) -> int64 =>
+        ((bytes[at] as int64) << 24) | ((bytes[at + 1] as int64) << 16) | ((bytes[at + 2] as int64) << 8)
+        | (bytes[at + 3] as int64);
+
+    /// @brief The 32-bit word at the offset, least significant byte first.
+    let load32_le = func(bytes: uint8[list], at: int) -> int64 =>
+        ((bytes[at + 3] as int64) << 24) | ((bytes[at + 2] as int64) << 16) | ((bytes[at + 1] as int64) << 8)
+        | (bytes[at] as int64);
+
+    /// @brief Appends the low 32 bits of the value, most significant byte first.
+    let append32_be = func(out: uint8[list], value: int64) {
+        out.append(((value >> 24) & 255) as uint8);
+        out.append(((value >> 16) & 255) as uint8);
+        out.append(((value >> 8) & 255) as uint8);
+        out.append((value & 255) as uint8);
+    };
+
+    /// @brief Appends the low 32 bits of the value, least significant byte first.
+    let append32_le = func(out: uint8[list], value: int64) {
+        out.append((value & 255) as uint8);
+        out.append(((value >> 8) & 255) as uint8);
+        out.append(((value >> 16) & 255) as uint8);
+        out.append(((value >> 24) & 255) as uint8);
+    };
+
+    /// @brief A canonical Huffman code for decoding: the number of codes of each length and the symbols in
+    /// code order (puff.c).
+    .Final
+    let DecodeTable = class (
+        /// @brief counts[n]: the number of codes of length n, for n from 0 to 15.
+        export let counts: int[list] = new;
+        /// @brief The symbols ordered by code.
+        export let symbols: int[list] = new;
+
+        /// @brief An empty table.
+        export let init = func {
+        };
+
+        /// @brief Builds the code of `n` lengths starting at `from`. Returns 0 for a complete code, a positive
+        /// number for an incomplete one and a negative number for an over-subscribed one.
+        export let build = func(lengths: int[list], from: int, n: int) -> int {
+            counts = filled(MaxBits + 1, 0);
+            for (let s = 0; s < n; s++) {
+                counts[lengths[from + s]] = counts[lengths[from + s]] + 1;
+            }
+            if (counts[0] == n) {
+                symbols = new;
+                return 0;
+            }
+            let left = 1;
+            for (let len = 1; len <= MaxBits; len++) {
+                left = left << 1;
+                left -= counts[len];
+                if (left < 0) {
+                    return left;
+                }
+            }
+            let offsets = filled(MaxBits + 1, 0);
+            for (let len = 1; len < MaxBits; len++) {
+                offsets[len + 1] = offsets[len] + counts[len];
+            }
+            symbols = filled(n, 0);
+            for (let s = 0; s < n; s++) {
+                last len = lengths[from + s];
+                if (len != 0) {
+                    symbols[offsets[len]] = s;
+                    offsets[len] = offsets[len] + 1;
+                }
+            }
+            return left;
+        };
+    );
+
+    /// @brief A DEFLATE decoder. With a window of `window_bits` bits, it rejects a distance beyond 2^window_bits.
+    /// It keeps the last 2^window_bits bytes and any unread bits between calls, so successive calls decode one
+    /// stream, as permessage-deflate's context takeover needs. After a final block the next call starts a new
+    /// stream that may still refer to the kept window.
+    .[Final, NotThreadSafe]
+    export let Inflater = class (
+        /// @brief The window size in bits, from 8 to 15.
+        export last window_bits: int;
+        /// @brief Whether the last call ended with a final block (BFINAL).
+        export let finished: bool = false;
+            | get: finished;
+
+        /// @brief Bytes of the last call's input after its final block, or 0.
+        export let unused: int = 0;
+            | get: unused;
+
+        last window_size: int;
+        /// @brief The kept window followed by the current call's output.
+        let buffer: uint8[list] = new;
+        /// @brief The index in `buffer` where the current call's output starts.
+        let output_start: int = 0;
+        let limit: int = 0;
+        let input: uint8[list] = new;
+        let position: int = 0;
+        let bit_buffer: int64 = 0;
+        let bit_count: int = 0;
+        /// @brief The first problem of the current call: empty while there is none.
+        let problem: string = "";
+        let problem_offset: int = 0;
+        let exceeded: bool = false;
+        let literal_code: DecodeTable = new;
+        let distance_code: DecodeTable = new;
+        let fixed_literal: DecodeTable = new;
+        let fixed_distance: DecodeTable = new;
+        let code_length_code: DecodeTable = new;
+
+        /// @brief A decoder with a window of `bits` bits; a value outside 8 to 15 traps with "invalid argument:
+        /// window bits".
+        export let init = func(window: int) {
+            if (window < MinWindowBits || window > MaxWindowBits) {
+                trap_with_message("invalid argument: window bits");
+            }
+            window_bits = window;
+            window_size = 1 << window;
+            let _ = fixed_literal.build(fixed_literal_lengths(), 0, 288);
+            let _ = fixed_distance.build(filled(30, 5), 0, 30);
+        };
+
+        /// @brief Forgets the window, the unread bits and any stream in progress.
+        export let reset = func {
+            buffer = new;
+            bit_buffer = 0;
+            bit_count = 0;
+            finished = false;
+            unused = 0;
+        };
+
+        /// @brief Decodes all of `data` and returns the bytes it produced, at most `max_output` of them. The data
+        /// must end on a block boundary or after a final block. A malformed stream fails with an Encoding error;
+        /// output beyond `max_output` fails with the OutputLimitCode error. After an error the decoder must be
+        /// reset before it is used again.
+        .NoDiscard
+        export let inflate = func(data: uint8[list], max_output: int) -> Result<uint8[list]> =>
+            inflate_from(data, 0, max_output);
+
+        /// @brief `inflate` of the bytes of `data` from `from` on; offsets in errors are offsets in `data`.
+        .NoDiscard
+        export let inflate_from = func(data: uint8[list], from: int, max_output: int) -> Result<uint8[list]> {
+            input = data;
+            position = from;
+            limit = max_output < 0 ? 0 : max_output;
+            output_start = buffer.length;
+            problem = "";
+            exceeded = false;
+            finished = false;
+            unused = 0;
+            while (position < input.length) {
+                last last_block = bits(1) == 1;
+                last kind = bits(2);
+                if (problem != "") {
+                    break;
+                }
+                if (kind == 0) {
+                    stored();
+                } else if (kind == 1) {
+                    codes(fixed_literal, fixed_distance);
+                } else if (kind == 2) {
+                    dynamic();
+                } else {
+                    fail("invalid block type");
+                }
+                if (exceeded) {
+                    return Result<uint8[list]>.Err(over_limit(limit));
+                }
+                if (problem != "") {
+                    break;
+                }
+                if (last_block) {
+                    finished = true;
+                    // The rest of the final block's last byte is padding.
+                    bit_buffer = 0;
+                    bit_count = 0;
+                    unused = input.length - position;
+                    break;
+                }
+            }
+            if (problem != "") {
+                return Result<uint8[list]>.Err(malformed(problem_offset, problem));
+            }
+            let produced: uint8[list] = new;
+            for (let i = output_start; i < buffer.length; i++) {
+                produced.append(buffer[i]);
+            }
+            keep_window();
+            input = new;
+            return Result<uint8[list]>.Ok(produced);
+        };
+
+        /// @brief Drops all but the last window_size bytes of the buffer.
+        let keep_window = func {
+            if (buffer.length <= window_size) {
+                return;
+            }
+            let kept: uint8[list] = new;
+            for (let i = buffer.length - window_size; i < buffer.length; i++) {
+                kept.append(buffer[i]);
+            }
+            buffer = kept;
+        };
+
+        /// @brief Records the first problem at the current input offset.
+        let fail = func(text: string) {
+            if (problem == "") {
+                problem = text;
+                problem_offset = position;
+            }
+        };
+
+        /// @brief The next `count` bits (0 to 16), least significant first; 0 after the input ran out.
+        let bits = func(count: int) -> int {
+            while (bit_count < count) {
+                if (position >= input.length) {
+                    fail("unexpected end of data");
+                    return 0;
+                }
+                bit_buffer = bit_buffer | ((input[position] as int64) << bit_count);
+                position++;
+                bit_count += 8;
+            }
+            last value = (bit_buffer & ((1s64 << count) - 1)) as int;
+            bit_buffer = bit_buffer >> count;
+            bit_count -= count;
+            return value;
+        };
+
+        /// @brief Appends one output byte, unless the limit is reached.
+        let emit = func(value: uint8) {
+            if (buffer.length - output_start >= limit) {
+                exceeded = true;
+                return;
+            }
+            buffer.append(value);
+        };
+
+        /// @brief A stored block (RFC 1951 section 3.2.4).
+        let stored = func {
+            // Discard the rest of the current byte.
+            bit_buffer = 0;
+            bit_count = 0;
+            if (position + 4 > input.length) {
+                position = input.length;
+                fail("unexpected end of data");
+                return;
+            }
+            last length = (input[position] as int) | ((input[position + 1] as int) << 8);
+            last complement = (input[position + 2] as int) | ((input[position + 3] as int) << 8);
+            if (length != (complement ^ 65535)) {
+                fail("stored block length does not match its complement");
+                return;
+            }
+            position += 4;
+            if (position + length > input.length) {
+                position = input.length;
+                fail("unexpected end of data");
+                return;
+            }
+            if (buffer.length - output_start + length > limit) {
+                exceeded = true;
+                return;
+            }
+            for (let i = 0; i < length; i++) {
+                buffer.append(input[position + i]);
+            }
+            position += length;
+        };
+
+        /// @brief The next symbol of the code, or -1 after a problem.
+        let decode = func(table: DecodeTable) -> int {
+            let code = 0;
+            let first = 0;
+            let index = 0;
+            for (let len = 1; len <= MaxBits; len++) {
+                code = code | bits(1);
+                if (problem != "") {
+                    return -1;
+                }
+                last count = table.counts[len];
+                if (code - count < first) {
+                    return table.symbols[index + (code - first)];
+                }
+                index += count;
+                first += count;
+                first = first << 1;
+                code = code << 1;
+            }
+            fail("invalid Huffman code");
+            return -1;
+        };
+
+        /// @brief The symbols of one Huffman-coded block, up to its end-of-block code.
+        let codes = func(literals: DecodeTable, distances: DecodeTable) {
+            while (true) {
+                last symbol = decode(literals);
+                if (symbol < 0) {
+                    return;
+                }
+                if (symbol < 256) {
+                    emit(symbol as uint8);
+                    if (exceeded) {
+                        return;
+                    }
+                } else if (symbol == 256) {
+                    return;
+                } else {
+                    last index = symbol - 257;
+                    if (index >= 29) {
+                        fail("invalid literal/length symbol");
+                        return;
+                    }
+                    last length = length_base(index) + bits(length_extra(index));
+                    last distance_index = decode(distances);
+                    if (distance_index < 0) {
+                        return;
+                    }
+                    if (distance_index >= 30) {
+                        fail("invalid distance symbol");
+                        return;
+                    }
+                    last distance = distance_base(distance_index) + bits(distance_extra(distance_index));
+                    if (problem != "") {
+                        return;
+                    }
+                    if (distance > buffer.length || distance > window_size) {
+                        fail("distance too far back");
+                        return;
+                    }
+                    if (buffer.length - output_start + length > limit) {
+                        exceeded = true;
+                        return;
+                    }
+                    for (let i = 0; i < length; i++) {
+                        buffer.append(buffer[buffer.length - distance]);
+                    }
+                }
+            }
+        };
+
+        /// @brief A dynamic-Huffman block (RFC 1951 section 3.2.7).
+        let dynamic = func {
+            last literal_count = bits(5) + 257;
+            last distance_count = bits(5) + 1;
+            last code_count = bits(4) + 4;
+            if (problem != "") {
+                return;
+            }
+            if (literal_count > LiteralLengthSymbols || distance_count > DistanceSymbols) {
+                fail("too many length or distance symbols");
+                return;
+            }
+            let lengths = filled(19, 0);
+            last order = code_length_order();
+            for (let i = 0; i < code_count; i++) {
+                lengths[order[i]] = bits(3);
+            }
+            if (problem != "") {
+                return;
+            }
+            if (code_length_code.build(lengths, 0, 19) != 0) {
+                fail("incomplete or over-subscribed code-length code");
+                return;
+            }
+            last total = literal_count + distance_count;
+            lengths = filled(total, 0);
+            let index = 0;
+            while (index < total) {
+                last symbol = decode(code_length_code);
+                if (symbol < 0) {
+                    return;
+                }
+                if (symbol < 16) {
+                    lengths[index] = symbol;
+                    index++;
+                } else {
+                    let repeated = 0;
+                    let times = 0;
+                    if (symbol == 16) {
+                        if (index == 0) {
+                            fail("repeated length with no first length");
+                            return;
+                        }
+                        repeated = lengths[index - 1];
+                        times = 3 + bits(2);
+                    } else if (symbol == 17) {
+                        times = 3 + bits(3);
+                    } else {
+                        times = 11 + bits(7);
+                    }
+                    if (problem != "") {
+                        return;
+                    }
+                    if (index + times > total) {
+                        fail("too many code lengths");
+                        return;
+                    }
+                    for (let t = 0; t < times; t++) {
+                        lengths[index] = repeated;
+                        index++;
+                    }
+                }
+            }
+            if (lengths[256] == 0) {
+                fail("no end-of-block code");
+                return;
+            }
+            last literal_status = literal_code.build(lengths, 0, literal_count);
+            if (literal_status < 0 ||
+                (literal_status > 0 && literal_count != literal_code.counts[0] + literal_code.counts[1])) {
+                fail("invalid literal/length code lengths");
+                return;
+            }
+            last distance_status = distance_code.build(lengths, literal_count, distance_count);
+            if (distance_status < 0 ||
+                (distance_status > 0 && distance_count != distance_code.counts[0] + distance_code.counts[1])) {
+                fail("invalid distance code lengths");
+                return;
+            }
+            codes(literal_code, distance_code);
+        };
+
+        /// @brief Names the decoder.
+        export let.override to_string = func -> string => "Deflate.Inflater(" .. window_bits.to_string() .. ")";
+    );
+
+    /// @brief A DEFLATE encoder. With a window of `window_bits` bits it uses no distance beyond 2^window_bits.
+    /// It keeps the last 2^window_bits bytes between calls, so a later message can refer to earlier ones
+    /// (context takeover); `reset` forgets them.
+    .[Final, NotThreadSafe]
+    export let Deflater = class (
+        /// @brief The window size in bits, from 8 to 15.
+        export last window_bits: int;
+
+        last window_size: int;
+        /// @brief Bytes kept for matching followed by the current message. data[0] is at absolute position
+        /// `start`.
+        let data: uint8[list] = new;
+        let start: int = 0;
+        /// @brief The absolute position up to which positions are in the hash chains.
+        let inserted: int = 0;
+        /// @brief The most recent absolute position of each hash, or -1.
+        let head: int[list] = filled(HashSize, -1);
+        /// @brief The previous absolute position with the same hash, indexed by position modulo window_size.
+        let chain: int[list] = new;
+        let out: uint8[list] = new;
+        let bit_buffer: int64 = 0;
+        let bit_count: int = 0;
+        /// @brief The current block: a literal byte, or 256 + match length, with its distance (0 for a literal).
+        let block_symbols: int[list] = new;
+        let block_distances: int[list] = new;
+        let fixed_literal: int[list] = fixed_literal_lengths();
+        let fixed_distance: int[list] = filled(30, 5);
+
+        /// @brief An encoder with a window of `bits` bits; a value outside 8 to 15 traps with "invalid argument:
+        /// window bits".
+        export let init = func(window: int) {
+            if (window < MinWindowBits || window > MaxWindowBits) {
+                trap_with_message("invalid argument: window bits");
+            }
+            window_bits = window;
+            window_size = 1 << window;
+            chain = filled(window_size, -1);
+        };
+
+        /// @brief Forgets the kept bytes, so the next message refers to nothing before it.
+        export let reset = func {
+            // Positions jump past the window, so every chain entry is too far back to be used.
+            start = start + data.length + window_size + 1;
+            inserted = start;
+            data = new;
+            rebase();
+        };
+
+        /// @brief Compresses `message`. With `final`, the result is a complete raw DEFLATE stream ending in a
+        /// final block. Otherwise it ends with a sync flush, an empty stored block 00 00 FF FF, as
+        /// permessage-deflate needs before it strips those four bytes.
+        .NoDiscard
+        export let compress = func(message: uint8[list], final: bool) -> uint8[list] {
+            out = new;
+            bit_buffer = 0;
+            bit_count = 0;
+            block_symbols = new;
+            block_distances = new;
+            last first = data.length;
+            for (let b in message) {
+                data.append(b);
+            }
+            let i = first;
+            let block_start = first;
+            while (i < data.length) {
+                insert_until(i);
+                last found = longest_match(i);
+                last length = found >> 16;
+                if (length >= 3) {
+                    block_symbols.append(256 + length);
+                    block_distances.append(found & 65535);
+                    i += length;
+                } else {
+                    block_symbols.append(data[i] as int);
+                    block_distances.append(0);
+                    i++;
+                }
+                if (block_symbols.length >= BlockSymbols) {
+                    emit_block(block_start, i, false);
+                    block_start = i;
+                }
+            }
+            if (final) {
+                emit_block(block_start, i, true);
+                align();
+            } else {
+                if (block_symbols.length > 0) {
+                    emit_block(block_start, i, false);
+                }
+                write_bits(0, 3);
+                align();
+                out.append(0);
+                out.append(0);
+                out.append(255);
+                out.append(255);
+            }
+            keep_window();
+            return out;
+        };
+
+        /// @brief Drops kept bytes that are more than a window behind the end, once there are many.
+        let keep_window = func {
+            if (data.length <= 2 * window_size) {
+                return;
+            }
+            last dropped = data.length - window_size;
+            let kept: uint8[list] = new;
+            for (let i = dropped; i < data.length; i++) {
+                kept.append(data[i]);
+            }
+            data = kept;
+            start += dropped;
+            rebase();
+        };
+
+        /// @brief Moves absolute positions back by a multiple of the window size before they could overflow.
+        /// A multiple keeps every position in its chain slot; positions before the shift become -1.
+        let rebase = func {
+            if (start < RebaseAt) {
+                return;
+            }
+            last shift = start - (start & (window_size - 1));
+            for (let h = 0; h < HashSize; h++) {
+                head[h] = head[h] >= shift ? head[h] - shift : -1;
+            }
+            for (let s = 0; s < window_size; s++) {
+                chain[s] = chain[s] >= shift ? chain[s] - shift : -1;
+            }
+            inserted -= shift;
+            start -= shift;
+        };
+
+        /// @brief The hash of the three bytes at an index of `data`.
+        let hash_at = func(i: int) -> int =>
+            (((data[i] as int) << 10) ^ ((data[i + 1] as int) << 5) ^ (data[i + 2] as int)) & (HashSize - 1);
+
+        /// @brief Adds every position before index `i` that has three bytes to the hash chains.
+        let insert_until = func(i: int) {
+            while (inserted < start + i && inserted - start + 2 < data.length) {
+                last j = inserted - start;
+                last h = hash_at(j);
+                chain[inserted & (window_size - 1)] = head[h];
+                head[h] = inserted;
+                inserted++;
+            }
+        };
+
+        /// @brief The longest earlier match at index `i`: length << 16 | distance, with a length below 3 when
+        /// there is none.
+        let longest_match = func(i: int) -> int {
+            if (data.length - i < 3) {
+                return 0;
+            }
+            last here = start + i;
+            last max_length = data.length - i < MaxMatch ? data.length - i : MaxMatch;
+            let best_length = 2;
+            let best_distance = 0;
+            let candidate = head[hash_at(i)];
+            let tries = MaxChain;
+            while (candidate >= start && here - candidate <= window_size && tries > 0) {
+                last c = candidate - start;
+                if (data[c + best_length] == data[i + best_length] && data[c] == data[i]) {
+                    let length = 0;
+                    while (length < max_length && data[c + length] == data[i + length]) {
+                        length++;
+                    }
+                    if (length > best_length) {
+                        best_length = length;
+                        best_distance = here - candidate;
+                        if (length == max_length) {
+                            break;
+                        }
+                    }
+                }
+                last next = chain[candidate & (window_size - 1)];
+                if (next >= candidate) {
+                    break;
+                }
+                candidate = next;
+                tries--;
+            }
+            if (best_length == 3 && best_distance > 4096) {
+                return 0;
+            }
+            return best_length < 3 ? 0 : (best_length << 16) | best_distance;
+        };
+
+        /// @brief Writes the low `count` bits of the value, least significant first.
+        let write_bits = func(value: int, count: int) {
+            bit_buffer = bit_buffer | ((value as int64) << bit_count);
+            bit_count += count;
+            while (bit_count >= 8) {
+                out.append((bit_buffer & 255) as uint8);
+                bit_buffer = bit_buffer >> 8;
+                bit_count -= 8;
+            }
+        };
+
+        /// @brief Pads the output to a byte boundary with zero bits.
+        let align = func {
+            if (bit_count > 0) {
+                write_bits(0, 8 - bit_count);
+            }
+        };
+
+        /// @brief Writes a Huffman code: `code` holds it already bit-reversed.
+        let write_code = func(codes: int[list], lengths: int[list], symbol: int) {
+            write_bits(codes[symbol], lengths[symbol]);
+        };
+
+        /// @brief Codes the collected symbols, which cover data[from] up to data[to], as one or more blocks,
+        /// choosing the shortest of stored, fixed and dynamic Huffman.
+        let emit_block = func(from: int, to: int, last_block: bool) {
+            let literal_frequencies = filled(LiteralLengthSymbols, 0);
+            let distance_frequencies = filled(DistanceSymbols, 0);
+            for (let k = 0; k < block_symbols.length; k++) {
+                last symbol = block_symbols[k];
+                if (symbol < 256) {
+                    literal_frequencies[symbol] = literal_frequencies[symbol] + 1;
+                } else {
+                    last ls = length_symbol(symbol - 256);
+                    literal_frequencies[ls] = literal_frequencies[ls] + 1;
+                    last ds = distance_symbol(block_distances[k]);
+                    distance_frequencies[ds] = distance_frequencies[ds] + 1;
+                }
+            }
+            literal_frequencies[256] = 1;
+            last literal_lengths = code_lengths(literal_frequencies, MaxBits);
+            last distance_lengths = code_lengths(distance_frequencies, MaxBits);
+
+            // The dynamic header: run-length coded code lengths (RFC 1951 section 3.2.7).
+            let literal_count = LiteralLengthSymbols;
+            while (literal_count > 257 && literal_lengths[literal_count - 1] == 0) {
+                literal_count--;
+            }
+            let distance_count = DistanceSymbols;
+            while (distance_count > 1 && distance_lengths[distance_count - 1] == 0) {
+                distance_count--;
+            }
+            let sequence: int[list] = new;
+            for (let s = 0; s < literal_count; s++) {
+                sequence.append(literal_lengths[s]);
+            }
+            for (let s = 0; s < distance_count; s++) {
+                sequence.append(distance_lengths[s]);
+            }
+            let header_symbols: int[list] = new;
+            let header_extras: int[list] = new;
+            run_lengths(sequence, header_symbols, header_extras);
+            let header_frequencies = filled(19, 0);
+            for (let s in header_symbols) {
+                header_frequencies[s] = header_frequencies[s] + 1;
+            }
+            last header_lengths = code_lengths(header_frequencies, MaxCodeLengthBits);
+            last order = code_length_order();
+            let header_count = 19;
+            while (header_count > 4 && header_lengths[order[header_count - 1]] == 0) {
+                header_count--;
+            }
+
+            let dynamic_bits: int64 = 3 + 14 + 3 * (header_count as int64);
+            for (let k = 0; k < header_symbols.length; k++) {
+                last s = header_symbols[k];
+                dynamic_bits += (header_lengths[s] + (s == 16 ? 2 : s == 17 ? 3 : s == 18 ? 7 : 0)) as int64;
+            }
+            dynamic_bits += data_bits(literal_lengths, distance_lengths);
+            last fixed_bits = 3 + data_bits(fixed_literal, fixed_distance);
+            last raw = to - from;
+            last stored_blocks = raw == 0 ? 1 : (raw + StoredMax - 1) / StoredMax;
+            last stored_bits = (stored_blocks as int64) * 48 + 8 * (raw as int64);
+
+            if (stored_bits <= fixed_bits && stored_bits <= dynamic_bits) {
+                let at = from;
+                for (let n = 0; n < stored_blocks; n++) {
+                    last size = to - at < StoredMax ? to - at : StoredMax;
+                    write_bits(last_block && n == stored_blocks - 1 ? 1 : 0, 1);
+                    write_bits(0, 2);
+                    align();
+                    out.append((size & 255) as uint8);
+                    out.append((size >> 8) as uint8);
+                    out.append(((size & 255) ^ 255) as uint8);
+                    out.append(((size >> 8) ^ 255) as uint8);
+                    for (let b = 0; b < size; b++) {
+                        out.append(data[at + b]);
+                    }
+                    at += size;
+                }
+            } else if (fixed_bits <= dynamic_bits) {
+                write_bits(last_block ? 1 : 0, 1);
+                write_bits(1, 2);
+                write_symbols(fixed_literal, fixed_distance);
+            } else {
+                write_bits(last_block ? 1 : 0, 1);
+                write_bits(2, 2);
+                write_bits(literal_count - 257, 5);
+                write_bits(distance_count - 1, 5);
+                write_bits(header_count - 4, 4);
+                for (let k = 0; k < header_count; k++) {
+                    write_bits(header_lengths[order[k]], 3);
+                }
+                last header_codes = canonical_codes(header_lengths);
+                for (let k = 0; k < header_symbols.length; k++) {
+                    last s = header_symbols[k];
+                    write_code(header_codes, header_lengths, s);
+                    if (s == 16) {
+                        write_bits(header_extras[k], 2);
+                    } else if (s == 17) {
+                        write_bits(header_extras[k], 3);
+                    } else if (s == 18) {
+                        write_bits(header_extras[k], 7);
+                    }
+                }
+                write_symbols(literal_lengths, distance_lengths);
+            }
+            block_symbols = new;
+            block_distances = new;
+        };
+
+        /// @brief The bits the block's symbols and end-of-block code take with these code lengths.
+        let data_bits = func(literal_lengths: int[list], distance_lengths: int[list]) -> int64 {
+            let total: int64 = literal_lengths[256] as int64;
+            for (let k = 0; k < block_symbols.length; k++) {
+                last symbol = block_symbols[k];
+                if (symbol < 256) {
+                    total += literal_lengths[symbol] as int64;
+                } else {
+                    last ls = length_symbol(symbol - 256);
+                    last ds = distance_symbol(block_distances[k]);
+                    total += (literal_lengths[ls] + length_extra(ls - 257) + distance_lengths[ds] +
+                        distance_extra(ds)) as int64;
+                }
+            }
+            return total;
+        };
+
+        /// @brief Writes the block's symbols and its end-of-block code with these code lengths.
+        let write_symbols = func(literal_lengths: int[list], distance_lengths: int[list]) {
+            last literal_codes = canonical_codes(literal_lengths);
+            last distance_codes = canonical_codes(distance_lengths);
+            for (let k = 0; k < block_symbols.length; k++) {
+                last symbol = block_symbols[k];
+                if (symbol < 256) {
+                    write_code(literal_codes, literal_lengths, symbol);
+                } else {
+                    last length = symbol - 256;
+                    last ls = length_symbol(length);
+                    write_code(literal_codes, literal_lengths, ls);
+                    write_bits(length - length_base(ls - 257), length_extra(ls - 257));
+                    last distance = block_distances[k];
+                    last ds = distance_symbol(distance);
+                    write_code(distance_codes, distance_lengths, ds);
+                    write_bits(distance - distance_base(ds), distance_extra(ds));
+                }
+            }
+            write_code(literal_codes, literal_lengths, 256);
+        };
+
+        /// @brief Names the encoder.
+        export let.override to_string = func -> string => "Deflate.Deflater(" .. window_bits.to_string() .. ")";
+    );
+
+    /// @brief The canonical codes of the lengths (RFC 1951 section 3.2.2), each bit-reversed for writing least
+    /// significant bit first.
+    let canonical_codes = func(lengths: int[list]) -> int[list] {
+        let counts = filled(MaxBits + 1, 0);
+        for (let len in lengths) {
+            counts[len] = counts[len] + 1;
+        }
+        counts[0] = 0;
+        let next = filled(MaxBits + 2, 0);
+        let code = 0;
+        for (let len = 1; len <= MaxBits; len++) {
+            code = (code + counts[len - 1]) << 1;
+            next[len] = code;
+        }
+        let codes = filled(lengths.length, 0);
+        for (let s = 0; s < lengths.length; s++) {
+            last len = lengths[s];
+            if (len != 0) {
+                let value = next[len];
+                next[len] = value + 1;
+                let reversed = 0;
+                for (let b = 0; b < len; b++) {
+                    reversed = (reversed << 1) | (value & 1);
+                    value = value >> 1;
+                }
+                codes[s] = reversed;
+            }
+        }
+        return codes;
+    };
+
+    /// @brief Huffman code lengths of at most `max_bits` bits for the frequencies, as zlib's trees.c builds
+    /// them: a Huffman tree, then any code longer than `max_bits` moved up so the code stays complete. At least
+    /// two symbols get a code, since a decoder rejects a code of one symbol of more than one bit. Exported for
+    /// tests/backend/deflate, which checks it directly.
+    .NoDiscard
+    export let code_lengths = func(frequencies: int[list], max_bits: int) -> int[list] {
+        last n = frequencies.length;
+        let lengths = filled(n, 0);
+        let used: int[list] = new;
+        for (let s = 0; s < n; s++) {
+            if (frequencies[s] > 0) {
+                used.append(s);
+            }
+        }
+        if (used.length < 2) {
+            last only = used.length == 1 ? used[0] : 0;
+            lengths[only] = 1;
+            lengths[only == 0 ? 1 : 0] = 1;
+            return lengths;
+        }
+        // Sort by frequency, then symbol, ascending (insertion sort: at most 286 symbols).
+        for (let a = 1; a < used.length; a++) {
+            last symbol = used[a];
+            let b = a - 1;
+            while (b >= 0 && (frequencies[used[b]] > frequencies[symbol] ||
+                (frequencies[used[b]] == frequencies[symbol] && used[b] > symbol))) {
+                used[b + 1] = used[b];
+                b--;
+            }
+            used[b + 1] = symbol;
+        }
+        // Huffman's algorithm with two queues: the sorted leaves and the internal nodes in creation order.
+        last m = used.length;
+        let weight: int64[list] = new;
+        for (let s in used) {
+            weight.append(frequencies[s] as int64);
+        }
+        let parent = filled(2 * m - 1, 0);
+        let next_leaf = 0;
+        let next_node = m;
+        for (let k = 0; k < m - 1; k++) {
+            let pair: int[list] = new;
+            for (let t = 0; t < 2; t++) {
+                if (next_leaf < m && (next_node >= weight.length || weight[next_leaf] <= weight[next_node])) {
+                    pair.append(next_leaf);
+                    next_leaf++;
+                } else {
+                    pair.append(next_node);
+                    next_node++;
+                }
+            }
+            parent[pair[0]] = weight.length;
+            parent[pair[1]] = weight.length;
+            weight.append(weight[pair[0]] + weight[pair[1]]);
+        }
+        let depth = filled(2 * m - 1, 0);
+        for (let k = 2 * m - 3; k >= 0; k--) {
+            depth[k] = depth[parent[k]] + 1;
+        }
+        // zlib's gen_bitlen: every node deeper than max_bits, leaf or not, counts as an overflow, and every
+        // leaf below max_bits is placed at max_bits.
+        let per_length = filled(max_bits + 1, 0);
+        let overflow = 0;
+        for (let k = 0; k < 2 * m - 2; k++) {
+            if (depth[k] > max_bits) {
+                overflow++;
+            }
+            if (k < m) {
+                last bits = depth[k] > max_bits ? max_bits : depth[k];
+                per_length[bits] = per_length[bits] + 1;
+            }
+        }
+        // Then, while there is overflow, move a leaf down from the deepest level below max_bits that has one,
+        // pair an overflowing leaf with it, and count two overflows as resolved.
+        while (overflow > 0) {
+            let bits = max_bits - 1;
+            while (per_length[bits] == 0) {
+                bits--;
+            }
+            per_length[bits] = per_length[bits] - 1;
+            per_length[bits + 1] = per_length[bits + 1] + 2;
+            per_length[max_bits] = per_length[max_bits] - 1;
+            overflow -= 2;
+        }
+        // The least frequent symbols get the longest codes.
+        let k = 0;
+        for (let bits = max_bits; bits >= 1; bits--) {
+            for (let c = 0; c < per_length[bits]; c++) {
+                lengths[used[k]] = bits;
+                k++;
+            }
+        }
+        return lengths;
+    };
+
+    /// @brief Run-length codes a sequence of code lengths with the code-length alphabet: 0 to 15 for one
+    /// length, 16 for 3 to 6 copies of the previous length, 17 for 3 to 10 zeros and 18 for 11 to 138 zeros.
+    let run_lengths = func(sequence: int[list], symbols: int[list], extras: int[list]) {
+        let i = 0;
+        while (i < sequence.length) {
+            last value = sequence[i];
+            let run = 1;
+            while (i + run < sequence.length && sequence[i + run] == value) {
+                run++;
+            }
+            i += run;
+            if (value == 0) {
+                while (run >= 11) {
+                    last r = run < 138 ? run : 138;
+                    symbols.append(18);
+                    extras.append(r - 11);
+                    run -= r;
+                }
+                if (run >= 3) {
+                    symbols.append(17);
+                    extras.append(run - 3);
+                    run = 0;
+                }
+            } else {
+                symbols.append(value);
+                extras.append(0);
+                run--;
+                while (run >= 3) {
+                    last r = run < 6 ? run : 6;
+                    symbols.append(16);
+                    extras.append(r - 3);
+                    run -= r;
+                }
+            }
+            while (run > 0) {
+                symbols.append(value);
+                extras.append(0);
+                run--;
+            }
+        }
+    };
+
+    /// @brief A complete raw DEFLATE stream of the bytes, with a 32 KiB window.
+    .NoDiscard
+    export let compress_raw = func(data: uint8[list]) -> uint8[list] {
+        let deflater = new Deflater(MaxWindowBits);
+        return deflater.compress(data, true);
+    };
+
+    /// @brief The bytes of a complete raw DEFLATE stream with a 32 KiB window, at most `max_output` of them.
+    /// Data after the final block fails with "data after end of stream".
+    .NoDiscard
+    export let decompress_raw = func(data: uint8[list], max_output: int) -> Result<uint8[list]> {
+        let inflater = new Inflater(MaxWindowBits);
+        last bytes = inflater.inflate(data, max_output)?;
+        return finish(inflater, data.length, 0, bytes);
+    };
+
+    /// @brief The decoded bytes when the stream ended with a final block followed by exactly `trailer` bytes.
+    let finish = func(inflater: Inflater, length: int, trailer: int, bytes: uint8[list]) -> Result<uint8[list]> {
+        if (not inflater.finished) {
+            return Result<uint8[list]>.Err(malformed(length, "unexpected end of data"));
+        }
+        if (inflater.unused < trailer) {
+            return Result<uint8[list]>.Err(malformed(length, "unexpected end of data"));
+        }
+        if (inflater.unused > trailer) {
+            return Result<uint8[list]>.Err(malformed(length - inflater.unused + trailer, "data after end of stream"));
+        }
+        return Result<uint8[list]>.Ok(bytes);
+    };
+
+    /// @brief The zlib stream (RFC 1950) of the bytes: header 78 9C, a 32 KiB window and the Adler-32 trailer.
+    .NoDiscard
+    export let compress_zlib = func(data: uint8[list]) -> uint8[list] {
+        let out: uint8[list] = new([120, 156]);
+        for (let b in compress_raw(data)) {
+            out.append(b);
+        }
+        append32_be(out, adler32(data));
+        return out;
+    };
+
+    /// @brief The bytes of a zlib stream, at most `max_output` of them. A preset dictionary is not supported;
+    /// the header's window size is enforced; the Adler-32 trailer is checked.
+    .NoDiscard
+    export let decompress_zlib = func(data: uint8[list], max_output: int) -> Result<uint8[list]> {
+        if (data.length < 2) {
+            return Result<uint8[list]>.Err(malformed(data.length, "unexpected end of data"));
+        }
+        last method = data[0] as int;
+        last flags = data[1] as int;
+        if ((method * 256 + flags) % 31 != 0) {
+            return Result<uint8[list]>.Err(malformed(1, "invalid zlib header check"));
+        }
+        if ((method & 15) != 8) {
+            return Result<uint8[list]>.Err(malformed(0, "unsupported compression method"));
+        }
+        if ((method >> 4) > 7) {
+            return Result<uint8[list]>.Err(malformed(0, "invalid window size"));
+        }
+        if ((flags & 32) != 0) {
+            return Result<uint8[list]>.Err(malformed(1, "preset dictionary not supported"));
+        }
+        let inflater = new Inflater((method >> 4) + 8);
+        last bytes = inflater.inflate_from(data, 2, max_output)?;
+        last _ = finish(inflater, data.length, 4, bytes)?;
+        last at = data.length - 4;
+        if (load32_be(data, at) != adler32(bytes)) {
+            return Result<uint8[list]>.Err(malformed(at, "incorrect Adler-32 checksum"));
+        }
+        return Result<uint8[list]>.Ok(bytes);
+    };
+
+    /// @brief The gzip member (RFC 1952) of the bytes: no name, comment or time, OS 255, a CRC-32 and size
+    /// trailer.
+    .NoDiscard
+    export let compress_gzip = func(data: uint8[list]) -> uint8[list] {
+        let out: uint8[list] = new([31, 139, 8, 0, 0, 0, 0, 0, 0, 255]);
+        for (let b in compress_raw(data)) {
+            out.append(b);
+        }
+        append32_le(out, kernels.crc32(data) as int64);
+        append32_le(out, (data.length as int64) & 4294967295);
+        return out;
+    };
+
+    /// @brief The bytes of one gzip member, at most `max_output` of them. The optional extra field, name,
+    /// comment and header CRC are read and checked; reserved flags, a second member or other data after the
+    /// member are rejected; the CRC-32 and size trailer is checked.
+    .NoDiscard
+    export let decompress_gzip = func(data: uint8[list], max_output: int) -> Result<uint8[list]> {
+        if (data.length < 10) {
+            return Result<uint8[list]>.Err(malformed(data.length, "unexpected end of data"));
+        }
+        if (data[0] != 31 || data[1] != 139) {
+            return Result<uint8[list]>.Err(malformed(0, "not a gzip member"));
+        }
+        if (data[2] != 8) {
+            return Result<uint8[list]>.Err(malformed(2, "unsupported compression method"));
+        }
+        last flags = data[3] as int;
+        if ((flags & 224) != 0) {
+            return Result<uint8[list]>.Err(malformed(3, "reserved gzip flags set"));
+        }
+        let at = 10;
+        if ((flags & 4) != 0) {
+            if (at + 2 > data.length) {
+                return Result<uint8[list]>.Err(malformed(data.length, "unexpected end of data"));
+            }
+            last extra = (data[at] as int) | ((data[at + 1] as int) << 8);
+            at += 2 + extra;
+        }
+        for (let field in [8, 16]) {
+            if ((flags & field) != 0) {
+                while (at < data.length && data[at] != 0) {
+                    at++;
+                }
+                at++;
+            }
+        }
+        if ((flags & 2) != 0) {
+            if (at + 2 > data.length) {
+                return Result<uint8[list]>.Err(malformed(data.length, "unexpected end of data"));
+            }
+            let header: uint8[list] = new;
+            for (let i = 0; i < at; i++) {
+                header.append(data[i]);
+            }
+            last expected = (kernels.crc32(header) & 65535) as int;
+            if (((data[at] as int) | ((data[at + 1] as int) << 8)) != expected) {
+                return Result<uint8[list]>.Err(malformed(at, "incorrect gzip header CRC"));
+            }
+            at += 2;
+        }
+        if (at > data.length) {
+            return Result<uint8[list]>.Err(malformed(data.length, "unexpected end of data"));
+        }
+        let inflater = new Inflater(MaxWindowBits);
+        last bytes = inflater.inflate_from(data, at, max_output)?;
+        last _ = finish(inflater, data.length, 8, bytes)?;
+        last trailer = data.length - 8;
+        if (load32_le(data, trailer) != (kernels.crc32(bytes) as int64)) {
+            return Result<uint8[list]>.Err(malformed(trailer, "incorrect CRC-32"));
+        }
+        if (load32_le(data, trailer + 4) != ((bytes.length as int64) & 4294967295)) {
+            return Result<uint8[list]>.Err(malformed(trailer + 4, "incorrect length"));
+        }
+        return Result<uint8[list]>.Ok(bytes);
+    };
+);

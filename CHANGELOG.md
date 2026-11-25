@@ -37,6 +37,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - Managed-list runs batch `Lists.filled` and byte appends in `StringBuilder`, `Strings.join`, and internal I/O buffers with element-wise step, heap, and version accounting. Images that use them require NVR 1.10. [Managed list runs](docs/runtime/NVM.md#managed-list-runs)
 - Module-level laws check pure claims at compile time with `neura prove`, `check`, and `build`. NeuraIR 1.16 preserves law statements and proofs for separate compilation. [Laws](docs/lang/Laws.md)
 - `Handshake.dtls_peer_certificate_chain` returns the verified peer chain of a DTLS 1.3 transport, including a client certificate verified by a DTLS server.
+- An internal DEFLATE, zlib and gzip implementation, `Std.Encoding.Internal.Deflate`, has bounded output and the reference decoder's checks. It is tested against Python's `zlib` in both directions. Only library modules can import it. [Stdlib 13.1](docs/lang/Stdlib.md#131-stdencoding)
 
 ### Changed
 

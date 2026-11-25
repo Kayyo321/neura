@@ -1,0 +1,160 @@
+let deflate = import:Std.Encoding.Internal.Deflate;
+let.promote _ = import:Std.Core.Error;
+let fs = import:Std.Fs.Fs;
+let int32 = import:Std.Core.Int32;
+let path = import:Std.Fs.Path;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+
+/// @brief Test-only bridge to the internal module Std.Encoding.Internal.Deflate. tests/backend/deflate.cmake
+/// installs it as Std.TestSupport.DeflateHarness in a scratch copy of the standard library, so a test program
+/// can reach the internal module, which ordinary programs cannot import (E0702).
+///
+/// `run` reads a manifest of one operation per line, `operation input output arguments...`, separated by single
+/// spaces. Byte inputs and outputs are files; a stream is a file of frames, each a 4-byte big-endian length
+/// followed by that many bytes. A failure writes `output.error` instead of `output`: "encoding OFFSET MESSAGE"
+/// or "custom CODE MESSAGE".
+///
+/// - `inflate-raw|inflate-zlib|inflate-gzip IN OUT MAX`
+/// - `deflate-raw|deflate-zlib|deflate-gzip IN OUT`
+/// - `stream-inflate IN OUT BITS MAX RESET`: one Inflater for all frames; RESET 1 resets it before each frame.
+///   Each frame gets 00 00 FF FF appended, as permessage-deflate does.
+/// - `stream-deflate IN OUT BITS RESET`: one Deflater, sync-flushed per frame; RESET 1 resets it before each.
+/// - `code-lengths IN OUT MAXBITS`: IN holds 4-byte big-endian frequencies; OUT gets one length byte each.
+export let DeflateHarness = module (
+    /// @brief Runs every operation of the manifest and returns how many ran.
+    export let run = func(manifest: string) -> Result<int> {
+        last text = fs.read_text(path.of(manifest))?;
+        let count = 0;
+        for (let line in strings.lines(text)) {
+            if (line.byte_length == 0) {
+                continue;
+            }
+            last fields = strings.split(line, " ");
+            last operation = fields[0];
+            last input = fs.read_bytes(path.of(fields[1]))?;
+            last output = fields[2];
+            last outcome = perform(operation, input, fields)?;
+            match (outcome) {
+                Result.Ok(bytes) => {
+                    fs.write_bytes(path.of(output), bytes)?;
+                },
+                Result.Err(failure) => {
+                    fs.write_text(path.of(output .. ".error"), describe(failure))?;
+                },
+            }
+            count++;
+        }
+        return Result<int>.Ok(count);
+    };
+
+    /// @brief The result of one operation; the outer Result fails only for a malformed manifest line.
+    let perform = func(operation: string, input: uint8[list], fields: string[list]) -> Result<Result<uint8[list]>> {
+        if (operation == "inflate-raw") {
+            return Result<Result<uint8[list]>>.Ok(deflate.decompress_raw(input, int32.parse(fields[3])?));
+        }
+        if (operation == "inflate-zlib") {
+            return Result<Result<uint8[list]>>.Ok(deflate.decompress_zlib(input, int32.parse(fields[3])?));
+        }
+        if (operation == "inflate-gzip") {
+            return Result<Result<uint8[list]>>.Ok(deflate.decompress_gzip(input, int32.parse(fields[3])?));
+        }
+        if (operation == "deflate-raw") {
+            return Result<Result<uint8[list]>>.Ok(Result<uint8[list]>.Ok(deflate.compress_raw(input)));
+        }
+        if (operation == "deflate-zlib") {
+            return Result<Result<uint8[list]>>.Ok(Result<uint8[list]>.Ok(deflate.compress_zlib(input)));
+        }
+        if (operation == "deflate-gzip") {
+            return Result<Result<uint8[list]>>.Ok(Result<uint8[list]>.Ok(deflate.compress_gzip(input)));
+        }
+        if (operation == "code-lengths") {
+            let frequencies: int[list] = new;
+            for (let at = 0; at + 4 <= input.length; at += 4) {
+                frequencies.append(((input[at] as int) << 24) | ((input[at + 1] as int) << 16) |
+                    ((input[at + 2] as int) << 8) | (input[at + 3] as int));
+            }
+            let lengths: uint8[list] = new;
+            for (let length in deflate.code_lengths(frequencies, int32.parse(fields[3])?)) {
+                lengths.append(length as uint8);
+            }
+            return Result<Result<uint8[list]>>.Ok(Result<uint8[list]>.Ok(lengths));
+        }
+        if (operation == "stream-inflate") {
+            last bits = int32.parse(fields[3])?;
+            last limit = int32.parse(fields[4])?;
+            last reset = fields[5] == "1";
+            let inflater = new deflate.Inflater(bits);
+            let out: uint8[list] = new;
+            for (let frame in frames(input)) {
+                if (reset) {
+                    inflater.reset();
+                }
+                frame.append(0);
+                frame.append(0);
+                frame.append(255);
+                frame.append(255);
+                match (inflater.inflate(frame, limit)) {
+                    Result.Ok(bytes) => {
+                        append_frame(out, bytes);
+                    },
+                    Result.Err(failure) => {
+                        return Result<Result<uint8[list]>>.Ok(Result<uint8[list]>.Err(failure));
+                    },
+                }
+            }
+            return Result<Result<uint8[list]>>.Ok(Result<uint8[list]>.Ok(out));
+        }
+        if (operation == "stream-deflate") {
+            last bits = int32.parse(fields[3])?;
+            last reset = fields[4] == "1";
+            let deflater = new deflate.Deflater(bits);
+            let out: uint8[list] = new;
+            for (let frame in frames(input)) {
+                if (reset) {
+                    deflater.reset();
+                }
+                append_frame(out, deflater.compress(frame, false));
+            }
+            return Result<Result<uint8[list]>>.Ok(Result<uint8[list]>.Ok(out));
+        }
+        return Result<Result<uint8[list]>>.Err(custom("test.deflate", "unknown operation " .. operation));
+    };
+
+    /// @brief The frames of a stream file.
+    let frames = func(data: uint8[list]) -> uint8[list][list] {
+        let out: uint8[list][list] = new;
+        let at = 0;
+        while (at + 4 <= data.length) {
+            last length = ((data[at] as int) << 24) | ((data[at + 1] as int) << 16) | ((data[at + 2] as int) << 8) |
+                (data[at + 3] as int);
+            at += 4;
+            let frame: uint8[list] = new;
+            for (let i = 0; i < length; i++) {
+                frame.append(data[at + i]);
+            }
+            at += length;
+            out.append(frame);
+        }
+        return out;
+    };
+
+    /// @brief Appends a frame: its 4-byte big-endian length, then its bytes.
+    let append_frame = func(out: uint8[list], bytes: uint8[list]) {
+        last length = bytes.length;
+        out.append(((length >> 24) & 255) as uint8);
+        out.append(((length >> 16) & 255) as uint8);
+        out.append(((length >> 8) & 255) as uint8);
+        out.append((length & 255) as uint8);
+        for (let b in bytes) {
+            out.append(b);
+        }
+    };
+
+    /// @brief The failure as one line for the driver.
+    let describe = func(failure: Error) -> string => match (failure) {
+        Error.Encoding { offset, message } => "encoding " .. offset.to_string() .. " " .. message,
+        Error.Custom(detail) => "custom " .. detail.code() .. " " .. detail.message(),
+        _ => "other " .. failure.to_string(),
+    };
+);
