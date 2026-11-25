@@ -177,6 +177,20 @@ bool TaskAnalysis::concurrent_handle(SymbolId cls) const {
            path != "std/concurrent/scope.nra";
 }
 
+// A specialization of Std.Concurrent.Guarded, and code in its own file.
+bool TaskAnalysis::guarded_class(SymbolId cls) const {
+    if (!valid(cls) || symbol(cls).kind != SymbolKind::Class) return false;
+    const auto& name = symbol(cls).name;
+    if (name != "Guarded" && !name.starts_with("Guarded<")) return false;
+    const auto file = source_file(program_, cls);
+    return file != no_symbol && symbol(file).library_path == "std/concurrent/guarded.nra";
+}
+
+bool TaskAnalysis::in_guarded_library(SymbolId owner) const {
+    const auto file = source_file(program_, owner);
+    return file != no_symbol && symbol(file).library_path == "std/concurrent/guarded.nra";
+}
+
 std::vector<SymbolId> TaskAnalysis::all_fields(SymbolId cls) const {
     std::vector<SymbolId> result;
     std::set<SymbolId> seen;
@@ -724,6 +738,23 @@ void TaskAnalysis::check() const {
                 first_operation = &node;
                 first_operation_owner = body.owner;
             }
+            if (node.op == IrOp::Allocate && valid(node.symbol) && guarded_class(node.type.symbol) &&
+                !in_guarded_library(body.owner) && !symbol(node.symbol).parameters.empty()) {
+                // Guarded.init takes the state as it is: a caller could keep an
+                // alias to a state that is not transferable and change it
+                // while a task holds the guard. Such a state is built inside
+                // the guard by Guarded.create.
+                const auto& state = symbol(symbol(node.symbol).parameters.front()).type;
+                if (!transferable(state)) {
+                    auto error = Diagnostic(user_site(body.owner, node.span),
+                                            "a value of type " + display(state) +
+                                            " is not transferable, so it cannot be given to a Guarded constructor")
+                        .with_code("E0602").label("not transferable");
+                    explain_class(error, state);
+                    error.help("build the state inside the guard with Guarded.create(initializer)");
+                    throw error;
+                }
+            }
             if (node.op == IrOp::SchedulerCall) {
                 // What a channel carries is given to another task (5.1).
                 const auto require = [&](const IrType& type, const char* role, bool item = false,
@@ -738,7 +769,28 @@ void TaskAnalysis::check() const {
                     throw error;
                 };
                 if (node.text == "transfer.check" && node.operands.size() == 1) {
-                    require(node.operands.front().type, "used where a transferable value is required");
+                    const auto& checked = node.operands.front().type;
+                    require(checked, "used where a transferable value is required");
+                    // A function that builds or uses guarded state runs on
+                    // whichever task calls the guard, the root task included,
+                    // so it must be task-safe as a spawned call is: otherwise
+                    // it could keep or reach the state through a global.
+                    if (checked.kind == TypeKind::Object && valid(checked.symbol) && signature_layout(checked.symbol)) {
+                        if (const auto found = derived_.find(checked.symbol); found != derived_.end()) {
+                            for (const auto layout : found->second) {
+                                if (!created_.contains(layout)) continue;
+                                for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
+                                    const auto& item = symbol(id);
+                                    if (item.kind != SymbolKind::Function || item.owner != layout || item.name != "$invoke")
+                                        continue;
+                                    if (const auto reason = unsafe(id)) {
+                                        throw unsafe_error(user_site(body.owner, node.span),
+                                                           "a function given to a guard is not task-safe", *reason);
+                                    }
+                                }
+                            }
+                        }
+                    }
                 } else if (node.text == "parallel.start" && !node.operands.empty() &&
                            node.operands.front().op == IrOp::Allocate && valid(node.operands.front().symbol)) {
                     // An isolated item: its captures enter another heap, its

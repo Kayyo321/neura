@@ -1,0 +1,13 @@
+// A state that is not transferable, given to Guarded's constructor (E0602):
+// the caller keeps an alias and could change it while a task holds the guard.
+let guards = import:Std.Concurrent.Guarded;
+
+let Box = class (
+    export let n: int = 0;
+);
+
+let run = func() {
+    let box = new Box();
+    let guard: guards.Guarded<Box> = new(box);
+    box.n = 1;
+};

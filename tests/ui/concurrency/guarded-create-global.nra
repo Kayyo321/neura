@@ -1,0 +1,14 @@
+// A create initializer that returns an object a reassignable global also holds
+// (E0601): the initializer runs on the calling task, and a function given to a
+// guard must be task-safe whichever task runs it.
+let guards = import:Std.Concurrent.Guarded;
+
+let Box = class (
+    export let n: int = 0;
+);
+
+let held: Box = new Box();
+
+let run = func() {
+    let guard = guards.create<Box>(func -> Box => held);
+};

@@ -124,6 +124,8 @@ private:
     bool signature_layout(SymbolId cls) const;
     bool capture_layout(SymbolId cls) const;
     bool concurrent_handle(SymbolId cls) const;
+    bool guarded_class(SymbolId cls) const;
+    bool in_guarded_library(SymbolId owner) const;
     bool fields_transferable(SymbolId cls) const;
     std::vector<SymbolId> all_fields(SymbolId cls) const;
     void callees(const IrNode& node, std::vector<std::pair<SymbolId, Span>>& out) const;

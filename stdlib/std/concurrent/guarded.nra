@@ -6,7 +6,8 @@ export let Guarded = module (
     /// @brief A guard around one mutable T.
     .[Final, ThreadSafe]
     export let Guarded = class<T> (
-        /// @brief A guard that owns the state. Use create, which builds the state inside the guard.
+        /// @brief A guard that owns the state, which must be transferable: a caller could keep an alias to any other
+        /// state. Use create, which builds the state inside the guard.
         export let init = func(state: T) {
             open_guard<T>(instance, state);
         };
@@ -27,7 +28,7 @@ export let Guarded = module (
     );
 
     /// @brief A guard around the state that `initializer` builds. The initializer's captures are
-    /// transferable, so the state it builds is reachable only through the guard.
+    /// transferable and it is task-safe, so the state it builds is reachable only through the guard.
     export let create = func<T>(initializer: func() -> T) -> Guarded<T> {
         last checked = transferable<(func() -> T)>(initializer);
         return new(checked());
