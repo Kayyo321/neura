@@ -1,0 +1,74 @@
+let config = import:Std.Net.Quic.QuicConfig;
+let connections = import:Std.Net.Quic.QuicConnection;
+let duration = import:Std.Time.Duration;
+let endpoints = import:Std.Net.Quic.QuicEndpoint;
+let error = import:Std.Core.Error;
+let optional = import:Std.Core.Optional;
+let result = import:Std.Core.Result;
+let socket_addr = import:Std.Net.Core.SocketAddr;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let ticket = import:Std.Net.Quic.SessionTicket;
+let tls = import:Std.Net.Tls.TlsConfig;
+
+// What the pinned OpenSSL 4.1 QUIC stack cannot honour fails with Unsupported
+// in the library, before any host call. The client configurations have no
+// server name, which the provider refuses with InvalidInput, so a check that
+// reached the host would answer that instead.
+let LimitsTests = module (
+    let settings = func(server: bool, bidirectional: int64, datagrams: uint64, congestion: config.CongestionAlgorithm,
+        early: bool) -> config.QuicConfig {
+        last builder = tls.builder();
+        builder.set_versions(tls.TlsVersion.Tls13, tls.TlsVersion.Tls13);
+        builder.set_alpn(new(["h3"]));
+        if (server) {
+            builder.set_certificate("server.pem", "server.key");
+        }
+        last built = result.expect<tls.TlsConfig>(server ? builder.build_server() : builder.build_client(), "tls");
+        return result.expect<config.QuicConfig>(config.create(built, bidirectional, connections.StackStreamLimit,
+            datagrams, duration.of_seconds(30), 1200, congestion, early), "config");
+    };
+
+    let target = func -> socket_addr.SocketAddr =>
+        result.expect<socket_addr.SocketAddr>(socket_addr.parse("127.0.0.1:443"), "address");
+
+    let connect_failure = func(quic: config.QuicConfig, early_bytes: uint8[list]) -> string =>
+        error.message(test.assert_err<connections.QuicConnection>(connections.connect(target(), quic,
+            optional.Optional<ticket.SessionTicket>.None, early_bytes)));
+
+    export let test_unsupported_settings_fail_before_the_host = func {
+        last limit = connections.StackStreamLimit;
+        last messages: string[list] = new;
+        messages.append(connect_failure(settings(false, limit, 65535, config.CongestionAlgorithm.NewReno, false), new));
+        messages.append(connect_failure(settings(false, limit, 0, config.CongestionAlgorithm.Cubic, false), new));
+        messages.append(connect_failure(settings(false, limit, 0, config.CongestionAlgorithm.NewReno, true), new));
+        messages.append(connect_failure(settings(false, 10, 0, config.CongestionAlgorithm.NewReno, false), new));
+        messages.append(connect_failure(settings(false, limit, 0, config.CongestionAlgorithm.NewReno, false),
+            strings.to_bytes("early")));
+        test.assert_equal_string("Unsupported: RFC 9221 datagrams are limited by the pinned QUIC stack (OpenSSL 4.1)|"
+            + "Unsupported: congestion controller Cubic are limited by the pinned QUIC stack (OpenSSL 4.1)|"
+            + "Unsupported: 0-RTT early data are limited by the pinned QUIC stack (OpenSSL 4.1)|"
+            + "Unsupported: stream limits other than 100 are limited by the pinned QUIC stack (OpenSSL 4.1)|"
+            + "Unsupported: 0-RTT early data are limited by the pinned QUIC stack (OpenSSL 4.1)",
+            strings.join(messages, "|"));
+    };
+
+    export let test_bind_checks_the_same_limits = func {
+        last refused = test.assert_err<endpoints.QuicEndpoint>(endpoints.bind(
+            result.expect<socket_addr.SocketAddr>(socket_addr.parse("127.0.0.1:0"), "address"),
+            settings(true, connections.StackStreamLimit, 0, config.CongestionAlgorithm.Ledbat, false)));
+        test.assert_equal_string("Unsupported: congestion controller Ledbat are limited by the pinned QUIC stack "
+            + "(OpenSSL 4.1)", error.message(refused));
+    };
+
+    export let test_a_supported_configuration_reaches_the_host = func {
+        // The provider refuses the missing server name without opening a socket.
+        last denied = test.assert_err<connections.QuicConnection>(connections.connect(target(),
+            settings(false, connections.StackStreamLimit, 0, config.CongestionAlgorithm.NewReno, false),
+            optional.Optional<ticket.SessionTicket>.None, new));
+        // A build without the TLS provider has no QUIC and answers Unsupported there instead.
+        last text = error.message(denied);
+        test.assert_with(text == "InvalidInput: QUIC connect failed (127.0.0.1:443)"
+            || text == "Unsupported: QUIC connect failed (127.0.0.1:443)", text);
+    };
+);

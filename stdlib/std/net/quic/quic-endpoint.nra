@@ -1,129 +1,98 @@
 let bytes = import:Std.Io.Internal.Bytes;
-let host_error = import:Std.Core.Internal.HostError;
+let.promote _ = import:Std.Time.Duration;
+let host = import:Std.Net.Quic.Internal.HostCalls;
 let.promote _ = import:Std.Net.Listener;
-let.promote _ = import:Std.Core.Optional;
 let.promote _ = import:Std.Net.Quic.QuicConfig;
 let.promote _ = import:Std.Net.Quic.QuicConnection;
 let.promote _ = import:Std.Core.Result;
-let socket = import:Std.Net.Internal.Socket;
 let.promote _ = import:Std.Net.Core.SocketAddr;
 let support = import:Std.Net.Socket.Internal.Support;
 let tls = import:Std.Net.Tls.TlsConfig;
 let.promote _ = import:Std.Core.Unit;
 
 /// @brief A QUIC server endpoint: a UDP port that accepts QUIC connections, as a `Std.Net.Listener` of
-/// `QuicConnection`s. Needs the net and fs capabilities.
+/// `QuicConnection`s, and an immutable handle that any task may hold. Needs the net and fs capabilities.
 ///
 /// `bind` needs a server configuration whose TLS settings hold the certificate and key, checked before any host
-/// call ("invalid argument: a QUIC endpoint needs a server configuration"). The transport needs a QUIC host service
-/// that no runtime offers, so `bind`
-/// traps in Neura 0.3.0.
+/// call ("invalid argument: a QUIC endpoint needs a server configuration"), and a configuration the pinned QUIC
+/// stack can honour (`QuicConnection.check_limits`). One `accept` may be pending at a time; a second fails at
+/// once with `quic.busy`. Closing the endpoint closes the connections it accepted, since they share its port;
+/// afterwards their operations fail with `IoErrorKind.Closed`.
 /// @see [Std.Net.Quic.QuicEndpoint](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Quic-QuicEndpoint)
 .Since("0.3.0")
 export let QuicEndpoint = module (
-    /// @brief A listener ID and the bound port, or a host error code.
-    let ListenOutcome = enum (Ok([int64, int]), Error(uint32));
-    /// @brief A connection ID, its ALPN, whether 0-RTT was accepted, and the peer address and port, or a host
-    /// error code.
-    let AcceptOutcome = enum (Ok([int64, string, bool, string, int]), Error(uint32));
-    /// @brief Success, or a host error code.
-    let DoneOutcome = enum (Ok, Error(uint32));
-
     /// @brief A listening QUIC endpoint.
-    .[Final, NoDiscard(reason: "an endpoint must be closed"), NotThreadSafe]
+    .[Final, Immutable]
     export let QuicEndpoint = class implements Listener<SocketAddr, QuicConnection> (
-        /// @brief The host's endpoint ID.
+        /// @brief The provider's endpoint ID.
         last id: int64;
         /// @brief The bound address with the chosen port.
         last bound: SocketAddr;
-        /// @brief The server configuration.
-        export last config: QuicConfig;
-        /// @brief Tracks whether the endpoint may still use the host ID.
-        let open_now: bool = true;
+        /// @brief The handshake timeout of `accept`, also the default timeout of accepted connections.
+        last timeout_nanos: int64;
 
-        /// @brief Use `bind`; the handle comes from the library.
-        export let init = func(opened: socket.Handle, address: SocketAddr, settings: QuicConfig) {
-            id = opened.id;
+        /// @brief Use `bind`; the ID comes from the library.
+        export let init = func(endpoint: int64, address: SocketAddr, default_timeout: int64) {
+            id = endpoint;
             bound = address;
-            config = settings;
+            timeout_nanos = default_timeout;
         };
 
         /// @brief The bound address.
         export let address = func -> SocketAddr => bound;
 
-        /// @brief Waits for the next connection and completes its handshake.
+        /// @brief Waits for the next connection and completes its handshake within the configured handshake
+        /// timeout (`Listener`).
         .NoDiscard
-        export let accept = func -> Result<QuicConnection> {
-            return Result<QuicConnection>.Err(bytes.closed("endpoint", bound.to_string())) unless open_now;
-            return match (quic_accept(id, support.timeout_nanos(config.tls_config.handshake_timeout))) {
-                AcceptOutcome.Ok(accepted) => connection_of(accepted, bound),
-                AcceptOutcome.Error(code) => Result<QuicConnection>.Err(
-                    host_error.io(code, "QUIC accept failed", bound.to_string())),
-            };
-        };
+        export let accept = func -> Result<QuicConnection> => accept_nanos(timeout_nanos);
 
-        /// @brief Closes every connection and releases the port. Closing again returns Ok.
+        /// @brief As `accept`, within `timeout` (zero: none). A separate name, because `accept` implements
+        /// `Listener` and an overload group cannot.
+        .NoDiscard
+        export let accept_within = func(timeout: Duration) -> Result<QuicConnection> =>
+            accept_nanos(support.timeout_nanos(timeout));
+
+        /// @brief Closes the endpoint and every connection it accepted, and releases the port.
         export let close = func -> Result<Unit> {
-            return bytes.ok() unless open_now;
-            open_now = false;
-            return match (quic_close_endpoint(id)) {
-                DoneOutcome.Ok => bytes.ok(),
-                DoneOutcome.Error(code) => Result<Unit>.Err(host_error.io(code, "close failed", bound.to_string())),
+            return match (host.close(id, 0, "")) {
+                host.DoneOutcome.Ok => bytes.ok(),
+                host.DoneOutcome.Error(code) => Result<Unit>.Err(host.error_of(code, "close failed", bound.to_string())),
             };
         };
 
         /// @brief Text such as "QuicEndpoint(0.0.0.0:443)".
         export let.override to_string = func -> string => "QuicEndpoint(" .. bound.to_string() .. ")";
+
+        let accept_nanos = func(nanos: int64) -> Result<QuicConnection> {
+            return match (host.accept(id, nanos)) {
+                host.ConnectionOutcome.Ok(accepted) => Result<QuicConnection>.Ok(
+                    connection_of(accepted, bound.to_string(), false, timeout_nanos)),
+                host.ConnectionOutcome.Error(code) => Result<QuicConnection>.Err(
+                    host.error_of(code, "QUIC accept failed", bound.to_string())),
+            };
+        };
     );
 
-    /// @brief Listens for QUIC on `address` (port 0 asks for a free port) with a server configuration. Traps
-    /// in Neura 0.3.0 (no QUIC host service).
+    /// @brief Listens for QUIC on `address` (port 0 asks for a free port) with a server configuration.
     .NoDiscard
     export let bind = func(address: SocketAddr, config: QuicConfig) -> Result<QuicEndpoint> {
         if (config.tls_config.role != tls.TlsRole.Server) {
             trap_with_message("invalid argument: a QUIC endpoint needs a server configuration");
         }
+        check_limits(config)?;
         last text = address.to_string();
         last settings = config.tls_config;
-        return match (quic_listen(address.host_text(), address.port, settings.certificate_file, settings.key_file,
-            settings.alpn(), config.max_datagram_frame_size as int64, config.early_data)) {
-            ListenOutcome.Ok(opened) => Result<QuicEndpoint>.Ok(endpoint_of(opened, address, config)),
-            ListenOutcome.Error(code) => Result<QuicEndpoint>.Err(host_error.io(code, "QUIC bind failed", text)),
+        return match (host.listen(address.host_text(), address.port, settings.certificate_file, settings.key_file,
+            settings.alpn())) {
+            host.EndpointOutcome.Ok(opened) => Result<QuicEndpoint>.Ok(endpoint_of(opened, address,
+                support.timeout_nanos(settings.handshake_timeout))),
+            host.EndpointOutcome.Error(code) => Result<QuicEndpoint>.Err(host.error_of(code, "QUIC bind failed", text)),
         };
     };
 
     /// @brief An endpoint from the host's [ID, port].
-    let endpoint_of = func(opened: [int64, int], address: SocketAddr, config: QuicConfig) -> QuicEndpoint {
+    let endpoint_of = func(opened: [int64, int], address: SocketAddr, nanos: int64) -> QuicEndpoint {
         let [id, port] = opened;
-        last bound = new SocketAddr(address.ip, port);
-        return new QuicEndpoint(new socket.Handle(id, bound.to_string()), bound, config);
-    };
-
-    /// @brief A connection from the host's [ID, ALPN, early accepted, peer address, peer port].
-    let connection_of = func(accepted: [int64, string, bool, string, int], bound: SocketAddr)
-        -> Result<QuicConnection> {
-        let [id, protocol, early, peer_text, peer_port] = accepted;
-        last peer = support.socket_address(peer_text, peer_port)?;
-        return Result<QuicConnection>.Ok(new QuicConnection(new socket.Handle(id, peer.to_string()),
-            Optional<SocketAddr>.Some(peer), false, protocol, early));
-    };
-
-    /// @brief Opens a QUIC server endpoint. Needed service: neura.net.quic.listen.
-    /// @stub no QUIC host service in any runtime
-    let quic_listen = func(host: string, port: int, certificate_file: string, key_file: string, alpn: string[list],
-        max_datagram_frame_size: int64, early_data: bool) -> ListenOutcome {
-        trap_with_message("unsupported: Std.Net.Quic.QuicEndpoint.quic_listen is not implemented in Neura 0.3.0 (no QUIC host service in any runtime)");
-    };
-
-    /// @brief Accepts one connection. Needed service: neura.net.quic.accept.
-    /// @stub no QUIC host service in any runtime
-    let quic_accept = func(endpoint: int64, timeout_nanos: int64) -> AcceptOutcome {
-        trap_with_message("unsupported: Std.Net.Quic.QuicEndpoint.quic_accept is not implemented in Neura 0.3.0 (no QUIC host service in any runtime)");
-    };
-
-    /// @brief Releases an endpoint. Needed service: neura.net.quic.close.
-    /// @stub no QUIC host service in any runtime
-    let quic_close_endpoint = func(endpoint: int64) -> DoneOutcome {
-        trap_with_message("unsupported: Std.Net.Quic.QuicEndpoint.quic_close_endpoint is not implemented in Neura 0.3.0 (no QUIC host service in any runtime)");
+        return new QuicEndpoint(id, new SocketAddr(address.ip, port), nanos);
     };
 );

@@ -1,0 +1,120 @@
+let bytes = import:Std.Io.Internal.Bytes;
+let.promote _ = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let host = import:Std.Net.Quic.Internal.HostCalls;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let stream_ids = import:Std.Net.Quic.StreamId;
+let support = import:Std.Net.Socket.Internal.Support;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief One stream of a `QuicConnection`, as an immutable handle that any task may hold.
+///
+/// The stream's state lives in the host provider; the handle holds only its connection's and its own IDs, so it
+/// crosses a spawn or a channel (Concurrency.md, "Host resource handles"). At most one read and one write may be
+/// pending on a stream at a time: a second one in the same direction fails at once with the Custom error
+/// `quic.busy`, while a read and a write, or operations on different streams, run concurrently. After any task
+/// closes the connection, every operation fails with `IoErrorKind.Closed`.
+///
+/// A read returns `None` at the peer's FIN. A stream the peer reset fails with the Custom error
+/// `quic.stream_reset`, and a connection the peer closed with `quic.connection_closed`; the message carries the
+/// peer's application error code. Without an explicit timeout an operation uses the connection's default.
+/// @see [Std.Net.Quic.QuicStream](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Quic-QuicStream)
+.Since("0.3.1")
+export let QuicStream = module (
+    /// @brief A stream of a connection.
+    .[Final, Immutable]
+    export let QuicStream = class (
+        /// @brief The provider's connection ID.
+        last connection: int64;
+        /// @brief The QUIC stream ID (RFC 9000 section 2.1).
+        export last id: int64;
+        /// @brief True when this side opened the stream.
+        export last local: bool;
+        /// @brief The default timeout of reads and writes in nanoseconds; zero waits without limit.
+        last timeout_nanos: int64;
+        /// @brief The connection's address text, for messages.
+        last label: string;
+
+        /// @brief Use `QuicConnection.open` or `accept`; the IDs come from the library.
+        export let init = func(owner: int64, stream: int64, opened_here: bool, default_timeout: int64,
+            address: string) {
+            connection = owner;
+            id = stream;
+            local = opened_here;
+            timeout_nanos = default_timeout;
+            label = address;
+        };
+
+        /// @brief Whether data can flow both ways on this stream.
+        export let bidirectional = func -> bool => stream_ids.is_bidirectional(id);
+
+        /// @brief Up to `maximum` (1 or more) bytes, or `None` once the peer finished the stream. Uses the
+        /// connection's default timeout, or `timeout` (zero: none).
+        .NoDiscard
+        export let read = func(maximum: int) -> Result<Optional<uint8[list]>> => read_within(maximum, timeout_nanos)
+            or func(maximum: int, timeout: Duration) -> Result<Optional<uint8[list]>> =>
+                read_within(maximum, support.timeout_nanos(timeout));
+
+        /// @brief Sends all of `data`; complete once the provider has accepted every byte for sending. Uses the
+        /// connection's default timeout, or `timeout`.
+        .NoDiscard
+        export let write = func(data: uint8[list]) -> Result<Unit> => write_within(data, false, timeout_nanos)
+            or func(data: uint8[list], timeout: Duration) -> Result<Unit> =>
+                write_within(data, false, support.timeout_nanos(timeout));
+
+        /// @brief Finishes this side of the stream (a STREAM frame with FIN).
+        .NoDiscard
+        export let finish = func -> Result<Unit> => write_within(new, true, timeout_nanos);
+
+        /// @brief Text such as "QuicStream(4, 127.0.0.1:4433)".
+        export let.override to_string = func -> string => "QuicStream(" .. id.to_string() .. ", " .. label .. ")";
+
+        let read_within = func(maximum: int, nanos: int64) -> Result<Optional<uint8[list]>> {
+            if (maximum < 1) {
+                trap_with_message("invalid argument: maximum count below 1");
+            }
+            return match (host.stream_read(connection, id, maximum, nanos)) {
+                host.ReadOutcome.Ok(read) => read_result(read),
+                host.ReadOutcome.Error(code) => Result<Optional<uint8[list]>>.Err(
+                    host.error_of(code, "QUIC stream read failed", label)),
+            };
+        };
+
+        let write_within = func(data: uint8[list], fin: bool, nanos: int64) -> Result<Unit> {
+            return match (host.stream_write(connection, id, data, fin, nanos)) {
+                host.WriteOutcome.Ok(written) => write_result(written, data.length),
+                host.WriteOutcome.Error(code) => Result<Unit>.Err(host.error_of(code, "QUIC stream write failed",
+                    label)),
+            };
+        };
+
+        let read_result = func(read: [uint8[list], int, int64]) -> Result<Optional<uint8[list]>> {
+            let [data, ending, code] = read;
+            if (ending != 0) {
+                return Result<Optional<uint8[list]>>.Err(ended(ending, code));
+            }
+            return Result<Optional<uint8[list]>>.Ok(data.length == 0 ? Optional<uint8[list]>.None
+                : Optional<uint8[list]>.Some(data));
+        };
+
+        let write_result = func(written: [int, int, int64], expected: int) -> Result<Unit> {
+            let [count, ending, code] = written;
+            if (ending != 0) {
+                return Result<Unit>.Err(ended(ending, code));
+            }
+            return count == expected ? bytes.ok()
+                : Result<Unit>.Err(bytes.no_progress("QUIC stream write stopped after " .. count.to_string()
+                    .. " of " .. expected.to_string() .. " bytes", label));
+        };
+
+        let ended = func(ending: int, code: int64) -> errors.Error {
+            if (ending == 1) {
+                return errors.custom("quic.stream_reset", "the peer reset stream " .. id.to_string()
+                    .. " with application error " .. code.to_string());
+            }
+            return errors.custom("quic.connection_closed", (ending == 2 ? "the peer closed the connection with "
+                .. "application error " : "the connection closed with transport error ") .. code.to_string());
+        };
+    );
+);

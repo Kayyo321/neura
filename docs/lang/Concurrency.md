@@ -547,6 +547,16 @@ The parameters and results of a monitor's methods may have any type. A method ru
 
 A monitor may keep a `Guarded<T>` field for a collection and expose methods that call `with` on it, which gives a collection an API of methods.
 
+### 8.3 Host resource handles
+
+Some library resources live in the host, not in the program: a QUIC endpoint, connection or stream (`Std.Net.Quic`). The library represents each by an `#Immutable` handle that holds only the host's identifier and fixed settings, such as a default timeout. Because its fields are transferable, such a handle crosses a spawn or a channel (section 5.1), and several tasks can use one resource at the same time: a coordinator accepts the streams of a connection and gives each to a task of its own.
+
+This shares no program state. Every operation on a handle is a host request, which the scheduler issues in order and a trace records and replays like any other (section 11). The memory model of section 5.4 is unchanged: two tasks still have no common program state, and what they do to the host resource is an external effect, as a write to the same file is.
+
+- **One pending operation per direction.** A resource takes at most one waiting operation of each kind at a time: for QUIC, one `accept` per endpoint, one `accept` of a stream per connection, and on each stream one read and one write. Another one fails at once with the Custom error `quic.busy` and is never queued, so the order of completions never depends on a hidden queue. Different streams, and a read and a write on one stream, run concurrently.
+- **Closing.** Any task may close a resource. Afterwards every operation on it, by any task and through any copy of the handle, fails with `IoErrorKind.Closed`, including operations already waiting, whose tasks wake with that error. The host never gives a closed resource's identifier to a later resource, so a stale handle cannot reach one.
+- **The QUIC handles.** `QuicEndpoint`, `QuicConnection` and `QuicStream` are `#Final` and `#Immutable`, with fields of transferable types. Their timeouts are fixed when they are created, and each waiting operation has a form that takes its own timeout.
+
 ## 9. `Std.Concurrent`
 
 One module per type, as in the rest of the [library](Stdlib.md#42-source-layout). `Std.Concurrent` sits after `Std.Time` in the dependency order and imports only `Std.Core` and `Std.Time`.

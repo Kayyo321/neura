@@ -1,7 +1,8 @@
 // status: 134
-// stderr: unsupported: Std\.Net\.Quic\.QuicEndpoint\.quic_listen is not implemented in Neura 0\.3\.0
-// A QUIC server endpoint needs a QUIC host service, which no runtime has.
+// stderr: invalid argument: a QUIC endpoint needs a server configuration
+// Binding an endpoint with a client configuration is a programming error.
 let config = import:Std.Net.Quic.QuicConfig;
+let connections = import:Std.Net.Quic.QuicConnection;
 let duration = import:Std.Time.Duration;
 let endpoint = import:Std.Net.Quic.QuicEndpoint;
 let program = import:Std.Program;
@@ -14,10 +15,10 @@ export let Main = module:program.Entry (
         last builder = tls.builder();
         builder.set_versions(tls.TlsVersion.Tls13, tls.TlsVersion.Tls13);
         builder.set_alpn(new(["h3"]));
-        builder.set_certificate("server.pem", "server.key");
-        last server = result.expect<tls.TlsConfig>(builder.build_server(), "tls");
-        last settings = result.expect<config.QuicConfig>(config.create(server, 100, 100, 0, duration.of_seconds(30),
-            1200, config.CongestionAlgorithm.NewReno, false), "config");
+        last client = result.expect<tls.TlsConfig>(builder.build_client(), "tls");
+        last settings = result.expect<config.QuicConfig>(config.create(client, connections.StackStreamLimit,
+            connections.StackStreamLimit, 0, duration.of_seconds(30), 1200, config.CongestionAlgorithm.NewReno, false),
+            "config");
         last address = result.expect<socket_addr.SocketAddr>(socket_addr.parse("127.0.0.1:0"), "address");
         let _ = endpoint.bind(address, settings);
         return program.ExitCode.Ok;

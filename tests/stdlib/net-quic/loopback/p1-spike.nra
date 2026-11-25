@@ -1,0 +1,283 @@
+// Milestone A1-0 (lead RULINGS-03): QUIC handles are immutable and any task
+// may wait on one. One program is both peers over loopback; quic-loopback.py
+// runs it live, records it, replays the recording with --deny-all, and checks
+// the trace.
+//
+// 1. The server's coordinator waits in accept_stream while two reader tasks
+//    wait in stream_read on two other streams; then the client sends to all
+//    three, and the script checks that the trace delivers the three answers
+//    at one tick.
+// 2. A second read on a stream with a read pending fails at once with
+//    quic.busy; a write on it meanwhile succeeds.
+// 3. A stream handle of a closed connection fails with Closed, also after a
+//    new connection reused the closed one's provider slot.
+let channels = import:Std.Concurrent.Channel;
+let config = import:Std.Net.Quic.QuicConfig;
+let connections = import:Std.Net.Quic.QuicConnection;
+let console = import:Std.Io.Console;
+let durations = import:Std.Time.Duration;
+let endpoints = import:Std.Net.Quic.QuicEndpoint;
+let errors = import:Std.Core.Error;
+let ip = import:Std.Net.Core.IpAddr;
+let ipv4 = import:Std.Net.Core.Ipv4Addr;
+let optional = import:Std.Core.Optional;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let socket_addr = import:Std.Net.Core.SocketAddr;
+let streams = import:Std.Net.Quic.QuicStream;
+let strings = import:Std.Text.Strings;
+let tickets = import:Std.Net.Quic.SessionTicket;
+let tls = import:Std.Net.Tls.TlsConfig;
+
+let describe = func(failure: errors.Error) -> string => match (failure) {
+    errors.Error.Io { kind, message: _, path: _ } => errors.io_kind_name(kind),
+    errors.Error.Custom(detail) => detail.code(),
+    _ => errors.message(failure),
+};
+
+let text_of = func(data: uint8[list]) -> string {
+    let [valid, text] = string.from_utf8(data);
+    return valid ? text : "<invalid>";
+};
+
+let read_text = func(stream: streams.QuicStream) -> string => match (stream.read(64)) {
+    result.Result.Ok(optional.Optional.Some(data)) => text_of(data),
+    result.Result.Ok(optional.Optional.None) => "<fin>",
+    result.Result.Err(failure) => "<" .. describe(failure) .. ">",
+};
+
+let send_text = func(stream: streams.QuicStream, text: string) -> string => match (stream.write(strings.to_bytes(text))) {
+    result.Result.Ok(_) => "sent",
+    result.Result.Err(failure) => "<" .. describe(failure) .. ">",
+};
+
+let opened = func(connection: connections.QuicConnection) -> string => match (connection.open(true)) {
+    result.Result.Ok(_) => "ok",
+    result.Result.Err(failure) => "<" .. describe(failure) .. ">",
+};
+
+let quic_config = func(settings: tls.TlsConfig) -> config.QuicConfig {
+    match (config.create(settings, connections.StackStreamLimit, connections.StackStreamLimit, 0u64,
+        durations.of_seconds(30), 1200, config.CongestionAlgorithm.NewReno, false)) {
+        result.Result.Ok(built) => {
+            return built;
+        },
+        result.Result.Err(failure) => {
+            trap_with_message("QUIC configuration: " .. errors.message(failure));
+        },
+    }
+};
+
+let tls_settings = func(server: bool, certificate: string, key: string) -> tls.TlsConfig {
+    let builder = tls.builder();
+    builder.set_versions(tls.TlsVersion.Tls13, tls.TlsVersion.Tls13);
+    builder.set_alpn(new(["spike"]));
+    builder.set_handshake_timeout(durations.of_seconds(10));
+    if (server) {
+        builder.set_certificate(certificate, key);
+    } else {
+        builder.set_server_name("localhost");
+        builder.set_ca_file(certificate);
+    }
+    match (server ? builder.build_server() : builder.build_client()) {
+        result.Result.Ok(built) => {
+            return built;
+        },
+        result.Result.Err(failure) => {
+            trap_with_message("TLS configuration: " .. errors.message(failure));
+        },
+    }
+};
+
+// Waits on one stream and reports what arrived.
+let reader = func(name: string, stream: streams.QuicStream, out: channels.Sender<string>) {
+    out.send(name .. " read " .. read_text(stream));
+};
+
+// As reader, after telling `started` that its read is about to be issued. A
+// buffered send does not yield, so the read is pending before the waiting
+// task runs again.
+let announced_reader = func(name: string, stream: streams.QuicStream, started: channels.Sender<int>,
+    out: channels.Sender<string>) {
+    started.send(1);
+    out.send(name .. " read " .. read_text(stream));
+};
+
+let client = func(port: int, certificate: string, go: channels.Receiver<int>, done: channels.Receiver<int>,
+    notes: channels.Sender<string>) {
+    let target = new socket_addr.SocketAddr(ip.IpAddr.V4(ipv4.localhost()), port);
+    let settings = quic_config(tls_settings(false, certificate, ""));
+    match (connections.connect(target, settings, optional.Optional<tickets.SessionTicket>.None, new)) {
+        result.Result.Err(failure) => {
+            notes.send("client connect failed: " .. errors.message(failure));
+        },
+        result.Result.Ok(connection) => {
+            let a = connection.open(true);
+            let b = connection.open(true);
+            match (a) {
+                result.Result.Ok(first) => {
+                    match (b) {
+                        result.Result.Ok(second) => {
+                            notes.send("client a1 " .. send_text(first, "a1") .. ", b1 " .. send_text(second, "b1"));
+                            let _ = go.receive();
+                            notes.send("client a2 " .. send_text(first, "a2") .. ", b2 " .. send_text(second, "b2"));
+                            match (connection.open(true)) {
+                                result.Result.Ok(third) => {
+                                    notes.send("client c1 " .. send_text(third, "c1"));
+                                    let _ = go.receive();
+                                    notes.send("client c2 " .. send_text(third, "c2"));
+                                },
+                                result.Result.Err(failure) => {
+                                    notes.send("client open c failed: " .. describe(failure));
+                                },
+                            }
+                            let _ = done.receive();
+                            let _ = connection.close_with(7, "spike done");
+                            notes.send("closed stream after close: " .. send_text(first, "late"));
+                            match (connections.connect(target, settings, optional.Optional<tickets.SessionTicket>.None, new)) {
+                                result.Result.Ok(again) => {
+                                    notes.send("stale handle after reuse: " .. send_text(first, "stale")
+                                        .. "; new connection open: " .. opened(again));
+                                    let _ = again.close();
+                                },
+                                result.Result.Err(failure) => {
+                                    notes.send("second connect failed: " .. errors.message(failure));
+                                },
+                            }
+                        },
+                        result.Result.Err(failure) => {
+                            notes.send("client open b failed: " .. describe(failure));
+                        },
+                    }
+                },
+                result.Result.Err(failure) => {
+                    notes.send("client open a failed: " .. describe(failure));
+                },
+            }
+        },
+    }
+};
+
+let forward = func(from: channels.Receiver<string>, out: channels.Sender<string>) {
+    match (from.receive()) {
+        channels.Received.Value(line) => {
+            out.send(line);
+        },
+        _ => {
+            out.send("<no reader result>");
+        },
+    }
+};
+
+let print_queued = func(lines: channels.Receiver<string>) {
+    let more = true;
+    while (more) {
+        match (lines.try_receive()) {
+            channels.TryReceived.Value(line) => {
+                console.print_line(line);
+            },
+            _ => {
+                more = false;
+            },
+        }
+    }
+};
+
+let serve = func(endpoint: endpoints.QuicEndpoint, go: channels.Sender<int>, done: channels.Sender<int>,
+    lines: channels.Sender<string>) {
+    match (endpoint.accept()) {
+        result.Result.Err(failure) => {
+            lines.send("server accept failed: " .. errors.message(failure));
+        },
+        result.Result.Ok(connection) => {
+            match (connection.accept()) {
+                result.Result.Ok(first) => {
+                    lines.send("server stream " .. first.id.to_string() .. " read " .. read_text(first));
+                    match (connection.accept()) {
+                        result.Result.Ok(second) => {
+                            lines.send("server stream " .. second.id.to_string() .. " read " .. read_text(second));
+                            let third_text = "";
+                            // The readers report on channels of their own, which the coordinator
+                            // prints in a fixed order: when each completion arrives depends on
+                            // when the datagrams do.
+                            let a_result = channels.open<string>(1);
+                            let b_result = channels.open<string>(1);
+                            let c_result = channels.open<string>(1);
+                            scope {
+                                // Check 1: two readers and the coordinator park together.
+                                spawn reader("reader A", first, a_result[0]);
+                                spawn reader("reader B", second, b_result[0]);
+                                go.send(1);
+                                match (connection.accept()) {
+                                    result.Result.Ok(third) => {
+                                        third_text = "coordinator accepted stream " .. third.id.to_string()
+                                            .. " and read " .. read_text(third);
+                                        lines.send(third_text);
+                                        // Check 2: one pending read per stream; a write meanwhile is fine.
+                                        let started = channels.open<int>(1);
+                                        scope {
+                                            spawn announced_reader("reader C", third, started[0], c_result[0]);
+                                            let _ = started[1].receive();
+                                            lines.send("second read while one is pending: " .. read_text(third));
+                                            lines.send("write while a read is pending: " .. send_text(third, "w"));
+                                            go.send(2);
+                                        }
+                                    },
+                                    result.Result.Err(failure) => {
+                                        lines.send("server accept c failed: " .. describe(failure));
+                                    },
+                                }
+                            }
+                            forward(a_result[1], lines);
+                            forward(b_result[1], lines);
+                            forward(c_result[1], lines);
+                            done.send(1);
+                        },
+                        result.Result.Err(failure) => {
+                            lines.send("server accept b failed: " .. describe(failure));
+                        },
+                    }
+                },
+                result.Result.Err(failure) => {
+                    lines.send("server accept a failed: " .. describe(failure));
+                },
+            }
+        },
+    }
+};
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        if (args.length != 2) {
+            console.print_line("usage: p1-spike <certificate> <key>");
+            return program.ExitCode.Failure;
+        }
+        let certificate = args[0];
+        let key = args[1];
+        let server_config = quic_config(tls_settings(true, certificate, key));
+        let any = new socket_addr.SocketAddr(ip.IpAddr.V4(ipv4.localhost()), 0);
+        match (endpoints.bind(any, server_config)) {
+            result.Result.Err(failure) => {
+                console.print_line("bind failed: " .. errors.message(failure));
+                return program.ExitCode.Failure;
+            },
+            result.Result.Ok(endpoint) => {
+                let go = channels.open<int>(2);
+                let done = channels.open<int>(1);
+                let lines = channels.open<string>(32);
+                let notes = channels.open<string>(32);
+                scope {
+                    spawn client(endpoint.address().port, certificate, go[1], done[1], notes[0]);
+                    serve(endpoint, go[0], done[0], lines[0]);
+                }
+                lines[2].close();
+                print_queued(lines[1]);
+                notes[2].close();
+                print_queued(notes[1]);
+                let _ = endpoint.close();
+                console.print_line("spike done");
+                return program.ExitCode.Ok;
+            },
+        }
+    };
+);

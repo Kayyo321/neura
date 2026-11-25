@@ -37,6 +37,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - Managed-list runs batch `Lists.filled` and byte appends in `StringBuilder`, `Strings.join`, and internal I/O buffers with element-wise step, heap, and version accounting. Images that use them require NVR 1.10. [Managed list runs](docs/runtime/NVM.md#managed-list-runs)
 - Module-level laws check pure claims at compile time with `neura prove`, `check`, and `build`. NeuraIR 1.16 preserves law statements and proofs for separate compilation. [Laws](docs/lang/Laws.md)
 - `Handshake.dtls_peer_certificate_chain` returns the verified peer chain of a DTLS 1.3 transport, including a client certificate verified by a DTLS server.
+- `Std.Net.Quic` runs over the TLS build's OpenSSL 4.1 QUIC stack: `QuicEndpoint.bind` and `accept`, `QuicConnection.connect`, `open`, `accept` and `close_with`, and the new `QuicStream` with `read`, `write` and `finish`. Endpoints, connections and streams are immutable handles that any task may use ([Host resource handles](docs/lang/Concurrency.md#83-host-resource-handles)). Each waiting call has a form that takes its own timeout. [QUIC services](docs/runtime/NVM.md#host-services)
 
 ### Changed
 
@@ -49,6 +50,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - `EventLoop.select` returns `Ok(Poll)` on Windows. Successful event-loop installs apply to the native driver and debugger. Replays use the recorded result.
 - Raw IP sockets require the explicit `raw` capability and network access.
 - `H2.hpack_encode` and `H3.encode_field_section` return `Result<uint8[list]>`. Handle the result at existing call sites.
+- `QuicConnection`, `QuicEndpoint` and their `init` functions changed shape: both classes are `#Immutable` handles. `set_read_timeout`, `read_timeout`, `peer_address`, `early_data_accepted` and `QuicEndpoint.config` are removed; a connection's default timeout is the TLS handshake timeout, and `timeout()` reads it. `session_ticket()` takes no arguments. A second waiting operation in one direction fails with `quic.busy`, and a closed handle fails with `Closed`. `QuicConnection.send`, `receive` and `migrate`, a session ticket, 0-RTT bytes, and a configuration with datagrams, a congestion controller other than `NewReno` or stream limits other than 100 return `Unsupported` instead of trapping.
 - `H2Connection.init(target: string)` is now `init(seal: Seal, target: string, stream: int64, timeout: int64)`. Create connections through `H2.connect` or `H2.connect_with`.
 - SPIFFE X.509-SVID and JWT-SVID verification require callers to pass a nonempty `trust_domain` argument.
 - Unqualified device and enclave evidence APIs and FN-DSA return typed `Unsupported` results. FN-DSA signing and verification now return `Result`.
@@ -82,6 +84,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - OpenSSL 4.1.0's DTLS 1.3 listener retransmits the HelloRetryRequest to an unvalidated address and briefly ignores further first flights from it, so address validation is not strictly stateless: a first flight spoofed with the peer's address delays the peer's handshake by about one retransmission interval. [DTLS services](docs/runtime/NVM.md#host-services)
 - OpenSSL 4.1.0 DTLS can drop outstanding post-handshake retransmissions on KeyUpdate ([#32878](https://github.com/openssl/openssl/issues/32878)), misclassify listener read or write errors ([#33277](https://github.com/openssl/openssl/issues/33277), [#33278](https://github.com/openssl/openssl/issues/33278)), or abort a handshake on an early acknowledgment ([#33242](https://github.com/openssl/openssl/issues/33242)). [DTLS 1.3 limitations](docs/lang/Neura0.3.1.md#dtls-13-limitations)
 - HTTP/3 transport, QPACK and MASQUE operations return typed `Unsupported`. The available QUIC provider carries DNS over QUIC.
+- Limited by the pinned QUIC stack (OpenSSL 4.1), and typed `Unsupported`: RFC 9221 datagrams, application-directed connection migration (a peer's NAT rebinding is not survived either), congestion controllers other than NewReno, 0-RTT early data, and stream limits other than the stack's 100. [Limited by the pinned QUIC stack](docs/lang/Neura0.3.1.md#limited-by-the-pinned-quic-stack)
 
 ## [0.3.0] - 2026-11-20
 
