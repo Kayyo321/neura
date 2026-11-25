@@ -224,6 +224,26 @@ inline platform::native_file open_name(const std::string& candidate) {
 }
 #endif
 
+#ifndef _WIN32
+// Opens a resolved credential name for reading without blocking. Under path
+// prefixes the open refuses a symbolic link (ELOOP): with O_NOFOLLOW_ANY
+// (macOS 11 and later) in every component, so a directory swapped for a link
+// after the checks makes the open fail instead of following it; elsewhere,
+// with O_NOFOLLOW, only in the final component. macOS 26 rejects the two
+// flags together with EINVAL, so exactly one of them is passed.
+inline platform::native_file open_for_reading(const std::string& candidate, bool restricted) {
+    auto flags = O_RDONLY | O_CLOEXEC | O_NONBLOCK;
+    if (restricted) {
+#ifdef O_NOFOLLOW_ANY
+        flags |= O_NOFOLLOW_ANY;
+#else
+        flags |= O_NOFOLLOW;
+#endif
+    }
+    return ::open(candidate.c_str(), flags);
+}
+#endif
+
 inline std::uint32_t read(const Capabilities& capabilities, const std::vector<ResolvedPath>& prefixes,
                           std::string& path) {
     if (path.empty()) return 0;
@@ -297,25 +317,21 @@ inline std::uint32_t read(const Capabilities& capabilities, const std::vector<Re
     } else
 #else
     if (!prefixes.empty()) {
-        // Without an open that refuses links in every component, check the
-        // resolved name itself. A directory swapped between this check and
-        // the open can still redirect it; the descriptor check below then
-        // rejects the object, but it has been opened (docs/runtime/NVM.md).
+        // Check the kind of the resolved name itself. With O_NOFOLLOW_ANY
+        // (macOS) a directory swapped between this check and the open makes
+        // the open fail. With O_NOFOLLOW alone it can still redirect the
+        // open; the descriptor check below then rejects the object, but it
+        // has been opened (docs/runtime/NVM.md).
         struct stat resolved{};
         if (::stat(candidate.c_str(), &resolved) != 0) return host_error::from_errno(errno);
         if (!S_ISREG(resolved.st_mode)) return host_error::invalid_input;
     }
 #endif
     {
-        auto flags = O_RDONLY | O_CLOEXEC | O_NONBLOCK;
-        if (!prefixes.empty()) {
-            flags |= O_NOFOLLOW;
-#ifdef O_NOFOLLOW_ANY
-            flags |= O_NOFOLLOW_ANY; // macOS 11: no link in any component.
-#endif
-        }
-        file = platform::UniqueFile(::open(candidate.c_str(), flags));
-        if (!file) return host_error::from_errno(errno);
+        file = platform::UniqueFile(open_for_reading(candidate, !prefixes.empty()));
+        // A link met under prefixes is a refusal, as on Linux.
+        if (!file)
+            return !prefixes.empty() && errno == ELOOP ? host_error::capability_denied : host_error::from_errno(errno);
     }
     struct stat info{};
     if (::fstat(file.get(), &info) != 0) return host_error::from_errno(errno);

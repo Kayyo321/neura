@@ -76,6 +76,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - Native fetch under an origin list reads an IP literal with a final dot (`http://1.2.3.4.:80`) as that address: it matched the listed numeric origin but was then treated as a name whose global answers were all allowed, instead of allowing exactly the listed address.
 - A DTLS read whose deadline passed while a peer datagram was on its way returns the packets that datagram produced, such as an ACK or the reply to a KeyUpdate, with `TimedOut`, instead of draining and dropping them, so the peer's KeyUpdate still completes.
 - Native fetch bounds the total framing of a chunked response to 64 KiB or eight times the body received so far, whichever is larger, and returns `TooLarge` past it, so one-byte chunks with 16 KiB extensions can no longer cost thousands of times the body in parsing.
+- TLS credential files could not be read under a restricted `--allow-fs` on macOS: the provider opened them with `O_NOFOLLOW | O_NOFOLLOW_ANY`, which macOS 26 rejects with `EINVAL`, so every load returned `InvalidInput`. It now passes `O_NOFOLLOW_ANY` alone on macOS, which refuses a symbolic link in any component of the resolved name, and `O_NOFOLLOW` elsewhere. A link met by that open under prefixes returns `CapabilityDenied`, as on Linux.
 
 ### Known limitations
 

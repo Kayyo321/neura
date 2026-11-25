@@ -164,6 +164,41 @@ int main() {
     assert(tls_material::read(capabilities, prefixes, path) == host_error::unsupported);
 #endif
 
+#if !defined(_WIN32) && !defined(__linux__) && defined(O_NOFOLLOW_ANY)
+    // The open that read uses under prefixes refuses a link in any component.
+    // read resolves the name first, so these are the names the open meets
+    // when a component is swapped for a link after the checks: a link as the
+    // final component and a link to a directory inside the prefix.
+    const auto final_link = allowed / "final-link.pem";
+    fs::create_symlink(fixture, final_link);
+    const auto real_directory = allowed / "real";
+    assert(fs::create_directory(real_directory));
+    {
+        std::ofstream stream(real_directory / "credential.pem", std::ios::binary);
+        stream << material;
+    }
+    const auto directory_link = allowed / "directory-link";
+    fs::create_directory_symlink(real_directory, directory_link);
+    for (const auto& linked : {final_link, directory_link / "credential.pem"}) {
+        errno = 0;
+        const platform::UniqueFile refused(tls_material::open_for_reading(path_text(linked), true));
+        assert(!refused && errno == ELOOP);
+        // Without prefixes the open follows links, as before.
+        const platform::UniqueFile followed(tls_material::open_for_reading(path_text(linked), false));
+        assert(followed);
+    }
+    const platform::UniqueFile direct(tls_material::open_for_reading(path_text(real_directory / "credential.pem"), true));
+    assert(direct);
+    // Through read: a link inside the prefix that leads inside it loads its
+    // target; one that leads outside is refused.
+    path = path_text(directory_link / "credential.pem");
+    assert(tls_material::read(capabilities, prefixes, path) == 0 && path == material);
+    const auto outside_link = allowed / "outside-link.pem";
+    fs::create_symlink(outside, outside_link);
+    path = path_text(outside_link);
+    assert(tls_material::read(capabilities, prefixes, path) == host_error::capability_denied);
+#endif
+
 #ifdef __linux__
     // Classify this path by the grant before any file-kind check on a handle.
     const auto fifo = root / "outside.fifo";
