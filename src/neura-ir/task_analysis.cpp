@@ -94,6 +94,9 @@ TaskAnalysis::TaskAnalysis(const IrProgram& program) : program_(program), dispat
         if (item.kind == SymbolKind::Field && valid(item.owner)) fields_[item.owner].push_back(id);
         if (item.kind == SymbolKind::Variant && valid(item.owner)) variants_[item.owner].push_back(id);
         if (item.kind == SymbolKind::Class && valid(item.base)) derived_[item.base].push_back(id);
+        if (item.kind == SymbolKind::Function && item.name == "$invoke" && valid(item.owner)) {
+            invokes_.emplace(item.owner, id);
+        }
         if (item.kind == SymbolKind::Function && item.name == "deinit" && valid(item.owner)) {
             destructors_[item.owner].push_back(id);
         }
@@ -821,15 +824,11 @@ void TaskAnalysis::check() const {
                     if (checked.kind == TypeKind::Object && valid(checked.symbol) && signature_layout(checked.symbol)) {
                         if (const auto found = derived_.find(checked.symbol); found != derived_.end()) {
                             for (const auto layout : found->second) {
-                                if (!created_.contains(layout)) continue;
-                                for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
-                                    const auto& item = symbol(id);
-                                    if (item.kind != SymbolKind::Function || item.owner != layout || item.name != "$invoke")
-                                        continue;
-                                    if (const auto reason = unsafe(id)) {
-                                        throw unsafe_error(user_site(body.owner, node.span),
-                                                           "a function given to a guard is not task-safe", *reason);
-                                    }
+                                const auto invoke = invokes_.find(layout);
+                                if (!created_.contains(layout) || invoke == invokes_.end()) continue;
+                                if (const auto reason = unsafe(invoke->second)) {
+                                    throw unsafe_error(user_site(body.owner, node.span),
+                                                       "a function given to a guard is not task-safe", *reason);
                                 }
                             }
                         }

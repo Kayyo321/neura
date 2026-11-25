@@ -81,6 +81,8 @@ private:
     std::map<SymbolId, std::vector<SymbolId>> fields_;
     std::map<SymbolId, std::vector<SymbolId>> derived_;
     std::map<SymbolId, std::vector<SymbolId>> variants_;
+    // The $invoke method of each closure layout.
+    std::map<SymbolId, SymbolId> invokes_;
     std::map<SymbolId, std::vector<SymbolId>> destructors_;
     std::map<SymbolId, Reason> unsafe_;
     // Why a function cannot run as an isolated item of a parallel map
