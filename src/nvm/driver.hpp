@@ -8,6 +8,7 @@
 
 #include "machine.hpp"
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -81,6 +82,12 @@ private:
         std::optional<HostCompletion> answer;
         bool cancellable = false;
         bool cancelled = false;
+        // The no-spin guard of wake_at: attempts in a row that a wake-up alone
+        // caused and that did not finish, and the real (steady) time before
+        // which a wake-up is ignored. Real time, because under virtual time a
+        // wake-up bounds the real wait and must not stall the virtual clock.
+        int fruitless_wakes = 0;
+        std::chrono::steady_clock::time_point wake_floor{};
     };
 
     // Tries every entry that may have progressed, or only `only`. The native

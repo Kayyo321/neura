@@ -593,6 +593,32 @@ void native_events() {
     }
 }
 
+// The no-spin guard: a wake-up that always answers "now" while its attempts
+// never finish is backed off, so the driver does not busy-wait.
+void wake_up_guard() {
+    LiveClock clock;
+    PendingRequests pending(clock);
+    Pipe quiet;
+    auto stuck = with_source(PosixWait{{quiet.reader(), PosixWait::Events::Read}});
+    int attempts = 0;
+    stuck.wake_at = [](std::int64_t now) { return now; };
+    stuck.attempt = [&](bool cancelled) -> std::optional<HostCompletion> {
+        ++attempts;
+        if (cancelled) return value(60);
+        return std::nullopt;
+    };
+    pending.add(60, std::move(stuck), true);
+    const auto end = clock.now() + 300'000'000;
+    int returns = 0;
+    while (clock.now() < end) {
+        static_cast<void>(pending.wait(end));
+        ++returns;
+    }
+    check(attempts < 40 && returns < 40, "a wake-up that never finishes made the driver spin");
+    pending.cancel(60);
+    completed(pending.poll(), 60, 60, true);
+}
+
 // A live clock: the driver sleeps until the wake-up, not until readiness,
 // and does not spin while it waits.
 void live_wake_up() {
@@ -659,6 +685,7 @@ int main() {
         provider_wake_ups();
         background_work();
         live_wake_up();
+        wake_up_guard();
 #endif
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

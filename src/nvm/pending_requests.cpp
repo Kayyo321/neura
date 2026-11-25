@@ -44,6 +44,14 @@ namespace {
 
 constexpr std::int64_t none = PendingOperation::no_deadline;
 constexpr int retry_ms = 1;
+// The no-spin guard: each attempt in a row that only a wake-up caused and that
+// did not finish doubles the time before the next wake-up counts, from 1 ms to
+// 32 ms. A provider whose wake_at keeps answering "now" while its attempts
+// cannot finish then costs at most about 1,000 attempts a second, and about
+// 31 once the guard has stepped up, instead of a busy wait. Readiness of its
+// wait source and its deadline still attempt it at once.
+constexpr std::chrono::milliseconds first_wake_backoff{1};
+constexpr int wake_backoff_steps = 6;
 
 // Round up so the clock has reached the deadline when the wait returns.
 int milliseconds_until(std::int64_t deadline, std::int64_t now) {
@@ -814,11 +822,19 @@ void PendingRequests::check(int timeout_ms, std::optional<std::uint64_t> only) {
         if (!now && (operation.deadline != none || operation.wake_at)) now = clock_.now();
         const bool due = operation.deadline != none && operation.deadline <= *now;
         // A provider timer that has come due: attempt again, but never expire.
-        const bool woken = operation.wake_at && operation.wake_at(*now) <= *now;
+        const bool woken = operation.wake_at && std::chrono::steady_clock::now() >= entry.wake_floor &&
+                           operation.wake_at(*now) <= *now;
         if (!check.ready && !due && !woken) continue;
         auto answer = operation.attempt(false);
         if (!answer && due) answer = operation.expire();
-        if (answer) entry.answer = std::move(*answer);
+        if (answer) {
+            entry.answer = std::move(*answer);
+        } else if (woken && !check.ready) {
+            entry.fruitless_wakes = std::min(entry.fruitless_wakes + 1, wake_backoff_steps);
+            entry.wake_floor = std::chrono::steady_clock::now() + first_wake_backoff * (1 << (entry.fruitless_wakes - 1));
+        } else if (check.ready) {
+            entry.fruitless_wakes = 0;
+        }
     }
 }
 
@@ -862,7 +878,9 @@ std::vector<PendingRequests::Done> PendingRequests::wait(std::optional<std::int6
         earliest = std::min(earliest, operation.deadline);
         if (operation.wake_at) {
             if (!wake_now) wake_now = clock_.now();
-            wake = std::min(wake, operation.wake_at(*wake_now));
+            const auto floor = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                   entry.wake_floor - std::chrono::steady_clock::now()).count();
+            wake = std::min(wake, std::max(operation.wake_at(*wake_now), *wake_now + std::max<std::int64_t>(floor, 0)));
         }
         if (waits_natively(operation.wait_source)) {
             has_native_wait = true;
