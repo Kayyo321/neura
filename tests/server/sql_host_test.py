@@ -426,7 +426,10 @@ def test_without_pools(args):
     check(result.returncode == 1 and "unknown SQL setting sql.main.colour" in result.stderr
           and "url is sqlite:<path> or a postgresql:// URI" in result.stderr,
           f"every configuration problem is listed: {result.stderr}")
-    if os.name == "nt":
+    # A Windows build without the provider refuses a PostgreSQL pool. No
+    # Windows build has the provider yet: cmake/windows/ has no
+    # neura_windows_postgres hook, so NEURA_ENABLE_POSTGRES cannot be set.
+    if os.name == "nt" and not args.postgres_build:
         result = run_host(args, image, "--listen", "127.0.0.1:0", "--sql-pool",
                           "main=postgresql://127.0.0.1:5432/probe")
         check(result.returncode == 1 and "the PostgreSQL provider is unavailable on Windows in Neura 0.3.0" in result.stderr,
