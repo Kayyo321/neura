@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """Shared pointer state changes cannot be split by a task switch.
 
-The owners and weak references of one target share library state (the
-SharedGroup, and each SharedPointer's own released flag). Tasks may share a
-pointer whose target is immutable, so a task switch may fall between any two
-polled nodes. This test compiles a program that spawns, so that calls and loops
-carry polls, and walks the specialized NeuraIR of every trusted pointer method:
-a store to that state whose value is not a constant must come before the
-method's first polled node, and its value must not poll. A constant store, such
-as clearing the with_mut flag after the body returns, may follow a poll, since
-it reads nothing that another task could have changed in between.
+The owners and weak references of one target share library state (each
+SharedGroup's slot, owner count and with_mut flag, each SharedPointer's
+released flag, and each AtomicPointer's slot). Tasks may share a pointer whose
+target is immutable, and an AtomicPointer, so a task switch may fall at any
+polled node. This test compiles a program that spawns, so that calls and loops
+carry polls, and walks the specialized NeuraIR of every trusted pointer method
+in evaluation order. A store to that state fails the test when a polled node
+lies between it and a read of that state that it depends on: a read in its own
+value or destination, a read kept in a local that it uses, or a read in the
+condition of a branch it is inside. A store whose value is a constant and that
+depends on no read, such as clearing the with_mut flag after the body returns,
+may follow a poll. Fields bound once (`last`) never change and are not state.
 
 Usage: polls.py <neura>
 """
@@ -33,7 +36,7 @@ let Config = class (
     };
 );
 
-let use = func(owner: SharedPointer<Config>) -> int {
+let use = func(owner: SharedPointer<Config>, slot: AtomicPointer<Config>, counter: LockedPointer<int>) -> int {
     last copy = owner.clone();
     last level = copy.read().level + copy.with_read<int>(func(config: Config) -> int => config.level);
     copy.with_mut(func(config: Config) {});
@@ -44,25 +47,34 @@ let use = func(owner: SharedPointer<Config>) -> int {
         },
         optional.Optional.None => {},
     }
+    last current = slot.load();
+    slot.store(copy);
+    last previous = slot.swap(current);
+    last replaced = slot.compare_exchange(previous, copy);
+    previous.release();
+    current.release();
+    counter.update(func(value: int) -> int => value + 1);
     copy.release();
     owner.release();
-    return if (weak.is_alive()) -> level else -> 0;
+    return if (weak.is_alive() && replaced) -> level + counter.read() else -> 0;
 };
 
 let run = func() -> int {
     let root: SharedPointer<Config> = new(new Config(3));
+    let slot: AtomicPointer<Config> = new(root);
+    let counter: LockedPointer<int> = new(0);
     scope {
-        last task = spawn use(root.clone());
+        last task = spawn use(root.clone(), slot, counter);
         return task.join();
     }
 };
 """
 
 # The classes whose state tasks share, and the methods that change it.
-SHARED_CLASSES = ("SharedPointer<", "WeakPointer<", "SharedGroup<")
+SHARED_CLASSES = ("SharedPointer<", "WeakPointer<", "SharedGroup<", "AtomicPointer<", "LockedPointer<")
 SYMBOL = re.compile(r'^  %(\d+) (\w+) "([^"]*)" : .*? owner=%(\d+)')
 POLLED = re.compile(r'^(call|virtual_call|call_closure|loop)\b.* poll\b')
-CONSTANT = re.compile(r'^(integer|bool|boolean|float|string|nil|enum_construct %\d+ :)')
+REFERENCE = re.compile(r'^(\w+)(?: "[^"]*")? %(\d+)')
 
 
 class Node:
@@ -70,11 +82,20 @@ class Node:
         self.head = head
         self.sections = []  # (name, [Node])
 
+    def section(self, name):
+        return dict(self.sections).get(name, [])
+
+    def kind(self):
+        return self.head.split(" ", 1)[0]
+
+    def symbol(self):
+        match = REFERENCE.match(self.head)
+        return int(match.group(2)) if match else None
+
 
 def parse_body(lines, start):
-    """Parses the body that begins after line `start` ('body %N {'). Returns
-    the top-level nodes and the index after the closing brace."""
-    def block_with_close(index, indent):
+    """Parses the body that begins after line `start` ('body %N {')."""
+    def block(index, indent):
         nodes = []
         while True:
             line = lines[index]
@@ -88,49 +109,84 @@ def parse_body(lines, start):
                 inner_indent = len(inner) - len(inner.lstrip())
                 if inner_indent == indent + 2 and inner.strip().endswith("{"):
                     name = inner.strip()[:-1].strip()
-                    children, index = block_with_close(index + 1, indent + 4)
+                    children, index = block(index + 1, indent + 4)
                     node.sections.append((name, children))
                 else:
                     break
             nodes.append(node)
 
-    return block_with_close(start + 1, 2)
+    return block(start + 1, 2)
 
 
-def check_body(name, nodes, tracked_fields, problems):
-    state = {"polled": None, "stores": 0}
+def earliest(*positions):
+    known = [p for p in positions if p is not None]
+    return min(known) if known else None
 
-    def destination_field(node):
-        operands = dict(node.sections).get("operands", [])
-        if not operands:
+
+class Walk:
+    """Evaluation order: operands, then the node; a branch's arms after its
+    condition; a loop's poll before its body."""
+
+    def __init__(self, name, state_fields, locals_, problems):
+        self.name = name
+        self.state = state_fields
+        self.locals = locals_
+        self.problems = problems
+        self.position = 0
+        self.polls = []
+        self.dependency = {}  # local -> earliest state read its value came from
+        self.stores = 0
+
+    def tick(self):
+        self.position += 1
+        return self.position
+
+    def split(self, since):
+        return since is not None and any(since < p < self.position for p in self.polls)
+
+    def visit(self, node, control):
+        kind = node.kind()
+        if kind == "loop" and POLLED.match(node.head):
+            self.polls.append(self.tick())
+        operands = node.section("operands")
+        if kind == "store" and len(operands) == 2:
+            destination, value = operands
+            value_read = self.visit(value, control)
+            destination_read = None
+            if destination.kind() == "field":
+                for child in destination.section("operands"):
+                    destination_read = earliest(destination_read, self.visit(child, control))
+            self.tick()
+            target = destination.symbol()
+            if destination.kind() == "field" and target in self.state:
+                self.stores += 1
+                since = earliest(value_read, destination_read, control)
+                if self.split(since):
+                    self.problems.append(f"{self.name}: a poll falls between a read of shared pointer state and "
+                                         f"the store to field %{target} that depends on it")
+            elif destination.kind() == "load" and target in self.locals:
+                self.dependency[target] = earliest(value_read, control)
             return None
-        match = re.match(r"^field %(\d+)", operands[0].head)
-        return int(match.group(1)) if match else None
-
-    def visit(node):
-        sections = dict(node.sections)
-        if POLLED.match(node.head) and node.head.startswith("loop"):
-            # A loop polls at its back edge, so its body may follow a poll.
-            state["polled"] = state["polled"] or node.head
-        for child in sections.get("operands", []):
-            visit(child)
-        if node.head.startswith("store"):
-            field = destination_field(node)
-            if field in tracked_fields:
-                state["stores"] += 1
-                value = sections["operands"][1]
-                if not CONSTANT.match(value.head) and state["polled"]:
-                    problems.append(f"{name}: the store to field %{field} follows the polled node "
-                                    f"{state['polled']!r}")
-        if POLLED.match(node.head) and not node.head.startswith("loop"):
-            state["polled"] = state["polled"] or node.head
+        reads = None
+        for child in operands:
+            reads = earliest(reads, self.visit(child, control))
+        position = self.tick()
+        symbol = node.symbol()
+        if kind == "field" and symbol in self.state:
+            reads = earliest(reads, position)
+        elif kind == "load" and symbol in self.dependency:
+            reads = earliest(reads, self.dependency[symbol])
+        elif kind == "initialize" and symbol in self.locals:
+            self.dependency[symbol] = earliest(reads, control)
+        if POLLED.match(node.head) and kind != "loop":
+            self.polls.append(position)
+        inner = earliest(control, reads) if kind in ("branch", "select_value") else control
         for section in ("body", "alternative"):
-            for child in sections.get(section, []):
-                visit(child)
-
-    for node in nodes:
-        visit(node)
-    return state["stores"]
+            for child in node.section(section):
+                self.visit(child, inner)
+        if kind == "loop" and POLLED.match(node.head):
+            self.polls.append(self.tick())
+        return reads
 
 
 def main():
@@ -147,13 +203,15 @@ def main():
     for line in lines:
         match = SYMBOL.match(line)
         if match:
-            symbols[int(match.group(1))] = (match.group(2), match.group(3), int(match.group(4)))
-    shared = {sid for sid, (kind, name, _) in symbols.items()
+            symbols[int(match.group(1))] = (match.group(2), match.group(3), int(match.group(4)), line)
+    shared = {sid for sid, (kind, name, _, _) in symbols.items()
               if kind == "class" and name.startswith(SHARED_CLASSES)}
-    tracked = {sid for sid, (kind, _, owner) in symbols.items() if kind == "field" and owner in shared}
-    methods = {sid: f"{symbols[owner][1]}.{name}" for sid, (kind, name, owner) in symbols.items()
+    state = {sid for sid, (kind, _, owner, line) in symbols.items()
+             if kind == "field" and owner in shared and " const " not in line}
+    locals_ = {sid for sid, (kind, _, _, _) in symbols.items() if kind == "local"}
+    methods = {sid: f"{symbols[owner][1]}.{name}" for sid, (kind, name, owner, _) in symbols.items()
                if kind == "function" and owner in shared and name != "init"}
-    if not shared or not tracked or not methods:
+    if not shared or not state or not methods:
         print("no shared pointer state found in the program's IR", file=sys.stderr)
         return 1
     problems = []
@@ -164,14 +222,18 @@ def main():
         if not match or int(match.group(1)) not in methods:
             continue
         nodes, _ = parse_body(lines, index)
-        stores += check_body(methods[int(match.group(1))], nodes, tracked, problems)
+        walk = Walk(methods[int(match.group(1))], state, locals_, problems)
+        for node in nodes:
+            walk.visit(node, None)
+        stores += walk.stores
         checked += 1
-    expected = {"clone", "release", "close", "upgrade", "with_mut"}
+    expected = {"clone", "release", "close", "upgrade", "with_mut", "load", "store", "swap", "compare_exchange",
+                "update"}
     seen = {name.split(".", 1)[1] for name in methods.values()}
     missing = expected - seen
     if missing:
         problems.append(f"methods not found in the IR: {sorted(missing)}")
-    if stores < 8:
+    if stores < 16:
         problems.append(f"only {stores} stores to shared pointer state were found")
     for problem in problems:
         print(problem, file=sys.stderr)
