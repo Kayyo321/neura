@@ -125,7 +125,7 @@ Three rules apply to every package. New code includes Windows headers only throu
 | W16 | File-system semantics | decided | [NVM](../runtime/NVM.md), [Standard library](../lang/Stdlib.md) |
 | W17 | Console services | decided | [NVM](../runtime/NVM.md) |
 | W18 | Environment | decided | [NVM](../runtime/NVM.md), [Standard library](../lang/Stdlib.md) |
-| W19 | Dynamic libraries, DLL search and C import linking | DLL loading and header reading in scope, C import linking deferred | [Foreign interop](../lang/ForeignInterop.md), [NVM](../runtime/NVM.md), [Tooling](../lang/Tooling.md) |
+| W19 | Dynamic libraries, DLL search and C import linking | DLL loading and header reading in 0.3.0. COFF linking in 0.3.1. | [Foreign interop](../lang/ForeignInterop.md), [NVM](../runtime/NVM.md), [Tooling](../lang/Tooling.md) |
 | W20 | Locked memory | decided | [NVM](../runtime/NVM.md), [Standard library](../lang/Stdlib.md) |
 | W21 | Process generation | decided | [NVM](../runtime/NVM.md) |
 | W22 | Install layout | decided | [Install](../Install.md), [Lifecycle030](Lifecycle030.md) |
@@ -136,8 +136,8 @@ Three rules apply to every package. New code includes Windows headers only throu
 | W27 | Server host | decided | [Server host](../runtime/ServerHost.md) |
 | W28 | TLS, HTTP/2, PostgreSQL and TLS trust | deferred to 0.3.1 | [Server host](../runtime/ServerHost.md), [Install](../Install.md), [SQL](../runtime/Sql.md) |
 | W29 | `neurad` | decided | [Service030](Service030.md), [Service](../runtime/Service.md) |
-| W30 | Native executables | deferred to 0.3.1 | [Standalone executables](../lang/Standalone.md), [Standalone design](Standalone.md) |
-| W31 | Desktop | deferred to 0.3.1 | [Desktop030](Desktop030.md), [Providers](../runtime/Providers.md) |
+| W30 | Native executables | Win64 PE in 0.3.1, qualification pending | [Standalone executables](../lang/Standalone.md), [Standalone design](Standalone.md) |
+| W31 | Desktop build, run, dev and ZIP | Win64 in 0.3.1, desktop session qualification pending | [Desktop030](Desktop030.md), [Providers](../runtime/Providers.md) |
 | W32 | Project tools | decided | [Projects](../apps/Projects.md), [Projects030](Projects030.md) |
 | W33 | GPU | decided | [GPU execution](../lang/GpuExecution.md) |
 | W34 | Testing | decided | [Continuous integration](../ContinuousIntegration.md), [CONTRIBUTING](../../CONTRIBUTING.md) |
@@ -300,7 +300,9 @@ Tools call `SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS)` when the
 
 `Std.DynamicForeign`'s `library.open` treats text that contains `/` or `\` or starts with a drive as a path, loaded with `LoadLibraryExW` and `LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR` with the default directories. A bare name is searched in the application directory, `System32`, then each `PATH` entry by full path. Any extension is accepted, so the tests keep `libmathops.so`. Library 0 searches the executable, `ucrtbase.dll`, `kernel32.dll`, then the other loaded modules in `EnumProcessModulesEx` order. The ABI is Win64 through libffi's `FFI_WIN64`: `long` is 4 bytes, `wchar_t` is 2 bytes and unsigned, and aggregates whose size is not 1, 2, 4 or 8 bytes are passed by reference.
 
-For an image with an embedded DLL, the runtime writes it into a private temporary directory and deletes it after unloading. A subsequent embedded load can clean up abandoned directories from processes that already exited. Windows 0.3.0 reads C headers through libclang and refuses a build requiring C import linking with `linking C imports is not supported on Windows in this release`. `NEURA_LIBCLANG` can select the supported DLL by full path. The loader searches installed LLVM, Visual Studio and then `PATH` entries by full path. The current directory is excluded from implicit DLL lookup.
+For an image with an embedded DLL, the runtime writes it into a private temporary directory and deletes it after unloading. A subsequent embedded load can clean up abandoned directories from processes that already exited. `NEURA_LIBCLANG` can select the supported DLL by full path. The loader searches installed LLVM, Visual Studio and then `PATH` entries by full path. The current directory is excluded from implicit DLL lookup.
+
+Windows 0.3.0 reads C headers through libclang and refuses linking. In 0.3.1 the x86-64 SDK compiles the C shim with `cl.exe` or `clang-cl.exe` and links the static COFF inputs into a PE DLL with `link.exe` or `lld-link.exe`. It uses `/WHOLEARCHIVE` for archives, `/BREPRO` for reproducible linking, and a module definition file to export the symbols requested by the C imports, including data and inline wrappers. DLL import libraries and objects are refused. The shim uses the static CRT, and the SDK embeds the DLL in the existing `NATV` section. The runner loads it with the embedded DLL loader and calls it through statically linked libffi. Windows CI qualification is pending. [C imports](../lang/ForeignInterop.md#c-imports)
 
 ### W20: Locked memory
 
@@ -374,11 +376,17 @@ This keeps the supervisor's poll-based design: `AF_UNIX` sockets can be waited o
 
 ### W30: Native executables
 
-The PE launcher is deferred to 0.3.1. `neura build --native` refuses on Windows with `--native: Windows has no native launcher in 0.3.0; run the image with 'neura run' instead`. Building an `.nvr` image and running it through `neura run` are available.
+The 0.3.1 Win64 SDK builds and installs `neura-launcher.exe` under `lib/neura/launchers/x86_64-windows-msvc/`. MSVC and clang-cl link it with `link.exe`. It links the runner, NVM, CRT and pinned libffi statically, carries its launcher descriptor and UTF-8 manifest, and uses Windows system DLLs. `neura build --native` copies that template and appends the image container. A Neura-only build needs the SDK and operates without a linker. The resulting executable runs independently of the SDK.
+
+The payload and footer stay in the PE overlay. The Security directory names the certificate table by file offset. The reader looks for the footer at EOF without a table, or before the table and its zero padding of up to seven bytes. Packaging clears the template's signing metadata and produces an unsigned `.exe`. Windows CI covers isolated execution, Unicode paths, inspection and replay, sealed policy, checksum, byte identity, and PE dependency closure. Portable tests exercise the synthetic certificate table, signed-template packaging and malformed directory bounds. [Native executable layout](../lang/Standalone.md#54-consequences-of-the-layout).
 
 ### W31: Desktop
 
-Desktop hosting and packaging on Windows are deferred to 0.3.1. They require a Windows native child (W30). The project commands refuse desktop operations requiring that child on Windows 0.3.0.
+In 0.3.1, `neura build --target desktop` includes the Win64 PE child (W30), the web bundle and the bridge registry. `neura run` and `neura dev` launch the pinned Electron 45.3.3 host, which starts the child without a shell, checks the registry digest and communicates over binary pipes. The data directory uses `%LOCALAPPDATA%`. Run and dev put the host in a Windows Job Object for cancellation and descendant cleanup. Dev replaces the job when a project edit changes the bundle.
+
+The Windows desktop suite exercises the project commands, Unicode paths, bridge and window behavior, and child cleanup. The Electron cases require a Windows desktop session. Windows 0.3.0 reports that the desktop host is unavailable.
+
+`neura package` builds the Windows desktop ZIP from the pinned Electron 45.3.3 x64 tree, the verified bundle, an ICO generated by Pillow, and the license and provider notices. The packager reports Python, Pillow and zlib versions for reproducibility. Windows CI compares repeated archives, extracts and launches the packaged host and PE child under a fresh Unicode profile, and checks the job ends after the window closes. [Desktop packages](../apps/Desktop.md#packages).
 
 ### W32: Project tools
 
@@ -450,12 +458,11 @@ Each case below has a defined refusal; none is left to fail in an unspecified wa
 | Item | Reason | Refusal |
 | --- | --- | --- |
 | Native JIT | Win64 code generation and calling conventions await qualification | `--jit=auto` uses the interpreter. `--jit=on` fails with `Windows has no JIT in 0.3.0` |
-| Native executable generation | The PE launcher is deferred to 0.3.1 | `neura build --native` reports `Windows has no native launcher in 0.3.0` |
-| Linking C imports | COFF static libraries and the Windows native linker need a port | A build that needs linking reports `linking C imports is not supported on Windows in this release` |
+| Native executable generation in the 0.3.0 archive | The PE launcher is a 0.3.1 addition (W30) | The 0.3.0 command reports `Windows has no native launcher in 0.3.0` |
 | Server TLS, HTTP/2, `Std.Net.Tls` and PostgreSQL | OpenSSL, nghttp2 and libpq integration is deferred to 0.3.1 | TLS listener startup, HTTP/2 enablement and PostgreSQL pool setup name the Windows 0.3.0 limit. `Std.Net.Tls` reports that TLS is unavailable in the runtime |
-| Desktop host and desktop project operations | The Windows Electron host and its native child need qualification | Desktop build, dev, run and package report `the desktop host is unavailable on Windows in Neura 0.3.0` |
+| Desktop host and desktop project operations in the 0.3.0 archive | W31 records the 0.3.1 addition | The 0.3.0 commands report `the desktop host is unavailable on Windows in Neura 0.3.0` |
 | The server host's fork-based worker zygote (`--worker-start zygote`) | Windows has no fork, and cloning a Win32 process that uses the CRT and Winsock is unsupported, so a pre-forked worker cannot be made safely | The existing `--worker-start zygote needs Linux`; the default on Windows is exec, as on macOS |
-| The fully static launcher (`neura build --native --static`, `neura-launcher-static`, `NEURA_STATIC_LAUNCHER=ON`) | The fully static launcher requires Linux | The general `--native` refusal applies. CMake keeps `NEURA_STATIC_LAUNCHER requires Linux` |
+| The fully static launcher (`neura build --native --static`, `neura-launcher-static`, `NEURA_STATIC_LAUNCHER=ON`) | The fully static flavor requires Linux | The Windows launcher search reports `--static: the fully static launcher requires Linux`. CMake reports `NEURA_STATIC_LAUNCHER requires Linux` |
 | Unix-domain datagram sockets and the abstract namespace (`neura.net.unix.datagram`, `unix.send_to`, `unix.receive_from`, `@` names) | Windows `AF_UNIX` implements only stream sockets and has no abstract namespace | 13 (`Unsupported`), as macOS answers for abstract names; the standard library's documentation and tests say so |
 | Linux-only socket services: pipe, splice, MPTCP, `TCP_USER_TIMEOUT`, `SO_REUSEPORT` | No Windows equivalent; macOS answers the same way today | 13 (`Unsupported`), documented in [NVM](../runtime/NVM.md) |
 | The epoll and io_uring backends (`NEURA_IO_BACKEND`, `nvm-wait-source-epoll`, `nvm-wait-source-io-uring`) | Linux kernel interfaces | `NEURA_IO_BACKEND` is ignored on Windows, as documented; the two CTest entries stay Linux-only |

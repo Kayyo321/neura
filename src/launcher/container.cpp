@@ -75,7 +75,7 @@ std::uint32_t update_crc(std::uint32_t crc, std::span<const std::uint8_t> bytes)
 }
 
 [[noreturn]] void malformed(std::string_view reason) {
-    throw std::runtime_error("native executable: " + std::string(reason));
+    throw CorruptContainerError("native executable: " + std::string(reason));
 }
 
 [[noreturn]] void no_payload() {
@@ -98,6 +98,137 @@ void append_integer(std::vector<std::uint8_t>& bytes, Integer value) {
     }
 }
 
+bool has_footer_magic(std::span<const std::uint8_t> bytes) {
+    return bytes.size() >= magic.size() && std::ranges::equal(bytes.last(magic.size()), magic);
+}
+
+struct CertificateTable {
+    std::uint64_t checksum_offset;
+    std::uint64_t directory_offset;
+};
+
+struct ExecutableOverlay {
+    std::uint64_t begin;
+    std::uint64_t end;
+    std::optional<CertificateTable> certificate_table = std::nullopt;
+};
+
+// In PE/COFF the Security directory uses a file offset. Its table starts on
+// an 8-byte boundary and its size is the sum of the rounded certificate lengths.
+// https://learn.microsoft.com/windows/win32/debug/pe-format#the-attribute-certificate-table-image-only
+template <class ReadAt>
+ExecutableOverlay executable_overlay(std::uint64_t size, const ReadAt& read_at) {
+    std::array<std::uint8_t, 2> signature{};
+    if (size < signature.size()) return {0, size};
+    read_at(0, signature);
+    if (signature != std::array<std::uint8_t, 2>{'M', 'Z'}) return {0, size};
+
+    constexpr std::uint64_t pe_pointer = 0x3c;
+    std::array<std::uint8_t, 4> pointer{};
+    if (size < pe_pointer + pointer.size()) malformed("truncated PE DOS header");
+    read_at(pe_pointer, pointer);
+    const std::uint64_t pe_offset = little_endian<std::uint32_t>(pointer);
+    std::array<std::uint8_t, 24> coff{}; // PE signature and COFF file header.
+    if (pe_offset < pe_pointer + pointer.size() || pe_offset + coff.size() > size) {
+        malformed("invalid PE header offset");
+    }
+    read_at(pe_offset, coff);
+    if (!std::ranges::equal(std::span(coff).first(4), std::array<std::uint8_t, 4>{'P', 'E', 0, 0})) {
+        malformed("invalid PE signature");
+    }
+
+    const auto section_count = little_endian<std::uint16_t>(std::span(coff).subspan(6));
+    const auto optional_size = little_endian<std::uint16_t>(std::span(coff).subspan(20));
+    const auto optional_offset = pe_offset + coff.size();
+    const auto section_headers = optional_offset + optional_size;
+    constexpr std::uint64_t section_header_size = 40;
+    const auto header_end = section_headers + section_count * section_header_size;
+    if (header_end > size || optional_size < 64) malformed("truncated PE headers");
+
+    std::array<std::uint8_t, 64> standard{};
+    read_at(optional_offset, standard);
+    const auto optional_magic = little_endian<std::uint16_t>(standard);
+    if (optional_magic != 0x10b && optional_magic != 0x20b) malformed("invalid PE optional header magic");
+    const std::uint32_t directory_count_offset = optional_magic == 0x20b ? 108 : 92;
+    if (optional_size < directory_count_offset + 4) malformed("truncated PE optional header");
+
+    const auto headers_size = little_endian<std::uint32_t>(std::span(standard).subspan(60));
+    if (headers_size < header_end || headers_size > size) malformed("invalid PE headers size");
+    std::uint64_t overlay_begin = headers_size;
+    std::array<std::uint8_t, section_header_size> section{};
+    for (std::uint32_t i = 0; i < section_count; ++i) {
+        read_at(section_headers + i * section_header_size, section);
+        const auto raw_size = little_endian<std::uint32_t>(std::span(section).subspan(16));
+        if (raw_size == 0) continue;
+        const std::uint64_t raw_offset = little_endian<std::uint32_t>(std::span(section).subspan(20));
+        const auto raw_end = raw_offset + raw_size;
+        if (raw_offset < headers_size || raw_end > size) malformed("invalid PE section bounds");
+        overlay_begin = std::max(overlay_begin, raw_end);
+    }
+
+    std::array<std::uint8_t, 4> directory_count{};
+    read_at(optional_offset + directory_count_offset, directory_count);
+    constexpr std::uint32_t security_index = 4;
+    if (little_endian<std::uint32_t>(directory_count) <= security_index) return {overlay_begin, size};
+    const auto security_offset = directory_count_offset + 4 + security_index * 8;
+    std::array<std::uint8_t, 8> security{};
+    if (optional_size < security_offset + security.size()) malformed("truncated PE Security directory");
+    const auto directory_offset = optional_offset + security_offset;
+    read_at(directory_offset, security);
+    const std::uint64_t table_offset = little_endian<std::uint32_t>(security);
+    const std::uint64_t table_size = little_endian<std::uint32_t>(std::span(security).subspan(4));
+    if (table_offset == 0 && table_size == 0) return {overlay_begin, size};
+    if (table_offset % 8 != 0) malformed("misaligned PE certificate table offset");
+    if (table_offset < overlay_begin) malformed("PE certificate table overlaps executable headers or sections");
+    const auto table_end = table_offset + table_size;
+    if (table_size < 8 || table_end > size) malformed("invalid PE certificate table bounds");
+
+    std::array<std::uint8_t, 4> length{};
+    for (auto offset = table_offset; offset < table_end;) {
+        if (table_end - offset < 8) malformed("truncated PE certificate entry");
+        read_at(offset, length);
+        const std::uint64_t entry_size = little_endian<std::uint32_t>(length);
+        const auto aligned_size = (entry_size + 7) & ~std::uint64_t{7};
+        if (entry_size < 8 || aligned_size > table_end - offset) malformed("invalid PE certificate entry length");
+        offset += aligned_size;
+    }
+    constexpr std::uint64_t checksum_field = 64; // Optional-header CheckSum (PE32 and PE32+).
+    return {overlay_begin, table_offset, CertificateTable{optional_offset + checksum_field, directory_offset}};
+}
+
+auto memory_reader(std::span<const std::uint8_t> bytes) {
+    return [bytes](std::uint64_t offset, std::span<std::uint8_t> target) {
+        std::ranges::copy(bytes.subspan(static_cast<std::size_t>(offset), target.size()), target.begin());
+    };
+}
+
+struct FooterWindow {
+    std::array<std::uint8_t, footer_size + 7> bytes{};
+    std::size_t length;
+    std::uint64_t end;
+    std::uint64_t overlay_begin;
+
+    std::span<const std::uint8_t> view() const { return std::span(bytes).first(length); }
+};
+
+template <class ReadAt>
+FooterWindow footer_window(std::uint64_t size, const ReadAt& read_at) {
+    const auto overlay = executable_overlay(size, read_at);
+    const auto max_padding = overlay.certificate_table ? 7U : 0U;
+    const auto length = static_cast<std::size_t>(std::min<std::uint64_t>(overlay.end, footer_size + max_padding));
+    FooterWindow window{{}, length, overlay.end, overlay.begin};
+    if (length != 0) read_at(overlay.end - length, std::span(window.bytes).first(length));
+    // The Authenticode image hash covers the overlay before the certificate
+    // table. A signer can insert zero bytes to align the start of the table.
+    // https://learn.microsoft.com/windows/win32/debug/pe-format#authenticode-pe-image-hash
+    for (unsigned padding = 0;
+         padding < max_padding && window.length != 0 && window.bytes[window.length - 1] == 0; ++padding) {
+        --window.length;
+        --window.end;
+    }
+    return window;
+}
+
 struct Footer {
     std::uint64_t payload_offset;
     std::uint64_t payload_size;
@@ -105,8 +236,9 @@ struct Footer {
     std::uint32_t version;
 };
 
-Footer read_footer(std::span<const std::uint8_t> tail, std::uint64_t file_size) {
-    if (!is_container(tail)) no_payload();
+Footer read_footer(const FooterWindow& window) {
+    auto tail = window.view();
+    if (!has_footer_magic(tail)) no_payload();
     if (tail.size() < footer_size) malformed("truncated footer");
     tail = tail.last(footer_size);
     const auto version = little_endian<std::uint32_t>(tail.subspan(20));
@@ -119,8 +251,9 @@ Footer read_footer(std::span<const std::uint8_t> tail, std::uint64_t file_size) 
         little_endian<std::uint32_t>(tail.subspan(16)),
         version,
     };
-    const auto footer_offset = file_size - footer_size;
-    if (footer.payload_offset == 0 || footer.payload_offset > footer_offset ||
+    const auto footer_offset = window.end - footer_size;
+    if (footer.payload_offset == 0 || footer.payload_offset < window.overlay_begin ||
+        footer.payload_offset > footer_offset ||
         footer.payload_size != footer_offset - footer.payload_offset ||
         footer.payload_size < minimum_payload_size(version)) {
         malformed("invalid payload bounds");
@@ -390,12 +523,11 @@ private:
 } // namespace
 
 bool is_container(std::span<const std::uint8_t> bytes) {
-    if (bytes.size() < magic.size()) return false;
-    return std::ranges::equal(bytes.last(magic.size()), magic);
+    return has_footer_magic(footer_window(bytes.size(), memory_reader(bytes)).view());
 }
 
 Container read_container(std::span<const std::uint8_t> bytes) {
-    const auto footer = read_footer(bytes, bytes.size());
+    const auto footer = read_footer(footer_window(bytes.size(), memory_reader(bytes)));
     const auto payload = bytes.subspan(static_cast<std::size_t>(footer.payload_offset),
                                        static_cast<std::size_t>(footer.payload_size));
     if (~update_crc(crc_seed, payload) != footer.checksum) malformed("payload checksum mismatch");
@@ -410,11 +542,11 @@ Container read_container(const std::filesystem::path& path) {
     if (end < 0) throw std::runtime_error("could not determine file size of " + path.string());
     const auto size = static_cast<std::uint64_t>(end);
 
-    std::array<std::uint8_t, footer_size> tail{};
-    const auto tail_length = static_cast<std::size_t>(std::min<std::uint64_t>(size, tail.size()));
-    input.seekg(static_cast<std::streamoff>(size - tail_length));
-    read_file_bytes(input, std::span(tail).first(tail_length));
-    const auto footer = read_footer(std::span(tail).first(tail_length), size);
+    const auto read_at = [&input](std::uint64_t offset, std::span<std::uint8_t> target) {
+        input.seekg(static_cast<std::streamoff>(offset));
+        read_file_bytes(input, target);
+    };
+    const auto footer = read_footer(footer_window(size, read_at));
 
     const auto payload_offset = static_cast<std::streamoff>(footer.payload_offset);
     input.seekg(payload_offset);
@@ -442,6 +574,8 @@ void write_executable(const std::filesystem::path& path, std::span<const std::ui
                       std::span<const std::uint8_t> image, const Policy& policy) {
     if (launcher.empty()) malformed("empty launcher");
     if (image.size() > std::numeric_limits<std::uint32_t>::max()) malformed("image must be smaller than 4 GiB");
+    const auto overlay = executable_overlay(launcher.size(), memory_reader(launcher));
+    launcher = launcher.first(static_cast<std::size_t>(overlay.end));
     const auto policy_bytes = encode_policy(policy, static_cast<std::uint32_t>(image.size()));
     const auto checksum = ~update_crc(update_crc(crc_seed, policy_bytes), image);
 
@@ -454,7 +588,21 @@ void write_executable(const std::filesystem::path& path, std::span<const std::ui
     footer.insert(footer.end(), magic.begin(), magic.end());
 
     AtomicOutput output(path);
-    output.write(launcher);
+    if (const auto& table = overlay.certificate_table) {
+        // Truncate the launcher at the old table and clear the fields that referred to it.
+        constexpr std::array<std::uint8_t, 4> empty_checksum{};
+        constexpr std::array<std::uint8_t, 8> empty_directory{};
+        const auto checksum_offset = static_cast<std::size_t>(table->checksum_offset);
+        const auto directory_offset = static_cast<std::size_t>(table->directory_offset);
+        const auto after_checksum = checksum_offset + empty_checksum.size();
+        output.write(launcher.first(checksum_offset));
+        output.write(empty_checksum);
+        output.write(launcher.subspan(after_checksum, directory_offset - after_checksum));
+        output.write(empty_directory);
+        output.write(launcher.subspan(directory_offset + empty_directory.size()));
+    } else {
+        output.write(launcher);
+    }
     output.write(policy_bytes);
     output.write(image);
     output.write(footer);

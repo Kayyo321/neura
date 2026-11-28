@@ -6,6 +6,7 @@
 #include "cli/driver.hpp"
 #include "cli/serve.hpp"
 #include "cli/tool.hpp"
+#include "platform/text.hpp"
 #if !defined(_WIN32) || defined(NEURA_HAS_SERVICE)
 #include "service/service.hpp"
 #endif
@@ -54,13 +55,16 @@ int main(int argc, char** argv) {
         return neura::cli::run_serve(static_cast<int>(start.arguments.size()), argv.data());
     }
     // `neura run <bundle directory> [-- arguments]` (docs/design/Projects030.md).
-    if (start.arguments.size() > 2 && start.arguments[1] == "run" && neura::app::is_bundle_directory(start.arguments[2])) {
-        std::vector<std::string> rest;
-        for (std::size_t i = 3; i < start.arguments.size(); ++i) {
-            if (i == 3 && start.arguments[i] == "--") continue;
-            rest.push_back(start.arguments[i]);
+    if (start.arguments.size() > 2 && start.arguments[1] == "run") {
+        const auto directory = neura::platform::path_from_utf8(start.arguments[2]);
+        if (neura::app::is_bundle_directory(directory)) {
+            std::vector<std::string> rest;
+            for (std::size_t i = 3; i < start.arguments.size(); ++i) {
+                if (i == 3 && start.arguments[i] == "--") continue;
+                rest.push_back(start.arguments[i]);
+            }
+            return neura::app::run_bundle(directory, rest, std::cout, std::cerr);
         }
-        return neura::app::run_bundle(start.arguments[2], rest, std::cout, std::cerr);
     }
     return core_options_main(std::move(start.arguments), command);
 }

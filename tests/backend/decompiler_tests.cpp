@@ -319,7 +319,6 @@ NEURA_TEST(behavior, resynthesized_functions_agree_exhaustively) {
                 continue;
             }
             const auto& function = image.functions[f];
-            std::vector<std::uint64_t> domain;
             bool small = true;
             for (std::uint32_t p = 0; p < function.parameter_count; ++p) {
                 const auto& t = image.types[function.frame_types[p]];
@@ -330,20 +329,21 @@ NEURA_TEST(behavior, resynthesized_functions_agree_exhaustively) {
             }
             const auto count = function.parameter_count;
             const std::uint64_t limit = count == 0 ? 1 : (count == 1 ? 256 : 65536);
+            std::vector<std::uint64_t> raw(count);
             for (std::uint64_t bits = 0; bits < limit; ++bits) {
-                std::vector<std::uint64_t> raw;
                 for (std::uint32_t p = 0; p < count; ++p) {
                     const auto& t = image.types[function.frame_types[p]];
                     const auto value = (bits >> (8 * p)) & 0xff;
-                    raw.push_back(t.kind == nvr::TypeKind::Bool ? value & 1 : value);
+                    raw[p] = t.kind == nvr::TypeKind::Bool ? value & 1 : value;
                 }
                 nvm::Execution original(image, f, raw);
                 nvm::Execution regenerated(rebuilt, f, raw);
                 const auto a = original.advance();
                 const auto b = regenerated.advance();
-                check(a.kind == b.kind && a.result == b.result &&
-                          (a.kind != nvm::Event::Kind::Trapped || (a.trap.kind == b.trap.kind && a.trap.reason == b.trap.reason)),
-                      std::string(fixture) + " function " + std::to_string(f) + " differs on input " + std::to_string(bits));
+                if (a.kind != b.kind || a.result != b.result ||
+                    (a.kind == nvm::Event::Kind::Trapped && (a.trap.kind != b.trap.kind || a.trap.reason != b.trap.reason))) {
+                    fail(std::string(fixture) + " function " + std::to_string(f) + " differs on input " + std::to_string(bits));
+                }
             }
         }
     }

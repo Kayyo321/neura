@@ -1,0 +1,17 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let widths = import:c("coff-widths.h", "coff-widths.lib");
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last signed_value: int32 = -2147483647;
+        last unsigned_value: uint32 = 4294967295;
+        last wide_char: uint16 = 55357;
+        last size: uint64 = 4294967297;
+        console.print_line(widths.coff_signed_long(signed_value).to_string());
+        console.print_line(widths.coff_unsigned_long(unsigned_value).to_string());
+        console.print_line(widths.coff_wide_char(wide_char).to_string());
+        console.print_line(widths.coff_size(size).to_string());
+        return program.ExitCode.Ok;
+    };
+);

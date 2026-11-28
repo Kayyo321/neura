@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -47,11 +48,17 @@ struct Descriptor {
     std::string toolchain_version;
 };
 
-// Recognizes the footer magic. Call read_container to validate the contents.
+class CorruptContainerError : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
+
+// Recognizes the footer magic at EOF or before a PE certificate table.
+// Malformed PE bounds throw CorruptContainerError.
 bool is_container(std::span<const std::uint8_t> bytes);
 
-// Validate the footer, checksum, and policy. Image validation is the
-// caller's responsibility. The file overload reads only the footer and payload.
+// Validate the footer, checksum, and policy. Image validation is the caller's
+// responsibility. The file overload reads only the metadata and payload.
 Container read_container(std::span<const std::uint8_t> bytes);
 Container read_container(const std::filesystem::path& path);
 
@@ -59,7 +66,8 @@ Container read_container(const std::filesystem::path& path);
 std::optional<Descriptor> read_descriptor(std::span<const std::uint8_t> bytes);
 
 // Write a sibling temporary file and replace the destination after all writes
-// succeed. The launcher and image spans are copied without modification.
+// succeed. A signed PE launcher is copied up to its certificate table, with
+// the Security directory entry and PE checksum cleared.
 void write_executable(const std::filesystem::path& path, std::span<const std::uint8_t> launcher,
                       std::span<const std::uint8_t> image, const Policy& policy);
 

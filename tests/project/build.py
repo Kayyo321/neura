@@ -166,16 +166,13 @@ def main():
     # A desktop target's child is a native executable, which needs this system's native launcher.
     native = any((NEURA.parent / 'lib/neura/launchers').glob(f'*/neura-launcher{EXE}'))
     if WINDOWS:
-        native = False
-        result = run('build', '--target', 'desktop', cwd=first, env=env)
-        check(result.returncode != 0 and 'the desktop host is unavailable on Windows in Neura 0.3.0' in result.stderr
-              and not (first / 'dist/desktop').exists(), f'desktop target is refused: {result.stdout}{result.stderr}')
-    elif not native:
+        check(native, 'the Windows SDK includes the PE launcher')
+    if not native:
         print(f'note: no native launcher in {NEURA.parent / "lib/neura/launchers"}; the desktop target is not built')
     for name in ('server', 'web', 'desktop') if native else ('server', 'web'):
         for project in (first, second):
             result = run('build', '--project', '../neura.toml', '--target', name, cwd=project / 'server', env=env)
-            if name == 'desktop' and result.returncode != 0 and 'native' in (result.stdout + result.stderr):
+            if not WINDOWS and name == 'desktop' and result.returncode != 0 and 'native' in (result.stdout + result.stderr):
                 native = False
                 print(f'note: the desktop target needs native builds, which this build lacks: {result.stderr.strip()}')
                 break
@@ -228,6 +225,9 @@ def main():
               desktop['origins'].get('connect') == ['https://api.example:8443'],
               'desktop bundle inherits the embedded web target connect list')
         child = first / 'dist/desktop' / desktop['image']['path']
+        if WINDOWS:
+            with child.open('rb') as executable:
+                check(child.suffix == '.exe' and executable.read(2) == b'MZ', 'desktop bundle contains a Win64 PE child')
         policy = run('inspect', child)
         check(policy.returncode == 0 and 'http_client (https://api.example:8443)' in policy.stdout,
               'the desktop native child records its HTTP origin list')

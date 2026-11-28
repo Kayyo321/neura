@@ -770,6 +770,9 @@ def main() -> int:
     report("no tests", "", 1, "at least 1 are required")
     report("a skipped test", ran + '<testcase name="c" status="notrun"><skipped message="no libclang"/></testcase>',
            2, "c: skipped (no libclang)")
+    report("a skipped test with its reason", ran + '<testcase name="c" status="notrun"><skipped message="SKIP_RETURN_CODE=77"/>'
+           '<system-out>building\nSKIP: c needs a desktop: session 0\n</system-out></testcase>', 2,
+           "c: skipped (SKIP_RETURN_CODE=77): SKIP: c needs a desktop: session 0")
     report("a disabled test", ran + '<testcase name="c" status="disabled"/>', 2, "c: status `disabled`, not run")
     report("a failed test", ran + '<testcase name="c" status="fail"><failure message="x"/></testcase>', 2, "c: failed")
     report("a missing report", None, 1, "cannot read the test report")

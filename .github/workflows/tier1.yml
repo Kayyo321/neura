@@ -112,6 +112,14 @@ jobs:
           "-DNEURA_SERVER_TEST_OPENSSL=$HOME/server-components/openssl/bin/openssl"
           -DNEURA_TEST_TIMEOUT_SCALE=3
 
+      # The configured CTest inventory, for the expected-inventory check
+      # (docs/ContinuousIntegration.md, "Test inventories").
+      - name: Save the test inventory
+        continue-on-error: true
+        run: |
+          ctest --test-dir build --show-only=json-v1 > build/ctest-inventory.json
+          python3 -c "import json, sys; print(len(json.load(open(sys.argv[1], encoding='utf-8'))['tests']), 'tests registered')" build/ctest-inventory.json
+
       - name: Build
         run: cmake --build build --parallel "$(nproc)" 2>&1 | tee build/build.log
 
@@ -134,6 +142,9 @@ jobs:
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       - name: Test
+        env:
+          NEURA_DECOMPILER_CORPUS_PROFILE: "1"
+          NEURA_REFERENCE_PROFILE: "1"
         run: >
           ctest --test-dir build --parallel "$(nproc)" --no-tests=error
           --output-on-failure --output-junit ctest-junit.xml
@@ -149,6 +160,7 @@ jobs:
           name: tier1-test-report
           path: |
             build/build.log
+            build/ctest-inventory.json
             build/ctest-junit.xml
             build/Testing/Temporary/LastTest.log
           if-no-files-found: warn
@@ -226,8 +238,87 @@ jobs:
           python scripts/generate-wiki.py --check
           python scripts/gen-kernels.py --check
           python scripts/build-site.py --check
+      # The desktop tests (docs/apps/Desktop.md) need the locked Electron
+      # engine, Node 22 or later and Pillow. When this step cannot provide
+      # them it leaves the four desktop tests unregistered instead of stopping
+      # the job, so every other test still runs and reports; the last step
+      # then fails the job with the reason. desktop-shell, desktop-app and
+      # desktop-package also need an unlocked interactive desktop: without
+      # one they report their Electron cases as skipped, which "Require every
+      # selected test to have run" refuses.
+      - name: Prepare the locked Windows desktop test engine
+        id: desktop
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $session = [Diagnostics.Process]::GetCurrentProcess().SessionId
+          Write-Output "::notice::Windows session $session; user-interactive: $([Environment]::UserInteractive)"
+          function Stop-Unready([string] $reason) {
+            "reason=$reason" >> $env:GITHUB_OUTPUT
+            Write-Output "::warning::The desktop tests are not registered: $reason"
+            exit 0
+          }
+          if (-not (Get-Command node -CommandType Application -ErrorAction SilentlyContinue)) { Stop-Unready 'Node is not installed.' }
+          Write-Output "Node $(node --version)"
+          node -e 'if (typeof Promise.withResolvers !== "function") process.exit(1)'
+          if ($LASTEXITCODE -ne 0) { Stop-Unready "the desktop tests need Node 22 or later, not $(node --version)." }
+          python -m pip install --only-binary=:all: Pillow==12.1.1
+          if ($LASTEXITCODE -ne 0) { Stop-Unready 'Pillow 12.1.1 could not be installed.' }
+          @'
+          import hashlib
+          import os
+          from pathlib import Path
+          import shutil
+          import tempfile
+          import tomllib
+          import urllib.request
+          import zipfile
+
+          lock = tomllib.loads(Path("hosts/desktop/engine.lock").read_text(encoding="utf-8"))
+          target = lock["targets"]["win32-x64"]
+          directory = Path(tempfile.mkdtemp(prefix="neura-electron-", dir=os.environ["RUNNER_TEMP"]))
+          archive = directory / target["archive"]
+          release = lock["engine"]["checksums"].rsplit("/", 1)[0]
+          with urllib.request.urlopen(f"{release}/{archive.name}", timeout=120) as download, archive.open("wb") as stream:
+              shutil.copyfileobj(download, stream)
+          with archive.open("rb") as stream:
+              digest = hashlib.file_digest(stream, "sha256").hexdigest()
+          if digest != target["sha256"]:
+              raise SystemExit(f"Unexpected SHA-256 for {archive.name}: {digest}")
+          engine = directory / "engine"
+          with zipfile.ZipFile(archive) as contents:
+              contents.extractall(engine)
+          print(f"Verified {archive.name} SHA-256 {digest}")
+          with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as environment:
+              print(f"NEURA_DESKTOP_ENGINE={engine / 'electron.exe'}", file=environment)
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { Stop-Unready 'the locked Electron archive could not be fetched, verified or unpacked.' }
+          "ready=true" >> $env:GITHUB_OUTPUT
       - name: Configure
-        run: cmake --preset windows-msvc -DNEURA_TEST_TIMEOUT_SCALE=12 -DNEURA_TEST_FRAME_HOOKS=ON
+        shell: pwsh
+        run: >
+          cmake --preset windows-msvc -DNEURA_TEST_TIMEOUT_SCALE=12 -DNEURA_TEST_FRAME_HOOKS=ON
+          "-DNEURA_DESKTOP_ENGINE=$env:NEURA_DESKTOP_ENGINE"
+      # The configured CTest inventory, for the expected-inventory check
+      # (docs/ContinuousIntegration.md, "Test inventories").
+      - name: Save the test inventory
+        continue-on-error: true
+        run: |
+          ctest --test-dir build-windows-msvc --show-only=json-v1 > build-windows-msvc/ctest-inventory.json
+          python -c "import json, sys; print(len(json.load(open(sys.argv[1], encoding='utf-8'))['tests']), 'tests registered')" build-windows-msvc/ctest-inventory.json
+      - name: Require the Windows desktop test entries
+        if: ${{ steps.desktop.outputs.ready == 'true' }}
+        shell: pwsh
+        run: |
+          $json = ctest --test-dir build-windows-msvc --show-only=json-v1 | Out-String
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $inventory = $json | ConvertFrom-Json
+          $desktopTests = @('desktop-native-child', 'desktop-shell', 'desktop-app', 'desktop-package')
+          foreach ($testName in $desktopTests) {
+            if ($inventory.tests.name -notcontains $testName) {
+              throw "Missing desktop test: $testName"
+            }
+          }
       - name: Build
         run: cmake --build --preset windows-msvc --parallel 4 2>&1 | tee build-windows-msvc/build.log
       - name: Require an MSVC build without Neura compiler warnings
@@ -238,17 +329,15 @@ jobs:
           python scripts/check-core-closure.py build-windows-msvc
           sh scripts/check-kernels.sh build-windows-msvc
           python scripts/check-windows-binaries.py build-windows-msvc
-      # Windows has no JIT, and on the interpreter the twelve tests left out
-      # here take most of the suite's time: about 400 of its 494 test-minutes
-      # on arm64 macOS, where stdlib-crypto-asymmetric alone ran for two
-      # hours. Tier 2 and release.yml run them on Windows, all but the crypto
-      # suites that x86-64 macOS also leaves out. This job runs the other 315
-      # of the 327 tests that CMake registers on Windows.
+      # Without the JIT these suites took about 400 of 494 test-minutes in an
+      # arm64 macOS run. Tier 2 and release.yml run the excluded lifetime
+      # fixtures and other slow entries on Windows, with the same crypto
+      # exceptions as x86-64 macOS. 315 is the historical minimum here.
       - name: Test
         run: >
           ctest --test-dir build-windows-msvc --parallel 6 --no-tests=error
           --output-on-failure --output-junit ctest-junit.xml
-          -E "^(stdlib-crypto-asymmetric|stdlib-crypto-advanced|stdlib-crypto-pqc(-.*)?|stdlib-crypto-token|stdlib-crypto-enclave|stdlib-crypto-pki|stdlib-character|backend-reference|lifetime-programs)$"
+          -E "^(stdlib-crypto-asymmetric|stdlib-crypto-advanced|stdlib-crypto-pqc(-.*)?|stdlib-crypto-token|stdlib-crypto-enclave|stdlib-crypto-pki|stdlib-character|backend-reference-.*|lifetime-programs-.*)$"
       - name: Require every selected test to have run
         if: ${{ !cancelled() }}
         run: python scripts/check-test-report.py build-windows-msvc/ctest-junit.xml --minimum 315
@@ -267,10 +356,19 @@ jobs:
           name: tier1-windows
           path: |
             build-windows-msvc/build.log
+            build-windows-msvc/ctest-inventory.json
             build-windows-msvc/ctest-junit.xml
             build-windows-msvc/Testing/Temporary/LastTest.log
           if-no-files-found: warn
           retention-days: 30
+      - name: Require the desktop tests to have been registered
+        if: ${{ !cancelled() && steps.desktop.outputs.ready != 'true' }}
+        shell: pwsh
+        env:
+          REASON: ${{ steps.desktop.outputs.reason || 'the preparation step failed; see its log.' }}
+        run: |
+          Write-Output "::error::desktop-native-child, desktop-shell, desktop-app and desktop-package did not run: $env:REASON"
+          exit 1
 
   runtime-only-windows:
     name: Runtime-only build (Windows x86-64)

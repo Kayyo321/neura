@@ -96,8 +96,8 @@ struct CImports {
     // Generated source by its virtual path: the header's path with the
     // module name and .nra appended.
     std::map<fs::path, std::string> sources;
-    // The C header each generated module was made from.
-    std::map<fs::path, std::string> headers;
+    // Each generated module owns a native unit with its C header and inputs.
+    std::map<fs::path, std::size_t> unit_by_source;
     std::vector<IrNativeUnit> units;
     // Declarations each generated module could not import, by module name.
     std::map<std::string, std::map<std::string, std::string>> unsupported;
@@ -743,7 +743,8 @@ std::vector<ParsedFile> read_sources_impl(const std::vector<fs::path>& files, co
         const auto in_library = !library_path(file, trusted).empty();
         if (c_imports && c_imports->sources.contains(file)) {
             source = c_imports->sources.at(file);
-            SourceMap::global().add(name, source, SourceKind::Generated, c_imports->headers[file]);
+            const auto& unit = c_imports->units[c_imports->unit_by_source.at(file)];
+            SourceMap::global().add(name, source, SourceKind::Generated, unit.header);
         } else if (source_overlays && source_overlays->contains(name)) {
             source = source_overlays->at(name);
             SourceMap::global().add(name, source, in_library ? SourceKind::Library : SourceKind::User);
@@ -779,7 +780,13 @@ std::vector<ParsedFile> read_sources_impl(const std::vector<fs::path>& files, co
         }
         for (const auto* import : dependencies.imports) {
             const auto requested_path = import->import_path.value_or("");
-            if (!seen_imports.emplace(import->text, requested_path).second) {
+            const bool first_import = seen_imports.emplace(import->text, requested_path).second;
+#ifdef _WIN32
+            // Repeated C imports can add static inputs to a header.
+            if (!first_import && import->c_import.empty()) {
+#else
+            if (!first_import) {
+#endif
                 continue;
             }
             if (import->text.ends_with(".*")) {
@@ -813,20 +820,45 @@ std::vector<ParsedFile> read_sources_impl(const std::vector<fs::path>& files, co
                 auto generated = header;
                 generated += "." + module + ".nra";
                 if (!c_imports->sources.contains(generated)) {
+                    if (!first_import) continue;
                     auto imported = import_c_header(header, !libraries.empty(), module, c_import_options, import->span);
                     c_imports->sources.emplace(generated, std::move(imported.source));
-                    c_imports->headers.emplace(generated, path_name(header));
+                    c_imports->unit_by_source.emplace(generated, c_imports->units.size());
                     c_imports->units.push_back({path_name(header), std::move(libraries), std::move(imported.shim),
                                                 std::move(imported.symbols)});
                     c_imports->unsupported[module] = std::move(imported.unsupported);
                 } else if (!libraries.empty()) {
-                    auto& unit = *std::ranges::find(c_imports->units, path_name(header), &IrNativeUnit::header);
+                    auto& unit = c_imports->units[c_imports->unit_by_source.at(generated)];
+#ifdef _WIN32
+                    if (unit.libraries.empty()) {
+                        // A header first encountered without a library may
+                        // now need to look up symbols in the embedded DLL.
+                        auto imported = import_c_header(header, true, module, c_import_options, import->span);
+                        auto& source = c_imports->sources.at(generated);
+                        source = std::move(imported.source);
+                        unit.shim = std::move(imported.shim);
+                        unit.symbols = std::move(imported.symbols);
+                        c_imports->unsupported[module] = std::move(imported.unsupported);
+                        const auto name = path_name(generated);
+                        const auto previous = std::ranges::find(parsed, name, &ParsedFile::file);
+                        if (previous != parsed.end()) {
+                            // The two forms use the same Neura import set.
+                            SourceMap::global().add(name, source, SourceKind::Generated, unit.header);
+                            auto updated = parse(lex(source, name));
+                            updated.imports = std::move(previous->imports);
+                            updated.library_path = std::move(previous->library_path);
+                            *previous = std::move(updated);
+                        }
+                    }
+#endif
                     for (auto& added : libraries)
                         if (std::ranges::find(unit.libraries, added) == unit.libraries.end())
                             unit.libraries.push_back(std::move(added));
                 }
-                syntax.imports.push_back({import->text, path_name(generated)});
-                pending.push_back(generated);
+                if (first_import) {
+                    syntax.imports.push_back({import->text, path_name(generated)});
+                    pending.push_back(generated);
+                }
                 continue;
             }
             bool artifact = import->import_path.has_value();

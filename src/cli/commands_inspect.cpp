@@ -1,6 +1,7 @@
 #include "commands.hpp"
 
 #include "launcher/container.hpp"
+#include "platform/text.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -32,17 +33,17 @@ int inspect(const Options& options) {
     const auto& path = options.files.front();
     const auto bytes = read_file(path);
     if (!neura::launcher::is_container(bytes) && !neura::launcher::read_descriptor(bytes)) {
-        throw std::runtime_error(path.string() + ": not a native executable (no NEURAEXE footer)");
+        throw std::runtime_error(platform::native_utf8_path(path) + ": not a native executable (no NEURAEXE footer)");
     }
     const auto executable = neura::launcher::read_container(bytes);
     const auto descriptor = neura::launcher::read_descriptor(std::span(bytes).first(executable.launcher_size));
-    if (!descriptor) throw std::runtime_error(path.string() + ": not a Neura launcher");
+    if (!descriptor) throw std::runtime_error(platform::native_utf8_path(path) + ": not a Neura launcher");
     const auto image = neura::nvr::load(executable.image);
     if (options.output) write_file(*options.output, executable.image);
 
     const auto& policy = executable.policy;
     const auto& caps = policy.capabilities;
-    std::cout << "native executable: " << path.filename().string() << '\n'
+    std::cout << "native executable: " << platform::utf8_path(path.filename()) << '\n'
               << "launcher: neura " << descriptor->toolchain_version << ", " << descriptor->triple << ", "
               << (descriptor->flavor == 0 ? "default" : "static") << ", runs NVR up to "
               << descriptor->nvr_major << '.' << descriptor->nvr_minor << '\n'

@@ -100,7 +100,7 @@ neura run dist/desktop
 
 A server bundle then runs under `neura-server-host`, beside `neura-run` or on `PATH`, in the foreground: it listens on the manifest's `listen` (127.0.0.1:8080 without one) unless the arguments after `--` give `--listen`, `--tls-listen` or `--no-http`; each pool's migrations and `migrate` mode are passed as configuration, and the `fs`, `net`, `http_client` and `env` groups as the host's `--allow-*` options; `http_client` carries the bundle's `origins.connect` list when the bundle requires `http_client_origins`. The pools' URLs and the rest of the configuration are the operator's, given after `--`. The operator can withdraw a scoped grant with `--deny-http-client` but cannot widen it: `--allow-http-client` in either form after `--` is refused before the host starts, since a plain one would lift the list and a listed one would add to it.
 
-A desktop bundle runs under the pinned Electron 45.3.3 named by `NEURA_DESKTOP_ENGINE` (or installed as `lib/neura/desktop/electron/electron`) with the desktop host's `main.js` from `share/neura/desktop` (or `NEURA_DESKTOP_HOST`), which loads the bundle as a package directory. The `desktop` capability grants the clipboard services.
+A desktop bundle runs under the pinned Electron 45.3.3 named by `NEURA_DESKTOP_ENGINE`. The installed engine is `lib/neura/desktop/electron/electron` on Linux and `lib/neura/desktop/electron/electron.exe` on Windows. The desktop host's `main.js` loads the bundle as a package directory from `share/neura/hosts/desktop`, or from `NEURA_DESKTOP_HOST` when set. The `desktop` capability grants the clipboard services.
 
 A web bundle is not runnable: `neura run` names `neura dev` and a static file host instead.
 
@@ -119,7 +119,7 @@ neura dev --target server --port 9000 -- --config greeting=hi
 | `server` | `neura-server-host` with the bundle, as `neura run` starts it; `--port` listens on `127.0.0.1:<port>`, and the arguments after `--` go to the host. It is restarted after each build. |
 | `desktop` | The desktop host with the bundle, as `neura run` starts it, restarted after each build. The embedded web bundle is not marked `dev`. |
 
-`neura dev` stops on an interrupt, a hangup (closing its terminal), a termination request, or the end of its standard input. Each host runs in a process group of its own, which `neura dev` ends (`SIGTERM`, then `SIGKILL` after two seconds) and reaps when it restarts the host and when it stops; it registers nothing with the system. `neura run` and `neura package` refuse a bundle marked `dev` (`E1029`).
+`neura dev` stops on an interrupt, a hangup (closing its terminal), a termination request, or the end of its standard input. On POSIX it stops each host group with `SIGTERM` and, after two seconds, `SIGKILL`. On Windows it sends Ctrl+Break to the host group and ends its Job Object to reap descendants. It cleans up the old host when it restarts and when it stops. `neura run` also uses a Windows Job Object for the desktop host. `neura run` and `neura package` refuse a bundle marked `dev` (`E1029`).
 
 ## Packaging
 
@@ -132,6 +132,6 @@ neura package --target desktop --format deb
 
 A server target gives `dist/<name>-<version>-<target>.tar.gz` holding `<name>-<version>/bundle/`, `bin/neura-run`, `bin/neura-server-host`, `lib/neura/libneura-core-<version>` (which holds the SQL and TLS providers) and `run`, a shell script that runs `neura-run run bundle -- "$@"`: the bundle is verified at every start, and the arguments go to the server host. Entries are sorted, owned by 0:0 and dated at `SOURCE_DATE_EPOCH` (default 0), and the gzip stream records no name or time and stores the data uncompressed, so the same bundle and tools give the same bytes.
 
-A desktop target gives a `.tar.gz` or `.deb` through the [desktop packager](Apps-Desktop#packages), with the format from `--format` or the first of the target's `packaging.formats`. It needs the target's `packaging.icon` (a 1,024-pixel PNG) and the pinned Electron 45.3.3 named by `NEURA_DESKTOP_ENGINE`. A web target is delivered as its directory and is not packaged.
+A desktop target gives a `.zip` on Windows, or a `.tar.gz` or `.deb` on Linux, through the [desktop packager](Apps-Desktop#packages). Windows defaults to ZIP. Linux uses `--format` or the first of the target's `packaging.formats`. Packaging needs the target's `packaging.icon` (a 1,024-pixel PNG) and the pinned Electron 45.3.3 named by `NEURA_DESKTOP_ENGINE`. A web target is delivered as its directory.
 
-`E1033` reports what cannot be built here: `.dmg` and `.msix` (built on macOS and Windows), `--sign` (Neura 0.3.0 signs nothing on Linux), a web target, a target with no built bundle, a desktop target without its icon or engine, and a server package in a format other than `.tar.gz`. `--report` is not implemented.
+`E1033` reports unsupported formats such as `.dmg` and `.msix`, `--sign`, a web target, a target without a built bundle, and a desktop target without its icon or engine. Server packages use `.zip` on Windows and `.tar.gz` on Linux. `--report` is not implemented.

@@ -19,6 +19,8 @@
 #include <type_traits>
 #include <vector>
 
+namespace neura::nvm { class CompileObserver; }
+
 namespace neura::nvm::tier3 {
 
 // Tier 3 of the executor (docs/runtime/NVM.md, "Execution tiers"): a native
@@ -447,6 +449,7 @@ struct Program {
     std::uint32_t trampoline = 0;
     // Whether to check the register allocation of code made later.
     bool verify = false;
+    CompileObserver* compile_observer = nullptr;
 
     struct EntryCode {
         const Program* program;

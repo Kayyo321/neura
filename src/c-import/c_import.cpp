@@ -1076,7 +1076,14 @@ private:
         });
     }
 
-    std::string symbol(const std::string& name) {
+    std::string symbol(const std::string& name, bool inline_wrapper = false) {
+#ifdef _WIN32
+        // GetProcAddress searches only the selected module. Keep unlinked
+        // declarations on the default lookup even when a wrapper needs a DLL.
+        if (!linked_ && !inline_wrapper) return "c_lookup.default_lookup().find_or_trap(\"" + name + "\")";
+#else
+        (void)inline_wrapper;
+#endif
         symbols_.insert(name);
         return "neura_library().find_or_trap(\"" + name + "\")";
     }
@@ -1147,7 +1154,8 @@ private:
         // An inline function has no external definition: call an exported
         // wrapper compiled into the image's native library.
         std::string target = c_name;
-        if (lib_.clang_Cursor_isFunctionInlined(cursor)) {
+        const bool inline_wrapper = lib_.clang_Cursor_isFunctionInlined(cursor) != 0;
+        if (inline_wrapper) {
             if (variadic) {
 #ifdef _WIN32
                 // The Universal C Runtime defines printf, scanf and the rest
@@ -1179,6 +1187,7 @@ private:
             descriptor += (i == 0 && result.kind == Mapped::Kind::Void ? "" : ", ") + layout_of(parameters[i].second);
         descriptor += ")";
 
+        const auto lookup = symbol(target, inline_wrapper);
         std::ostringstream out;
         const auto result_type = neura_type(result);
         if (variadic) {
@@ -1191,7 +1200,7 @@ private:
             out << "        let neura_arguments: c_variadic.Argument[list] = new;\n";
             for (const auto& [parameter, mapped] : parameters) out << "        neura_arguments.append(" << pack(mapped, parameter) << ");\n";
             out << "        for (let neura_argument in neura_rest) {\n            neura_arguments.append(neura_argument);\n        }\n";
-            const auto call = "c_method.MethodHandle.call_variadic(" + symbol(target) + ", " + descriptor + ", neura_arguments)";
+            const auto call = "c_method.MethodHandle.call_variadic(" + lookup + ", " + descriptor + ", neura_arguments)";
             if (result.kind == Mapped::Kind::Void) out << "        " << call << ";\n";
             else out << "        return " << result_of(result, call) << ";\n";
             out << "    };\n\n";
@@ -1201,7 +1210,7 @@ private:
         out << "    let neura_handle_" << name << ": c_method.MethodHandle = nil;\n";
         out << "    let neura_call_" << name << " = func -> c_method.MethodHandle {\n";
         out << "        if (neura_handle_" << name << " == nil) {\n";
-        out << "            neura_handle_" << name << " = c_linker.native_linker().downcall_handle(" << symbol(target)
+        out << "            neura_handle_" << name << " = c_linker.native_linker().downcall_handle(" << lookup
             << ",\n                " << descriptor << ");\n";
         out << "        }\n        return neura_handle_" << name << ";\n    };\n";
         const bool has_string = std::ranges::any_of(parameters, [](const auto& p) { return p.second.c_string; });

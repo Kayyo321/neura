@@ -206,7 +206,7 @@ After install, `neura update`, `neura uninstall`, the SDK/runtime split, and `ne
 - Native tier-3 code generation either supports the Windows x64 calling convention or declines to tier 2 on Windows. Both paths must give identical results under the runtime-identity and tier-boundary gates.
 - Apps:
   - `neura build --target web|server|desktop` and `neura run` work on Windows;
-  - `neura package` produces a Windows desktop package (`.zip`, and `.msix` once trusted signing and a clean Windows install both pass), replacing today's E1033 refusal;
+  - `neura package` produces a Windows desktop package (`.zip`, and `.msix` once trusted signing and a clean Windows install both pass), replacing the 0.3.0 E1033 refusal;
   - the browser runtime is tested in Edge and Chrome on Windows.
 - The editor extension and the debugger work against the native Windows install.
 

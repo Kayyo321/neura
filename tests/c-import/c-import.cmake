@@ -2,8 +2,7 @@
 # tests/native/mathops.h with the static libmathops.a and the system's
 # stdlib.h, run them, and check the image's NATV section, reproducible
 # builds, .nir round trips, assembly, decompilation, and the diagnostics for
-# unsupported inputs. Windows checks the same headers and diagnostics and
-# verifies that the build and IR emission report the native-link limitation.
+# unsupported inputs. On Windows the fixture archive contains COFF objects.
 foreach(variable NEURA SOURCE_DIR TEST_DIR NATIVE_DIR C_COMPILER)
     if(NOT DEFINED ${variable})
         message(FATAL_ERROR "Provide NEURA, SOURCE_DIR, TEST_DIR, NATIVE_DIR, and C_COMPILER")
@@ -16,10 +15,14 @@ file(COPY "${tests}/c-import.nra" "${tests}/qsort.nra" "${tests}/nullability.nra
      "${tests}/nullability-inner.h" "${tests}/umbrella.nra" "${tests}/umbrella.h" "${tests}/_umbrella.h"
      "${tests}/_umbrella_inner.h" "${tests}/umbrella-plain.h" "${SOURCE_DIR}/tests/native/mathops.h"
      "${SOURCE_DIR}/tests/native/mathops.c" "${NATIVE_DIR}/libmathops.a" DESTINATION "${TEST_DIR}")
+if(CMAKE_HOST_WIN32)
+    # Check toolchain discovery here. windows-coff.cmake passes --cc explicitly.
+    unset(ENV{CC})
+endif()
 
 function(neura prefix)
     execute_process(COMMAND "${NEURA}" ${ARGN} WORKING_DIRECTORY "${TEST_DIR}"
-        RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+        RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr ENCODING UTF-8)
     set("${prefix}_status" "${status}" PARENT_SCOPE)
     set("${prefix}_stdout" "${stdout}" PARENT_SCOPE)
     set("${prefix}_stderr" "${stderr}" PARENT_SCOPE)
@@ -35,82 +38,66 @@ endfunction()
 
 function(expect_error source pattern)
     file(WRITE "${TEST_DIR}/rejected.nra" "${source}")
+    file(REMOVE "${TEST_DIR}/rejected.nvr")
     neura(rejected build rejected.nra -o rejected.nvr)
-    if(rejected_status STREQUAL "0" OR NOT rejected_stderr MATCHES "${pattern}")
+    if(rejected_status STREQUAL "0" OR NOT rejected_stderr MATCHES "${pattern}" OR EXISTS "${TEST_DIR}/rejected.nvr")
         message(FATAL_ERROR "expected a build error matching '${pattern}', got status ${rejected_status}\n"
                             "${rejected_stderr}")
     endif()
 endfunction()
 
-if(CMAKE_HOST_WIN32)
-    # Windows can read and type-check each header, including an import with
-    # a static library. The current image and IR emit paths refuse to link them.
-    set(link_refusal "linking C imports is not supported on Windows in this release")
-    foreach(name IN ITEMS c-import qsort nullability umbrella)
-        expect_ok(check check ${name}.nra)
-        neura(build build ${name}.nra -o ${name}.nvr)
-        if(build_status STREQUAL "0" OR NOT build_stderr MATCHES "${link_refusal}" OR EXISTS "${TEST_DIR}/${name}.nvr")
-            message(FATAL_ERROR "${name}: expected build to refuse linking (${build_status})\n${build_stderr}")
-        endif()
-    endforeach()
-    neura(nir emit-ir c-import.nra -o c-import.nir)
-    if(nir_status STREQUAL "0" OR NOT nir_stderr MATCHES "${link_refusal}" OR EXISTS "${TEST_DIR}/c-import.nir")
-        message(FATAL_ERROR "expected emit-ir to refuse linking (${nir_status})\n${nir_stderr}")
+# Programs and their output.
+foreach(name IN ITEMS c-import qsort nullability umbrella)
+    file(READ "${tests}/${name}.out" expected)
+    expect_ok(build build ${name}.nra -o ${name}.nvr)
+    expect_ok(run run --allow-native ${name}.nvr)
+    if(NOT run_stdout STREQUAL expected)
+        message(FATAL_ERROR "${name}: output differs:\n${run_stdout}")
     endif()
-else()
-    # Programs and their output.
-    foreach(name IN ITEMS c-import qsort nullability umbrella)
-        file(READ "${tests}/${name}.out" expected)
-        expect_ok(build build ${name}.nra -o ${name}.nvr)
-        expect_ok(run run --allow-native ${name}.nvr)
-        if(NOT run_stdout STREQUAL expected)
-            message(FATAL_ERROR "${name}: output differs:\n${run_stdout}")
-        endif()
-    endforeach()
+endforeach()
 
-    # A repeated build reproduces the image, the image round-trips through
-    # assembly, and a .nir build carries the native library.
-    expect_ok(again build c-import.nra -o again.nvr)
-    execute_process(COMMAND "${CMAKE_COMMAND}" -E compare_files "${TEST_DIR}/c-import.nvr" "${TEST_DIR}/again.nvr"
-                    RESULT_VARIABLE different)
-    if(NOT different STREQUAL "0")
-        message(FATAL_ERROR "repeating the build changed the image")
-    endif()
-    expect_ok(dis disassemble c-import.nvr -o c-import.nvra)
-    expect_ok(asm assemble c-import.nvra -o reassembled.nvr)
-    execute_process(COMMAND "${CMAKE_COMMAND}" -E compare_files "${TEST_DIR}/c-import.nvr"
-                    "${TEST_DIR}/reassembled.nvr" RESULT_VARIABLE different)
-    if(NOT different STREQUAL "0")
-        message(FATAL_ERROR "the image does not round-trip through assembly")
-    endif()
-    expect_ok(nir emit-ir c-import.nra -o c-import.nir)
-    expect_ok(from_nir build c-import.nir -o from-nir.nvr)
-    expect_ok(nir_run run --allow-native from-nir.nvr)
-    file(READ "${tests}/c-import.out" expected)
-    if(NOT nir_run_stdout STREQUAL expected)
-        message(FATAL_ERROR "the image built from .nir behaves differently:\n${nir_run_stdout}")
-    endif()
-    expect_ok(decompiled decompile c-import.nvr)
-    if(NOT decompiled_stdout MATCHES "native library \"[^\"]+\", [0-9]+ bytes  \\[opaque" OR
-       NOT decompiled_stdout MATCHES "native symbol \"neura_inline_mathops_square\"")
-        message(FATAL_ERROR "decompilation should show the native library as an opaque region")
-    endif()
-    expect_ok(check check c-import.nra)
+# A repeated build reproduces the image, the image round-trips through
+# assembly, and a .nir build carries the native library.
+expect_ok(again build c-import.nra -o again.nvr)
+execute_process(COMMAND "${CMAKE_COMMAND}" -E compare_files "${TEST_DIR}/c-import.nvr" "${TEST_DIR}/again.nvr"
+                RESULT_VARIABLE different)
+if(NOT different STREQUAL "0")
+    message(FATAL_ERROR "repeating the build changed the image")
+endif()
+expect_ok(dis disassemble c-import.nvr -o c-import.nvra)
+expect_ok(asm assemble c-import.nvra -o reassembled.nvr)
+execute_process(COMMAND "${CMAKE_COMMAND}" -E compare_files "${TEST_DIR}/c-import.nvr"
+                "${TEST_DIR}/reassembled.nvr" RESULT_VARIABLE different)
+if(NOT different STREQUAL "0")
+    message(FATAL_ERROR "the image does not round-trip through assembly")
+endif()
+expect_ok(nir emit-ir c-import.nra -o c-import.nir)
+expect_ok(from_nir build --cc compiler-must-not-be-used c-import.nir -o from-nir.nvr)
+expect_ok(nir_run run --allow-native from-nir.nvr)
+file(READ "${tests}/c-import.out" expected)
+if(NOT nir_run_stdout STREQUAL expected)
+    message(FATAL_ERROR "the image built from .nir behaves differently:\n${nir_run_stdout}")
+endif()
+expect_ok(decompiled decompile c-import.nvr)
+if(NOT decompiled_stdout MATCHES "native library \"[^\"]+\", [0-9]+ bytes  \\[opaque" OR
+   NOT decompiled_stdout MATCHES "native symbol \"neura_inline_mathops_square\"")
+    message(FATAL_ERROR "decompilation should show the native library as an opaque region")
+endif()
+expect_ok(check check c-import.nra)
 
-    # With native code denied the first native call traps; on another target the
-    # embedded library cannot load.
-    neura(denied run --deny-native c-import.nvr)
-    if(NOT denied_status STREQUAL "134" OR NOT denied_stderr MATCHES "native access denied: the native capability is not granted")
-        message(FATAL_ERROR "a run with --deny-native should trap with 134\n${denied_stderr}")
-    endif()
-    file(READ "${TEST_DIR}/c-import.nvra" assembly)
-    string(REGEX REPLACE "native-library \"[^\"]+\"" "native-library \"riscv64-unknown-elf\"" assembly "${assembly}")
-    file(WRITE "${TEST_DIR}/foreign.nvra" "${assembly}")
-    expect_ok(foreign_asm assemble foreign.nvra -o foreign.nvr)
-    neura(foreign run --allow-native foreign.nvr)
-    if(NOT foreign_status STREQUAL "134" OR NOT foreign_stderr MATCHES "native embedded library load failed")
-        message(FATAL_ERROR "an image linked for another target should fail to load its library\n${foreign_stderr}")
-    endif()
+# With native code denied the first native call traps; on another target the
+# embedded library cannot load.
+neura(denied run --deny-native c-import.nvr)
+if(NOT denied_status STREQUAL "134" OR NOT denied_stderr MATCHES "native access denied: the native capability is not granted")
+    message(FATAL_ERROR "a run with --deny-native should trap with 134\n${denied_stderr}")
+endif()
+file(READ "${TEST_DIR}/c-import.nvra" assembly)
+string(REGEX REPLACE "native-library \"[^\"]+\"" "native-library \"riscv64-unknown-elf\"" assembly "${assembly}")
+file(WRITE "${TEST_DIR}/foreign.nvra" "${assembly}")
+expect_ok(foreign_asm assemble foreign.nvra -o foreign.nvr)
+neura(foreign run --allow-native foreign.nvr)
+if(NOT foreign_status STREQUAL "134" OR NOT foreign_stderr MATCHES "native embedded library load failed")
+    message(FATAL_ERROR "an image linked for another target should fail to load its library\n${foreign_stderr}")
 endif()
 
 # The generated bindings, with the test directory replaced.
@@ -164,8 +151,4 @@ execute_process(COMMAND "${CMAKE_COMMAND}" -E env NEURA_LIBCLANG=/no/such/libcla
 if(status STREQUAL "0" OR NOT stderr MATCHES "C imports need libclang")
     message(FATAL_ERROR "a missing libclang should be a diagnostic\n${stderr}")
 endif()
-if(CMAKE_HOST_WIN32)
-    message(STATUS "C imports: checking, bindings, link refusal, and diagnostics checked")
-else()
-    message(STATUS "C imports: programs, NATV, reproducibility, .nir, assembly, and diagnostics checked")
-endif()
+message(STATUS "C imports: programs, NATV, reproducibility, .nir, assembly, and diagnostics checked")

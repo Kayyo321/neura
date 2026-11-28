@@ -4,18 +4,20 @@
 // directory with desktop.json, a verified web bundle, registry.json and the
 // real Neura native child (tests/desktop/fixtures/app-child.nra). The child
 // opens the windows; pages call the bridge through the preload object only.
-// run_app_test.py runs one case per process under Xvfb.
+// run_app_test.py runs one case per process.
 
 const assert = require('node:assert/strict');
 const { createHash } = require('node:crypto');
 const { promises: fs } = require('node:fs');
 const path = require('node:path');
+const { StringDecoder } = require('node:string_decoder');
 const { setTimeout: delay } = require('node:timers/promises');
 const { app, BrowserWindow, clipboard, ipcMain, Menu } = require('electron');
 const { DesktopStatus, loadDesktopPackage, registerDesktopScheme, runDesktopApplication } = require('../../hosts/desktop/main');
 
 const scratch = process.env.NEURA_DESKTOP_TEST_SCRATCH;
 const caseName = process.env.NEURA_DESKTOP_TEST_CASE;
+const windowsHost = process.platform === 'win32';
 app.setPath('userData', path.join(scratch, 'profile'));
 registerDesktopScheme();
 const applicationId = 'example.neura.fixture';
@@ -69,13 +71,15 @@ async function makePackage({ capabilities = [], limits = {} } = {}) {
     await fs.writeFile(path.join(web, 'bundle.json'), manifest);
     const registry = Buffer.from(JSON.stringify({ operations, schema: 1 }));
     await fs.writeFile(path.join(root, 'registry.json'), registry);
-    await fs.copyFile(process.env.NEURA_DESKTOP_TEST_CHILD, path.join(root, 'bin', 'app-child'));
-    await fs.chmod(path.join(root, 'bin', 'app-child'), 0o755);
+    const executable = windowsHost ? 'bin/app-child.exe' : 'bin/app-child';
+    const childPath = path.join(root, executable);
+    await fs.copyFile(process.env.NEURA_DESKTOP_TEST_CHILD, childPath);
+    if (!windowsHost) await fs.chmod(childPath, 0o755);
     await fs.writeFile(path.join(root, 'desktop.json'), JSON.stringify({
         schema: 1, kind: 'desktop', id: applicationId,
         web: { directory: 'web', manifestDigest: digest(manifest) },
         registry: { path: 'registry.json', sha256: digest(registry) },
-        child: { executable: 'bin/app-child', args: [] },
+        child: { executable, args: [] },
         supportedRequirements: { browserAdapter: 1 }, externalOrigins: [], capabilities, limits,
     }));
     return root;
@@ -113,10 +117,18 @@ async function start(packageOptions = {}, runOptions = {}) {
     const reported = [];
     const logged = [];
     const childLog = [];
+    const decoder = new StringDecoder('utf8');
+    let pending = '';
     const running = await runDesktopApplication(configuration, {
         log: message => logged.push(message),
         onNativeFailure: runOptions.defaultFailure ? undefined : (error, result) => reported.push({ error, result }),
-        nativeIO: { onStderr: chunk => childLog.push(...chunk.toString().split('\n').filter(Boolean)) },
+        nativeIO: {
+            onStderr(chunk) {
+                const lines = (pending + decoder.write(chunk)).split(/\r?\n/);
+                pending = lines.pop();
+                childLog.push(...lines.filter(Boolean));
+            },
+        },
         ...runOptions,
     });
     const [first] = await waitFor(() => {
@@ -233,19 +245,18 @@ async function services() {
     assert.deepEqual(notified, [['Fixture', 'Saved ✓'], ['Fixture', 'off']]);
 
     step('clipboard');
-    // The real system clipboard of the X display, written by the child and read by the host, then the reverse.
+    // The test desktop's system clipboard, written by the child and read by the host, then the reverse.
     assert.deepEqual(await bridge(evaluate, 'fixture.clipboard_write', 'copied by Neura ✓'), { status: 0, text: 'written' });
     assert.equal(await clipboard.readText(), 'copied by Neura ✓');
     await clipboard.writeText('pasted from the system é');
     assert.deepEqual(await bridge(evaluate, 'fixture.clipboard_read'), { status: 0, text: 'pasted from the system é' });
 
     step('data directory');
-    // The data directory is $XDG_DATA_HOME/<id>, created with mode 700, and the page never sees it unless asked.
-    const expected = path.join(process.env.XDG_DATA_HOME, applicationId);
+    const expected = path.join(windowsHost ? process.env.LOCALAPPDATA : process.env.XDG_DATA_HOME, applicationId);
     assert.deepEqual(await bridge(evaluate, 'fixture.data_dir'), { status: 0, text: expected });
     const entry = await fs.stat(expected);
     assert.ok(entry.isDirectory());
-    assert.equal(entry.mode & 0o777, 0o700);
+    if (!windowsHost) assert.equal(entry.mode & 0o777, 0o700);
 
     expectEnd(session, 0, reported => assert.equal(reported.length, 0));
     session.first.window.close();
@@ -260,7 +271,7 @@ async function denied() {
         { status: DesktopStatus.Other, text: 'CapabilityDenied: neura.desktop.clipboard.read failed' });
     assert.deepEqual(await bridge(evaluate, 'fixture.clipboard_write', 'x'),
         { status: DesktopStatus.Other, text: 'CapabilityDenied: neura.desktop.clipboard.write failed' });
-    // Electron's own notification service under Xvfb: either shown or unsupported, never an error.
+    // Electron's own notification service on the test desktop: either shown or unsupported.
     const outcome = await bridge(evaluate, 'fixture.notify', 'real');
     assert.equal(outcome.status, 0);
     assert.ok(['Shown', 'Unsupported'].includes(outcome.text), outcome.text);
@@ -467,12 +478,15 @@ async function dialogs() {
     first.window.close();
 }
 
-// Case 32 with the default failure report: the host's native error dialog. The test runner finds the dialog on
-// the X display, checks its title and dismisses it; the application then exits 1.
+// Case 32 with the default failure report: the driver finds and dismisses the host's native error dialog.
 async function trapDialog() {
     const session = await start({}, { defaultFailure: true });
-    console.log(`DISPLAY=${process.env.DISPLAY}`);
-    console.log(`XAUTHORITY=${process.env.XAUTHORITY ?? ''}`);
+    if (windowsHost) {
+        console.log(`DIALOG_PID=${process.pid}`);
+    } else {
+        console.log(`DISPLAY=${process.env.DISPLAY}`);
+        console.log(`XAUTHORITY=${process.env.XAUTHORITY ?? ''}`);
+    }
     expectEnd(session, 1, reported => assert.equal(reported.length, 0));
     bridge(session.evaluate, 'fixture.trap').catch(() => {});
 }
@@ -492,9 +506,12 @@ const cases = {
 
 (async () => {
     assert.equal(process.versions.electron, '45.3.3');
-    // Never the user's own desktop: no Wayland display, and Electron on the virtual X display.
-    assert.equal(process.env.WAYLAND_DISPLAY, undefined);
-    assert.equal(app.commandLine.getSwitchValue('ozone-platform'), 'x11');
+    if (windowsHost) {
+        assert.equal(process.arch, 'x64');
+    } else {
+        assert.equal(process.env.WAYLAND_DISPLAY, undefined);
+        assert.equal(app.commandLine.getSwitchValue('ozone-platform'), 'x11');
+    }
     await cases[caseName]();
 })().catch(error => {
     console.error(error);

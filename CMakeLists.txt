@@ -419,11 +419,10 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             message(FATAL_ERROR "NEURA_STATIC_LAUNCHER needs a static C library")
         endif()
     endif()
-elseif(WIN32 AND COMMAND neura_windows_launchers)
-    # The PE launcher (cmake/windows/launchers.cmake).
-    neura_windows_launchers()
 elseif(NEURA_STATIC_LAUNCHER STREQUAL "ON")
     message(FATAL_ERROR "NEURA_STATIC_LAUNCHER requires Linux")
+elseif(WIN32)
+    neura_windows_hook(launchers)
 endif()
 
 set(NEURA_GPU "AUTO" CACHE STRING "GPU graph execution: AUTO, ON, or OFF")
@@ -887,6 +886,9 @@ add_library(neura_cli_sdk STATIC
     src/cli/commands_test.cpp
     src/cli/driver_sdk.cpp
 )
+if(WIN32)
+    target_sources(neura_cli_sdk PRIVATE src/cli/windows_c_import.cpp)
+endif()
 target_link_libraries(neura_cli_sdk PUBLIC neura_cli_core neura_compiler)
 neura_target_defaults(neura_cli_sdk)
 
@@ -1023,6 +1025,38 @@ if(NEURA_SDK)
     # installation runs bundles without libneura-sdk.
     neura_add_shared(neura_sdk_library neura-sdk sdk neura_core_library neura_cli_sdk neura_cli_artifact neura_cli_explain
         neura_cli_tags neura_cli_debug neura_compiler neura_decompiler neura_libclang neura_app neura_project)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        # Build the held-out benchmark tool with this SDK's headers and libraries.
+        add_executable(neura-held-out EXCLUDE_FROM_ALL tests/bench-wall/held-out.cpp)
+        target_include_directories(neura-held-out PRIVATE src)
+        target_link_libraries(neura-held-out PRIVATE neura_core_library neura_sdk_library)
+        set(held_out_headers src/cli/benchmark.hpp src/cli/gpu_run.hpp src/cli/options.hpp src/nvm/compile_observer.hpp
+            src/nvm/host.hpp src/nvm/machine.hpp src/nvm/tier1.hpp src/nvm/tier3.hpp src/nvr/format.hpp
+            src/runner/runner.hpp)
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${held_out_headers})
+        set(held_out_header_hashes "")
+        foreach(header IN LISTS held_out_headers)
+            file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/${header}" header_hash)
+            string(APPEND held_out_header_hashes "${header}=${header_hash}\n")
+        endforeach()
+        string(SHA256 held_out_header_fingerprint "${held_out_header_hashes}")
+        target_compile_definitions(neura-held-out PRIVATE
+            NEURA_BENCH_HEADER_SHA256="${held_out_header_fingerprint}"
+            NEURA_BENCH_COMPILER="${CMAKE_CXX_COMPILER_ID}-${CMAKE_CXX_COMPILER_VERSION}")
+        if(NEURA_HAS_GPU)
+            target_compile_definitions(neura-held-out PRIVATE NEURA_HAS_GPU=1)
+        endif()
+        if(TARGET neura_sql)
+            target_compile_definitions(neura-held-out PRIVATE NEURA_HAS_SQL)
+        endif()
+        set_target_properties(neura-held-out PROPERTIES BUILD_RPATH "${neura_build_rpath}"
+            INSTALL_RPATH "${neura_install_rpath}")
+        install(TARGETS neura-held-out RUNTIME DESTINATION bin COMPONENT benchmark EXCLUDE_FROM_ALL)
+        if(NEURA_PORTABLE_RELEASE)
+            target_link_options(neura-held-out PRIVATE -static-libstdc++ -static-libgcc)
+        endif()
+        neura_target_defaults(neura-held-out)
+    endif()
 endif()
 
 set(NEURA_TOOL_TARGETS)
@@ -1258,6 +1292,13 @@ if(BUILD_TESTING)
     foreach(suite IN ITEMS int128 line-endings)
         add_test(NAME util-${suite} COMMAND neura_util_tests ${suite})
     endforeach()
+
+    # Synthetic PE files exercise the container reader on every native host.
+    add_executable(neura_pe_container_tests tests/native/pe_container_cases.cpp)
+    target_link_libraries(neura_pe_container_tests PRIVATE neura_runner)
+    neura_target_defaults(neura_pe_container_tests)
+    add_test(NAME native-pe-container COMMAND neura_pe_container_tests
+        "$<TARGET_FILE_DIR:neura_pe_container_tests>/native-pe-container-test.exe")
 endif()
 
 add_library(neura_project STATIC EXCLUDE_FROM_ALL
@@ -1510,6 +1551,29 @@ if(BUILD_TESTING AND NEURA_SDK)
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/concurrency/schedules.cmake"
     )
 
+    # Compare execution tiers at each quantum, including recorded scheduler
+    # inputs and choices. Keep the fixture groups independently bounded.
+    foreach(section IN ITEMS programs monitors io parallel special schedules)
+        add_test(NAME concurrency-tiers-${section} COMMAND ${CMAKE_COMMAND}
+            "-DNEURA=$<TARGET_FILE:neura>"
+            "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+            "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/concurrency-tiers-${section}-tests"
+            "-DSECTION=${section}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/concurrency/tiers.cmake")
+        set_tests_properties(concurrency-tiers-${section} PROPERTIES TIMEOUT 600)
+    endforeach()
+    # Only x86-64 Linux emits Tier 3 machine code. Until M1, zero native
+    # task entries are the expected failure of this independent probe.
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND neura_host_arch STREQUAL "x86_64")
+        add_test(NAME concurrency-tiers-nonvacuity COMMAND ${CMAKE_COMMAND}
+            "-DNEURA=$<TARGET_FILE:neura>"
+            "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+            "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/concurrency-tiers-nonvacuity-tests"
+            -DSECTION=nonvacuity -DEXPECT_MISSING_NATIVE=ON
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/concurrency/tiers.cmake")
+        set_tests_properties(concurrency-tiers-nonvacuity PROPERTIES TIMEOUT 120)
+    endif()
+
     # Monitors: #Synchronized methods on shared instances (Concurrency.md section 8.1).
     add_test(NAME concurrency-monitors COMMAND ${CMAKE_COMMAND}
         "-DNEURA=$<TARGET_FILE:neura>"
@@ -1690,16 +1754,24 @@ if(BUILD_TESTING AND NEURA_SDK)
     set_tests_properties(matching-programs PROPERTIES TIMEOUT 180)
     # Programs of the lifetime milestone (docs/design/Lifetime030.md), each
     # in every build and execution mode with the same output, steps and peak
-    # cells, and their NeuraIR version.
-    add_test(NAME lifetime-programs COMMAND "${Python3_EXECUTABLE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/lifetime/programs.py" "$<TARGET_FILE:neura>"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/lifetime/programs")
-    # Under the address and undefined-behavior sanitizers the programs run
-    # several times slower in every mode, so that configuration sets a
-    # longer limit, as it does for backend-reference.
+    # cells, and their NeuraIR version. Give every fixture an independent
+    # entry so CTest can schedule the full checks in parallel.
     set(NEURA_LIFETIME_PROGRAMS_TEST_TIMEOUT 900 CACHE STRING
-        "CTest limit, in seconds, for the lifetime-programs test")
-    set_tests_properties(lifetime-programs PROPERTIES TIMEOUT "${NEURA_LIFETIME_PROGRAMS_TEST_TIMEOUT}")
+        "CTest limit, in seconds, for each lifetime program test")
+    set(lifetime_programs_dir "${CMAKE_CURRENT_SOURCE_DIR}/tests/lifetime/programs")
+    file(GLOB lifetime_program_outputs CONFIGURE_DEPENDS LIST_DIRECTORIES false "${lifetime_programs_dir}/*.expected")
+    if(NOT lifetime_program_outputs)
+        message(FATAL_ERROR "No lifetime program fixtures in ${lifetime_programs_dir}")
+    endif()
+    foreach(output IN LISTS lifetime_program_outputs)
+        get_filename_component(fixture "${output}" NAME_WLE)
+        add_test(NAME "lifetime-programs-${fixture}" COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/lifetime/programs.py" "$<TARGET_FILE:neura>"
+            "${lifetime_programs_dir}" "${fixture}")
+        # Seed first-run scheduling with the recent whole-suite average per program.
+        set_tests_properties("lifetime-programs-${fixture}" PROPERTIES
+            TIMEOUT "${NEURA_LIFETIME_PROGRAMS_TEST_TIMEOUT}" COST 60)
+    endforeach()
     # E0475 and E0550 when a program is built from a .nir module whose call
     # was retargeted after lowering checked it.
     add_test(NAME lifetime-nir-checks COMMAND "${Python3_EXECUTABLE}"
@@ -2029,6 +2101,9 @@ if(BUILD_TESTING AND NEURA_SDK)
     # Tier 3's checkable variant under the region check of NEURA_TIER_CHECK=1.
     add_test(NAME backend-tier3-check COMMAND neura_backend_tests tier3_check "${CMAKE_CURRENT_SOURCE_DIR}")
     set_tests_properties(backend-tier3-check PROPERTIES ENVIRONMENT "NEURA_TIER_CHECK=1;NEURA_TIER3=interp")
+    add_test(NAME backend-tier2-portable-fallback COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/backend/check-tier2-fallback.py" "$<TARGET_FILE:neura>")
+    set_tests_properties(backend-tier2-portable-fallback PROPERTIES TIMEOUT 120)
     # These fixtures require x86-64 native Tier 3.
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND neura_host_arch STREQUAL "x86_64")
         add_test(NAME backend-tier3-nil-result COMMAND "${Python3_EXECUTABLE}"
@@ -2097,26 +2172,36 @@ if(BUILD_TESTING AND NEURA_SDK)
     endif()
 
     # Standard library tests under the reference evaluator and NVM.
-    add_test(NAME backend-reference COMMAND neura_backend_tests reference "${CMAKE_CURRENT_SOURCE_DIR}")
-    # The suite takes about 1470 seconds on GitHub's Intel macOS runners, which
-    # is too close to CTest's default limit of 1500 seconds. Under the address
-    # and undefined-behavior sanitizers it takes more than an hour on a GitHub
-    # runner, so that configuration sets a longer limit. A limit set here takes
-    # precedence over ctest --timeout.
     set(NEURA_REFERENCE_TEST_TIMEOUT 3600 CACHE STRING
-        "CTest limit, in seconds, for the backend-reference test")
-    set_tests_properties(backend-reference PROPERTIES TIMEOUT "${NEURA_REFERENCE_TEST_TIMEOUT}")
+        "CTest limit, in seconds, for each backend reference library shard")
+    add_test(NAME backend-reference-overloads COMMAND neura_backend_tests reference
+        "${CMAKE_CURRENT_SOURCE_DIR}" overloads_match_the_evaluator)
+    add_test(NAME backend-reference-primitive COMMAND neura_backend_tests reference
+        "${CMAKE_CURRENT_SOURCE_DIR}" primitive_references_match_the_evaluator)
+    set(reference_shards 5)
+    foreach(shard RANGE 1 ${reference_shards})
+        add_test(NAME backend-reference-library-${shard} COMMAND neura_backend_tests reference
+            "${CMAKE_CURRENT_SOURCE_DIR}" library_tests_match_the_evaluator)
+        # The original suite's scheduling weight was 2640 seconds.
+        set_tests_properties(backend-reference-library-${shard} PROPERTIES
+            ENVIRONMENT "NEURA_REFERENCE_SHARD=${shard}/${reference_shards}"
+            TIMEOUT "${NEURA_REFERENCE_TEST_TIMEOUT}" COST 528)
+    endforeach()
 
-    foreach(suite IN ITEMS lossless lift behavior)
+    foreach(suite IN ITEMS lossless lift)
         add_test(NAME decompiler-${suite}
             COMMAND neura_backend_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()
-    # decompiler-behavior takes a few minutes in a Release build and more than
-    # an hour under the address and undefined-behavior sanitizers, so that
-    # configuration sets a longer limit, as it does for backend-reference.
+    # Keep the behavior cases independent. Each uses the former suite's
+    # timeout, with the sanitizer workflow's longer limit where configured.
     set(NEURA_DECOMPILER_BEHAVIOR_TEST_TIMEOUT 3600 CACHE STRING
-        "CTest limit, in seconds, for the decompiler-behavior test")
-    set_tests_properties(decompiler-behavior PROPERTIES TIMEOUT "${NEURA_DECOMPILER_BEHAVIOR_TEST_TIMEOUT}")
+        "CTest limit, in seconds, for each decompiler behavior test")
+    add_test(NAME decompiler-behavior-trace-replay COMMAND neura_backend_tests behavior
+        "${CMAKE_CURRENT_SOURCE_DIR}" resynthesized_images_replay_the_original_trace)
+    add_test(NAME decompiler-behavior-scalar-equivalence COMMAND neura_backend_tests behavior
+        "${CMAKE_CURRENT_SOURCE_DIR}" resynthesized_functions_agree_exhaustively)
+    set_tests_properties(decompiler-behavior-trace-replay decompiler-behavior-scalar-equivalence
+        PROPERTIES TIMEOUT "${NEURA_DECOMPILER_BEHAVIOR_TEST_TIMEOUT}")
 
     # Lifted blocks (src/lift): the structural and overflow proofs, and the
     # lowered blocks against the reference evaluator over a program corpus.
@@ -2189,7 +2274,10 @@ if(BUILD_TESTING AND NEURA_SDK)
             PREFIX "lib"
             WINDOWS_EXPORT_ALL_SYMBOLS ON
             ARCHIVE_OUTPUT_NAME mathops-import)
-        set_target_properties(neura_test_mathops_static PROPERTIES PREFIX "lib" SUFFIX ".a")
+        # The generated C-import shim uses the release static CRT in every
+        # SDK build. The static fixture must use the same runtime in Debug.
+        set_target_properties(neura_test_mathops_static PROPERTIES PREFIX "lib" SUFFIX ".a"
+            MSVC_RUNTIME_LIBRARY MultiThreaded)
     endif()
     set(neura_native_test_dir "${CMAKE_CURRENT_BINARY_DIR}/native-tests")
     add_test(NAME backend-capabilities COMMAND ${CMAKE_COMMAND}
@@ -2399,10 +2487,8 @@ if(BUILD_TESTING AND NEURA_SDK)
         set_tests_properties(backend-secret-memory-supported PROPERTIES SKIP_RETURN_CODE 77)
     endif()
 
-    # The desktop window host and its Neura native child (docs/design/Desktop030.md). These tests need the
-    # pinned Electron 45.3.3 of hosts/desktop/engine.lock, Node and xvfb-run, so they are registered only when
-    # NEURA_DESKTOP_ENGINE names that Electron executable. Each starts X servers and Electron processes, so they
-    # run one at a time.
+    # The desktop suite uses pinned Electron and Node. Linux runs under Xvfb;
+    # Windows runs in a desktop session. The Electron tests share the desktop.
     set(NEURA_DESKTOP_ENGINE "" CACHE FILEPATH
         "The pinned Electron 45.3.3 executable; when set, the desktop tests are registered")
     if(NEURA_DESKTOP_ENGINE)
@@ -2411,22 +2497,28 @@ if(BUILD_TESTING AND NEURA_SDK)
         endif()
         find_program(NEURA_DESKTOP_NODE node REQUIRED)
         if(NOT WIN32)
-            # Windows has a desktop session of its own; X servers are for POSIX.
             find_program(NEURA_DESKTOP_XVFB_RUN xvfb-run REQUIRED)
         endif()
         set(neura_desktop_tests "${CMAKE_CURRENT_SOURCE_DIR}/tests/desktop")
         add_test(NAME desktop-native-child COMMAND "${NEURA_DESKTOP_NODE}" --test
-            "${neura_desktop_tests}/native_child_test.js")
-        add_test(NAME desktop-shell COMMAND "${Python3_EXECUTABLE}" "${neura_desktop_tests}/run_shell_test.py"
-            "${NEURA_DESKTOP_ENGINE}" --case shell --case child-mismatch --case child-close --case child-quit
+            "${neura_desktop_tests}/native_child_test.js" "${neura_desktop_tests}/bridge_test.js")
+        add_test(NAME desktop-shell COMMAND "${Python3_EXECUTABLE}" -X utf8 "${neura_desktop_tests}/run_shell_test.py"
+            "${NEURA_DESKTOP_ENGINE}" --node "${NEURA_DESKTOP_NODE}"
+            --case shell --case child-mismatch --case child-close --case child-quit
             --case child-crash)
-        add_test(NAME desktop-app COMMAND "${Python3_EXECUTABLE}" "${neura_desktop_tests}/run_app_test.py"
-            "${NEURA_DESKTOP_ENGINE}" --neura "$<TARGET_FILE:neura>")
-        add_test(NAME desktop-package COMMAND "${Python3_EXECUTABLE}" "${neura_desktop_tests}/run_package_test.py"
+        add_test(NAME desktop-app COMMAND "${Python3_EXECUTABLE}" -X utf8 "${neura_desktop_tests}/run_app_test.py"
+            "${NEURA_DESKTOP_ENGINE}" --node "${NEURA_DESKTOP_NODE}" --neura "$<TARGET_FILE:neura>")
+        add_test(NAME desktop-package COMMAND "${Python3_EXECUTABLE}" -X utf8 "${neura_desktop_tests}/run_package_test.py"
             "${NEURA_DESKTOP_ENGINE}" --neura "$<TARGET_FILE:neura>")
         set_tests_properties(desktop-native-child desktop-shell desktop-app desktop-package PROPERTIES
             RUN_SERIAL TRUE LABELS desktop WORKING_DIRECTORY "${neura_desktop_tests}")
         set_tests_properties(desktop-app desktop-package PROPERTIES TIMEOUT 1200)
+        if(WIN32)
+            # Without an unlocked interactive desktop these drivers run what
+            # needs no window, then report the Electron cases as skipped
+            # (tests/desktop/windows_desktop.py), which the CI report refuses.
+            set_tests_properties(desktop-shell desktop-app desktop-package PROPERTIES SKIP_RETURN_CODE 77)
+        endif()
     else()
         message(STATUS "NEURA_DESKTOP_ENGINE is not set: the desktop tests are not registered "
             "(desktop-native-child, desktop-shell, desktop-app, desktop-package)")
@@ -2442,9 +2534,21 @@ if(BUILD_TESTING AND NEURA_SDK)
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/c-import/c-import.cmake"
     )
     set_tests_properties(c-import PROPERTIES FIXTURES_REQUIRED stdlib)
+    if(WIN32)
+        add_test(NAME c-import-windows-coff COMMAND ${CMAKE_COMMAND}
+            "-DNEURA=${CMAKE_CURRENT_BINARY_DIR}/stdlib-install/prefix/bin/neura${CMAKE_EXECUTABLE_SUFFIX}"
+            "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+            "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/c-import-windows-coff-tests"
+            "-DC_COMPILER=${CMAKE_C_COMPILER}"
+            "-DCOFF_ARCHIVER=${CMAKE_AR}"
+            "-DPYTHON=${Python3_EXECUTABLE}"
+            "-DIMPORT_LIBRARY=$<TARGET_LINKER_FILE:neura_test_mathops_shared>"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/c-import/windows-coff.cmake")
+        set_tests_properties(c-import-windows-coff PROPERTIES FIXTURES_REQUIRED stdlib)
+    endif()
 
     set(native_replay_options)
-    if(TARGET neura_launcher)
+    if(TARGET neura_launcher AND NOT WIN32)
         list(APPEND native_replay_options "-DNATIVE_TOOLCHAIN=$<TARGET_FILE:neura>")
     endif()
     add_test(NAME native-replay COMMAND ${CMAKE_COMMAND}
@@ -2589,8 +2693,9 @@ if(BUILD_TESTING)
     # the many short ones instead of running alone at the end. The costs are
     # their seconds on the x86_64 Linux CI runner (release trial 16).
     set(neura_test_costs
-        backend-reference 2640 lifetime-programs 900 stdlib-crypto-pqc 300 stdlib-crypto-pqc-slh-dsa-sign-shake-small 400
-        stdlib-crypto-pqc-slh-dsa-sign-sha2-small 300 stdlib-crypto-pqc-slh-dsa-sign-fast 200 decompiler-behavior 540
+        stdlib-crypto-pqc 300 stdlib-crypto-pqc-slh-dsa-sign-shake-small 400
+        stdlib-crypto-pqc-slh-dsa-sign-sha2-small 300 stdlib-crypto-pqc-slh-dsa-sign-fast 200
+        decompiler-behavior-trace-replay 290 decompiler-behavior-scalar-equivalence 112
         stdlib-crypto-asymmetric 480 app-ui-reconcile 450 stdlib-character 390 backend-tier3 380
         program-fuzz 370 lifecycle-update 360 decompiler-lift 350 stdlib-crypto-pki 330
         expressions-equivalence 300 stdlib-crypto-advanced 290 lift-corpus 260 stdlib-crypto-token 250

@@ -1542,7 +1542,7 @@ These rules complete the contracts of the earlier sections. Where a rule here is
 ### 18.11 Test layout
 
 - **Layout.** Each area of `tests/stdlib` holds test files, `support/` modules, `traps/` programs with `// status:` and `// stderr:` headers, and `programs/` with expected output (`tests/stdlib/area.cmake`). Every area runs against a fresh installation (`stdlib-install`), its tests optimized twice and unoptimized, its programs and traps in both modes, and its program images through `disassemble`, `assemble`, and `decompile`.
-- **Reference evaluator.** `backend-reference` runs every library test function under the NeuraIR reference evaluator and NVM and compares the outcome, the console output, and any trap message. A call of a kernel-bound function runs the runtime's own kernel through the kernel table, so those tests are compared. Tests that need host responses (files, sockets, console input), open a channel, or exceed the evaluator's budget or call depth are counted and not compared.
+- **Reference evaluator.** The `backend-reference-library-*` entries run every library test function under the NeuraIR reference evaluator and NVM and compares the outcome, the console output, and any trap message. A call of a kernel-bound function runs the runtime's own kernel through the kernel table, so those tests are compared. Tests that need host responses (files, sockets, console input), open a channel, or exceed the evaluator's budget or call depth are counted and not compared.
 - **Host services** are tested with the capability denied, with real providers in temporary directories and on localhost, and by replaying checked-in traces.
 - **Cost baseline.** `tests/benchmarks` holds the workloads of this section's cost baseline and a few more (ArrayList, TreeMap, strings, JSON, dates); `benchmarks` compares their steps, peak heap cells, neurons, and image bytes with `baseline.txt` and checks that steps grow as expected between two sizes.
 - **Not established.** Agreement of `Math` with a reference fdlibm 5.3 build (no reference build was available); `with_capacity(2^29)` and other limits that need billions of elements were only inspected.
@@ -1598,7 +1598,7 @@ The modules of `Std.Concurrent` are implemented. [Concurrency](Concurrency) spec
 - The registrations are an immutable list that `subscribe` and `unsubscribe` replace, so `emit` copies nothing. `subscribe` and `unsubscribe` allocate; `emit` does not, beyond what handlers do.
 - The three classes are not transferable, so giving one to a task is [E0602](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0602.md).
 - `emit` is not called under a monitor guard ([E0550](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0550.md)): in a `#Synchronized` method, in a lambda passed directly to `Guarded.with`, or in a function either of them reaches through calls the compiler resolves. A call through a function value is not followed, so the check is a check of the known call graph and not a proof.
-- Tests: `stdlib-events`, and `lifetime-programs` for delivery in every execution mode.
+- Tests include `stdlib-events` and the `lifetime-programs-events-*` entries for delivery in every execution mode.
 
 ## 21. `Std.Crypto`
 

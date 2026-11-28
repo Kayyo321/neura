@@ -633,6 +633,13 @@ void TierCache::add_steps(const TierSteps& steps) {
     statistics_.steps.list_run += steps.list_run;
 }
 
+CompileActivity TierCache::compile_activity() const {
+    const std::lock_guard lock(mutex_);
+    return {statistics_.attempted, statistics_.jit_compiled, statistics_.native_programs,
+            statistics_.native_failed, native_lazy_entries_, statistics_.native_osr_programs,
+            statistics_.native_bytes};
+}
+
 TierStatistics TierCache::statistics() const {
     const std::lock_guard lock(mutex_);
     auto copy = statistics_;

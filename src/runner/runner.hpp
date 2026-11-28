@@ -111,6 +111,11 @@ void provide_native_library(const nvr::Image& image, nvm::StandardServices& serv
 // device, nor with parallel workers, whose time overlaps the run's.
 bool times_runs(const nvm::RunLimits& limits);
 
+// One fresh execution using the caller's prepared bindings and tier cache.
+nvm::RunResult run_bound(const nvr::Image& image, Host& host, const nvm::Bindings& bindings,
+                         std::span<const std::string> arguments, const nvm::RunLimits& limits, bool virtual_time);
+void end_run(Host& host);
+
 int run(const nvr::Image& image, Host& host, std::span<const std::string> arguments,
         const RunOptions& options, std::string_view name, std::size_t image_bytes);
 

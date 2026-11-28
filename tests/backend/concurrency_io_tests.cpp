@@ -16,6 +16,7 @@
 #include "fixtures.hpp"
 #include "nvm/driver.hpp"
 #include "nvm/providers.hpp"
+#include "nvm/tier1.hpp"
 #include "nvm/trace.hpp"
 #include "nvm/trace_file.hpp"
 
@@ -25,6 +26,7 @@
 #include <functional>
 #include <map>
 #include <set>
+#include <span>
 
 #ifdef _WIN32
 #include "platform/windows.hpp"
@@ -162,13 +164,15 @@ private:
     nvm::HostSignature signature_;
 };
 
-// A virtual clock: it moves only when the driver would otherwise sleep.
+// The clock usually moves only when the driver would otherwise sleep. A
+// busy task can instead see a fixed advance on each scheduler clock read.
 class FakeClock final : public nvm::TaskClock {
 public:
-    std::int64_t now() override { return time; }
+    std::int64_t now() override { return time += increment_ns; }
     void wait_until(std::int64_t deadline) override { time = std::max(time, deadline); }
     bool virtual_time() const override { return true; }
     std::int64_t time = 1'000'000;
+    std::int64_t increment_ns = 0;
 };
 
 class FakeMonotonic final : public nvm::HostService {
@@ -475,16 +479,63 @@ struct Recorded {
     std::vector<std::uint64_t> schedule;
 };
 
-Recorded record_scenario(const Environment& environment, const std::string& scenario, nvm::RunLimits limits = {}) {
-    const auto& image = scenarios(environment);
+Recorded record_image(const nvr::Image& image, std::span<const std::string> arguments, nvm::RunLimits limits,
+                      std::int64_t clock_increment = 0) {
     World world;
+    world.clock.increment_ns = clock_increment;
     Recorded recorded;
     limits.schedule = &recorded.schedule;
     const auto bindings = world.bind(image);
-    recorded.trace = nvm::record(image, bindings, std::vector<std::string>{scenario}, limits, &world.clock);
+    recorded.trace = nvm::record(image, bindings, arguments, limits, &world.clock);
     recorded.text = nvm::write_trace(recorded.trace);
     recorded.output = world.console.output();
     return recorded;
+}
+
+Recorded record_scenario(const Environment& environment, const std::string& scenario, nvm::RunLimits limits = {}) {
+    return record_image(scenarios(environment), std::vector<std::string>{scenario}, limits);
+}
+
+NEURA_TEST(concurrency, execution_tiers_match_schedule_vectors_and_deterministic_io_traces) {
+    const auto busy = build_program({environment.source_dir / "tests" / "concurrency" / "busy-deadline.nra"});
+    const auto compare = [&](const std::string& fixture, const nvr::Image& image, std::span<const std::string> arguments,
+                             std::int64_t clock_increment, std::string_view expected_output) {
+        for (const auto quantum : {1, 2, 3, 7, 64, 1024}) {
+            nvm::RunLimits limits;
+            limits.tier = 0;
+            limits.task_quantum = quantum;
+            limits.max_steps = 2'000'000;
+            const auto expected = record_image(image, arguments, limits, clock_increment);
+            const auto label = fixture + ", quantum " + std::to_string(quantum);
+            check(expected.trace.outcome.completed && expected.trace.outcome.status == 0, label + ": completes");
+            check(expected.output.find(expected_output) != std::string::npos,
+                  label + ": missing '" + std::string(expected_output) + "' in output:\n" + expected.output);
+            check(std::ranges::count(expected.schedule, std::uint64_t{1}) > 1, label + ": task 1 ran several turns");
+            check(expected.text.find("\nclock ") != std::string::npos, label + ": a deadline expired");
+
+            limits.tier = 2;
+            for (const auto mode : {nvm::TierOptions::Tier3::Off, nvm::TierOptions::Tier3::Interp,
+                                    nvm::TierOptions::Tier3::Native}) {
+                nvm::TierOptions options;
+                options.tier3 = mode;
+                options.hint_after = options.search_after = options.region_after = options.native_after = 1;
+                options.programs = mode == nvm::TierOptions::Tier3::Off ? nvm::TierOptions::Programs::Off
+                                                                      : nvm::TierOptions::Programs::On;
+                nvm::TierCache cache(image, options);
+                limits.tier_cache = &cache;
+                const auto actual = record_image(image, arguments, limits, clock_increment);
+                const auto case_label = label + ", tier 3 mode " + std::to_string(static_cast<int>(mode));
+                check(actual.schedule == expected.schedule, case_label + ": scheduling decisions differ");
+                check_equal(actual.text, expected.text, case_label + ": the trace bytes");
+                check_equal(actual.output, expected.output, case_label + ": output");
+                check_equal(actual.trace.steps, expected.trace.steps, case_label + ": steps");
+                check_equal(actual.trace.peak_heap_cells, expected.trace.peak_heap_cells, case_label + ": peak heap");
+            }
+        }
+    };
+    compare("overlapping I/O", scenarios(environment), std::vector<std::string>{"mixed"}, 0,
+            "wait 99 failed: Cancelled");
+    compare("busy deadline", busy, {}, 250'000, "busy task stopped: true\n");
 }
 
 // What a replay of `trace` makes of the scenario: with no service bound.

@@ -3,6 +3,7 @@
 #include "tool.hpp"
 
 #include "jit/jit.hpp"
+#include "platform/text.hpp"
 #include "util/diagnostic.hpp"
 #include "util/diagnostic_codes.hpp"
 #include "util/suggest.hpp"
@@ -290,7 +291,7 @@ Options read_options(int argc, char** argv) {
             if (options.command == Command::Run) {
                 options.arguments.emplace_back(arg);
             } else {
-                options.files.push_back(fs::canonical(argv[i]));
+                options.files.push_back(fs::canonical(platform::path_from_utf8(arg)));
             }
         } else if (arg == "--") {
             positional_only = true;
@@ -386,9 +387,9 @@ Options read_options(int argc, char** argv) {
             if (options.command != Command::Check) throw std::runtime_error("--fix applies only to check");
             options.fix = true;
         } else if (compiles && arg == "-I") {
-            const auto root = fs::canonical(next());
+            const auto root = fs::canonical(platform::path_from_utf8(next()));
             if (!fs::is_directory(root)) {
-                throw std::runtime_error("source root is not a directory: " + root.string());
+                throw std::runtime_error("source root is not a directory: " + platform::native_utf8_path(root));
             }
             options.roots.push_back(root);
         } else if (arg == "--no-optimize") {
@@ -430,11 +431,11 @@ Options read_options(int argc, char** argv) {
                 }
                 if (triple.empty() || triple == "." || triple == ".." ||
                     triple.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-") != std::string::npos) {
-                    throw std::runtime_error("--target expects an ELF target triple");
+                    throw std::runtime_error("--target expects a target triple");
                 }
                 options.native_target = triple;
             } else {
-                const fs::path file = next();
+                const auto file = platform::path_from_utf8(next());
                 if (options.launcher && *options.launcher != file) throw std::runtime_error("conflicting --launcher values");
                 options.launcher = file;
             }
@@ -468,7 +469,7 @@ Options read_options(int argc, char** argv) {
                 options.command != Command::Decompile) {
                 throw std::runtime_error("-o applies only to docs, emit-ir, build, inspect, disassemble, assemble, and decompile");
             }
-            options.output = fs::path(next());
+            options.output = platform::path_from_utf8(next());
         } else if (options.command == Command::Run && arg == "--profile") {
             options.limits.profile = true;
         } else if (arg == "--max-tasks" || arg == "--task-quantum" || arg == "--max-queued-messages" ||
@@ -528,7 +529,8 @@ Options read_options(int argc, char** argv) {
         } else if (runs && arg == "--stats") {
             options.stats = true;
         } else if (compiles && arg == "--c-include") {
-            options.c_import.include_dirs.push_back(fs::canonical(next()).string());
+            const auto directory = fs::canonical(platform::path_from_utf8(next()));
+            options.c_import.include_dirs.push_back(platform::native_utf8_path(directory));
         } else if (compiles && arg == "--c-define") {
             options.c_import.defines.emplace_back(next());
         } else if (compiles && arg == "--libclang") {
@@ -580,7 +582,7 @@ Options read_options(int argc, char** argv) {
         } else if (single_input && !options.files.empty()) {
             throw std::runtime_error("expected one input file");
         } else {
-            options.files.push_back(fs::canonical(argv[i]));
+            options.files.push_back(fs::canonical(platform::path_from_utf8(arg)));
         }
     }
     if (options.test_coverage) {

@@ -44,8 +44,11 @@ must contain none. The minor can be higher when it includes expression
 operations or nil metadata from the program or its library imports. The
 reader must reject a file marked as older than the features it contains.
 
-Usage: programs.py <neura> <directory>
+Usage: programs.py <neura> <directory> [fixture]
+
+Omit the fixture stem to run all programs in the directory.
 """
+import argparse
 import os
 import pathlib
 import re
@@ -53,8 +56,13 @@ import subprocess
 import sys
 import tempfile
 
-NEURA = pathlib.Path(sys.argv[1]).resolve()
-DIRECTORY = pathlib.Path(sys.argv[2]).resolve()
+parser = argparse.ArgumentParser(description='Check the lifetime program fixtures.')
+parser.add_argument('neura', type=pathlib.Path)
+parser.add_argument('directory', type=pathlib.Path)
+parser.add_argument('fixture', nargs='?', help='run one fixture by its filename stem')
+args = parser.parse_args()
+NEURA = args.neura.resolve()
+DIRECTORY = args.directory.resolve()
 LIFETIME_MINOR = 14
 # NeuraIR 1.15 (nir_expressions_minor) holds concat text, the string chains
 # that the standard library uses for its messages since the 0.3.0
@@ -150,6 +158,10 @@ def main():
     programs = sorted(DIRECTORY.glob('*.expected'))
     if not programs:
         sys.exit('no programs')
+    if args.fixture is not None:
+        programs = [path for path in programs if path.stem == args.fixture]
+        if not programs:
+            sys.exit(f'unknown lifetime fixture: {args.fixture}')
     with tempfile.TemporaryDirectory() as scratch:
         scratch = pathlib.Path(scratch)
         for expected_path in programs:

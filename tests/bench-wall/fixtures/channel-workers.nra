@@ -1,0 +1,62 @@
+// A bounded worker queue distributes jobs to three workers. Each worker
+// sends a result over a second bounded channel to a single collector.
+let channels = import:Std.Concurrent.Channel;
+let groups = import:Std.Concurrent.WorkerGroup;
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+export let ChannelWorkers = module:program.Entry (
+    const Workers = 3;
+    const Capacity = 16;
+
+    let emit = func(outgoing: channels.Sender<int>) -> func(int) -> void {
+        return new func(job: int) -> void {
+            let value: int64 = job as int64;
+            for (let i = 0; i < 3; i += 1) {
+                value = (value * 1103515245 + 12345) & 1073741823;
+            }
+            outgoing.send((value & 65535) as int);
+        };
+    };
+
+    let collect = func(incoming: channels.Receiver<int>, count: int) -> int64 {
+        let total: int64 = 0;
+        for (let i = 0; i < count; i += 1) {
+            match (incoming.receive()) {
+                channels.Received.Value(value) => {
+                    total += value as int64;
+                },
+                _ => {
+                    trap_with_message("worker result missing");
+                },
+            }
+        }
+        return total;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        if (args.length != 1) {
+            return program.ExitCode.Failure;
+        }
+        last count = result.value_or<int32>(int32s.parse(args[0]), -1);
+        if (count < 0) {
+            return program.ExitCode.Failure;
+        }
+        let [outgoing, incoming, closer] = channels.open<int>(Capacity);
+        let total: int64 = 0;
+        scope {
+            let collector = spawn collect(incoming, count);
+            groups.with_workers<int>(Workers, Capacity, emit(outgoing), func(group: groups.WorkerGroup<int>) -> void {
+                for (let job = 0; job < count; job += 1) {
+                    group.submit(job);
+                }
+            });
+            closer.close();
+            total = collector.join();
+        }
+        console.println("channel-workers {} {}", count, total);
+        return program.ExitCode.Ok;
+    };
+);

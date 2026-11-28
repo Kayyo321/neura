@@ -4,7 +4,7 @@
 #include "app/project.hpp"
 
 #include "cli/tool.hpp"
-#include "project/files.hpp"
+#include "platform/text.hpp"
 
 #include <algorithm>
 #include <iostream>
@@ -78,11 +78,11 @@ int project_build_main(const std::vector<std::string>& arguments) {
         } else if (is("--out")) {
             const auto v = value("--out");
             if (!v) return 1;
-            options.out = *v;
+            options.out = platform::path_from_utf8(*v);
         } else if (is("--web-runtime")) {
             const auto v = value("--web-runtime");
             if (!v) return 1;
-            options.web_runtime = *v;
+            options.web_runtime = platform::path_from_utf8(*v);
         } else if (arg == "--update-lock") {
             options.update_lock = true;
         } else if (arg == "--source-map") {

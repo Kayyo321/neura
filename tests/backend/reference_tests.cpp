@@ -15,14 +15,19 @@
 #include "neura-ir/reference_storage.hpp"
 #include "neura-ir/specialize.hpp"
 #include "nvm/host.hpp"
+#include "nvm/tier1.hpp"
 #include "nvr/format.hpp"
 
 #include <algorithm>
+#include <charconv>
+#include <chrono>
 #include <cstdlib>
 #include <iostream>
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace neura::testing {
@@ -52,6 +57,38 @@ std::optional<std::string> console_output(const Outcome& outcome) {
         output += effect.arguments.front().text + "\n";
     }
     return output;
+}
+
+std::vector<fs::path> reference_files(const fs::path& root) {
+    // Keep the single-file selector for diagnosing an individual input.
+    if (const char* only = std::getenv("NEURA_REFERENCE_FILE")) return {fs::path(only)};
+    std::vector<fs::path> files;
+    for (const auto& area : fs::directory_iterator(root)) {
+        if (!area.is_directory()) continue;
+        for (const auto& entry : fs::directory_iterator(area.path())) {
+            if (entry.path().extension() == ".nra") files.push_back(entry.path());
+        }
+    }
+    std::sort(files.begin(), files.end());
+    const char* setting = std::getenv("NEURA_REFERENCE_SHARD");
+    if (!setting) return files;
+
+    const std::string_view shard(setting);
+    const auto slash = shard.find('/');
+    constexpr auto invalid = "NEURA_REFERENCE_SHARD must be INDEX/COUNT with 1 <= INDEX <= COUNT <= files";
+    check(slash != std::string_view::npos, invalid);
+    const auto number = [&](std::string_view text) {
+        std::size_t value = 0;
+        const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+        check(error == std::errc{} && end == text.data() + text.size(), invalid);
+        return value;
+    };
+    const auto index = number(shard.substr(0, slash));
+    const auto count = number(shard.substr(slash + 1));
+    check(index >= 1 && index <= count && count <= files.size(), invalid);
+    std::vector<fs::path> selected;
+    for (std::size_t i = index - 1; i < files.size(); i += count) selected.push_back(std::move(files[i]));
+    return selected;
 }
 
 void check_fixture(const fs::path& path) {
@@ -94,16 +131,7 @@ NEURA_TEST(reference, primitive_references_match_the_evaluator) {
 
 NEURA_TEST(reference, library_tests_match_the_evaluator) {
     const auto root = environment.source_dir / "tests" / "stdlib";
-    std::vector<fs::path> files;
-    for (const auto& area : fs::directory_iterator(root)) {
-        if (!area.is_directory()) continue;
-        for (const auto& entry : fs::directory_iterator(area.path())) {
-            if (entry.path().extension() == ".nra") files.push_back(entry.path());
-        }
-    }
-    std::sort(files.begin(), files.end());
-    // NEURA_REFERENCE_FILE limits the run to one test file, for diagnosis.
-    if (const char* only = std::getenv("NEURA_REFERENCE_FILE")) files = {fs::path(only)};
+    const auto files = reference_files(root);
     std::size_t compared = 0;
     std::size_t total = 0;
     std::map<std::string, std::size_t> not_compared;
@@ -113,12 +141,33 @@ NEURA_TEST(reference, library_tests_match_the_evaluator) {
     Limits limits;
     limits.budget = 3'000'000;
     limits.depth = 400;
+    using Clock = std::chrono::steady_clock;
+    const bool profile = std::getenv("NEURA_REFERENCE_PROFILE") != nullptr;
+    const auto now = [profile] { return profile ? Clock::now() : Clock::time_point{}; };
     for (const auto& file : files) {
+        const auto started = now();
+        const auto compared_before = compared;
+        const auto label = file.lexically_relative(root).generic_string();
         std::vector<fs::path> roots;
         if (fs::is_directory(file.parent_path() / "support")) roots.push_back(file.parent_path() / "support");
         auto program = lower_files({file}, roots);
         const auto tests = test_functions(program, fs::canonical(file));
-        if (tests.empty()) continue;
+        const auto lowered = now();
+        Clock::duration preparation{}, evaluation{}, execution{};
+        const auto report = [&] {
+            if (!profile) return;
+            const auto ms = [](Clock::duration elapsed) {
+                return std::chrono::duration<double, std::milli>(elapsed).count();
+            };
+            std::cout << "  reference-file " << label << " total=" << tests.size()
+                      << " compared=" << compared - compared_before << " lowering_ms=" << ms(lowered - started)
+                      << " preparation_ms=" << ms(preparation) << " evaluator_ms=" << ms(evaluation)
+                      << " nvm_ms=" << ms(execution) << " wall_ms=" << ms(now() - started) << '\n';
+        };
+        if (tests.empty()) {
+            report();
+            continue;
+        }
         total += tests.size();
         materialize_reference_storage(program);
         specialize(program);
@@ -127,6 +176,8 @@ NEURA_TEST(reference, library_tests_match_the_evaluator) {
         backend::ConversionOptions options;
         options.entries = tests;
         auto image = nvr::load(nvr::encode(backend::convert(optimized, options).image));
+        const auto evaluator_started = now();
+        preparation = evaluator_started - lowered;
         Evaluator evaluator(program, limits);
         bool initialized = true;
         for (const auto& outcome : evaluator.initialize()) {
@@ -136,11 +187,25 @@ NEURA_TEST(reference, library_tests_match_the_evaluator) {
                 break;
             }
         }
-        if (!initialized) continue;
-        const auto label = file.lexically_relative(root).generic_string();
+        evaluation = now() - evaluator_started;
+        if (!initialized) {
+            report();
+            continue;
+        }
+
+        nvm::StringSink sink;
+        nvm::ConsoleWriteLine console(sink);
+        nvm::HostRegistry registry;
+        registry.add(console);
+        std::optional<nvm::Bindings> bindings;
+        std::optional<std::string> bind_error;
+        std::optional<nvm::TierCache> tiers;
+        nvm::RunLimits runtime_limits;
         for (std::size_t i = 0; i < tests.size(); ++i) {
             const auto name = label + " " + program.symbols[tests[i]].name;
+            const auto call_started = now();
             const auto expected = evaluator.call(tests[i], {});
+            evaluation += now() - call_started;
             if (expected.status == Status::Unsupported || expected.status == Status::LimitReached) {
                 const auto reason = describe(expected.status) + ": " + expected.reason;
                 ++not_compared[reason];
@@ -152,46 +217,61 @@ NEURA_TEST(reference, library_tests_match_the_evaluator) {
                 ++not_compared["an effect other than a console line"];
                 continue;
             }
-            image.entry = static_cast<std::uint32_t>(i);
             // The NVM run binds the console alone. An image that imports another
             // host service, such as Std.App's server services, cannot bind there,
             // so its tests are not compared.
-            std::optional<Captured> run;
-            try {
-                run.emplace(run_captured(image));
-            } catch (const nvm::BindError& error) {
+            const auto nvm_started = now();
+            if (!bindings && !bind_error) {
+                try {
+                    bindings.emplace(nvm::bind(image, registry));
+                } catch (const nvm::BindError& error) {
+                    bind_error = error.what();
+                }
+            }
+            if (bind_error) {
+                execution += now() - nvm_started;
                 const std::string reason = "the image imports a host service other than the console";
                 ++not_compared[reason];
-                first_of.emplace(reason, name + ": " + error.what());
+                first_of.emplace(reason, name + ": " + *bind_error);
                 continue;
             }
-            const auto& actual = *run;
+            // Like neura test, reuse the image's tier proofs and code while
+            // giving every entry a fresh execution and empty console sink.
+            if (!tiers && nvm::tier_ceiling() >= 1) {
+                tiers.emplace(image);
+                runtime_limits.tier_cache = &*tiers;
+            }
+            image.entry = static_cast<std::uint32_t>(i);
+            sink = nvm::StringSink{};
+            const auto actual = nvm::run(image, *bindings, {}, runtime_limits);
+            execution += now() - nvm_started;
             ++compared;
             const bool returned = expected.status == Status::Returned;
-            if (returned != actual.result.completed) {
+            if (returned != actual.completed) {
                 mismatches.push_back(name + ": evaluator " + describe(expected) + ", NVM " +
-                                     (actual.result.completed ? "completed" : describe_trap(actual.result, image)));
+                                     (actual.completed ? "completed" : describe_trap(actual, image)));
                 continue;
             }
-            if (*output != actual.output) {
+            if (*output != sink.contents()) {
                 mismatches.push_back(name + ": console output differs\n  evaluator: " + *output + "\n  NVM: " +
-                                     actual.output);
+                                     sink.contents());
                 continue;
             }
             if (expected.status == Status::Trapped && expected.trap_reason == 3 &&
-                (actual.result.trap.reason != 3 || actual.result.trap.detail != expected.reason)) {
+                (actual.trap.reason != 3 || actual.trap.detail != expected.reason)) {
                 mismatches.push_back(name + ": message differs: evaluator '" + expected.reason + "', NVM '" +
-                                     actual.result.trap.detail + "'");
+                                     actual.trap.detail + "'");
             }
         }
+        report();
     }
     std::cout << "  " << compared << " of " << total << " library tests compared with the evaluator\n";
     std::vector<std::pair<std::size_t, std::string>> reasons;
     for (const auto& [reason, count] : not_compared) reasons.emplace_back(count, reason);
     std::sort(reasons.rbegin(), reasons.rend());
-    for (std::size_t i = 0; i < reasons.size() && i < 12; ++i) {
-        std::cout << "  not compared: " << reasons[i].first << " x " << reasons[i].second;
-        if (const auto found = first_of.find(reasons[i].second); found != first_of.end()) {
+    for (const auto& [count, reason] : reasons) {
+        std::cout << "  not compared: " << count << " x " << reason;
+        if (const auto found = first_of.find(reason); found != first_of.end()) {
             std::cout << " (first: " << found->second << ")";
         }
         std::cout << '\n';

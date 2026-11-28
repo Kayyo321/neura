@@ -1,4 +1,5 @@
 #include "commands.hpp"
+#include "benchmark.hpp"
 #ifdef NEURA_HAS_SQL
 #include "sql/sql_engine.hpp"
 #endif
@@ -98,12 +99,12 @@ std::optional<std::string> test_failure_message(const neura::nvm::Trap& trap, co
     return text;
 }
 
-} // namespace
+struct TestSource {
+    IrProgram program;
+    std::vector<tooling::TestInfo> catalog;
+};
 
-// Testing.md: every exported, zero-argument, void function whose name starts
-// with test_ in a module of the listed files is a test. Each test runs in a
-// fresh execution of one image, so no state carries over between tests.
-int run_tests(const Options& options) {
+TestSource discover_test_source(const Options& options) {
     // Discovery does semantic analysis but never links native code, converts
     // circuits, initializes modules, or executes any user function.
     auto analysis_options = options;
@@ -129,22 +130,14 @@ int run_tests(const Options& options) {
         }
         std::erase_if(catalog, [&](const auto& item) { return !selected.contains(item.id); });
     }
-    if (options.list_tests) {
-        if (options.test_format_json) {
-            neura::tooling::Json records = neura::tooling::Json::Array{};
-            for (const auto& test : catalog) records.push_back(neura::tooling::test_info_json(test));
-            std::cout << neura::tooling::Json{{"version", 1}, {"tests", std::move(records)}}.dump() << '\n';
-        } else {
-            for (const auto& test : catalog) std::cout << test.id << '\n';
-        }
-        return 0;
-    }
-    std::vector<neura::SymbolId> tests;
-    std::vector<std::string> names;
-    for (const auto& test : catalog) {
-        tests.push_back(test.symbol);
-        names.push_back(test.label);
-    }
+    return {std::move(program), std::move(catalog)};
+}
+
+nvr::Image convert_test_source(const Options& options, TestSource& source) {
+    auto& [program, catalog] = source;
+    std::vector<SymbolId> tests;
+    tests.reserve(catalog.size());
+    for (const auto& test : catalog) tests.push_back(test.symbol);
     if (tests.empty()) {
         throw std::runtime_error("no tests found: a test is an exported, zero-argument void function named "
                                  "test_* in a module of the listed files");
@@ -177,11 +170,73 @@ int run_tests(const Options& options) {
             conversion_options.extra_functions.push_back(body.owner);
         }
     }
-    auto conversion = neura::backend::convert(program, conversion_options);
+    return neura::backend::convert(program, conversion_options).image;
+}
+
+} // namespace
+
+namespace benchmark {
+
+int export_suite(const Options& options, const fs::path& image, const fs::path& catalog, BuildTiming& timing) {
+    if (options.list_tests || options.test_coverage || options.schedule || options.schedules > 1 || options.save_schedule)
+        throw std::runtime_error("suite export requires a compiled test selection with the reference schedule");
+    auto source = discover_test_source(options);
+    const auto encoded = nvr::encode(convert_test_source(options, source));
+    timing.encoded = std::chrono::steady_clock::now();
+    timing.encoded_cpu = std::clock();
+    write_file(image, encoded);
+    timing.written = std::chrono::steady_clock::now();
+    auto entries = tooling::Json::Array{};
+    for (std::size_t i = 0; i < source.catalog.size(); ++i) {
+        auto entry = tooling::test_info_json(source.catalog[i]);
+        entry["entry"] = i;
+        entry["label"] = source.catalog[i].label;
+        entries.push_back(std::move(entry));
+    }
+    tooling::Json labels = tooling::Json::Array{};
+    for (const auto& file : options.files) labels.push_back(backend::source_label(source.program, file.generic_string()));
+    const auto text = tooling::Json{{"version", 1}, {"tests", std::move(entries)},
+                                    {"source_labels", std::move(labels)}}.dump() + '\n';
+    write_file(catalog, std::vector<std::uint8_t>(text.begin(), text.end()));
+    return 0;
+}
+
+std::string test_failure(const nvm::RunResult& result, const nvr::Image& image,
+                         const std::set<std::string>& source_labels) {
+    if (result.completed) {
+        if (result.status == 0) return {};
+        return "the test exited with status " + std::to_string(result.status);
+    }
+    if (const auto assertion = test_failure_message(result.trap, image, source_labels)) return *assertion;
+    return nvm::describe(result.trap, image, false);
+}
+
+} // namespace benchmark
+
+// Testing.md: every exported, zero-argument, void function whose name starts
+// with test_ in a module of the listed files is a test. Each test runs in a
+// fresh execution of one image, so no state carries over between tests.
+int run_tests(const Options& options) {
+    auto source = discover_test_source(options);
+    auto& [program, catalog] = source;
+    if (options.list_tests) {
+        if (options.test_format_json) {
+            neura::tooling::Json records = neura::tooling::Json::Array{};
+            for (const auto& test : catalog) records.push_back(neura::tooling::test_info_json(test));
+            std::cout << neura::tooling::Json{{"version", 1}, {"tests", std::move(records)}}.dump() << '\n';
+        } else {
+            for (const auto& test : catalog) std::cout << test.id << '\n';
+        }
+        return 0;
+    }
+    const auto test_image = convert_test_source(options, source);
+    std::vector<std::string> names;
+    names.reserve(catalog.size());
+    for (const auto& test : catalog) names.push_back(test.label);
     // --tier-stats times the tests from the loading of their built image.
     std::optional<neura::nvm::TierTimes> times;
     if (options.tier_stats) times.emplace(std::chrono::steady_clock::now());
-    auto image = neura::nvr::load(neura::nvr::encode(conversion.image));
+    auto image = neura::nvr::load(neura::nvr::encode(test_image));
     std::unique_ptr<neura::tooling::LineCoverage> coverage;
     if (options.test_coverage) {
         std::map<std::string, fs::path> sources;
@@ -200,7 +255,7 @@ int run_tests(const Options& options) {
         }
         coverage = std::make_unique<neura::tooling::LineCoverage>(image, sources);
     }
-    const auto max_jobs = std::min<std::size_t>(tests.size(), neura::nvm::FleetOptions{}.window);
+    const auto max_jobs = std::min<std::size_t>(catalog.size(), neura::nvm::FleetOptions{}.window);
     neura::cli::GpuRun gpu(options.gpu, image, max_jobs);
 
 #ifdef _WIN32
@@ -213,10 +268,10 @@ int run_tests(const Options& options) {
     std::unique_ptr<neura::tooling::TestReporter> reporter;
     if (options.test_reporter_json) {
         reporter = std::make_unique<neura::tooling::TestReporter>();
-        reporter->event("runStart", {{"count", options.schedule ? std::size_t{1} : tests.size()}});
+        reporter->event("runStart", {{"count", options.schedule ? std::size_t{1} : catalog.size()}});
     }
     std::unique_ptr<neura::tooling::TestOutputCapture> captured;
-    std::vector<std::chrono::steady_clock::time_point> started(tests.size());
+    std::vector<std::chrono::steady_clock::time_point> started(catalog.size());
     const auto begin = [&](std::size_t i) {
         if (!reporter) return;
         reporter->event("testStart", neura::tooling::test_info_json(catalog[i]));
@@ -241,15 +296,9 @@ int run_tests(const Options& options) {
     const auto finished = [&](std::size_t i, const neura::nvm::RunResult& result, const std::string& note = {},
                               const std::string& forced_failure = {}) {
         // Each test is its own run: files and sockets it left open close now.
-        host.services.end_run();
-        host.secrets.release_all();
-        std::string message = forced_failure;
-        if (message.empty() && result.completed && result.status != 0)
-            message = "the test exited with status " + std::to_string(result.status);
-        if (message.empty() && !result.completed) {
-            if (const auto assertion = test_failure_message(result.trap, image, test_labels)) message = *assertion;
-            else message = neura::nvm::describe(result.trap, image, false);
-        }
+        runner::end_run(host);
+        const auto message = forced_failure.empty() ? benchmark::test_failure(result, image, test_labels)
+                                                    : forced_failure;
         const bool success = message.empty();
         if (!success) ++failed;
         if (reporter) {
@@ -323,21 +372,16 @@ int run_tests(const Options& options) {
     // its own virtual clock when virtual time is on.
     const auto run_test = [&](std::size_t i, neura::nvm::ScheduleChooser* chooser, std::uint64_t quantum,
                               bool virtual_time) {
-        neura::nvm::VirtualTaskClock virtual_clock;
-        neura::nvm::TaskClock* clock = virtual_time ? &virtual_clock : nullptr;
-        host.services.set_clock(clock);
         auto test_limits = limits;
         test_limits.chooser = chooser;
         test_limits.task_quantum = quantum;
         // The start functions share the entry signature, so any of them can
         // be the entry of a validated image.
         image.entry = static_cast<std::uint32_t>(i);
-        auto result = neura::nvm::run(image, bindings, {}, test_limits, clock);
-        host.services.set_clock(nullptr);
-        return result;
+        return runner::run_bound(image, host, bindings, {}, test_limits, virtual_time);
     };
     const auto passed = [](const neura::nvm::RunResult& result) { return result.completed && result.status == 0; };
-    std::size_t ran = tests.size();
+    std::size_t ran = catalog.size();
     if (options.schedule) {
         // Reproduction: the one test of the saved schedule, under exactly
         // its choices, quantum, and clock.
@@ -363,7 +407,7 @@ int run_tests(const Options& options) {
         if (reporter) {
             // A single member per fleet preserves GPU behavior while making
             // every native/console byte unambiguously attributable to a test.
-            for (std::size_t i = 0; i < tests.size(); ++i) {
+            for (std::size_t i = 0; i < catalog.size(); ++i) {
                 begin(i);
                 neura::nvm::Fleet fleet(image, {limits, device, 1});
                 fleet.add(static_cast<std::uint32_t>(i), {});
@@ -372,7 +416,7 @@ int run_tests(const Options& options) {
             }
         } else {
             neura::nvm::Fleet fleet(image, {limits, device});
-            for (std::size_t i = 0; i < tests.size(); ++i) fleet.add(static_cast<std::uint32_t>(i), {});
+            for (std::size_t i = 0; i < catalog.size(); ++i) fleet.add(static_cast<std::uint32_t>(i), {});
             neura::nvm::run_fleet(fleet, bindings,
                                   [&](std::size_t i, const neura::nvm::RunResult& result) { finished(i, result); });
         }
@@ -382,7 +426,7 @@ int run_tests(const Options& options) {
         // bounded: it says nothing about schedules it did not run.
         std::uint64_t explored = 0;
         bool saved = false;
-        for (std::size_t i = 0; i < tests.size(); ++i) {
+        for (std::size_t i = 0; i < catalog.size(); ++i) {
             begin(i);
             auto result = run_test(i, nullptr, limits.task_quantum, options.virtual_time);
             std::uint64_t count = 1;
@@ -390,8 +434,7 @@ int run_tests(const Options& options) {
             neura::nvm::SavedSchedule failing{names[i], options.schedule_seed, limits.task_quantum,
                                               options.virtual_time, {}};
             for (std::uint64_t k = 1; passed(result) && k < options.schedules; ++k) {
-                host.services.end_run();
-                host.secrets.release_all();
+                runner::end_run(host);
                 neura::nvm::ExploringChooser chooser(options.schedule_seed + k);
                 result = run_test(i, &chooser, limits.task_quantum, options.virtual_time);
                 // No decision offered a choice: the test has one schedule.
@@ -417,7 +460,7 @@ int run_tests(const Options& options) {
             finished(i, result, note);
         }
         if (options.schedules > 1 && !reporter) {
-            std::cout << "explored " << explored << " schedule(s) of " << tests.size() << " test(s), seed "
+            std::cout << "explored " << explored << " schedule(s) of " << catalog.size() << " test(s), seed "
                       << options.schedule_seed << '\n';
         }
     }
