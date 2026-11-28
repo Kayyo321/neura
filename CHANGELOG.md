@@ -42,6 +42,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ### Changed
 
+- NeuraIR 1.18 and NVR 1.12 add the shared-pointer object-storage operation. Every program that links `Std.Core.Pointer` is now written as NeuraIR 1.18, because the module contains the operation, so a reader that accepts only up to 1.17 refuses it. Its image keeps its earlier NVR minor unless the program constructs a `SharedPointer`. [NeuraIR 1.18](docs/NirFormat.md#revision-118-shared-pointer-storage)
 - `new Guarded<T>(state)` requires a transferable `T` (E0602), because the caller could keep an alias to the state and change it while another task holds the guard. Build any other state inside the guard with `Guarded.create`. The initializer given to `create` must be task-safe (E0601), so it cannot return an object a reassignable global also holds.
 - A `Std.Concurrent` handle such as `AtomicInt64` cannot be a `Parallel.map` item (E0602) or be read through a `const` global by a parallel worker (E0601). The item received a copy, so its updates were lost.
 - E0602 for a value in a `select` send arm is reported at that value instead of at the `select`.
