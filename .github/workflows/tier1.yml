@@ -229,8 +229,63 @@ jobs:
           python scripts/generate-wiki.py --check
           python scripts/gen-kernels.py --check
           python scripts/build-site.py --check
+      - name: Prepare the locked Windows desktop test engine
+        shell: pwsh
+        run: |
+          if (-not [Environment]::UserInteractive -or [Diagnostics.Process]::GetCurrentProcess().SessionId -eq 0) {
+            throw 'The Windows desktop suite requires an interactive desktop session.'
+          }
+          Get-Command node -CommandType Application -ErrorAction Stop
+          node -e 'if (typeof Promise.withResolvers !== "function") process.exit(1)'
+          if ($LASTEXITCODE -ne 0) { throw 'The desktop tests require Node 22 or later.' }
+          python -m pip install --only-binary=:all: Pillow==12.1.1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          @'
+          import hashlib
+          import os
+          from pathlib import Path
+          import shutil
+          import tempfile
+          import tomllib
+          import urllib.request
+          import zipfile
+
+          lock = tomllib.loads(Path("hosts/desktop/engine.lock").read_text(encoding="utf-8"))
+          target = lock["targets"]["win32-x64"]
+          directory = Path(tempfile.mkdtemp(prefix="neura-electron-", dir=os.environ["RUNNER_TEMP"]))
+          archive = directory / target["archive"]
+          release = lock["engine"]["checksums"].rsplit("/", 1)[0]
+          with urllib.request.urlopen(f"{release}/{archive.name}", timeout=120) as download, archive.open("wb") as stream:
+              shutil.copyfileobj(download, stream)
+          with archive.open("rb") as stream:
+              digest = hashlib.file_digest(stream, "sha256").hexdigest()
+          if digest != target["sha256"]:
+              raise SystemExit(f"Unexpected SHA-256 for {archive.name}: {digest}")
+          engine = directory / "engine"
+          with zipfile.ZipFile(archive) as contents:
+              contents.extractall(engine)
+          print(f"Verified {archive.name} SHA-256 {digest}")
+          with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as environment:
+              print(f"NEURA_DESKTOP_ENGINE={engine / 'electron.exe'}", file=environment)
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Configure
-        run: cmake --preset windows-msvc -DNEURA_TEST_TIMEOUT_SCALE=12 -DNEURA_TEST_FRAME_HOOKS=ON
+        shell: pwsh
+        run: >
+          cmake --preset windows-msvc -DNEURA_TEST_TIMEOUT_SCALE=12 -DNEURA_TEST_FRAME_HOOKS=ON
+          "-DNEURA_DESKTOP_ENGINE=$env:NEURA_DESKTOP_ENGINE"
+      - name: Require the Windows desktop test entries
+        shell: pwsh
+        run: |
+          $json = ctest --test-dir build-windows-msvc --show-only=json-v1 | Out-String
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $inventory = $json | ConvertFrom-Json
+          $desktopTests = @('desktop-native-child', 'desktop-shell', 'desktop-app', 'desktop-package')
+          foreach ($testName in $desktopTests) {
+            if ($inventory.tests.name -notcontains $testName) {
+              throw "Missing desktop test: $testName"
+            }
+          }
       - name: Build
         run: cmake --build --preset windows-msvc --parallel 4 2>&1 | tee build-windows-msvc/build.log
       - name: Require an MSVC build without Neura compiler warnings
