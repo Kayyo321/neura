@@ -1,0 +1,96 @@
+// The SharedPointer and WeakPointer examples of docs/lang/Neura0.3.1.md
+// (sections 2.5, 2.6, and 4, and the strong part of 2.7), as written there
+// except that the list field of section 4 is constructed with new.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let optional = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Pointer;
+
+let Node = class (
+    export let value: int64 = 0;
+    export let parent: WeakPointer<Node> = nil;
+    export let children: SharedPointer<Node>[list] = new;
+
+    export let init = func(initial: int64) {
+        value = initial;
+    };
+);
+
+let Point = class (
+    export let x: int64 = 0;
+    export let y: int64 = 0;
+
+    export let init = func(px: int64, py: int64) {
+        x = px;
+        y = py;
+    };
+);
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        // Section 2.5
+        {
+            let root: SharedPointer<Node> = new(new Node(1));
+            let alias = root.clone();
+            let first = root.read().value; // 1
+            let second = alias.read().value; // 1
+            let weak = root.downgrade();
+            console.println("{} {}", first, second);
+        }
+        // Section 2.6
+        {
+            let resource: SharedPointer<Point> = new(new Point(3, 4));
+            let weak = resource.downgrade();
+            let result = weak.upgrade();
+            match (result) {
+                optional.Optional.Some(strong) => {
+                    let x = strong.read().x;
+                    console.println("{}", x);
+                },
+                optional.Optional.None => {
+                    // The object is no longer available.
+                },
+            }
+        }
+        // Section 4
+        {
+            let root: SharedPointer<Node> = new(new Node(1));
+            let child: SharedPointer<Node> = new(new Node(2));
+
+            child.with_mut(func(node: Node) {
+                node.parent = root.downgrade();
+            });
+
+            root.with_mut(func(node: Node) {
+                node.children.append(child.clone());
+            });
+
+            let alias = root.clone();
+
+            let parent_ref = child.with_read(
+                func(node: Node) -> WeakPointer<Node> => node.parent
+            );
+
+            let upgraded = parent_ref.upgrade();
+
+            match (upgraded) {
+                optional.Optional.Some(parent) => {
+                    let value = parent.with_read(
+                        func(node: Node) -> int64 => node.value
+                    );
+                    console.println("{}", value);
+                },
+                optional.Optional.None => {
+                    // Parent no longer exists.
+                },
+            }
+        }
+        // Sections 2.7 and 4, the strong part of the SoftPointer example
+        {
+            let data: int64[] = [10, 20, 30];
+            let strong: SharedPointer<int64[]> = new(data);
+            console.println("{}", strong.read()[0]);
+        }
+        return program.ExitCode.Ok;
+    };
+);

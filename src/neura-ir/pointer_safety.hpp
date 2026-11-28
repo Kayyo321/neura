@@ -8,7 +8,9 @@
 
 namespace neura {
 
-enum class PointerKind { None, Mutable, Const, List, Unique, Shared, Weak, Soft, Atomic, Locked };
+// SharedGroup is the private state that the owners and weak references of
+// one shared target reach; it follows their transfer rule.
+enum class PointerKind { None, Mutable, Const, List, Unique, Shared, Weak, Soft, Atomic, Locked, SharedGroup };
 
 // The source name of each pointer class, for diagnostics.
 inline std::string_view pointer_kind_name(PointerKind kind) {
@@ -22,6 +24,7 @@ inline std::string_view pointer_kind_name(PointerKind kind) {
     case PointerKind::Soft: return "SoftPointer";
     case PointerKind::Atomic: return "AtomicPointer";
     case PointerKind::Locked: return "LockedPointer";
+    case PointerKind::SharedGroup: return "SharedGroup";
     case PointerKind::None: break;
     }
     return {};
@@ -58,6 +61,7 @@ inline PointerKind pointer_class(const IrProgram& program, SymbolId id) {
     if (pointer_class_name(cls, "SoftPointer")) return PointerKind::Soft;
     if (pointer_class_name(cls, "AtomicPointer")) return PointerKind::Atomic;
     if (pointer_class_name(cls, "LockedPointer")) return PointerKind::Locked;
+    if (pointer_class_name(cls, "SharedGroup")) return PointerKind::SharedGroup;
     return PointerKind::None;
 }
 

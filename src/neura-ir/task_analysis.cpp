@@ -306,7 +306,8 @@ bool TaskAnalysis::class_transferable(SymbolId cls, bool item) const {
     };
     bool result = false;
     if (const auto pointer = pointer_class(program_, cls);
-        pointer == PointerKind::Shared || pointer == PointerKind::Weak || pointer == PointerKind::Soft) {
+        pointer == PointerKind::Shared || pointer == PointerKind::Weak || pointer == PointerKind::Soft ||
+        pointer == PointerKind::SharedGroup) {
         // Tasks may share a pointer to a target that never changes. A parallel
         // item runs in a heap of its own and cannot share it.
         const auto* target = pointer_value_type(program_, cls);

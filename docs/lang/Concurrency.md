@@ -295,6 +295,7 @@ These are the ordering guarantees a program may rely on. An effect A is *visible
 - A precedes `close`, and B follows an operation that reports `Closed`;
 - A precedes a cancellation request, and B follows an observation of that request;
 - A and B are operations on one `AtomicInt64`, which are totally ordered, each seeing the latest earlier store;
+- A and B are operations on the owner claims of one `SharedPointer` target (`clone`, `release`, `close`, and `upgrade` and `is_alive` on its `WeakPointer`s), which are totally ordered, each seeing the latest earlier one;
 - A is inside one `Guarded<T>.with` call and B is inside a later one on the same guard;
 - A is inside one call of a synchronized method on an instance, and B is inside a later call of a synchronized method on the same instance (section 8.1).
 

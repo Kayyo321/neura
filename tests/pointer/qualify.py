@@ -376,8 +376,10 @@ let use = func {
     def test_declared_kinds_keep_the_pointer_boundaries(self):
         kinds = self.SHAREABLE + ("UniquePointer<Mutable>",)
         for kind in kinds:
-            with self.subTest(constructor=kind):
-                self.reject(self.KINDS_HEADER + f"""
+            # SharedPointer and WeakPointer have constructors since M2.
+            if not kind.startswith(("SharedPointer", "WeakPointer")):
+                with self.subTest(constructor=kind):
+                    self.reject(self.KINDS_HEADER + f"""
 let use = func {{
     let pointer: {kind} = new();
 }};
@@ -399,6 +401,164 @@ let use = func(pointer: SharedPointer<Fixed>) {
     let weak = pointer as WeakPointer<Fixed>;
 };
 """, "E0415", "cannot change a managed pointer", "as WeakPointer")
+
+    SHARED_DECLARATIONS = """let optional = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+let Node = class (
+    export let value: int64 = 0;
+    export let parent: WeakPointer<Node> = nil;
+    export let init = func(initial: int64) {
+        value = initial;
+    };
+);
+
+let alive = func(weak: WeakPointer<Node>) -> string {
+    match (weak.upgrade()) {
+        optional.Optional.Some(strong) => {
+            last value = strong.read().value;
+            strong.release();
+            return "alive " + value.to_string();
+        },
+        optional.Optional.None => {},
+    }
+    return "gone";
+};
+
+let scoped = func(owner: SharedPointer<Node>) -> Result<Unit> {
+    using (copy = owner.clone()) {
+        console.println("scoped {}", copy.read().value);
+    }
+    return Result<Unit>.Ok(Unit.Value);
+};
+"""
+
+    def test_shared_and_weak_pointers(self):
+        self.build(program("""
+        let root: SharedPointer<Node> = new(new Node(1));
+        let alias = root.clone();
+        console.println("{} {} {}", root.read().value, alias.read().value, root.read() == alias.read());
+        let weak = root.downgrade();
+        root.with_mut(func(node: Node) {
+            node.value = 5;
+        });
+        let doubled = alias.with_read<int64>(func(node: Node) -> int64 => node.value * 2);
+        console.println("{} {} {}", doubled, alive(weak), weak.is_alive());
+        scoped(alias);
+        root.release();
+        console.println("{}", alive(weak));
+        alias.close();
+        alias.close();
+        console.println("{} {}", alive(weak), weak.is_alive());
+        let data: int64[] = [10, 20, 30];
+        let numbers: SharedPointer<int64[]> = new(data);
+        let items: SharedPointer<int64[list]> = new(new([4, 5]));
+        console.println("{} {}", numbers.read()[1], items.read().length);
+        if (args.length != 0) {
+            if (args[0] == "twice") {
+                alias.release();
+            } else if (args[0] == "released") {
+                alias.read();
+            } else if (args[0] == "borrowed") {
+                let other: SharedPointer<Node> = new(new Node(2));
+                other.with_mut(func(node: Node) {
+                    other.with_read<int64>(func(inner: Node) -> int64 => inner.value);
+                });
+            } else {
+                let other: SharedPointer<Node> = new(new Node(3));
+                let target = other.read();
+                destroy target;
+            }
+        }
+""", self.SHARED_DECLARATIONS))
+        expected = "1 1 true\n10 alive 5 true\nscoped 5\nalive 5\ngone false\n20 2\n"
+        self.assert_counts_agree(self.run_modes(0, expected))
+        self.run_modes(134, expected, "invalid state: SharedPointer released twice", ("twice",))
+        self.run_modes(134, expected, "invalid state: released SharedPointer", ("released",))
+        self.run_modes(134, expected, "invalid state: SharedPointer is borrowed by with_mut", ("borrowed",))
+        self.run_modes(139, expected, "pointer-owned storage is released by collection", ("destroy",))
+
+    def test_shared_pointers_cross_tasks_with_immutable_targets(self):
+        self.build(program("""
+        let root: SharedPointer<Config> = new(new Config(7));
+        let weak = root.downgrade();
+        scope {
+            last a = spawn use(root.clone(), 10);
+            last b = spawn use(root.clone(), 10);
+            last c = spawn probe(weak);
+            console.println("{} {}", a.join() + b.join(), c.join());
+        }
+        console.println("{}", weak.is_alive());
+        root.release();
+        console.println("{}", weak.is_alive());
+""", """let optional = import:Std.Core.Optional;
+
+.Immutable
+let Config = class (
+    export last level: int;
+    export let init = func(value: int) {
+        level = value;
+    };
+);
+
+let use = func(owner: SharedPointer<Config>, rounds: int) -> int {
+    let total = 0;
+    for (let i: int = 0; i < rounds; i++) {
+        last copy = owner.clone();
+        total += copy.read().level;
+        copy.release();
+    }
+    owner.release();
+    return total;
+};
+
+let probe = func(weak: WeakPointer<Config>) -> bool {
+    match (weak.upgrade()) {
+        optional.Optional.Some(strong) => {
+            last seen = strong.read().level == 7;
+            strong.release();
+            return seen;
+        },
+        optional.Optional.None => {},
+    }
+    return false;
+};
+"""))
+        for quantum in ("1", "1024"):
+            self.assert_counts_agree(self.run_modes(0, "140 true\ntrue\nfalse\n", limits=("--task-quantum", quantum)))
+
+    def test_shared_pointer_images_and_artifacts(self):
+        self.build(program("""
+        let owner: SharedPointer<Node> = new(new Node(4));
+        console.println("{}", owner.read().value);
+""", self.SHARED_DECLARATIONS))
+        image = self.image.read_bytes()
+        self.assertEqual(image[:4], b"NEUR")
+        self.assertEqual(int.from_bytes(image[6:8], "little"), 12)
+        ir = self.path / "shared.nir"
+        rebuilt = self.path / "rebuilt.nvr"
+        assembly = self.path / "shared.nvra"
+        assembled = self.path / "assembled.nvr"
+        for arguments in (("emit-ir", self.source, "-o", ir), ("build", ir, "-o", rebuilt),
+                          ("disassemble", self.image, "-o", assembly), ("assemble", assembly, "-o", assembled)):
+            result = self.command(*arguments)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(ir.read_bytes()[:8], b"NEIR\x01\x00\x12\x00")
+        self.assertTrue(rebuilt.read_bytes() == image, "building from NeuraIR changed the image")
+        self.assertTrue(assembled.read_bytes() == image, "assembling the disassembly changed the image")
+        self.assertIn("retain-object-storage", assembly.read_text(encoding="utf-8"))
+        older = bytearray(image)
+        older[6] = 11
+        (self.path / "older.nvr").write_bytes(bytes(older))
+        result = self.command("run", "--runtime=off", "--gpu=off", self.path / "older.nvr")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("the image uses NVR 1.12 features but declares 1.11", result.stderr)
+
+    def test_shared_pointer_specification_examples(self):
+        source = (pathlib.Path(__file__).with_name("spec-shared.nra")).read_text(encoding="utf-8")
+        self.build(source)
+        self.run_modes(0, "1 1\n3\n1\n10\n")
 
     def test_const_pointer_stays_in_its_task(self):
         # A Pointer to the same storage can still change it, so a read view is
@@ -553,7 +713,9 @@ let Proofs = module (
         ir = self.path / "mixed.nir"
         result = self.command("emit-ir", self.source, "-o", ir)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(ir.read_bytes()[:8], b"NEIR\x01\x00\x11\x00")
+        # The Pointer module's own SharedPointer retains object storage
+        # (NeuraIR 1.18), so a program that imports it is written as 1.18.
+        self.assertEqual(ir.read_bytes()[:8], b"NEIR\x01\x00\x12\x00")
         listing = self.command("emit-ir", "--no-optimize", ir)
         self.assertEqual(listing.returncode, 0, listing.stderr)
         self.assertIn("non_nil_uses {", listing.stdout)

@@ -265,7 +265,7 @@ They do not replace the runtime's memory manager.
 
 The declarations and usage examples in this document describe the proposed API using Neura syntax.
 
-Version 0.3.1 implements `Pointer<T>`, `ConstPointer<T>`, and `ListPointer<T>`. It declares the other six types with the target types each accepts and its task-transfer rules, below. They have no public constructor yet, and their operations are planned. Ownership transfer, restricted borrowing, weak and soft reachability, and atomic reference updates require additional compiler or runtime support.
+Version 0.3.1 implements `Pointer<T>`, `ConstPointer<T>`, `ListPointer<T>`, `SharedPointer<T>`, and `WeakPointer<T>`. It declares the other four types with the target types each accepts and its task-transfer rules, below. They have no public constructor yet, and the milestone that adds each one's constructor and operations is listed there. Ownership transfer, restricted borrowing, weak and soft reachability, and atomic reference updates require additional compiler or runtime support.
 
 They must not be implemented as ordinary wrappers if doing so would weaken their stated guarantees.
 
@@ -499,12 +499,13 @@ Static use of a managed pointer at the `Std.DynamicForeign` boundary is an error
 
 **Declared types (0.3.1).** The other six types are declared with these rules, which the compiler checks on each instantiation and at every task boundary:
 
-| Type | Target type | Between tasks |
-| --- | --- | --- |
-| `UniquePointer<T>` | A class or interface (E0418 otherwise) | Stays in its task (`#NotThreadSafe`); a join result moves it |
-| `SharedPointer<T>`, `WeakPointer<T>`, `SoftPointer<T>` | A class, interface, array, or list (E0418 otherwise) | Shared when `T` is deeply immutable and transferable; otherwise stays in its task (E0602) |
-| `AtomicPointer<T>` | An `#Immutable` class (E0418 for any other type, E0580 for a mutable class) | Shared |
-| `LockedPointer<T>` | Any type | Shared |
+| Type | Target type | Between tasks | Constructor and operations |
+| --- | --- | --- | --- |
+| `UniquePointer<T>` | A class or interface (E0418 otherwise) | Stays in its task (`#NotThreadSafe`); a join result moves it | Milestones M5 and M6 |
+| `SharedPointer<T>`, `WeakPointer<T>` | A class, interface, array, or list (E0418 otherwise) | Shared when `T` is deeply immutable and transferable; otherwise stays in its task (E0602) | Implemented (sections 2.5 and 2.6) |
+| `SoftPointer<T>` | A class, interface, array, or list (E0418 otherwise) | Shared when `T` is deeply immutable and transferable; otherwise stays in its task (E0602) | Milestone M4 |
+| `AtomicPointer<T>` | An `#Immutable` class (E0418 for any other type, E0580 for a mutable class) | Shared | Milestone M3 |
+| `LockedPointer<T>` | Any type | Shared | Milestone M3 |
 
 None of them is a parallel item (E0602) or a `const` global that a parallel worker reads (E0601): a parallel item runs in a heap of its own and would receive a copy. Each is a managed pointer at the native boundary, in casts, and for `destroy`, like the three implemented types.
 
@@ -610,6 +611,8 @@ It is intended for data structures, graph representations, shared application ob
 | `with_read(callback)` | Callback result | Provides scoped read access |
 | `with_mut(callback)` | Callback result | Provides task-local, checked mutable access |
 | `downgrade()` | `WeakPointer<T>` | Creates a weak reference |
+| `release()` | `void` | Ends this owner claim (0.3.1) |
+| `close()` | `Result<Unit>` | Ends this owner claim if it is held, for `using` (0.3.1) |
 
 ### Example
 
@@ -648,6 +651,19 @@ Weak references do not contribute to strong reachability.
 
 A public `ref_count()` is intentionally excluded from the initial API. Neura's garbage collection and ordinary class aliases make raw ownership counts unsuitable as correctness guarantees.
 
+**0.3.1 decision: owner claims end explicitly.** When a collection runs is not part of Neura's deterministic contract, so whether a target is still reachable cannot decide what a program observes. Ownership is therefore counted in explicit claims:
+
+- `new(target)` creates the first owner claim. `clone()` on a SharedPointer, and a successful `upgrade()` on a WeakPointer, each add one.
+- `release()` ends one claim. A plain alias of a SharedPointer (`let b = a;`) is the same claim, not a new one, so releasing either releases both.
+- A second `release()` of the same claim traps with `invalid state: SharedPointer released twice`. Any other use of a released claim traps with `invalid state: released SharedPointer`.
+- `close()` ends the claim if it is still held and returns `Ok`; closing again does nothing, as `Std.Io.Closeable` requires. So `using (copy = shared.clone()) { ... }` ends the claim when the block is left, in a function whose result is a `Result` (E0473).
+- When the last claim ends, the target *expires*: every WeakPointer to it returns `None`, and the pointer drops its reference so that collection can reclaim the target once nothing else holds it.
+- A claim that is never released keeps the target available for as long as anything can reach its group. Release claims that a weak reference should outlive.
+
+**0.3.1 decision: the target belongs to the pointer.** `new(target)` takes a value that nothing else refers to (E0465): a new object whose constructor does not keep its receiver, an array or list literal, or a local whose only definition is one of these and whose only use is this argument. An `#Immutable` object is accepted when it is new, whatever its constructor does, since it never changes. Only the target itself is checked, not what its fields refer to. The pointer keeps its own handle to a class target, so `destroy` of the object read from it traps with `invalid reference handle: pointer-owned storage is released by collection`. An array target lives on the managed heap, as a `ListPointer`'s array does.
+
+**0.3.1 decision: scoped access.** `with_read<U>(callback: func(T) -> U)` returns the callback's result. `with_mut(callback: func(T) -> void)` takes a callback without a result, because a generic function cannot be overloaded and `void` is not a type argument. While a `with_mut` runs, a `with_mut` or `with_read` of the same target traps with `invalid state: SharedPointer is borrowed by with_mut`. There is no other borrow check: `read()` already returns the target under the ordinary reference rules.
+
 ### Mutability and concurrency
 
 `SharedPointer<T>` does not automatically make mutable `T` thread-safe.
@@ -657,6 +673,8 @@ Mutable targets remain subject to Neura's task-isolation rules.
 Sharing a mutable target between tasks through `SharedPointer<T>` alone is prohibited.
 
 When cross-task sharing is required, use an immutable target, `AtomicPointer<T>`, or `LockedPointer<T>`, depending on the operation.
+
+**0.3.1 decision.** A SharedPointer or WeakPointer whose target type is deeply immutable and transferable may be given to another task, as the same claim (clone it first to give the task a claim of its own). The claims of one target are counted in state that every task reaches. Its methods change that state only in straight-line field operations before their first call, so no task switch falls between a read and the write that depends on it (`tests/pointer/polls.py`). Operations on one target's claims are therefore totally ordered ([Concurrency](Concurrency.md#54-memory-model)).
 
 ### Safety guarantees
 
@@ -718,6 +736,8 @@ If the object has already become unavailable, the operation returns `None`.
 The result never contains an invalid or partially destroyed object.
 
 `is_alive()` is advisory. The target may become unavailable immediately after a successful check, so callers must use `upgrade()` to access it.
+
+**0.3.1 decision.** A target becomes unavailable when its last owner claim ends (section 2.5), never because a collection ran. Until then, a WeakPointer keeps the target allocated, so a weak reference whose owners are never released keeps upgrading. In a single task, `is_alive()` stays true until the program itself ends the last claim.
 
 ### Safety guarantees
 
