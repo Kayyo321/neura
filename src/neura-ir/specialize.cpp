@@ -15,10 +15,12 @@
 #include "purity.hpp"
 #include "task_analysis.hpp"
 #include "nominal.hpp"
+#include "tags.hpp"
 
 #include <algorithm>
 #include <deque>
 #include <map>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -1137,6 +1139,118 @@ void guard_managed_pointers_in_native_packing(IrProgram& program) {
 
 } // namespace
 
+namespace {
+
+// E0465 (docs/lang/Neura0.3.1.md, SharedPointer): a SharedPointer takes
+// ownership of a value that nothing else refers to, so that its group alone
+// decides when the target expires and no other handle can destroy it. The
+// value is fresh when it is a new object whose constructor does not keep its
+// receiver, an array or list literal, or a local whose only definition is
+// such a value and whose only use is this argument. Only the root object is
+// checked: what its constructor's arguments refer to may be shared.
+class PointerConstruction {
+public:
+    explicit PointerConstruction(const IrProgram& program) : program_(program) {}
+
+    void check() {
+        for (const auto& body : program_.bodies) {
+            if (body.owner >= program_.symbols.size() || trusted_pointer_declaration(program_, body.owner) ||
+                in_template(body.owner))
+                continue;
+            for (const auto& node : body.instructions) visit(node, body);
+        }
+    }
+
+private:
+    bool in_template(SymbolId id) const {
+        for (std::set<SymbolId> seen; id < program_.symbols.size() && seen.insert(id).second;
+             id = program_.symbols[id].owner)
+            if (!program_.symbols[id].generics.empty()) return true;
+        return false;
+    }
+
+    void visit(const IrNode& node, const IrBody& body) {
+        if (node.op == IrOp::Allocate && pointer_class(program_, node.type.symbol) == PointerKind::Shared &&
+            node.symbol < program_.symbols.size() && program_.symbols[node.symbol].parameters.size() == 1 &&
+            node.operands.size() == 1)
+            require_fresh(node.operands.front(), body);
+        for (const auto* region : {&node.operands, &node.body, &node.alternative})
+            for (const auto& child : *region) visit(child, body);
+    }
+
+    // The constructor of a new object does not store its receiver anywhere
+    // that outlives the call.
+    bool keeps_receiver(const IrNode& allocation, std::string& why) {
+        if (allocation.symbol >= program_.symbols.size()) return false;
+        // Purity does not track the receiver of an #Immutable class. Such an
+        // object never changes, and the pointer keeps its own storage handle,
+        // so another reference can neither change nor destroy what it owns.
+        const auto cls = allocation.type.symbol;
+        if (cls < program_.symbols.size() && has_tag(program_.symbols[cls], TagId::Immutable)) return false;
+        if (!purity_) purity_.emplace(program_);
+        const auto* summary = purity_->summary(allocation.symbol);
+        if (!summary || summary->retention.empty()) return false;
+        const auto kept = summary->retention.front();
+        if (kept == PurityAnalysis::Retention::NotRetained || kept == PurityAnalysis::Retention::ByResult) return false;
+        why = "the constructor of '" + program_.symbols[program_.symbols[allocation.symbol].owner].name +
+              "' keeps its receiver where another reference can reach it";
+        if (const auto cause = summary->retained_at.find(0); cause != summary->retained_at.end())
+            why += ": it " + cause->second.operation;
+        return true;
+    }
+
+    bool fresh_value(const IrNode& value, std::string& why) {
+        if (value.op == IrOp::Collection || value.op == IrOp::RepeatCollection) return true;
+        if (value.op == IrOp::Allocate) return !keeps_receiver(value, why);
+        return false;
+    }
+
+    void count(const IrNode& node, SymbolId local, std::size_t& definitions, std::size_t& loads,
+               const IrNode*& initializer) {
+        if (node.symbol == local) {
+            if (node.op == IrOp::Initialize) {
+                ++definitions;
+                if (!node.operands.empty()) initializer = &node.operands.back();
+            } else if (node.op == IrOp::Load) {
+                ++loads;
+            } else if (node.op == IrOp::Store) {
+                definitions += 2;
+            }
+        }
+        for (const auto* region : {&node.operands, &node.body, &node.alternative})
+            for (const auto& child : *region) count(child, local, definitions, loads, initializer);
+    }
+
+    void require_fresh(const IrNode& argument, const IrBody& body) {
+        std::string why;
+        bool fresh = fresh_value(argument, why);
+        if (!fresh && argument.op == IrOp::Load && argument.symbol < program_.symbols.size() &&
+            program_.symbols[argument.symbol].kind == SymbolKind::Local) {
+            std::size_t definitions = 0;
+            std::size_t loads = 0;
+            const IrNode* initializer = nullptr;
+            for (const auto& node : body.instructions) count(node, argument.symbol, definitions, loads, initializer);
+            fresh = definitions == 1 && loads == 1 && initializer && fresh_value(*initializer, why);
+            if (!fresh && why.empty())
+                why = loads > 1 ? "'" + program_.symbols[argument.symbol].name + "' is used again elsewhere"
+                                : "'" + program_.symbols[argument.symbol].name +
+                                      "' is not defined once by a new object or a literal";
+        }
+        if (fresh) return;
+        auto error = Diagnostic(argument.span, "a SharedPointer takes ownership of a value that nothing else refers to")
+            .with_code("E0465").label("this value may be referred to elsewhere");
+        if (!why.empty()) error.note(why);
+        error.help("construct it in place, as in new(new Node(1)), or pass an array or list literal, or a local "
+                   "that holds one and is used only here");
+        throw error;
+    }
+
+    const IrProgram& program_;
+    std::optional<PurityAnalysis> purity_;
+};
+
+} // namespace
+
 void specialize(IrProgram& program, const SpecializationLimits& limits) {
     erase_laws(program);
     // Std.Reflect (docs/design/Reflect030.md): calls of the trusted
@@ -1164,6 +1278,7 @@ void specialize(IrProgram& program, const SpecializationLimits& limits) {
     lower_synchronized(program);
     // Hooked programs get their implicit calls during hook elaboration.
     if (!has_class_hooks(program)) check_task_safety(program);
+    PointerConstruction(program).check();
 }
 
 } // namespace neura

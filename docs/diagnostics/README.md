@@ -165,6 +165,7 @@ Errors about types, values, calls, and statements.
 | [E0451](E0451.md) | an array escapes its owner |
 | [E0452](E0452.md) | a primitive borrow escapes its owner |
 | [E0453](E0453.md) | an escaping closure requires explicit construction |
+| [E0465](E0465.md) | pointer constructed from a value that may be referred to elsewhere |
 | [E0470](E0470.md) | return in a startup block |
 | [E0471](E0471.md) | deferred call with a result |
 | [E0472](E0472.md) | defer or using outside a function |

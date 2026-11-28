@@ -555,6 +555,45 @@ let probe = func(weak: WeakPointer<Config>) -> bool {
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("the image uses NVR 1.12 features but declares 1.11", result.stderr)
 
+    def test_shared_pointer_targets_must_be_fresh(self):
+        declarations = POINTER + """
+let Node = class (
+    export let value: int64 = 0;
+);
+let Registered = class (
+    export let init = func {
+        keep(instance);
+    };
+);
+let kept: Registered = nil;
+let keep = func(item: Registered) {
+    kept = item;
+};
+"""
+        for body in (
+            "let take = func -> SharedPointer<Node> => new(new Node());",
+            "let take = func -> SharedPointer<Node> {\n    let node = new Node();\n    return new(node);\n};",
+            "let take = func -> SharedPointer<int[]> {\n    let data: int[] = [1, 2];\n    return new(data);\n};",
+            "let take = func -> SharedPointer<int[list]> => new(new([1, 2]));",
+        ):
+            with self.subTest(accepted=body):
+                self.accept(declarations + body + "\n")
+        for name, body, use, note in (
+            ("parameter", "let take = func(node: Node) -> SharedPointer<Node> => new(node);", "new(node)", None),
+            ("used twice", "let take = func -> SharedPointer<Node> {\n    let node = new Node();\n    node.value = 2;\n"
+             "    return new(node);\n};", "return new(node)", "'node' is used again elsewhere"),
+            ("captured", "let take = func -> SharedPointer<Node> {\n    let node = new Node();\n"
+             "    let read = func() -> int64 => node.value;\n    return new(node);\n};", "return new(node)",
+             "'node' is used again elsewhere"),
+            ("constructor keeps it", "let take = func -> SharedPointer<Registered> => new(new Registered());",
+             "new(new Registered())", "the constructor of 'Registered' keeps its receiver"),
+        ):
+            with self.subTest(rejected=name):
+                diagnostic = self.reject(declarations + body + "\n", "E0465",
+                                         "a SharedPointer takes ownership of a value that nothing else refers to", use)
+                if note:
+                    self.assertTrue(any(note in item for item in diagnostic["notes"]), diagnostic)
+
     def test_shared_pointer_specification_examples(self):
         source = (pathlib.Path(__file__).with_name("spec-shared.nra")).read_text(encoding="utf-8")
         self.build(source)
