@@ -1,0 +1,16 @@
+server stream 0 read a1
+server stream 4 read b1
+coordinator accepted stream 8 and read c1
+second read while one is pending: <quic.busy>
+write while a read is pending: sent
+reader A read a2
+reader B read b2
+reader C read c2
+read after the peer closed: quic.connection_closed: the peer closed the connection with application error 7
+client a1 sent, b1 sent
+client a2 sent, b2 sent
+client c1 sent
+client c2 sent
+closed stream after close: <Closed>
+stale handle after reuse: <Closed>; new connection open: ok
+spike done

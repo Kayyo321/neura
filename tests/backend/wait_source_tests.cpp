@@ -165,6 +165,78 @@ void external_cancel_and_deadline() {
     completed(pending.poll(), 4, 25);
 }
 
+// PendingOperation::wake_at: a provider timer makes the driver attempt
+// again without readiness, never expires the operation, and never moves a
+// virtual clock.
+void provider_wake_ups() {
+    Clock clock;
+    clock.time = 1'000;
+    PendingRequests pending(clock);
+    const auto signal = std::make_shared<ExternalSignal>();
+    auto timed = with_source(ExternalWait{signal});
+    int attempts = 0;
+    std::int64_t wake = PendingOperation::no_deadline;
+    timed.wake_at = [&](std::int64_t) { return wake; };
+    timed.attempt = [&](bool) -> std::optional<HostCompletion> {
+        if (++attempts == 2) return value(30);
+        return std::nullopt;
+    };
+    pending.add(30, std::move(timed), false);
+    check(pending.poll().empty() && attempts == 0, "an unset wake-up attempted the operation");
+    wake = 2'000;
+    check(pending.poll().empty() && attempts == 0, "a future wake-up attempted the operation");
+    wake = 1'000;
+    check(pending.poll().empty() && attempts == 1, "a due wake-up did not attempt the operation");
+    completed(pending.wait(std::nullopt), 30, 30);
+    check(clock.time == 1'000, "a wake-up moved the virtual clock");
+
+    // A wake-up that keeps moving never expires the operation; the deadline does.
+    auto bounded = with_source(ExternalWait{std::make_shared<ExternalSignal>()});
+    int woken = 0;
+    bool expired = false;
+    bounded.deadline = 5'000;
+    bounded.wake_at = [](std::int64_t now) { return now; };
+    bounded.attempt = [&](bool) -> std::optional<HostCompletion> {
+        ++woken;
+        return std::nullopt;
+    };
+    bounded.expire = [&] {
+        expired = true;
+        return value(31);
+    };
+    pending.add(31, std::move(bounded), false);
+    check(pending.poll().empty() && woken == 1 && !expired, "a wake-up expired the operation");
+    completed(pending.wait(std::nullopt), 31, 31);
+    check(expired && clock.time == 5'000, "the deadline did not expire a woken operation");
+}
+
+// BackgroundWork: run on every full check, never on a cancellation's own
+// check, and its wake-up bounds the native wait without delivering anything.
+void background_work() {
+    struct Counting final : BackgroundWork {
+        int runs = 0;
+        std::int64_t wake = PendingOperation::no_deadline;
+        std::vector<PosixWait::Interest> interests() override { return {}; }
+        std::int64_t wake_at(std::int64_t) override { return wake; }
+        void run() override { ++runs; }
+    } work;
+    Clock clock;
+    PendingRequests pending(clock);
+    pending.add_background(&work);
+    pending.add_background(&work);
+    check(pending.poll().empty() && work.runs == 1, "background work did not run once per check");
+    auto cancellable = with_source(ExternalWait{std::make_shared<ExternalSignal>()});
+    cancellable.attempt = [](bool cancelled) -> std::optional<HostCompletion> {
+        if (cancelled) return value(50);
+        return std::nullopt;
+    };
+    pending.add(50, std::move(cancellable), true);
+    pending.cancel(50);
+    check(work.runs == 1, "a cancellation's own check ran background work");
+    completed(pending.poll(), 50, 50, true);
+    check(work.runs == 2, "background work missed a check");
+}
+
 #ifdef _WIN32
 
 class ManualEvent {
@@ -521,6 +593,92 @@ void native_events() {
     }
 }
 
+// One descriptor named by two pending operations and by background work in
+// the same wait (a QUIC connection's socket): every backend wakes all of them.
+void shared_descriptor() {
+    LiveClock clock;
+    PendingRequests pending(clock);
+    Pipe shared;
+    struct Watching final : BackgroundWork {
+        int descriptor = -1;
+        int runs = 0;
+        std::vector<PosixWait::Interest> interests() override {
+            return {PosixWait::Interest{descriptor, PosixWait::Events::Read}};
+        }
+        std::int64_t wake_at(std::int64_t) override { return PendingOperation::no_deadline; }
+        void run() override { ++runs; }
+    } work;
+    work.descriptor = shared.reader();
+    pending.add_background(&work);
+    bool readable = false;
+    for (const std::uint64_t sequence : {70, 71}) {
+        auto operation = with_source(PosixWait{{shared.reader(), PosixWait::Events::Read}});
+        operation.attempt = [&, sequence](bool) -> std::optional<HostCompletion> {
+            if (!readable) return std::nullopt;
+            return value(sequence);
+        };
+        pending.add(sequence, std::move(operation), false);
+    }
+    check(pending.poll().empty(), "operations on an idle shared descriptor completed");
+    readable = true;
+    shared.send('s');
+    std::vector<PendingRequests::Done> done;
+    while (done.size() < 2) {
+        for (auto& answer : pending.wait(std::nullopt)) done.push_back(answer);
+    }
+    check(done.size() == 2 && done[0].sequence == 70 && done[1].sequence == 71 && work.runs >= 2,
+          "a shared descriptor did not wake both operations and the background work");
+}
+
+// The no-spin guard: a wake-up that always answers "now" while its attempts
+// never finish is backed off, so the driver does not busy-wait.
+void wake_up_guard() {
+    LiveClock clock;
+    PendingRequests pending(clock);
+    Pipe quiet;
+    auto stuck = with_source(PosixWait{{quiet.reader(), PosixWait::Events::Read}});
+    int attempts = 0;
+    stuck.wake_at = [](std::int64_t now) { return now; };
+    stuck.attempt = [&](bool cancelled) -> std::optional<HostCompletion> {
+        ++attempts;
+        if (cancelled) return value(60);
+        return std::nullopt;
+    };
+    pending.add(60, std::move(stuck), true);
+    const auto end = clock.now() + 300'000'000;
+    int returns = 0;
+    while (clock.now() < end) {
+        static_cast<void>(pending.wait(end));
+        ++returns;
+    }
+    check(attempts < 40 && returns < 40, "a wake-up that never finishes made the driver spin");
+    pending.cancel(60);
+    completed(pending.poll(), 60, 60, true);
+}
+
+// A live clock: the driver sleeps until the wake-up, not until readiness,
+// and does not spin while it waits.
+void live_wake_up() {
+    LiveClock clock;
+    PendingRequests pending(clock);
+    Pipe quiet;
+    auto timer = with_source(PosixWait{{quiet.reader(), PosixWait::Events::Read}});
+    const auto due = clock.now() + 20'000'000;
+    int attempts = 0;
+    timer.wake_at = [due](std::int64_t) { return due; };
+    timer.attempt = [&](bool) -> std::optional<HostCompletion> {
+        ++attempts;
+        if (clock.now() >= due) return value(40);
+        return std::nullopt;
+    };
+    pending.add(40, std::move(timer), false);
+    std::vector<PendingRequests::Done> done;
+    while (done.empty()) done = pending.wait(std::nullopt);
+    completed(done, 40, 40);
+    check(clock.now() >= due, "the wake-up was attempted early");
+    check(attempts <= 3, "the driver spun before the wake-up");
+}
+
 #endif
 
 } // namespace
@@ -540,6 +698,8 @@ int main() {
         many_handles();
         native_sockets();
         closed_sockets();
+        provider_wake_ups();
+        background_work();
 #else
 #ifdef __linux__
         if (backend == IoBackend::IoUring) {
@@ -559,6 +719,11 @@ int main() {
         polled_and_external();
         external_cancel_and_deadline();
         native_events();
+        provider_wake_ups();
+        background_work();
+        live_wake_up();
+        wake_up_guard();
+        shared_descriptor();
 #endif
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

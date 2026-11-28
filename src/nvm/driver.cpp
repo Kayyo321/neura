@@ -16,6 +16,9 @@ std::vector<std::uint8_t> host_modes_for(const nvr::Image& image, const Bindings
 
 Event drive(Execution& execution, const Bindings& bindings, TaskClock& clock, DriveHooks& hooks) {
     PendingRequests pending(clock);
+    for (const auto* service : bindings.services) {
+        if (service) pending.add_background(service->background());
+    }
     const auto deliver = [&](const Event& at, std::vector<PendingRequests::Done>& done) {
         for (auto& answer : done) {
             if (hooks.delivered) hooks.delivered(at.tick, answer.sequence, answer.cancelled, answer.completion);

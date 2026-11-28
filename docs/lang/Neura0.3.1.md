@@ -168,6 +168,16 @@ Direct TLS uses OpenSSL 4.1.0. Windows needs runtime verification for Winsock TL
 
 [OpenSSL 4.1 release notes](https://openssl-library.org/post/2026-10-23-openssl-41-final-release/)
 
+### Limited by the pinned QUIC stack
+
+`Std.Net.Quic` runs on OpenSSL 4.1's QUIC implementation, the owner's choice for 0.3.1. That stack has no public interface for the features below, so each returns a typed `Unsupported`, with no silent fallback. A second QUIC implementation that could provide them is a candidate for a later release.
+
+- RFC 9221 datagrams: `QuicConnection.send` and `receive`, and a configuration with `max_datagram_frame_size` above 0.
+- Application-directed connection migration (`QuicConnection.migrate`). A peer's NAT rebinding is not survived either: in a probe of the stack, the server kept sending to the client's old address.
+- A transport congestion controller other than the stack's NewReno.
+- 0-RTT early data.
+- Initial stream limits other than the stack's default of 100.
+
 
 ## Windows native build
 

@@ -8,6 +8,7 @@
 
 #include "machine.hpp"
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -44,6 +45,10 @@ public:
         bool cancelled = false;
     };
 
+    // Runs `work` on every check from now on (HostService::background). A
+    // work added twice runs once.
+    void add_background(BackgroundWork* work);
+
     // Keeps request `sequence`, which `service.begin` answered with `started`.
     void add(std::uint64_t sequence, std::variant<HostCompletion, PendingOperation> started, bool cancellable);
     // The task waiting for `sequence` asked to cancel. A cancellable
@@ -77,6 +82,12 @@ private:
         std::optional<HostCompletion> answer;
         bool cancellable = false;
         bool cancelled = false;
+        // The no-spin guard of wake_at: attempts in a row that a wake-up alone
+        // caused and that did not finish, and the real (steady) time before
+        // which a wake-up is ignored. Real time, because under virtual time a
+        // wake-up bounds the real wait and must not stall the virtual clock.
+        int fruitless_wakes = 0;
+        std::chrono::steady_clock::time_point wake_floor{};
     };
 
     // Tries every entry that may have progressed, or only `only`. The native
@@ -88,6 +99,7 @@ private:
     TaskClock& clock_;
     IoBackend backend_;
     std::map<std::uint64_t, Entry> entries_;
+    std::vector<BackgroundWork*> background_;
 };
 
 // What the driver asks of its caller. Every function may be empty except

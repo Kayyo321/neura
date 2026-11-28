@@ -1,0 +1,61 @@
+// A QUIC server in an image without tasks (quic-loopback.py): it prints its
+// port, accepts one connection and one stream, and counts the bytes it reads
+// until the stream finishes, the connection ends or the expected count arrives.
+let config = import:Std.Net.Quic.QuicConfig;
+let connections = import:Std.Net.Quic.QuicConnection;
+let console = import:Std.Io.Console;
+let durations = import:Std.Time.Duration;
+let endpoints = import:Std.Net.Quic.QuicEndpoint;
+let errors = import:Std.Core.Error;
+let ip = import:Std.Net.Core.IpAddr;
+let ipv4 = import:Std.Net.Core.Ipv4Addr;
+let optional = import:Std.Core.Optional;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let socket_addr = import:Std.Net.Core.SocketAddr;
+let streams = import:Std.Net.Quic.QuicStream;
+let tls = import:Std.Net.Tls.TlsConfig;
+
+let server_config = func(certificate: string, key: string) -> config.QuicConfig {
+    let builder = tls.builder();
+    builder.set_versions(tls.TlsVersion.Tls13, tls.TlsVersion.Tls13);
+    builder.set_alpn(new(["spike"]));
+    builder.set_certificate(certificate, key);
+    let settings = result.expect<tls.TlsConfig>(builder.build_server(), "tls");
+    return result.expect<config.QuicConfig>(config.create(settings, connections.StackStreamLimit,
+        connections.StackStreamLimit, 0, durations.of_seconds(30), 1200, config.CongestionAlgorithm.NewReno, false,
+        durations.of_seconds(10)), "config");
+};
+
+let count = func(stream: streams.QuicStream, expected: int) -> string {
+    let total = 0;
+    while (total < expected) {
+        match (stream.read(65536)) {
+            result.Result.Ok(optional.Optional.Some(data)) => {
+                total = total + data.length;
+            },
+            result.Result.Ok(optional.Optional.None) => {
+                return total.to_string() .. " bytes, then FIN";
+            },
+            result.Result.Err(failure) => {
+                return total.to_string() .. " bytes, then " .. errors.message(failure);
+            },
+        }
+    }
+    return total.to_string() .. " bytes";
+};
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let expected = result.expect<int>(int.parse(args[2]), "count");
+        let any = new socket_addr.SocketAddr(ip.IpAddr.V4(ipv4.localhost()), 0);
+        let endpoint = result.expect<endpoints.QuicEndpoint>(endpoints.bind(any, server_config(args[0], args[1])),
+            "bind");
+        console.print_line("PORT " .. endpoint.address().port.to_string());
+        let connection = result.expect<connections.QuicConnection>(endpoint.accept(), "accept");
+        let stream = result.expect<streams.QuicStream>(connection.accept(), "accept stream");
+        console.print_line("server read " .. count(stream, expected));
+        let _ = endpoint.close();
+        return program.ExitCode.Ok;
+    };
+);

@@ -156,6 +156,34 @@ struct PendingOperation {
     // The completion when the deadline passes before the operation finishes.
     // Required when there is a deadline.
     std::function<HostCompletion()> expire{};
+    // Optional, unset by default. Given the task clock's reading, the reading
+    // at which attempt(false) must run again although the wait source is not
+    // ready, or no_deadline for none. The provider recomputes it on every
+    // call from its own timers (a QUIC connection's loss, acknowledgment and
+    // idle timers). Reaching it never expires the operation: only `deadline`
+    // does. A live driver bounds its wait by it. Under virtual time it is a
+    // real-time bound on the native wait and never moves the virtual clock.
+    // Neither steps nor the trace depend on it.
+    std::function<std::int64_t(std::int64_t now)> wake_at{};
+};
+
+// Event processing a provider must run while it holds live resources,
+// whether or not a request is pending on them: a QUIC connection sends its
+// acknowledgments and buffered data, retransmits, and runs its idle timer.
+// The driver of an image with tasks runs it on every check, waits on its
+// descriptors and wake-up as well, and never delivers anything for it
+// (docs/runtime/NVM.md, "Overlapping and cancellable services"). A replay
+// never calls a provider, so it never runs.
+class BackgroundWork {
+public:
+    virtual ~BackgroundWork() = default;
+    // The descriptors to watch until the next check; empty when nothing is live.
+    virtual std::vector<PosixWait::Interest> interests() = 0;
+    // As PendingOperation::wake_at: the task clock's reading at which run()
+    // is due again, or PendingOperation::no_deadline.
+    virtual std::int64_t wake_at(std::int64_t now) = 0;
+    // Processes whatever is due. Never blocks.
+    virtual void run() = 0;
 };
 
 class HostService {
@@ -177,6 +205,9 @@ public:
     virtual std::variant<HostCompletion, PendingOperation> begin(const HostRequest& request) {
         return invoke(request);
     }
+    // The provider's background work, if it has any; several services may
+    // share one object, which the driver runs once per check.
+    virtual BackgroundWork* background() const { return nullptr; }
 };
 
 // The services a runner offers, keyed by name and interface version.

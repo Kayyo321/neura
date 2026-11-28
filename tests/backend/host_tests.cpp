@@ -2237,10 +2237,17 @@ public:
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         if (!SSL_is_init_finished(connection.get())) return;
+        // The peer drives its connection's events while it waits. Polling
+        // only SSL_accept_stream with NO_BLOCK left the client's stream
+        // unaccepted on macOS, so every exchange timed out.
+        const auto idle = [&] {
+            static_cast<void>(SSL_handle_events(connection.get()));
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        };
         std::unique_ptr<SSL, decltype(&SSL_free)> stream(nullptr, SSL_free);
         while (retry() && !stream) {
             stream.reset(SSL_accept_stream(connection.get(), SSL_ACCEPT_STREAM_NO_BLOCK));
-            if (!stream) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            if (!stream) idle();
         }
         if (!stream || response == Response::Rejected) return;
 
@@ -2259,7 +2266,7 @@ public:
             } else if (error != SSL_ERROR_WANT_READ && error != SSL_ERROR_WANT_WRITE) {
                 return;
             } else {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                idle();
             }
         }
         if (!finished || query != test_dns_query) return;
@@ -2277,7 +2284,7 @@ public:
             if (status == 1 && sent == query.size()) break;
             const auto error = SSL_get_error(stream.get(), status);
             if (error != SSL_ERROR_WANT_READ && error != SSL_ERROR_WANT_WRITE) return;
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            idle();
         }
         while (retry() && SSL_handle_events(connection.get())) std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }

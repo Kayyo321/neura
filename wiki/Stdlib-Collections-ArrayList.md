@@ -152,7 +152,7 @@ The loop form depends on the source value.
 | --- | --- | --- |
 | For-each over the built-in list from `ArrayList.items()`, or from any collection's `to_list()` | Yes | The built-in loop compares the list's structural version before each advance and traps with reason 5 on a change. `items()` is live; `to_list()` is a copy. |
 | An index loop over `size()` and `get(index)` | Yes | For lists and deques. No modification check. |
-| The collection's iterator object: `iterator()` returns a class with `has_next() → bool` and `next() → T` | Yes, as one concrete iterator class per collection | `has_next` has no effect and can be repeated. `next` returns the next element and advances, and traps with `no such element` at the end. An iterator is used once. |
+| The collection's iterator object: `iterator()` returns a class with `has_next() → bool` and `next() → T` | Yes, as one concrete iterator class per collection | For a collection's iterator, `has_next` has no effect and can be repeated. For every iterator, a generator's included, `has_next` consumes nothing and repeating it repeats no work ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Lifetime030.md), implemented, proposed). `next` returns the next element and advances, and traps with `no such element` at the end. An iterator is used once. |
 | For-each directly over the collection | Yes | Lowers to the iterator protocol when the source implements `Iterable<T>`. Every public collection, `Sequence`, and `IntRange` implement it; `tests/stdlib/for-each` loops over each one. |
 
 - **Iteration does not allocate per element.** `has_next` and `next` stay two calls. A single `next` returning `Optional<T>` would read well with `match`, but it would allocate an enum value for every element.
@@ -161,6 +161,7 @@ The loop form depends on the source value.
 - **Fail-fast iterator objects.** A wrapper over a single built-in list uses that list's `uint64` structural version. Other mutable collections use a `uint64` modification count and increment it after each structural change. An iterator records its version when created. `has_next` and `next` compare first and trap on a difference. Replacing an element by index or replacing the value for an existing key is not structural.
 - The iteration order of every collection is specified in section 9.
 - `Iterator<T>` and `Iterable<T>` are the interfaces for this protocol. Concrete iterator classes and collections implement these member signatures.
+- A [generator](CoreLanguage#generators) is a function that returns a `Sequence<T>` over a generated `Iterator<T>`: its first `has_next` with nothing buffered runs the body to its next `yield`, and further calls run nothing until `next` takes the buffered value.
 
 ### 5.6 Callbacks
 
@@ -179,7 +180,7 @@ These are the intended source-module contracts. Compiler support for the operati
 | --- | --- | --- | --- | --- |
 | Integers, floats, `bool`, fieldless enums, `string`, tuples | Built in (G3a) | Companion `compare` functions | No (`Strings.scalars` gives a list) | |
 | Array, list | Built in, structural (G3a) | No | Built-in for-each | |
-| `Optional<T>`, `Result<T>`, `Error`, `JsonValue` | Module functions; payload enums have no built-in equality | No | No | |
+| `Optional<T>`, `Result<T>`, `Error`, `JsonValue` | Built in when each payload supports value members | No | No | |
 | `ArrayList`, `LinkedList` | As lists | No | Yes | `MutableList`; `LinkedList` also `Deque` |
 | `ArrayDeque`, `PriorityQueue` | Identity | No | Yes | `Deque` or `Queue` |
 | `HashSet`, `TreeSet`, `BitSet` | As sets | No | Yes | `MutableSet`; `TreeSet` also `SortedSet` |
@@ -196,6 +197,8 @@ These are the intended source-module contracts. Compiler support for the operati
 | `Unit` | A fieldless enum with the single variant `Value`. | Yes |
 | `Cell<T>` | A class with one mutable field `value`, and the module function `of<T>(value)`. It exists so that closures, which capture by value, can share mutable state. | Yes |
 | `IntRange` | An immutable class with the get-only fields `start` (inclusive), `end` (exclusive), and `step` (nonzero). Module functions `of(start, end)` and `stepped(start, end, step)`; a zero step traps. A negative step counts down while the value is greater than `end`. Members `size()`, `is_empty()`, `contains(value)`, `get(index)`, `to_list()`, and `iterator()`; it implements `Iterable<int>`, so `for (let i in range)` visits the values in order. `size` and iteration are computed in `int64` so that no intermediate overflows. | Yes |
+
+The [`Std.Core.Pointer` module](https://github.com/Kayyo321/neura/blob/main/docs/lang/Neura0.3.1.md#stdcorepointer) gives a `Cell<T>` a managed mutable view and a read-only view for deeply immutable values. `ListPointer<T>` provides bounded, mutable views over arrays and lists. The views keep their storage reachable and do not expose addresses.
 
 `Pair`, `Entry`, and `Boxed` do not exist: a pair is the native tuple `[A, B]` (`partition` returns `[ArrayList<T>, ArrayList<T>]`, `divide_and_remainder` returns `[BigInteger, BigInteger]`, `enumerate` yields `[int, T]`, and `zip` yields `[T, U]`), and a map entry is the tuple `[K, V]`. No API on this page takes an `Object`.
 

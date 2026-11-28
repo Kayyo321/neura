@@ -1428,6 +1428,20 @@ StandardServices::StandardServices(ConsoleSink& output, ConsoleSink& error, Cons
     };
     add_tls_services(adder, fetch_adder, *tables_, capabilities_, prefixes_);
     add_doq_services(adder, capabilities_, prefixes_);
+    const QuicAdder quic_adder = [this](HostSignature signature, FunctionService::Handler handler,
+                                        BackgroundWork* work) {
+        auto service = std::make_unique<FunctionService>(std::move(signature), std::move(handler));
+        service->set_background(work);
+        services_.push_back(std::move(service));
+    };
+    const QuicOverlapAdder quic_overlap = [this](HostSignature signature, FunctionService::Handler handler,
+                                                 FunctionService::Begin begin, BackgroundWork* work) {
+        auto service = std::make_unique<FunctionService>(std::move(signature), std::move(handler), std::move(begin),
+                                                         true);
+        service->set_background(work);
+        services_.push_back(std::move(service));
+    };
+    add_quic_services(quic_adder, quic_overlap, *tables_, capabilities_, prefixes_);
     add_http_fetch_services(fetch_adder, capabilities_);
     add_hpack_services(adder);
     add_ffi_services(adder, *tables_, capabilities_);
@@ -1465,6 +1479,7 @@ void StandardServices::register_all(HostRegistry& registry) {
 void StandardServices::end_run() {
     close_files(*tables_);
     close_tls(*tables_);
+    close_quic(*tables_);
     close_sockets(*tables_);
     close_native(*tables_);
 }

@@ -547,6 +547,17 @@ The parameters and results of a monitor's methods may have any type. A method ru
 
 A monitor may keep a `Guarded<T>` field for a collection and expose methods that call `with` on it, which gives a collection an API of methods.
 
+### 8.3 Host resource handles
+
+Some library resources live in the host, not in the program: a QUIC endpoint, connection or stream (`Std.Net.Quic`). The library represents each by an `#Immutable` handle that holds only the host's identifier and fixed settings, such as a default timeout. Because its fields are transferable, such a handle crosses a spawn or a channel (section 5.1), and several tasks can use one resource at the same time: a coordinator accepts the streams of a connection and gives each to a task of its own.
+
+This shares no program state. Every operation on a handle is a host request, which the scheduler issues in order and a trace records and replays like any other (section 11). The memory model of section 5.4 is unchanged: two tasks still have no common program state, and what they do to the host resource is an external effect, as a write to the same file is.
+
+- **One pending operation per direction.** A resource takes at most one waiting operation of each kind at a time: for QUIC, one `accept` per endpoint, one `accept` of a stream per connection, and on each stream one read and one write. Another one fails at once with the Custom error `quic.busy` and is never queued, so the order of completions never depends on a hidden queue. Different streams, and a read and a write on one stream, run concurrently.
+- **Closing.** Any task may close a resource. Afterwards every operation on it, by any task and through any copy of the handle, fails with `IoErrorKind.Closed`, including operations already waiting, whose tasks wake with that error. The host never gives a closed resource's identifier to a later resource, so a stale handle cannot reach one.
+- **When a connection is serviced.** A live QUIC connection sends what its writes left in OpenSSL's buffers, sends acknowledgments and keeps its timers running only when the driver checks host I/O, which it does at scheduling points while some request, timer or deadline is outstanding and whenever every task is parked. A task that computes for many quanta with nothing outstanding gets no such checks: its connections wait until its next host request or until it parks. Making a live connection count as outstanding would change the scheduling decisions of such a program, its ticks and its trace (section 10.2), so 0.3.1 leaves it so. In an image without tasks nothing services a connection between calls; each waiting call does its own processing, `close` waits until the connection has sent its data and terminated or its timeout passed, and the end of the run closes every connection still open the same way, within two seconds.
+- **The QUIC handles.** `QuicEndpoint`, `QuicConnection` and `QuicStream` are `#Final` and `#Immutable`, with fields of transferable types. Their default timeout is fixed when they are created, from `QuicConfig.read_timeout`, and each waiting operation has a form that takes its own timeout: an overload, or for `QuicEndpoint`, whose `accept` implements `Listener`, `accept_within`. Only the library can create them, because their constructors take a seal that no program can import.
+
 ## 9. `Std.Concurrent`
 
 One module per type, as in the rest of the [library](Stdlib.md#42-source-layout). `Std.Concurrent` sits after `Std.Time` in the dependency order and imports only `Std.Core` and `Std.Time`.

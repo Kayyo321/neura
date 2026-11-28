@@ -44,6 +44,14 @@ namespace {
 
 constexpr std::int64_t none = PendingOperation::no_deadline;
 constexpr int retry_ms = 1;
+// The no-spin guard: each attempt in a row that only a wake-up caused and that
+// did not finish doubles the time before the next wake-up counts, from 1 ms to
+// 32 ms. A provider whose wake_at keeps answering "now" while its attempts
+// cannot finish then costs at most about 1,000 attempts a second, and about
+// 31 once the guard has stepped up, instead of a busy wait. Readiness of its
+// wait source and its deadline still attempt it at once.
+constexpr std::chrono::milliseconds first_wake_backoff{1};
+constexpr int wake_backoff_steps = 6;
 
 // Round up so the clock has reached the deadline when the wait returns.
 int milliseconds_until(std::int64_t deadline, std::int64_t now) {
@@ -639,12 +647,24 @@ bool wait_kqueue(std::vector<pollfd>& descriptors, int timeout_ms) {
 }
 #endif
 
+// One poll entry per descriptor: interests on the same descriptor (two
+// operations, or an operation and background work on its socket) share it.
+// poll(2) on macOS reports readiness on only one of several entries for the
+// same descriptor, so duplicates would leave the others never ready.
 class NativeWaits {
 public:
     std::size_t add(PosixWait::Interest source) {
-        const auto index = descriptors_.size();
-        descriptors_.push_back({static_cast<int>(source.descriptor), poll_events(source.events), 0});
-        return index;
+        const int fd = static_cast<int>(source.descriptor);
+        const short events = poll_events(source.events);
+        auto found = entry_of_.find(fd);
+        if (found == entry_of_.end()) {
+            found = entry_of_.emplace(fd, descriptors_.size()).first;
+            descriptors_.push_back({fd, 0, 0});
+        }
+        descriptors_[found->second].events |= events;
+        const auto slot = slots_.size();
+        slots_.push_back({found->second, events});
+        return slot;
     }
 
     std::size_t add(WindowsWait) {
@@ -672,10 +692,21 @@ public:
         }
     }
 
-    bool ready(std::size_t index) const { return descriptors_[index].revents != 0; }
+    // Ready for what this interest asked, or failed (which wakes every
+    // interest on the descriptor, as a separate entry would have been).
+    bool ready(std::size_t slot) const {
+        const auto& [entry, events] = slots_[slot];
+        return (descriptors_[entry].revents & (events | POLLERR | POLLHUP | POLLNVAL)) != 0;
+    }
 
 private:
+    struct Slot {
+        std::size_t entry;
+        short events;
+    };
     std::vector<pollfd> descriptors_;
+    std::map<int, std::size_t> entry_of_;
+    std::vector<Slot> slots_;
 };
 
 #endif
@@ -748,6 +779,12 @@ void PendingRequests::add(std::uint64_t sequence, std::variant<HostCompletion, P
     }
 }
 
+void PendingRequests::add_background(BackgroundWork* work) {
+    if (work && std::find(background_.begin(), background_.end(), work) == background_.end()) {
+        background_.push_back(work);
+    }
+}
+
 void PendingRequests::cancel(std::uint64_t sequence) {
     const auto found = entries_.find(sequence);
     if (found == entries_.end()) return;
@@ -784,7 +821,19 @@ void PendingRequests::check(int timeout_ms, std::optional<std::uint64_t> only) {
             check.external = external->signal.get();
         }
     }
+    // Background work is watched and run on every full check, never on the
+    // check of one cancellation.
+    if (!only) {
+        for (auto* work : background_) {
+            for (const auto& interest : work->interests()) {
+                if (interest.descriptor >= 0) static_cast<void>(native.add(interest));
+            }
+        }
+    }
     native.wait(timeout_ms, backend_);
+    if (!only) {
+        for (auto* work : background_) work->run();
+    }
     for (auto& check : checks) {
         check.ready = check.native_index ? native.ready(*check.native_index) : !check.external || check.external->take();
     }
@@ -793,12 +842,22 @@ void PendingRequests::check(int timeout_ms, std::optional<std::uint64_t> only) {
     for (const auto& check : checks) {
         auto& entry = *check.entry;
         const auto& operation = entry.operation;
-        if (!now && operation.deadline != none) now = clock_.now();
+        if (!now && (operation.deadline != none || operation.wake_at)) now = clock_.now();
         const bool due = operation.deadline != none && operation.deadline <= *now;
-        if (!check.ready && !due) continue;
+        // A provider timer that has come due: attempt again, but never expire.
+        const bool woken = operation.wake_at && std::chrono::steady_clock::now() >= entry.wake_floor &&
+                           operation.wake_at(*now) <= *now;
+        if (!check.ready && !due && !woken) continue;
         auto answer = operation.attempt(false);
         if (!answer && due) answer = operation.expire();
-        if (answer) entry.answer = std::move(*answer);
+        if (answer) {
+            entry.answer = std::move(*answer);
+        } else if (woken && !check.ready) {
+            entry.fruitless_wakes = std::min(entry.fruitless_wakes + 1, wake_backoff_steps);
+            entry.wake_floor = std::chrono::steady_clock::now() + first_wake_backoff * (1 << (entry.fruitless_wakes - 1));
+        } else if (check.ready) {
+            entry.fruitless_wakes = 0;
+        }
     }
 }
 
@@ -826,22 +885,47 @@ std::vector<PendingRequests::Done> PendingRequests::wait(std::optional<std::int6
     auto earliest = clock_deadline.value_or(none);
     bool has_native_wait = false;
     bool retry_soon = false;
+    // The earliest provider wake-up (PendingOperation::wake_at). It stays
+    // none, and every wait below is as it was, when no operation sets one.
+    auto wake = none;
+    std::optional<std::int64_t> wake_now;
+    for (auto* work : background_) {
+        for (const auto& interest : work->interests()) {
+            if (interest.descriptor >= 0) has_native_wait = true;
+        }
+        if (!wake_now) wake_now = clock_.now();
+        wake = std::min(wake, work->wake_at(*wake_now));
+    }
     for (const auto& [sequence, entry] : entries_) {
         const auto& operation = entry.operation;
         earliest = std::min(earliest, operation.deadline);
+        if (operation.wake_at) {
+            if (!wake_now) wake_now = clock_.now();
+            const auto floor = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                   entry.wake_floor - std::chrono::steady_clock::now()).count();
+            wake = std::min(wake, std::max(operation.wake_at(*wake_now), *wake_now + std::max<std::int64_t>(floor, 0)));
+        }
         if (waits_natively(operation.wait_source)) {
             has_native_wait = true;
         } else if (std::holds_alternative<ExternalWait>(operation.wait_source) || operation.deadline == none) {
             retry_soon = true;
         }
     }
+    // A wake-up bounds the real wait only; it is never a clock deadline.
+    const int wake_ms = wake == none ? -1 : milliseconds_until(wake, *wake_now);
+    const auto bounded = [wake_ms](int timeout_ms) {
+        if (wake_ms < 0) return timeout_ms;
+        return timeout_ms < 0 ? wake_ms : std::min(timeout_ms, wake_ms);
+    };
     if (clock_.virtual_time()) {
         if (earliest != none) {
             clock_.wait_until(earliest);
         } else if (has_native_wait) {
-            check(retry_soon ? retry_ms : -1);
+            check(bounded(retry_soon ? retry_ms : -1));
         } else if (retry_soon) {
             pause_briefly();
+        } else if (wake_ms > 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(wake_ms));
         }
         check(0);
         return collect();
@@ -849,6 +933,13 @@ std::vector<PendingRequests::Done> PendingRequests::wait(std::optional<std::int6
 
     int timeout_ms = earliest == none ? -1 : milliseconds_until(earliest, clock_.now());
     if (retry_soon) timeout_ms = timeout_ms < 0 ? retry_ms : std::min(timeout_ms, retry_ms);
+    if (wake != none && !has_native_wait && !retry_soon && (earliest == none || wake < earliest)) {
+        // Only a provider wake-up is due before anything else: sleep until it.
+        std::this_thread::sleep_for(std::chrono::milliseconds(wake_ms));
+        check(0);
+        return collect();
+    }
+    timeout_ms = bounded(timeout_ms);
     if (has_native_wait) {
         check(timeout_ms);
     } else {

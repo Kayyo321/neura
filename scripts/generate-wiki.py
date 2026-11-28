@@ -159,10 +159,17 @@ def is_hand_written(name: str) -> bool:
     return name in HAND_WRITTEN or bool(MODULE_PAGE.match(name))
 
 
-def rewrite_target(target: str, source: str, root: Path, repository: str) -> str:
-    """The wiki spelling of one link target found in the docs page `source`."""
+def rewrite_target(target: str, source: str, root: Path, repository: str, same_page: str | None = None) -> str:
+    """The wiki spelling of one link target found in the docs page `source`.
+
+    A same-page link is left alone, unless `same_page` names the wiki page that the text is copied
+    to: then it points at that page, as a module page's copy of a section of `docs/lang/Stdlib.md`
+    must link to the section on `Stdlib-Design`.
+    """
     angle = target.startswith("<") and target.endswith(">")
     inner = target[1:-1] if angle else target
+    if same_page and inner.startswith("#"):
+        return f"<{same_page}{inner}>" if angle else f"{same_page}{inner}"
     parts = urlsplit(inner)
     if parts.scheme or parts.netloc or not parts.path:
         return target
@@ -183,7 +190,7 @@ def rewrite_target(target: str, source: str, root: Path, repository: str) -> str
     return f"<{result}>" if angle else result
 
 
-def rewrite_prose(prose: str, source: str, root: Path, repository: str) -> str:
+def rewrite_prose(prose: str, source: str, root: Path, repository: str, same_page: str | None = None) -> str:
     """Prose with its links rewritten; code spans are left alone.
 
     The prose is rewritten as a whole, not line by line, because the text of a
@@ -194,11 +201,11 @@ def rewrite_prose(prose: str, source: str, root: Path, repository: str) -> str:
     for pattern in (REFERENCE_DEFINITION, INLINE_LINK, HTML_REFERENCE):
         spans.extend(match.span(1) for match in pattern.finditer(masked))
     for start, end in sorted(spans, reverse=True):
-        prose = prose[:start] + rewrite_target(prose[start:end], source, root, repository) + prose[end:]
+        prose = prose[:start] + rewrite_target(prose[start:end], source, root, repository, same_page) + prose[end:]
     return prose
 
 
-def rewrite_links(text: str, source: str, root: Path, repository: str) -> str:
+def rewrite_links(text: str, source: str, root: Path, repository: str, same_page: str | None = None) -> str:
     """The text with links rewritten for the wiki; fenced blocks are untouched."""
     output: list[str] = []
     prose: list[str] = []
@@ -206,7 +213,7 @@ def rewrite_links(text: str, source: str, root: Path, repository: str) -> str:
 
     def flush() -> None:
         if prose:
-            output.append(rewrite_prose("\n".join(prose), source, root, repository))
+            output.append(rewrite_prose("\n".join(prose), source, root, repository, same_page))
             prose.clear()
 
     for line in text.split("\n"):

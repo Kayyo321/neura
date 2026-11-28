@@ -317,6 +317,7 @@ The networking contracts, TCP streams and listeners, and the packages added in 0
 | [`Std.Net.Quic.QuicConfig`](Stdlib-Net-Quic-QuicConfig) | [Contracts](Stdlib-Net-Quic-QuicConfig#detailed-contracts) | [Declarations](Stdlib-Net-Quic-QuicConfig#exported-declarations) |
 | [`Std.Net.Quic.QuicConnection`](Stdlib-Net-Quic-QuicConnection) | [Contracts](Stdlib-Net-Quic-QuicConnection#detailed-contracts) | [Declarations](Stdlib-Net-Quic-QuicConnection#exported-declarations) |
 | [`Std.Net.Quic.QuicEndpoint`](Stdlib-Net-Quic-QuicEndpoint) | [Contracts](Stdlib-Net-Quic-QuicEndpoint#detailed-contracts) | [Declarations](Stdlib-Net-Quic-QuicEndpoint#exported-declarations) |
+| [`Std.Net.Quic.QuicStream`](Stdlib-Net-Quic-QuicStream) | [Contracts](Stdlib-Net-Quic-QuicStream#detailed-contracts) | [Declarations](Stdlib-Net-Quic-QuicStream#exported-declarations) |
 | [`Std.Net.Quic.ReplayFilter`](Stdlib-Net-Quic-ReplayFilter) | [Contracts](Stdlib-Net-Quic-ReplayFilter#detailed-contracts) | [Declarations](Stdlib-Net-Quic-ReplayFilter#exported-declarations) |
 | [`Std.Net.Quic.SessionTicket`](Stdlib-Net-Quic-SessionTicket) | [Contracts](Stdlib-Net-Quic-SessionTicket#detailed-contracts) | [Declarations](Stdlib-Net-Quic-SessionTicket#exported-declarations) |
 | [`Std.Net.Quic.StreamId`](Stdlib-Net-Quic-StreamId) | [Contracts](Stdlib-Net-Quic-StreamId#detailed-contracts) | [Declarations](Stdlib-Net-Quic-StreamId#exported-declarations) |

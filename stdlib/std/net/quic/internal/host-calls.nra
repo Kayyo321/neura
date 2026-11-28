@@ -1,0 +1,90 @@
+let errors = import:Std.Core.Error;
+let host_error = import:Std.Core.Internal.HostError;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief The host calls of `Std.Net.Quic`. Library use only.
+///
+/// A QUIC endpoint, connection or stream lives in the host provider. `QuicEndpoint`, `QuicConnection` and
+/// `QuicStream` are `#Immutable` handles of its IDs, so a handle crosses a spawn or a channel and any task may wait on it (Concurrency.md, "Host
+/// resource handles"). The provider allows one pending operation per direction: one accept per endpoint, one
+/// `accept_stream` per connection, and one read and one write per stream. A second one fails at once with the
+/// Custom error `quic.busy`; it is never queued. An ID the provider no longer holds, because the handle was
+/// closed by any task, fails with `IoErrorKind.Closed`; IDs carry a generation, so a closed ID never reaches a
+/// later object.
+///
+/// Stream reads and writes report how the peer ended a stream or the connection in their result, with its
+/// application code, because a host binding's error is a bare code.
+.Since("0.3.1")
+export let HostCalls = module (
+    /// @brief The proof that a QUIC handle is built by the library: the handles' constructors take it, and only
+    /// library source can import this module, so a program cannot make a handle from a raw provider ID.
+    export let Seal = enum (Library);
+
+    /// @brief An endpoint ID and its bound port, or a host error code.
+    export let EndpointOutcome = enum (Ok([int64, int]), Error(uint32));
+    /// @brief A connection ID and the selected ALPN protocol, or a host error code.
+    export let ConnectionOutcome = enum (Ok([int64, string]), Error(uint32));
+    /// @brief A stream ID, or a host error code.
+    export let StreamOutcome = enum (Ok(int64), Error(uint32));
+    /// @brief An accepted stream ID and whether it is bidirectional, or a host error code.
+    export let AcceptedOutcome = enum (Ok([int64, bool]), Error(uint32));
+    /// @brief Bytes read (empty at FIN), how the peer ended the stream or connection (0 not, 1 stream reset,
+    /// 2 application close, 3 transport close) and its code (-1 when none), or a host error code.
+    export let ReadOutcome = enum (Ok([uint8[list], int, int64]), Error(uint32));
+    /// @brief The byte count accepted for sending, the peer's ending and its code as for reads, and, for a write
+    /// with FIN, whether the peer acknowledged every byte before the timeout; or a host error code.
+    export let WriteOutcome = enum (Ok([int, int, int64, bool]), Error(uint32));
+    /// @brief Whether a close ended in OpenSSL's terminated state before its timeout, or a host error code.
+    export let CloseOutcome = enum (Ok(bool), Error(uint32));
+
+    /// @brief Listens on a numeric address with a certificate and key file and the ALPN protocols to accept.
+    export let listen = func(host: string, port: int, certificate: string, key: string, alpn: string[list],
+        idle_timeout_nanos: int64, max_payload: int, client_ca_file: string) -> EndpointOutcome
+        host("neura.net.quic.listen", 1);
+
+    /// @brief Waits for a connection; zero waits without limit.
+    export let accept = func(endpoint: int64, timeout_nanos: int64) -> ConnectionOutcome
+        host("neura.net.quic.accept", 1);
+
+    /// @brief Connects to a numeric address, verifying `server_name` against the CA file (empty: system trust).
+    export let connect = func(host: string, port: int, timeout_nanos: int64, server_name: string,
+        alpn: string[list], ca_file: string, idle_timeout_nanos: int64, max_payload: int, certificate: string,
+        key: string) -> ConnectionOutcome host("neura.net.quic.connect", 1);
+
+    /// @brief Opens a stream of this side without waiting; `quic.busy` at the peer's stream limit.
+    export let open_stream = func(connection: int64, bidirectional: bool) -> StreamOutcome
+        host("neura.net.quic.open_stream", 1);
+
+    /// @brief Waits for a stream the peer opens.
+    export let accept_stream = func(connection: int64, timeout_nanos: int64) -> AcceptedOutcome
+        host("neura.net.quic.accept_stream", 1);
+
+    /// @brief Reads up to `maximum` bytes of a stream.
+    export let stream_read = func(connection: int64, stream: int64, maximum: int, timeout_nanos: int64)
+        -> ReadOutcome host("neura.net.quic.stream_read", 1);
+
+    /// @brief Writes bytes to a stream, finishing it after them when `fin`.
+    export let stream_write = func(connection: int64, stream: int64, data: uint8[list], fin: bool,
+        timeout_nanos: int64) -> WriteOutcome host("neura.net.quic.stream_write", 1);
+
+    /// @brief Closes a connection with an application code and reason, after its streams' buffered data, and
+    /// waits up to `timeout_nanos` (zero: two seconds) for it to terminate; or closes an endpoint and its
+    /// connections at once. Every ID of the closed objects is refused from the start.
+    export let close = func(id: int64, code: int64, reason: string, timeout_nanos: int64) -> CloseOutcome
+        host("neura.net.quic.close", 1);
+
+    /// @brief The error of a failed QUIC host call: `Closed` for an ID the provider no longer holds,
+    /// `quic.busy` for a second pending operation in one direction, and the shared mapping otherwise.
+    .Pure
+    export let error_of = func(code: uint32, message: string, path: string) -> errors.Error {
+        if (code == 1) {
+            return errors.Error.Io { kind: errors.IoErrorKind.Closed, message: message .. ": handle is closed",
+                path: path };
+        }
+        if (code == 17) {
+            return errors.custom("quic.busy", message .. ": another operation in this direction is pending");
+        }
+        return host_error.io(code, message, path);
+    };
+);

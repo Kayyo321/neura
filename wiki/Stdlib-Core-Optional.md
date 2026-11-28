@@ -59,7 +59,7 @@ The loop form depends on the source value.
 | --- | --- | --- |
 | For-each over the built-in list from `ArrayList.items()`, or from any collection's `to_list()` | Yes | The built-in loop compares the list's structural version before each advance and traps with reason 5 on a change. `items()` is live; `to_list()` is a copy. |
 | An index loop over `size()` and `get(index)` | Yes | For lists and deques. No modification check. |
-| The collection's iterator object: `iterator()` returns a class with `has_next() → bool` and `next() → T` | Yes, as one concrete iterator class per collection | `has_next` has no effect and can be repeated. `next` returns the next element and advances, and traps with `no such element` at the end. An iterator is used once. |
+| The collection's iterator object: `iterator()` returns a class with `has_next() → bool` and `next() → T` | Yes, as one concrete iterator class per collection | For a collection's iterator, `has_next` has no effect and can be repeated. For every iterator, a generator's included, `has_next` consumes nothing and repeating it repeats no work ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Lifetime030.md), implemented, proposed). `next` returns the next element and advances, and traps with `no such element` at the end. An iterator is used once. |
 | For-each directly over the collection | Yes | Lowers to the iterator protocol when the source implements `Iterable<T>`. Every public collection, `Sequence`, and `IntRange` implement it; `tests/stdlib/for-each` loops over each one. |
 
 - **Iteration does not allocate per element.** `has_next` and `next` stay two calls. A single `next` returning `Optional<T>` would read well with `match`, but it would allocate an enum value for every element.
@@ -68,6 +68,7 @@ The loop form depends on the source value.
 - **Fail-fast iterator objects.** A wrapper over a single built-in list uses that list's `uint64` structural version. Other mutable collections use a `uint64` modification count and increment it after each structural change. An iterator records its version when created. `has_next` and `next` compare first and trap on a difference. Replacing an element by index or replacing the value for an existing key is not structural.
 - The iteration order of every collection is specified in section 9.
 - `Iterator<T>` and `Iterable<T>` are the interfaces for this protocol. Concrete iterator classes and collections implement these member signatures.
+- A [generator](CoreLanguage#generators) is a function that returns a `Sequence<T>` over a generated `Iterator<T>`: its first `has_next` with nothing buffered runs the body to its next `yield`, and further calls run nothing until `next` takes the buffered value.
 
 ### 5.7 Conformance summary
 
@@ -77,7 +78,7 @@ These are the intended source-module contracts. Compiler support for the operati
 | --- | --- | --- | --- | --- |
 | Integers, floats, `bool`, fieldless enums, `string`, tuples | Built in (G3a) | Companion `compare` functions | No (`Strings.scalars` gives a list) | |
 | Array, list | Built in, structural (G3a) | No | Built-in for-each | |
-| `Optional<T>`, `Result<T>`, `Error`, `JsonValue` | Module functions; payload enums have no built-in equality | No | No | |
+| `Optional<T>`, `Result<T>`, `Error`, `JsonValue` | Built in when each payload supports value members | No | No | |
 | `ArrayList`, `LinkedList` | As lists | No | Yes | `MutableList`; `LinkedList` also `Deque` |
 | `ArrayDeque`, `PriorityQueue` | Identity | No | Yes | `Deque` or `Queue` |
 | `HashSet`, `TreeSet`, `BitSet` | As sets | No | Yes | `MutableSet`; `TreeSet` also `SortedSet` |
@@ -157,6 +158,7 @@ Use `nil` for an internal absent reference when it cannot be confused with a rea
 | `to_string(v) → string` | Decimal. Built by concatenating one-character literals, most significant digit first; negative values are handled in the negative range so `Min` needs no negation. |
 | `to_string_radix(v, radix: int) → string` | Lowercase digits. The kernel `neura.integer.format_i64` or `format_u64` writes them (P2a). |
 | `format(v, radix: int, min_width: int, pad: string) → string` | As `to_string_radix`, then left-padded with copies of `pad` to `min_width` digits and sign. When `pad` is `0`, padding goes after the sign. |
+| `zero() → X`, `add(left, right) → X`, `one() → X`, `multiply(left, right) → X` | The operators at the type's width; `add` and `multiply` trap on overflow (reason 1). They implement `Additive<X>` and `Multiplicative<X>` of [section 6.6](Stdlib-Design#66-arithmetic), with `compare` and `parse` for `Ordered<X>` and `Parseable<X>`. |
 | `parse(text) → Result<X>`, `parse_radix(text, radix: int) → Result<X>` | **T1.** Grammar below. The kernel `neura.integer.parse_i64` or `parse_u64` parses the text as a 64-bit value, which a narrower type then checks against its range (P2a). |
 
 **Parsing grammar.** An optional `+` or `-`, then one or more digits of the radix, letters in either case. No whitespace, separators, or radix prefix. An empty input fails with kind `Empty`; a sign with no digits with `UnexpectedEnd`; any other byte with `InvalidCharacter` at its offset; a value outside the type with `OutOfRange` at offset 0. A `-` on an unsigned type is accepted only for zero. The parser accumulates in the negative range for signed types, so `Min` parses without overflow.
@@ -223,7 +225,7 @@ A class holding a compiled regular expression. Needs T1 only: its types are all 
 | `split(input)` | A built-in list of strings, with the rules of `Strings.split`. |
 | `group_count: int`, `pattern: string` | Get-only fields ([accessors](Types#accessors)), set at compilation. |
 
-`RegexMatch` is an immutable class: the get-only fields `start` and `end` (byte offsets), `text()`, `group(index) → Optional<string>`, `group_start(index) → int` (-1 when the group did not participate), and `named_group(name) → Optional<string>`. Group 0 is the whole match.
+`RegexMatch` is an immutable class: the get-only fields `start` and `end` (byte offsets), `text()`, `group(index) → Optional<string>`, `group_start(index) → int` (-1 when the group did not participate), and `named_group(name) → Optional<string>`. Group 0 is the whole match. Its capture positions are kept in a list, so it is not marked `#Immutable` and tasks cannot share it.
 
 ### 9.1 Contracts
 
@@ -325,7 +327,7 @@ The module also has functions for sequences of one element type, which a member 
 
 ### 10.2 `BigInteger`
 
-An immutable arbitrary-precision integer. Parsing uses T1 and conversion to `float64` uses N1.
+An immutable arbitrary-precision integer. Its magnitude is a list of limbs, so the class is not marked `#Immutable`, and a task cannot be given one or read the constants `Zero`, `One`, and `Ten`. Parsing uses T1 and conversion to `float64` uses N1.
 
 - **Layout.** `sign` (`int`: -1, 0, or 1) and `magnitude`, a built-in `uint32` list of limbs, least significant first, with no zero limb at the top. Zero has sign 0 and an empty magnitude. The form is unique, so equality compares the fields. No method changes the list after construction.
 - **Limits.** At most 2^26 limbs; a larger result traps with `invalid argument: magnitude too large`.
@@ -391,7 +393,7 @@ The three names are this page's shorthand. A type overlay cannot name a function
 
 Needs P2 for every host operation and T1 for `Path`.
 
-**`Path`** is an immutable class holding normalized text.
+**`Path`** is an `#Immutable` class holding normalized text.
 
 - The separator is `/` on every host. `\` is an ordinary character in `Path`. The Windows file-system host also accepts `\` as a separator.
 - **Normalization at construction.** Repeated separators collapse, `.` components are removed, and a trailing separator is removed except for a root. An empty result is `.`. `..` components are kept because removing them can change where a path with links leads. A relative path starting with a drive designator followed by more components keeps a leading `./`, as in `./C:/x`. For example, `Path.of("C:").join("x")` remains relative.

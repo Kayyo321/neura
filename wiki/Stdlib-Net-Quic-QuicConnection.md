@@ -18,46 +18,52 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **QuicConnection** · [`export let QuicConnection = class implements MultiplexedTransport<int64, uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L50)
-  One QUIC connection. Tagged `#Final`, `#NoDiscard(reason: "a connection must be closed")`, `#NotThreadSafe`.
-- **QuicConnection.QuicConnection** · [`export last client: bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L58)
+- **QuicConnection** · [`export const StackStreamLimit: int64 = 100`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L35)
+  The stream limit the pinned stack advertises; any other configured limit is unsupported. Since 0.3.1.
+- **QuicConnection** · [`export let QuicConnection = class implements MultiplexedTransport<int64, uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L39)
+  One QUIC connection. Tagged `#Final`, `#Immutable`.
+- **QuicConnection.QuicConnection** · [`export last client: bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L45)
   True on the client side.
-- **QuicConnection.QuicConnection** · [`export last alpn: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L60)
+- **QuicConnection.QuicConnection** · [`export last alpn: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L47)
   The ALPN protocol the handshake selected.
-- **QuicConnection.QuicConnection** · [`export last early_data_accepted: bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L62)
-  True when the server accepted this client's 0-RTT data.
-- **QuicConnection.QuicConnection** · [`export let init = func(opened: socket.Handle, address: Optional<SocketAddr>, is_client: bool, protocol: string, early_accepted: bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L69)
-  Use `connect` or `QuicEndpoint.accept`; the handle comes from the library.
-- **QuicConnection.QuicConnection** · [`export let peer_address = func -> Optional<SocketAddr>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L80)
-  The peer's address, or `None` when the host did not report it.
+- **QuicConnection.QuicConnection** · [`export let init = func(seal: host.Seal, connection: int64, address: string, is_client: bool, protocol: string, default_timeout: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L52)
+  Use `connect` or `QuicEndpoint.accept`: only the library holds the seal and the provider's ID.
+- **QuicConnection.QuicConnection** · [`export let timeout = func -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L63)
+  The default timeout of waiting operations; zero waits without limit. Since 0.3.1.
+- **QuicConnection.QuicConnection** · [`export let open = func(bidirectional: bool) -> Result<QuicStream>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L68)
+  Opens a stream of this side, bidirectional or send-only, without waiting. Fails with `quic.busy` at the peer's stream limit. Tagged `#NoDiscard`. Since 0.3.1.
+- **QuicConnection.QuicConnection** · [`export let accept = func -> Result<QuicStream>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L79)
+  Waits for the next stream the peer opens, with the default timeout or `timeout`. Tagged `#NoDiscard`. Since 0.3.1.
 - **QuicConnection.QuicConnection** · [`export let open_stream = func(bidirectional: bool) -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L84)
-  Opens a stream of this side, bidirectional or send-only. Tagged `#NoDiscard`.
+  As `open`, returning the stream ID (`MultiplexedTransport`). Tagged `#NoDiscard`.
 - **QuicConnection.QuicConnection** · [`export let accept_stream = func -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L91)
-  Waits for the next stream the peer opens. Tagged `#NoDiscard`.
+  As `accept`, returning the stream ID (`MultiplexedTransport`). Tagged `#NoDiscard`.
 - **QuicConnection.QuicConnection** · [`export let send_on = func(stream: int64, frame: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L99)
   Sends `frame` on `stream`. A stream this side cannot send on (the peer's unidirectional stream) is a `quic.stream_state` error. Tagged `#NoDiscard`.
-- **QuicConnection.QuicConnection** · [`export let receive_on = func(stream: int64) -> Result<Optional<uint8[list]>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L108)
-  The next bytes of `stream`, or `None` once the peer finished it. A stream this side cannot receive on (its own unidirectional stream) is a `quic.stream_state` error. Tagged `#NoDiscard`.
-- **QuicConnection.QuicConnection** · [`export let finish_stream = func(stream: int64) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L121)
+- **QuicConnection.QuicConnection** · [`export let receive_on = func(stream: int64) -> Result<Optional<uint8[list]>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L106)
+  The next bytes of `stream`, or `None` once the peer finished it. Tagged `#NoDiscard`.
+- **QuicConnection.QuicConnection** · [`export let finish_stream = func(stream: int64) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L113)
   Finishes this side of `stream` (a STREAM frame with FIN). Tagged `#NoDiscard`.
-- **QuicConnection.QuicConnection** · [`export let send = func(data: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L129)
-  Sends one unreliable datagram (an RFC 9221 DATAGRAM frame). Tagged `#NoDiscard`.
-- **QuicConnection.QuicConnection** · [`export let receive = func -> Result<Optional<uint8[list]>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L139)
-  The next datagram, or `None` once the connection is closed. Tagged `#NoDiscard`.
-- **QuicConnection.QuicConnection** · [`export let migrate = func(local: SocketAddr) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L151)
-  Moves the connection to a new local address (client migration, RFC 9000 section 9), for example from Wi-Fi to cellular; the peer validates the new path. Tagged `#NoDiscard`.
-- **QuicConnection.QuicConnection** · [`export let session_ticket = func(clock: Clock, server_name: string) -> Result<Optional<SessionTicket>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L161)
-  The newest session ticket the server sent, stamped with the clock's time, or `None`. Tagged `#NoDiscard`.
-- **QuicConnection.QuicConnection** · [`export let read_timeout = func -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L172)
-  The longest a read or accept waits; zero waits without limit.
-- **QuicConnection.QuicConnection** · [`export let set_read_timeout = func(timeout: Duration)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L175)
-  Sets the read timeout. A negative timeout traps with "invalid argument: negative timeout".
-- **QuicConnection.QuicConnection** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L180)
-  Closes the connection with application error 0 (CONNECTION_CLOSE). Closing again returns Ok.
-- **QuicConnection.QuicConnection** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L190)
+- **QuicConnection.QuicConnection** · [`export let send = func(data: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L121)
+  Unsupported: the pinned QUIC stack has no RFC 9221 datagrams. Tagged `#NoDiscard`.
+- **QuicConnection.QuicConnection** · [`export let receive = func -> Result<Optional<uint8[list]>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L125)
+  Unsupported: the pinned QUIC stack has no RFC 9221 datagrams. Tagged `#NoDiscard`.
+- **QuicConnection.QuicConnection** · [`export let migrate = func(local: SocketAddr) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L130)
+  Unsupported: the pinned QUIC stack has no application-directed migration. Tagged `#NoDiscard`.
+- **QuicConnection.QuicConnection** · [`export let session_ticket = func -> Result<Optional<SessionTicket>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L135)
+  Unsupported until session resumption is offered. Tagged `#NoDiscard`.
+- **QuicConnection.QuicConnection** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L139)
+  Closes the connection with application error 0 (CONNECTION_CLOSE).
+- **QuicConnection.QuicConnection** · [`export let close_with = func(code: int64, reason: string) -> Result<bool>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L149)
+  Closes the connection with an application error code (0 through 2^62 - 1) and a reason, after the streams' buffered data. Every handle of the connection fails with `Closed` from the start. `true` when the connection terminated within the default timeout (or two seconds without one), `false` when it was released before that. Since 0.3.1.
+- **QuicConnection.QuicConnection** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L157)
   Text such as "QuicConnection(client, h3, 192.0.2.1:443)".
-- **QuicConnection** · [`export let connect = func(address: SocketAddr, config: QuicConfig, ticket: Optional<SessionTicket>, early_bytes: uint8[list]) -> Result<QuicConnection>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L218)
-  Opens a QUIC connection to `address` with a client configuration (its TLS settings give the server name, CA file and ALPN). With a usable `ticket` and `early_data` enabled in the configuration, the ticket resumes the session and `early_bytes` go as 0-RTT data. Traps in Neura 0.3.0 (no QUIC host service). Tagged `#NoDiscard`.
+- **QuicConnection** · [`export let connect = func(address: SocketAddr, config: QuicConfig, ticket: Optional<SessionTicket>, early_bytes: uint8[list]) -> Result<QuicConnection>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L185)
+  Opens a QUIC connection to `address` with a client configuration: its TLS settings give the server name, CA file, ALPN and, for mutual TLS, the client certificate and key; its idle timeout and maximum datagram size are requested as transport parameters. The handshake is bounded by the TLS handshake timeout; later waiting operations use the configuration's `read_timeout`. A ticket, 0-RTT bytes, or a configuration the pinned stack cannot honour (see the module documentation) fail with `Unsupported` before any host call. Tagged `#NoDiscard`.
+- **QuicConnection** · [`export let connection_of = func(seal: host.Seal, opened: [int64, string], address: string, is_client: bool, nanos: int64) -> QuicConnection`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L212)
+  A connection handle from the host's [ID, ALPN]. Library use: `QuicEndpoint.accept` builds its connections with it. Since 0.3.1.
+- **QuicConnection** · [`export let check_limits = func(config: QuicConfig) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-connection.nra#L221)
+  `Ok` when the pinned QUIC stack can honour `config`, else the typed `Unsupported` of the first setting it cannot. Tagged `#NoDiscard`. Since 0.3.1.
 <!-- END SOURCE API -->
 
 ## Detailed contracts
