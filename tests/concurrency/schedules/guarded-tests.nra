@@ -1,0 +1,74 @@
+// Guarded state and atomics used as Concurrency.md section 5.4 allows, under
+// schedule exploration and without optimization: the escapes that RETURN-01
+// reproduced are compile errors now, and these programs hold under every
+// schedule explored.
+let atomics = import:Std.Concurrent.AtomicInt64;
+let guards = import:Std.Concurrent.Guarded;
+let test = import:Std.Test;
+
+let GuardedTests = module (
+    let Box = class (
+        export let n: int = 0;
+        export let spins: int = 0;
+    );
+
+    let spin = func(state: Box, rounds: int) {
+        for (let i: int = 0; i < rounds; i++) {
+            state.spins += 1;
+        }
+    };
+
+    // Reads the count, polls while it holds the guard, and writes it back:
+    // no other task can change it in between.
+    let bump = func(guard: guards.Guarded<Box>, rounds: int) {
+        for (let i: int = 0; i < rounds; i++) {
+            guard.with<bool>(func(state: Box) -> bool {
+                let before = state.n;
+                spin(state, 3);
+                state.n = before + 1;
+                return true;
+            });
+        }
+    };
+
+    // The guarded value does not change while this task holds the guard.
+    let steady = func(guard: guards.Guarded<Box>) -> int => guard.with<int>(func(state: Box) -> int {
+        let before = state.n;
+        spin(state, 20);
+        return state.n - before;
+    });
+
+    let add = func(counter: atomics.AtomicInt64, rounds: int) {
+        for (let i: int = 0; i < rounds; i++) {
+            counter.add(1);
+        }
+    };
+
+    export let test_guarded_updates_are_exclusive = func() -> void {
+        let guard = guards.create<Box>(func -> Box => new Box());
+        let changed = 0;
+        scope {
+            spawn bump(guard, 4);
+            spawn bump(guard, 4);
+            last observer = spawn steady(guard);
+            changed = observer.join();
+        }
+        test.assert_equal_int32(0, changed);
+        test.assert_equal_int32(8, guard.with<int>(func(state: Box) -> int => state.n));
+    };
+
+    export let test_atomic_additions_are_exact = func() -> void {
+        let counter = atomics.create(0);
+        scope {
+            spawn add(counter, 25);
+            spawn add(counter, 25);
+            spawn add(counter, 25);
+        }
+        test.assert_equal_int64(75, counter.load());
+    };
+
+    export let test_guarded_with_a_transferable_state = func() -> void {
+        let guard: guards.Guarded<int> = new(5);
+        test.assert_equal_int32(6, guard.with<int>(func(value: int) -> int => value + 1));
+    };
+);

@@ -914,7 +914,7 @@ check_rejection(select_send_of_a_class "${box_class}${channels_import}" [=[
         select {
             sender.send(new Box(2)) => { },
         }
-]=] "13:9" "a value of type Box is not transferable, so it cannot be sent on a channel")
+]=] "14:25" "a value of type Box is not transferable, so it cannot be sent on a channel")
 
 check_rejection(scope_handle_returned [=[
 let scopes = import:Std.Concurrent.Scope;

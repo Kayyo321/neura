@@ -1459,6 +1459,14 @@ void Validator::state(const Function& function, const Exit& exit,
         require_kind(0, {TypeKind::Object});
         require_slot_type([&](std::uint32_t slot) { return slot == args[0].type; }, "the cell argument type");
         break;
+    case StateOp::RetainObjectStorage:
+        arity(1);
+        zero_immediate();
+        if (image_.minor_version < object_storage_minor_version)
+            invalid(where + ": retaining object storage requires NVR 1.12");
+        require_kind(0, {TypeKind::Object});
+        require_slot_type([&](std::uint32_t slot) { return slot == args[0].type; }, "the object argument type");
+        break;
     case StateOp::ReadTag:
         arity(1);
         zero_immediate();

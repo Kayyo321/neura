@@ -1,0 +1,18 @@
+// A with body that stores the guarded state in a reassignable global (E0608):
+// Guarded is #ThreadSafe, so every exported method, with the bodies it calls,
+// must be task-safe.
+let guards = import:Std.Concurrent.Guarded;
+
+let Box = class (
+    export let n: int = 0;
+);
+
+let stash: Box = nil;
+
+let run = func() {
+    let guard = guards.create<Box>(func -> Box => new Box());
+    guard.with<bool>(func(state: Box) -> bool {
+        stash = state;
+        return true;
+    });
+};

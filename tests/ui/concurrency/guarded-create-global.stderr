@@ -1,0 +1,10 @@
+error[E0601]: a function given to a guard is not task-safe: it uses the reassignable binding 'held'
+  --> $DIR/guarded-create-global.nra:13:17
+   |
+13 |     let guard = guards.create<Box>(func -> Box => held);
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this call must be task-safe
+   |                                                   ---- uses the reassignable binding 'held' here
+   |
+   = note: `neura check --task-safety` reports for every function whether it is task-safe, and why not
+
+For more information about this error, try `neura explain E0601`.

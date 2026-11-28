@@ -378,6 +378,11 @@ bool concurrent_image(const Image& image) {
 }
 
 std::uint16_t required_minor_version(const Image& image) {
+    for (const auto& function : image.functions)
+        for (const auto& block : function.blocks)
+            for (const auto& exit : block.exits)
+                if (exit.kind == ExitKind::State && exit.operation == StateOp::RetainObjectStorage)
+                    return object_storage_minor_version;
     if (!image.transferable_cell_layouts.empty()) return pointer_minor_version;
     bool concat = false;
     bool append_run = false;

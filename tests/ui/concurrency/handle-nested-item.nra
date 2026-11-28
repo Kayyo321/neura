@@ -1,0 +1,10 @@
+// A Std.Concurrent handle inside a tuple given to a parallel item (E0602):
+// tasks may share the tuple, so the note names the handle it holds.
+let atomics = import:Std.Concurrent.AtomicInt64;
+let parallel = import:Std.Concurrent.Parallel;
+
+let bump = func(pair: [atomics.AtomicInt64, int]) -> int64 => pair[0].add(1);
+
+let run = func(counter: atomics.AtomicInt64) {
+    let _ = parallel.map<[atomics.AtomicInt64, int], int64>([[counter, 1]], bump, parallel.limits(1000, 1000));
+};

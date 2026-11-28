@@ -662,11 +662,13 @@ private:
         }
         if (destination.op == IrOp::Field) {
             const auto kind = static_field(program_, destination.symbol) ? EscapeKind::ArrayInGlobal : EscapeKind::ArrayInField;
+            // A constructor of the trusted pointer implementation stores the
+            // array that a view or shared pointer keeps; the allocation was
+            // retained where the program constructed the pointer.
             const bool view_backing = known(destination.symbol) && known(body_.owner) &&
-                symbol(destination.symbol).name == "source" &&
                 symbol(body_.owner).name == "init" &&
                 symbol(destination.symbol).owner == symbol(body_.owner).owner &&
-                pointer_class(program_, symbol(destination.symbol).owner) == PointerKind::List;
+                trusted_pointer_declaration(program_, symbol(destination.symbol).owner);
             if (!view_backing) arrays_into(kind, at, value, scope, destination.symbol);
             references_into(EscapeKind::ReferenceInField, at, value, scope, destination.symbol);
         } else if (destination.op == IrOp::Load && known(destination.symbol) &&
@@ -738,7 +740,13 @@ private:
     }
 
     void retained(const IrNode& call, const StorageOwner& scope) {
-        const bool view = call.op == IrOp::Allocate && pointer_class(program_, call.type.symbol) == PointerKind::List &&
+        // The trusted pointer implementation passes a retained array on to
+        // its own classes.
+        if (call.op == IrOp::Allocate && known(body_.owner) && trusted_pointer_declaration(program_, body_.owner) &&
+            trusted_pointer_declaration(program_, call.type.symbol))
+            return;
+        const auto pointer = call.op == IrOp::Allocate ? pointer_class(program_, call.type.symbol) : PointerKind::None;
+        const bool view = (pointer == PointerKind::List || pointer == PointerKind::Shared) &&
                           !call.operands.empty() && call.operands.front().type.kind == TypeKind::Array;
         if (view) retain_view_array(call, scope);
         for (std::size_t i = view ? 1 : 0; i < call.operands.size(); ++i) {
@@ -865,6 +873,10 @@ private:
                 if (origin.kind == Origin::Kind::Local || origin.kind == Origin::Kind::Parameter ||
                     origin.kind == Origin::Kind::Unknown)
                     report(EscapeKind::ReferenceReturned, node, value, origin);
+            } else if (origin.kind == Origin::Kind::Field && known(body_.owner) &&
+                       trusted_pointer_declaration(program_, body_.owner)) {
+                // A shared pointer returns the array it keeps, whose allocation
+                // was retained on the managed heap where the pointer was made.
             } else if (borrowed || origin.kind == Origin::Kind::Unknown) {
                 report(EscapeKind::ArrayReturnedBorrowed, node, value, origin);
             }

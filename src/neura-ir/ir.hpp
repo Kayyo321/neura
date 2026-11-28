@@ -223,7 +223,11 @@ enum class IrOp {
     Reflect = 75,
     // NeuraIR 1.17. Produces an independently owned, private handle to the
     // storage of a live Std.Core.Cell. Its result and operand share a type.
-    RetainCellStorage = 76
+    RetainCellStorage = 76,
+    // NeuraIR 1.18. Produces a private handle to the storage of a live class
+    // instance that a shared pointer owns, so that destroy through another
+    // handle cannot invalidate it. Its result and operand share a type.
+    RetainObjectStorage = 77
 };
 
 // A MakeClosure (or its specialized Allocate) carries the written
@@ -398,6 +402,11 @@ struct IrProgram {
     // Source contracts and inferred return summaries for nil diagnostics.
     std::vector<IrNilBinding> nil_bindings{};
     std::vector<IrNilResult> nil_results{};
+    // Each specialized class of the trusted Std.Core.Pointer module and its
+    // type argument, the pointee, which the class's own type no longer
+    // carries after specialization. Set by specialization; not part of a
+    // .nir file, which holds IR as lowered.
+    std::vector<std::pair<SymbolId, IrType>> pointer_pointees{};
 };
 
 // The source loader can supply this trusted library file and retry lowering.

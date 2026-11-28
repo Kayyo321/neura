@@ -8,7 +8,27 @@
 
 namespace neura {
 
-enum class PointerKind { None, Mutable, Const, List };
+// SharedGroup is the private state that the owners and weak references of
+// one shared target reach; it follows their transfer rule.
+enum class PointerKind { None, Mutable, Const, List, Unique, Shared, Weak, Soft, Atomic, Locked, SharedGroup };
+
+// The source name of each pointer class, for diagnostics.
+inline std::string_view pointer_kind_name(PointerKind kind) {
+    switch (kind) {
+    case PointerKind::Mutable: return "Pointer";
+    case PointerKind::Const: return "ConstPointer";
+    case PointerKind::List: return "ListPointer";
+    case PointerKind::Unique: return "UniquePointer";
+    case PointerKind::Shared: return "SharedPointer";
+    case PointerKind::Weak: return "WeakPointer";
+    case PointerKind::Soft: return "SoftPointer";
+    case PointerKind::Atomic: return "AtomicPointer";
+    case PointerKind::Locked: return "LockedPointer";
+    case PointerKind::SharedGroup: return "SharedGroup";
+    case PointerKind::None: break;
+    }
+    return {};
+}
 
 // Only declarations descended from the trusted standard library file
 // have pointer-specific construction, storage, or transfer rules.
@@ -35,6 +55,13 @@ inline PointerKind pointer_class(const IrProgram& program, SymbolId id) {
     if (pointer_class_name(cls, "Pointer")) return PointerKind::Mutable;
     if (pointer_class_name(cls, "ConstPointer")) return PointerKind::Const;
     if (pointer_class_name(cls, "ListPointer")) return PointerKind::List;
+    if (pointer_class_name(cls, "UniquePointer")) return PointerKind::Unique;
+    if (pointer_class_name(cls, "SharedPointer")) return PointerKind::Shared;
+    if (pointer_class_name(cls, "WeakPointer")) return PointerKind::Weak;
+    if (pointer_class_name(cls, "SoftPointer")) return PointerKind::Soft;
+    if (pointer_class_name(cls, "AtomicPointer")) return PointerKind::Atomic;
+    if (pointer_class_name(cls, "LockedPointer")) return PointerKind::Locked;
+    if (pointer_class_name(cls, "SharedGroup")) return PointerKind::SharedGroup;
     return PointerKind::None;
 }
 
@@ -67,25 +94,12 @@ inline bool contains_native_type(const IrProgram& program, const IrType& type) {
            std::ranges::any_of(type.arguments, [&](const auto& argument) { return contains_native_type(program, argument); });
 }
 
-// After specialization the class type has no source type arguments. For
-// ConstPointer the private backing class still gives the exact value type.
+// The pointee of a specialized pointer class: its type argument, which
+// specialization records because the class type no longer carries it.
+// Null before specialization and for any other class.
 inline const IrType* pointer_value_type(const IrProgram& program, SymbolId pointer) {
-    for (const auto& field : program.symbols) {
-        if (field.kind != SymbolKind::Field || field.owner != pointer || field.name != "backing" ||
-            !cell_class(program, field.type.symbol))
-            continue;
-        if (!field.type.arguments.empty()) return &field.type.arguments.front();
-        for (const auto& value : program.symbols) {
-            if (value.kind != SymbolKind::Field || value.owner != field.type.symbol || value.name != "value")
-                continue;
-            if (value.type.kind == TypeKind::Object && value.type.name.starts_with('&')) {
-                for (const auto& boxed : program.symbols)
-                    if (boxed.kind == SymbolKind::Field && boxed.owner == value.type.symbol && boxed.name == "$value")
-                        return &boxed.type;
-            }
-            return &value.type;
-        }
-    }
+    for (const auto& [instance, pointee] : program.pointer_pointees)
+        if (instance == pointer) return &pointee;
     return nullptr;
 }
 

@@ -1,0 +1,12 @@
+// A parallel worker that reads a Std.Concurrent handle through a const global
+// (E0601): the item would see a copy, and its updates would be lost.
+let atomics = import:Std.Concurrent.AtomicInt64;
+let parallel = import:Std.Concurrent.Parallel;
+
+const shared = atomics.create(100);
+
+let bump = func(n: int64) -> int64 => shared.add(n);
+
+let run = func() {
+    let _ = parallel.map<int64, int64>([1, 2, 3], bump, parallel.limits(1000, 1000));
+};

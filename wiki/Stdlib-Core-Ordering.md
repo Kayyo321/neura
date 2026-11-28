@@ -78,6 +78,7 @@ The following sections are taken from the [standard library specification](Stdli
 | `to_string(v) → string` | Decimal. Built by concatenating one-character literals, most significant digit first; negative values are handled in the negative range so `Min` needs no negation. |
 | `to_string_radix(v, radix: int) → string` | Lowercase digits. The kernel `neura.integer.format_i64` or `format_u64` writes them (P2a). |
 | `format(v, radix: int, min_width: int, pad: string) → string` | As `to_string_radix`, then left-padded with copies of `pad` to `min_width` digits and sign. When `pad` is `0`, padding goes after the sign. |
+| `zero() → X`, `add(left, right) → X`, `one() → X`, `multiply(left, right) → X` | The operators at the type's width; `add` and `multiply` trap on overflow (reason 1). They implement `Additive<X>` and `Multiplicative<X>` of [section 6.6](Stdlib-Design#66-arithmetic), with `compare` and `parse` for `Ordered<X>` and `Parseable<X>`. |
 | `parse(text) → Result<X>`, `parse_radix(text, radix: int) → Result<X>` | **T1.** Grammar below. The kernel `neura.integer.parse_i64` or `parse_u64` parses the text as a 64-bit value, which a narrower type then checks against its range (P2a). |
 
 **Parsing grammar.** An optional `+` or `-`, then one or more digits of the radix, letters in either case. No whitespace, separators, or radix prefix. An empty input fails with kind `Empty`; a sign with no digits with `UnexpectedEnd`; any other byte with `InvalidCharacter` at its offset; a value outside the type with `OutOfRange` at offset 0. A `-` on an unsigned type is accepted only for zero. The parser accumulates in the negative range for signed types, so `Min` parses without overflow.
@@ -99,10 +100,11 @@ The float companions use N1 for bit-level operations. `is_nan` can also use ordi
 | `equals(a, b)`, `hash(v)` | [Section 5.2](Stdlib-Design#52-equality-hashing-and-text). |
 | `to_string(v)`, `to_fixed(v, digits: int)`, `to_exponential(v, digits: int)` | [Section 7.5](Stdlib-Design#75-float-text-conversion). `to_fixed` gives exactly `digits` fraction digits (0 through 100), correctly rounded, ties to even. |
 | `parse(text) → Result<X>` | Also T1. |
+| `zero() → X`, `add(left, right) → X`, `one() → X`, `multiply(left, right) → X` | The operators, rounded as float arithmetic is. They implement `Additive<X>` and `Multiplicative<X>` of [section 6.6](Stdlib-Design#66-arithmetic), with `parse` for `Parseable<X>`. |
 
 ### 7.4 `Bool`
 
-`to_int(v) → int` gives 1 or 0; `xor(a, b)`; `compare(a, b) → Ordering`; `hash(v)`; `to_string(v)`. `parse(text) → Result<bool>` accepts exactly `true` and `false` and needs T1.
+`to_int(v) → int` gives 1 or 0; `xor(a, b)`; `compare(a, b) → Ordering`; `hash(v)`; `to_string(v)`. `parse(text) → Result<bool>` accepts exactly `true` and `false` and needs T1. `bool` conforms to `Ordered<bool>` and `Parseable<bool>` of [section 6.6](Stdlib-Design#66-arithmetic).
 
 ### 8.1 `Strings`
 
@@ -231,7 +233,7 @@ The module **`Lists`** has helpers for built-in lists that need no callback: `co
 
 ### 10.2 `BigInteger`
 
-An immutable arbitrary-precision integer. Parsing uses T1 and conversion to `float64` uses N1.
+An immutable arbitrary-precision integer. Its magnitude is a list of limbs, so the class is not marked `#Immutable`, and a task cannot be given one or read the constants `Zero`, `One`, and `Ten`. Parsing uses T1 and conversion to `float64` uses N1.
 
 - **Layout.** `sign` (`int`: -1, 0, or 1) and `magnitude`, a built-in `uint32` list of limbs, least significant first, with no zero limb at the top. Zero has sign 0 and an empty magnitude. The form is unique, so equality compares the fields. No method changes the list after construction.
 - **Limits.** At most 2^26 limbs; a larger result traps with `invalid argument: magnitude too large`.

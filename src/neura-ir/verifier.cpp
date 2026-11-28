@@ -1451,6 +1451,12 @@ private:
                  !cell_class(program_, node.type.symbol)))
                 report(node.span, "retention needs a Cell operand and yields that same Cell type");
             break;
+        case IrOp::RetainObjectStorage:
+            if (!trusted_pointer_declaration(program_, context.owner))
+                report(node.span, "retention of object storage requires the trusted pointer implementation");
+            if (expect_operands(node, 1, "retain object storage") && node.type != node.operands[0].type)
+                report(node.span, "retention yields the type of its operand");
+            break;
         case IrOp::Length:
             if (expect_operands(node, 1, "length") && !is_collection(node.operands.front().type)) {
                 report(node.span, "length requires an array or list");

@@ -1,0 +1,13 @@
+error[E0601]: the worker of a parallel map must compute in isolation: it reaches 'bump', which uses the binding 'shared', whose type AtomicInt64 cannot be copied into a parallel item
+  --> $DIR/handle-const-global-item.nra:11:13
+   |
+ 8 | let bump = func(n: int64) -> int64 => shared.add(n);
+   |                                       ------ uses the binding 'shared', whose type AtomicInt64 cannot be copied into a parallel item here
+...
+11 |     let _ = parallel.map<int64, int64>([1, 2, 3], bump, parallel.limits(1000, 1000));
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this call must be task-safe
+   |                                                   ---- calls 'bump'
+   |
+   = note: `neura check --task-safety` reports for every function whether it is task-safe, and why not
+
+For more information about this error, try `neura explain E0601`.

@@ -1090,7 +1090,8 @@
 
     // Entry by entry in handle order: presence, kind, type, cells and their
     // initialized flags (an uninitialized cell's bits are not compared),
-    // bytes, version, and identity number.
+    // bytes, version, identity number, and the pointer storage handles that
+    // share the entry.
     // Both heaps are walked in handle order in step, without copying; an
     // entry that Heap::same finds equal is passed over at once.
     bool shadow_compare_heap(ShadowDiff& d, const State& other) const {
@@ -1115,6 +1116,21 @@
             // Heap::same does not read.
             if (d.differs(heap_.in_region(a), other.heap_.in_region(b), [&] { return item() + " region entry"; })) {
                 return true;
+            }
+            // Which handles share the entry as pointer storage (NVR 1.11),
+            // which Heap::same does not read either.
+            if (d.differs(heap_.is_storage_handle(handle), other.heap_.is_storage_handle(handle),
+                          [&] { return item() + " storage handle"; })) {
+                return true;
+            }
+            if (const auto a_group = heap_.storage_group(handle), b_group = other.heap_.storage_group(handle);
+                a_group != b_group) {
+                const auto text = [](const std::vector<std::uint64_t>& group) {
+                    std::string out = "[";
+                    for (const auto member : group) out += (out.size() > 1 ? " " : "") + std::to_string(member);
+                    return out + "]";
+                };
+                return d.note(item() + " storage group", text(a_group), text(b_group));
             }
             if (Heap::same(heap_, a, other.heap_, b)) continue;
             const auto a_kind = heap_.kind(a);
@@ -1225,6 +1241,14 @@
                     }
                 }
                 if (done) break;
+            }
+            break;
+        case Perturb::StorageHandle:
+            for (auto handle = heap_.next_live(0); handle != 0; handle = heap_.next_live(handle)) {
+                if (!heap_.is_storage_handle(handle)) continue;
+                heap_.forget_storage_flag_for_test(handle);
+                done = true;
+                break;
             }
             break;
         case Perturb::LiveCells:

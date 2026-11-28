@@ -31,7 +31,7 @@ constexpr std::array<std::string_view, nvr::state_op_count> state_ops{
     "read-component",  "write-component",
     "enter-region",    "release-region",   "region-object", "region-collection", "region-repeat",
     "move-to-region",  "hook-enter",       "hook-leave",    "concat-text", "append-run",
-    "retain-cell-storage",
+    "retain-cell-storage", "retain-object-storage",
 };
 constexpr std::array<std::string_view, 3> value_kinds{"slot", "constant", "lanes"};
 
@@ -764,6 +764,11 @@ nvr::Image assemble(std::string_view text) {
                 }
                 if (exit.operation == nvr::StateOp::RetainCellStorage && image.minor_version < nvr::pointer_minor_version) {
                     in.error("retain-cell-storage requires NVR 1." + std::to_string(nvr::pointer_minor_version));
+                }
+                if (exit.operation == nvr::StateOp::RetainObjectStorage &&
+                    image.minor_version < nvr::object_storage_minor_version) {
+                    in.error("retain-object-storage requires NVR 1." +
+                             std::to_string(nvr::object_storage_minor_version));
                 }
                 in.keyword("immediate");
                 exit.immediate = in.index("immediate");

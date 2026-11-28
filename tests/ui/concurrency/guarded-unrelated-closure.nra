@@ -1,0 +1,21 @@
+// A closure of the same type as a create initializer, elsewhere in the
+// program, reads a reassignable global (E0601). Guard functions are checked by
+// type, over every closure of that type the program creates, so the report
+// labels the other closure; the initializer itself is task-safe.
+let guards = import:Std.Concurrent.Guarded;
+
+let Box = class (
+    export let n: int = 0;
+);
+
+let counter: int = 0;
+
+let call = func(make: func() -> Box) -> Box => make();
+
+let run = func() {
+    let made = call(func -> Box {
+        counter += 1;
+        return new Box();
+    });
+    let guard = guards.create<Box>(func -> Box => new Box());
+};

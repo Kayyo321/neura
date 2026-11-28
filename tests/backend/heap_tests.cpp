@@ -59,22 +59,31 @@ NEURA_TEST(heap, retained_cell_storage_has_independent_reachability) {
     const auto entry = live(heap, cell);
     const auto storage = heap.retain_storage(cell, entry);
     check(storage != cell && heap.is_storage_handle(storage), "the storage has a separate managed handle");
-    check_equal(heap.retain_storage(cell, entry), storage, "the Cell reuses the storage handle");
+    const auto second = heap.retain_storage(cell, entry);
+    check(second > storage && heap.is_storage_handle(second), "each retain of the Cell reserves a fresh storage handle");
     check_equal(heap.retain_storage(storage, live(heap, storage)), storage, "cloning reuses the storage handle");
+    check(heap.storage_group(cell) == std::vector<std::uint64_t>{cell, storage, second}, "one group holds every handle");
+    check_equal(heap.check(), std::string(), "the groups are consistent");
     heap.set_field(live(heap, storage), 0, 42);
     check_equal(heap.field(entry, 0), std::uint64_t{42}, "the Cell sees a write through its storage alias");
+    check_equal(heap.field(live(heap, second), 0), std::uint64_t{42}, "every storage alias sees the write");
     check_equal(heap.cells_released_by(cell, entry), std::uint64_t{0}, "destroying the Cell releases no shared cells");
     heap.free(cell);
     check(!heap.find(cell), "the destroyed Cell handle is invalid");
+    check(heap.storage_group(storage) == std::vector<std::uint64_t>{storage, second}, "the storage handles remain grouped");
     check_equal(heap.field(live(heap, storage), 0), std::uint64_t{42}, "the storage remains live");
     check(heap.mark(storage, live(heap, storage)), "a retained handle can be a root");
     std::uint64_t reclaimed = 0;
     const auto record = [&](std::uint64_t, std::uint64_t cells) { reclaimed += cells; };
     heap.sweep(record);
+    check(!heap.find(second), "the unrooted storage handle is collected");
     check_equal(reclaimed, std::uint64_t{0}, "the rooted storage remains allocated");
+    check(heap.storage_group(storage) == std::vector<std::uint64_t>{storage}, "the survivor is a storage handle alone");
+    check_equal(heap.check(), std::string(), "the survivor carries no mark after the sweep");
     heap.sweep(record);
     check(!heap.find(storage), "the unreachable storage handle is collected");
     check_equal(reclaimed, std::uint64_t{2}, "the last handle releases the allocation exactly once");
+    check(heap.storage_group(storage).empty(), "no group remains");
 }
 
 NEURA_TEST(heap, collecting_an_unreachable_storage_alias_preserves_the_cell) {
@@ -88,6 +97,7 @@ NEURA_TEST(heap, collecting_an_unreachable_storage_alias_preserves_the_cell) {
     check(swept == std::vector<std::pair<std::uint64_t, std::uint64_t>>{{storage, 0}},
           "collecting the alias accounts for no storage cells");
     check(live(heap, cell) == entry, "the Cell is still live");
+    check(heap.storage_group(cell).empty() && !heap.is_storage_handle(cell), "the Cell is an ordinary handle again");
     const auto replacement = heap.retain_storage(cell, entry);
     check(replacement > storage, "a later pointer gets a fresh handle");
     check(heap.mark(replacement, live(heap, replacement)), "mark the replacement as the only root");
@@ -96,6 +106,50 @@ NEURA_TEST(heap, collecting_an_unreachable_storage_alias_preserves_the_cell) {
     check(swept == std::vector<std::pair<std::uint64_t, std::uint64_t>>{{cell, 0}},
           "sweeping the original handle carries forward the storage root");
     check(live(heap, replacement) == entry, "the original storage remains live");
+    check_equal(heap.check(), std::string(), "the replacement alone is consistent");
+}
+
+// F2: whether a collection swept an earlier storage handle must not change
+// how many handles a later retain consumes.
+NEURA_TEST(heap, retaining_consumes_handles_independently_of_collection) {
+    const auto run = [](bool collect) {
+        Heap heap;
+        const auto cell = heap.create_object(7, 1);
+        heap.retain_storage(cell, live(heap, cell));
+        if (collect) {
+            check(heap.mark(cell, live(heap, cell)), "only the Cell is a root");
+            heap.sweep([](std::uint64_t, std::uint64_t) {});
+        }
+        const auto again = heap.retain_storage(cell, live(heap, cell));
+        const auto next = heap.create_object(7, 1);
+        check_equal(heap.check(), std::string(), "the heap is consistent");
+        return std::array<std::uint64_t, 3>{again, next, heap.last_handle()};
+    };
+    check(run(true) == run(false), "the retain and the next allocation get the same handles with or without a sweep");
+}
+
+NEURA_TEST(heap, a_storage_group_of_three_keeps_one_mark_per_handle) {
+    Heap heap;
+    const auto cell = heap.create_object(7, 1);
+    const auto entry = live(heap, cell);
+    const auto first = heap.retain_storage(cell, entry);
+    const auto second = heap.retain_storage(cell, entry);
+    const auto words = heap.snapshot();
+    const std::vector<std::uint64_t> group{1, cell, 3, cell, 0, first, 1, second, 1};
+    check(std::search(words.begin(), words.end(), group.begin(), group.end()) != words.end(),
+          "the snapshot records the storage group and its storage flags");
+    check(heap.mark(second, live(heap, second)), "only the last storage handle is a root");
+    check(!heap.mark(second, live(heap, second)), "a second mark of the same handle reports it marked");
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> swept;
+    heap.sweep([&](std::uint64_t handle, std::uint64_t cells) { swept.emplace_back(handle, cells); });
+    check(swept == std::vector<std::pair<std::uint64_t, std::uint64_t>>{{cell, 0}, {first, 0}},
+          "the unrooted handles release no shared cells");
+    check(live(heap, second) == entry, "the rooted storage handle keeps the entry");
+    check_equal(heap.check(), std::string(), "the survivor's mark was consumed by the sweep");
+    swept.clear();
+    heap.sweep([&](std::uint64_t handle, std::uint64_t cells) { swept.emplace_back(handle, cells); });
+    check(swept == std::vector<std::pair<std::uint64_t, std::uint64_t>>{{second, 2}},
+          "the last handle releases the entry's cells once");
 }
 
 NEURA_TEST(heap, pages_are_released_and_handles_stay_ordered) {

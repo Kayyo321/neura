@@ -103,7 +103,7 @@ These are the intended source-module contracts. Compiler support for the operati
 | --- | --- | --- | --- | --- |
 | Integers, floats, `bool`, fieldless enums, `string`, tuples | Built in (G3a) | Companion `compare` functions | No (`Strings.scalars` gives a list) | |
 | Array, list | Built in, structural (G3a) | No | Built-in for-each | |
-| `Optional<T>`, `Result<T>`, `Error`, `JsonValue` | Module functions; payload enums have no built-in equality | No | No | |
+| `Optional<T>`, `Result<T>`, `Error`, `JsonValue` | Built in when each payload supports value members | No | No | |
 | `ArrayList`, `LinkedList` | As lists | No | Yes | `MutableList`; `LinkedList` also `Deque` |
 | `ArrayDeque`, `PriorityQueue` | Identity | No | Yes | `Deque` or `Queue` |
 | `HashSet`, `TreeSet`, `BitSet` | As sets | No | Yes | `MutableSet`; `TreeSet` also `SortedSet` |
@@ -120,6 +120,8 @@ These are the intended source-module contracts. Compiler support for the operati
 | `Unit` | A fieldless enum with the single variant `Value`. | Yes |
 | `Cell<T>` | A class with one mutable field `value`, and the module function `of<T>(value)`. It exists so that closures, which capture by value, can share mutable state. | Yes |
 | `IntRange` | An immutable class with the get-only fields `start` (inclusive), `end` (exclusive), and `step` (nonzero). Module functions `of(start, end)` and `stepped(start, end, step)`; a zero step traps. A negative step counts down while the value is greater than `end`. Members `size()`, `is_empty()`, `contains(value)`, `get(index)`, `to_list()`, and `iterator()`; it implements `Iterable<int>`, so `for (let i in range)` visits the values in order. `size` and iteration are computed in `int64` so that no intermediate overflows. | Yes |
+
+The [`Std.Core.Pointer` module](https://github.com/Kayyo321/neura/blob/main/docs/lang/Neura0.3.1.md#stdcorepointer) gives a `Cell<T>` a managed mutable view and a read-only view for deeply immutable values. `ListPointer<T>` provides bounded, mutable views over arrays and lists. The views keep their storage reachable and do not expose addresses. `SharedPointer<T>` shares a target between owner claims that end with `release` or `close`, and `WeakPointer<T>` upgrades until the last claim ends. `AtomicPointer<T>` replaces a shared immutable target atomically, and `LockedPointer<T>` guards state that tasks reach one at a time. `UniquePointer` and `SoftPointer` are declared with their target and task-transfer rules, without constructors yet.
 
 `Pair`, `Entry`, and `Boxed` do not exist: a pair is the native tuple `[A, B]` (`partition` returns `[ArrayList<T>, ArrayList<T>]`, `divide_and_remainder` returns `[BigInteger, BigInteger]`, `enumerate` yields `[int, T]`, and `zip` yields `[T, U]`), and a map entry is the tuple `[K, V]`. No API on this page takes an `Object`.
 
@@ -149,7 +151,7 @@ Signed wrapping operations convert to the unsigned pattern, operate, and convert
 
 ### 10.2 `BigInteger`
 
-An immutable arbitrary-precision integer. Parsing uses T1 and conversion to `float64` uses N1.
+An immutable arbitrary-precision integer. Its magnitude is a list of limbs, so the class is not marked `#Immutable`, and a task cannot be given one or read the constants `Zero`, `One`, and `Ten`. Parsing uses T1 and conversion to `float64` uses N1.
 
 - **Layout.** `sign` (`int`: -1, 0, or 1) and `magnitude`, a built-in `uint32` list of limbs, least significant first, with no zero limb at the top. Zero has sign 0 and an empty magnitude. The form is unique, so equality compares the fields. No method changes the list after construction.
 - **Limits.** At most 2^26 limbs; a larger result traps with `invalid argument: magnitude too large`.

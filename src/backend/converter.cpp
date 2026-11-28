@@ -1455,19 +1455,10 @@ Conversion Converter::run() {
 void Converter::mark_transferable_layouts() {
     const TaskAnalysis analysis(program_);
     std::set<std::uint32_t> marked;
-    std::map<std::uint32_t, std::uint32_t> retained_cells;
     for (const auto& [id, index] : layouts_) {
         const auto& item = symbol(id);
-        if (item.kind == SymbolKind::Enum ? analysis.transferable(item.type) : analysis.transferable_class(id)) {
+        if (item.kind == SymbolKind::Enum ? analysis.transferable(item.type) : analysis.transferable_class(id))
             marked.insert(index);
-            if (pointer_class(program_, id) == PointerKind::Const) {
-                const auto& backing = symbol(member(id, "backing"));
-                const auto cell = backing.type.symbol;
-                const auto& value = symbol(member(cell, "value"));
-                retained_cells.emplace(layout(cell, backing.span), is_primitive_reference(value.type) ?
-                                       layout(value.type.symbol, value.span) : absent);
-            }
-        }
     }
     for (const auto& [type, index] : box_layouts_) {
         if (analysis.transferable(type)) marked.insert(index);
@@ -1479,9 +1470,9 @@ void Converter::mark_transferable_layouts() {
         if (parent != absent && marked.insert(parent).second) pending.push_back(parent);
     }
     image_.transferable_layouts = std::vector<std::uint32_t>(marked.begin(), marked.end());
-    for (const auto& [cell, box] : retained_cells)
-        image_.transferable_cell_layouts.push_back({cell, box});
-    if (!retained_cells.empty()) image_.minor_version = nvr::pointer_minor_version;
+    // No transferable class retains Cell storage since ConstPointer stopped
+    // crossing tasks, so new images list no TRNS cell layouts. The loader
+    // and the scheduler still accept them in NVR 1.11 images written before.
 }
 
 void Converter::add_reached_callbacks() {
@@ -3603,6 +3594,10 @@ Operand FunctionCompiler::expression(const IrNode& node) {
     case IrOp::RetainCellStorage: {
         auto cell = expression(node.operands.front());
         return state(nvr::StateOp::RetainCellStorage, 0, {cell}, cell.type, node.span);
+    }
+    case IrOp::RetainObjectStorage: {
+        auto target = expression(node.operands.front());
+        return state(nvr::StateOp::RetainObjectStorage, 0, {target}, target.type, node.span);
     }
     case IrOp::CollectionVersion: {
         auto list = expression(node.operands.front());

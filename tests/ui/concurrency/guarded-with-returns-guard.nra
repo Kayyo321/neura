@@ -1,0 +1,12 @@
+// A with body that wraps the guarded state in a second guard (E0602): the
+// second guard would be transferable and reach the state without the first.
+let guards = import:Std.Concurrent.Guarded;
+
+let Box = class (
+    export let n: int = 0;
+);
+
+let run = func() {
+    let guard = guards.create<Box>(func -> Box => new Box());
+    let leaked = guard.with<guards.Guarded<Box>>(func(state: Box) -> guards.Guarded<Box> => new(state));
+};

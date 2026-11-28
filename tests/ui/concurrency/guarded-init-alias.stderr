@@ -1,0 +1,10 @@
+error[E0602]: a value of type Box is not transferable, so it cannot be given to a Guarded constructor
+  --> $DIR/guarded-init-alias.nra:11:38
+   |
+11 |     let guard: guards.Guarded<Box> = new(box);
+   |                                      ^^^^^^^^ not transferable
+   |
+   = note: tasks may share an instance of a class marked #Immutable, or of a monitor, whose exported methods are #Synchronized
+   = help: build the state inside the guard with Guarded.create(initializer)
+
+For more information about this error, try `neura explain E0602`.

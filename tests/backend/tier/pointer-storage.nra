@@ -1,0 +1,22 @@
+// A loop over a Pointer to a live Cell, for the tier shadow's comparison of
+// pointer storage handles (NVR 1.11): every retain of the Cell takes its own
+// storage handle, which the shadow compares with the run's.
+let cell = import:Std.Core.Cell;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let.promote _ = import:Std.Core.Pointer;
+
+let PointerStorage = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let storage = cell.of<int64>(0);
+        let first: Pointer<int64> = new(storage);
+        let second: Pointer<int64> = new(storage);
+        let total: int64 = 0;
+        for (let i: int = 0; i < 2000; i++) {
+            first.write(second.read() + 1);
+            total += storage.value;
+        }
+        console.print_line(total.to_string());
+        return program.ExitCode.Ok;
+    };
+);

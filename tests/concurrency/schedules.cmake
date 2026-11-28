@@ -134,4 +134,37 @@ if(NOT service_status STREQUAL "0" OR
     message(FATAL_ERROR "service fixture: status ${service_status}\n${service_stdout}\n${service_stderr}")
 endif()
 
-message(STATUS "concurrency schedules: exploration, reproduction, virtual time, and the service fixture passed")
+# Guarded state and atomics used as section 5.4 allows hold under every
+# schedule explored, in both builds. The unoptimized build reads every field
+# where it is written: eliminate-common-subexpressions may reuse a read across
+# a poll, which the memory model allows (docs/IrOptimization.md, "Tasks,
+# polls, and scheduler operations"), and that would hide a change that an
+# escaped reference made. With a guard that released before the body, the
+# exclusivity test fails in both builds.
+foreach(build IN ITEMS --no-optimize --optimize)
+    if(build STREQUAL "--optimize")
+        neura(guarded test --schedules 50 --task-quantum 1 "${sources}/guarded-tests.nra")
+    else()
+        neura(guarded test --no-optimize --schedules 50 --task-quantum 1 "${sources}/guarded-tests.nra")
+    endif()
+    if(NOT guarded_status STREQUAL "0" OR
+       NOT guarded_stdout MATCHES "^PASS GuardedTests.test_guarded_updates_are_exclusive \\[50 schedules\\]\nPASS GuardedTests.test_atomic_additions_are_exact \\[50 schedules\\]\nPASS GuardedTests.test_guarded_with_a_transferable_state \\[1 schedule\\]\n")
+        message(FATAL_ERROR "guarded state (${build}): status ${guarded_status}\n${guarded_stdout}\n${guarded_stderr}")
+    endif()
+endforeach()
+
+# LockedPointer and AtomicPointer shared between tasks hold under every
+# schedule explored, in both builds.
+foreach(build IN ITEMS --no-optimize --optimize)
+    if(build STREQUAL "--optimize")
+        neura(pointers test --schedules 50 --task-quantum 1 "${sources}/pointer-tests.nra")
+    else()
+        neura(pointers test --no-optimize --schedules 50 --task-quantum 1 "${sources}/pointer-tests.nra")
+    endif()
+    if(NOT pointers_status STREQUAL "0" OR
+       NOT pointers_stdout MATCHES "^PASS PointerTests.test_locked_updates_are_exact \\[50 schedules\\]\nPASS PointerTests.test_locked_mutable_state_is_exclusive \\[50 schedules\\]\nPASS PointerTests.test_atomic_loads_are_live \\[50 schedules\\]\n")
+        message(FATAL_ERROR "pointers (${build}): status ${pointers_status}\n${pointers_stdout}\n${pointers_stderr}")
+    endif()
+endforeach()
+
+message(STATUS "concurrency schedules: exploration, reproduction, virtual time, the service fixture, guarded state, and pointers passed")

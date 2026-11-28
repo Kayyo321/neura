@@ -19,6 +19,9 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ### Added
 
+- `AtomicPointer<T>` (`load`, `store`, `swap`, `compare_exchange`) and `LockedPointer<T>` (`read`, `update`, `with`, and `locked<T>(initializer)` for a value of any type) of `Std.Core.Pointer`. Tasks may share both. An AtomicPointer's operations are totally ordered, and a LockedPointer's state is reached only under its guard: its constructor takes a transferable value (E0602), `read` needs a deeply immutable one (E0580), and a callback's captures and result follow `Guarded.with`'s rules. [Pointer contract](docs/lang/Neura0.3.1.md#28-atomicpointerescapetescape)
+- `SharedPointer<T>` and `WeakPointer<T>` of `Std.Core.Pointer` have constructors and operations: `clone`, `read`, `with_read`, `with_mut`, `downgrade`, `release` and `close` (for `using`), and `upgrade` and `is_alive`. Owner claims end explicitly, and a weak pointer upgrades until the last claim ends. A pointer takes a target that nothing else refers to (E0465), and `destroy` of a pointer-owned target traps. Images that construct one use the object-storage operation of NVR 1.12 and NeuraIR 1.18. [Pointer contract](docs/lang/Neura0.3.1.md#25-sharedpointerescapetescape)
+- `Std.Core.Pointer` declares `UniquePointer<T>`, `SharedPointer<T>`, `WeakPointer<T>`, `SoftPointer<T>`, `AtomicPointer<T>`, and `LockedPointer<T>` with the target types each accepts (E0418, E0580) and their task-transfer rules. `SharedPointer`, `WeakPointer`, and `SoftPointer` over a deeply immutable target, `AtomicPointer`, and `LockedPointer` may be shared between tasks; none is a parallel item. They have no public constructor yet. [Pointer contract](docs/lang/Neura0.3.1.md#type-erasure-and-native-code)
 - `Std.Core.Pointer` adds managed `Pointer<T>`, `ConstPointer<T>`, and checked `ListPointer<T>` views. Storage and views remain live through their holders. [Pointer contract](docs/lang/Neura0.3.1.md#stdcorepointer)
 - The `nil-access` and `nil-argument` warnings report dereferences and transfers that may encounter a nil reference. A guard can prove a binding non-nil, and function result summaries survive separate compilation. [Nil warnings](docs/lang/CoreLanguage.md#nil-access-and-nil-argument-warnings)
 - Numeric literals accept apostrophe digit separators and fixed-width integer and floating-point suffixes.
@@ -40,6 +43,11 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ### Changed
 
+- NeuraIR 1.18 and NVR 1.12 add the shared-pointer object-storage operation. Every program that links `Std.Core.Pointer` is now written as NeuraIR 1.18, because the module contains the operation, so a reader that accepts only up to 1.17 refuses it. Its image keeps its earlier NVR minor unless the program constructs a `SharedPointer`. [NeuraIR 1.18](docs/NirFormat.md#revision-118-shared-pointer-storage)
+- `new Guarded<T>(state)` requires a transferable `T` (E0602), because the caller could keep an alias to the state and change it while another task holds the guard. Build any other state inside the guard with `Guarded.create`. The initializer given to `create` must be task-safe (E0601), so it cannot return an object a reassignable global also holds.
+- A `Std.Concurrent` handle such as `AtomicInt64` cannot be a `Parallel.map` item (E0602) or be read through a `const` global by a parallel worker (E0601). The item received a copy, so its updates were lost.
+- E0602 for a value in a `select` send arm is reported at that value instead of at the `select`.
+- `ConstPointer<T>` is `#NotThreadSafe` and stays in its task, even when `T` is deeply immutable, because a `Pointer<T>` to the same storage can still change what it reads. Giving one to a spawned task, a channel, a `select` send arm, or a parallel item is E0602, and reading one through a `const` global from a spawned call is E0601. Give the task `view.read()` instead. NVR 1.11 images written before this change keep their `ConstPointer` transfers: the loader still accepts their `TRNS` cell layouts, and the compiler no longer writes any. [Pointer contract](docs/lang/Neura0.3.1.md#type-erasure-and-native-code)
 - `Std.Text.Strings.join` accepts parts and separators up to the maximum text length and reports when the accumulated byte count exceeds that limit.
 - In a `let` or `const` initializer, bare `law()` starts a law declaration and requires a claim. Parenthesize the callee as `(law)()` to call a zero-argument function named `law`.
 - Empty tag groups (`#[]` and `.[]`) are now rejected with `E0910`.
@@ -58,6 +66,9 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ### Fixed
 
+- A program that uses `Sequence<T>` can call `Guarded.create<T>` for the same `T`. Sequence's own availability checks and element pulls captured lists and iterators with the type `func() -> T`, which made every initializer of that type untransferable (E0602). They now take a private argument, so their type differs.
+- Each `Pointer<T>` created from a live `Cell<T>` takes its own storage handle. Before, a pointer reused an earlier pointer's storage handle only if no collection had reclaimed it, so the handle numbers in later trap details and the point at which the handle limit was reached could depend on when the collector ran. [NVR 1.11](docs/runtime/NVR.md#managed-pointer-storage-111)
+- `NEURA_TIER_CHECK=2` compares which heap handles share an entry as pointer storage, and the runtime's heap consistency check verifies those groups.
 - Specialization preserves constructor overloads declared with `or` in generic classes.
 - A primitive reference can bind to a specialized generic field of the matching primitive type, such as `let r: &int64 = box.value` on `Box<int64>`.
 - `neura.process.generation` no longer fails on an unknown VMClock version or an unexpected read error; it falls back to the PID and vmgenid detectors and retries a transient VMClock open failure or a read shorter than the VMClock header, giving VMClock up only after three short reads in a row.

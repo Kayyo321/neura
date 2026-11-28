@@ -1,0 +1,14 @@
+error[E0608]: method 'with<bool>' of #ThreadSafe class 'Guarded<Box>' is not task-safe: it uses the reassignable binding 'stash'
+  --> $ROOT/stdlib/std/concurrent/guarded.nra:7:14
+   |
+ 7 |     .[Final, ThreadSafe]
+   |              ^^^^^^^^^^ #ThreadSafe promises task safety
+  ::: $DIR/guarded-with-stash.nra:15:9
+   |
+15 |         stash = state;
+   |         ----- uses the reassignable binding 'stash' here
+   |
+   = note: `neura check --task-safety` reports for every function whether it is task-safe, and why not
+   = help: remove #ThreadSafe, or remove the use of shared state
+
+For more information about this error, try `neura explain E0608`.

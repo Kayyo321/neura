@@ -4165,6 +4165,18 @@ private:
             if (heap_.last_handle() >= limits_.max_handles) fault(TrapKind::HandleLimit);
             return heap_.retain_storage(args[0], item);
         }
+        case nvr::StateOp::RetainObjectStorage: {
+            const auto item = typed_entry(args[0], types[0].type);
+            if (heap_.kind(item) != EntryKind::Object)
+                fault(TrapKind::InvalidHandle, "object storage retention needs an object");
+            if (heap_.in_region(item))
+                fault(TrapKind::InvalidRegion, "cannot retain object storage owned by a region");
+            if (scheduler_object(args[0]))
+                fault(TrapKind::InvalidTaskOperation, "cannot retain a scheduler object's storage");
+            if (const auto handle = heap_.retained_storage(args[0])) return handle;
+            if (heap_.last_handle() >= limits_.max_handles) fault(TrapKind::HandleLimit);
+            return heap_.retain_storage(args[0], item);
+        }
         case nvr::StateOp::ReadTag:
             return heap_.type(state_receiver(exit, args[0]));
         case nvr::StateOp::ReadField: {
@@ -4295,7 +4307,7 @@ private:
         case nvr::StateOp::FreeObject: {
             const auto item = typed_entry(args[0], types[0].type);
             if (heap_.is_storage_handle(args[0]))
-                fault(TrapKind::InvalidHandle, "retained cell storage is released by collection");
+                fault(TrapKind::InvalidHandle, "pointer-owned storage is released by collection");
             if (heap_.in_region(item)) {
                 fault(TrapKind::InvalidRegion, "handle " + std::to_string(args[0]) + " belongs to a region and is freed by its release");
             }

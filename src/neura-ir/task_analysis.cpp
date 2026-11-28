@@ -94,6 +94,9 @@ TaskAnalysis::TaskAnalysis(const IrProgram& program) : program_(program), dispat
         if (item.kind == SymbolKind::Field && valid(item.owner)) fields_[item.owner].push_back(id);
         if (item.kind == SymbolKind::Variant && valid(item.owner)) variants_[item.owner].push_back(id);
         if (item.kind == SymbolKind::Class && valid(item.base)) derived_[item.base].push_back(id);
+        if (item.kind == SymbolKind::Function && item.name == "$invoke" && valid(item.owner)) {
+            invokes_.emplace(item.owner, id);
+        }
         if (item.kind == SymbolKind::Function && item.name == "deinit" && valid(item.owner)) {
             destructors_[item.owner].push_back(id);
         }
@@ -175,6 +178,20 @@ bool TaskAnalysis::concurrent_handle(SymbolId cls) const {
     const auto& path = symbol(file).library_path;
     return path.starts_with("std/concurrent/") && path != "std/concurrent/task.nra" &&
            path != "std/concurrent/scope.nra";
+}
+
+// A specialization of Std.Concurrent.Guarded, and code in its own file.
+bool TaskAnalysis::guarded_class(SymbolId cls) const {
+    if (!valid(cls) || symbol(cls).kind != SymbolKind::Class) return false;
+    const auto& name = symbol(cls).name;
+    if (name != "Guarded" && !name.starts_with("Guarded<")) return false;
+    const auto file = source_file(program_, cls);
+    return file != no_symbol && symbol(file).library_path == "std/concurrent/guarded.nra";
+}
+
+bool TaskAnalysis::in_guarded_library(SymbolId owner) const {
+    const auto file = source_file(program_, owner);
+    return file != no_symbol && symbol(file).library_path == "std/concurrent/guarded.nra";
 }
 
 std::vector<SymbolId> TaskAnalysis::all_fields(SymbolId cls) const {
@@ -288,12 +305,18 @@ bool TaskAnalysis::class_transferable(SymbolId cls, bool item) const {
         });
     };
     bool result = false;
-    if (pointer_class(program_, cls) == PointerKind::Const) {
-        // Scheduler tasks share a heap on one thread. An isolated parallel
-        // item cannot receive a live read view of another heap's storage.
-        const auto* value = pointer_value_type(program_, cls);
-        result = !item && value && value->kind != TypeKind::TypeParameter &&
-                 !mutable_part(program_, *value) && transferable_in(*value, false);
+    if (const auto pointer = pointer_class(program_, cls);
+        pointer == PointerKind::Shared || pointer == PointerKind::Weak || pointer == PointerKind::Soft ||
+        pointer == PointerKind::SharedGroup) {
+        // Tasks may share a pointer to a target that never changes. A parallel
+        // item runs in a heap of its own and cannot share it.
+        const auto* target = pointer_value_type(program_, cls);
+        result = !item && target && target->kind != TypeKind::TypeParameter && !mutable_part(program_, *target) &&
+                 transferable_in(*target, false);
+    } else if (pointer == PointerKind::Atomic || pointer == PointerKind::Locked) {
+        // Their targets are deeply immutable, or reached only under a guard;
+        // their identity is what tasks share, so an item cannot receive one.
+        result = !item;
     } else if (signature_layout(cls)) {
         // Section 5.2's union rule, applied to values: a function value is
         // transferable when every closure of its type that the program can
@@ -304,8 +327,13 @@ bool TaskAnalysis::class_transferable(SymbolId cls, bool item) const {
                 return !created_.contains(layout) || parts(layout);
             });
         }
-    } else if (capture_layout(cls) || concurrent_handle(cls)) {
+    } else if (capture_layout(cls)) {
         result = parts(cls);
+    } else if (concurrent_handle(cls)) {
+        // A handle is an identity of this run's scheduler state, shared by
+        // reference. A parallel item runs in a heap of its own and would
+        // receive a copy whose updates are lost, so a handle cannot enter one.
+        result = !item && parts(cls);
     } else if (not_thread_safe_class(cls) != no_symbol) {
         result = false;
     } else if (has_tag(symbol(cls), TagId::Immutable)) {
@@ -367,11 +395,20 @@ void TaskAnalysis::explain_class(Diagnostic& error, const IrType& type) const {
     const auto cls = type.symbol;
     const auto& item = symbol(cls);
     if (item.kind != SymbolKind::Class) return;
-    if (pointer_class(program_, cls) == PointerKind::Const) {
-        if (const auto* pointee = pointer_value_type(program_, cls); pointee && !transferable(*pointee)) {
-            error.note("pointee type '" + display(*pointee) + "' does not meet the task-transfer rules");
-            return;
+    const auto pointer = pointer_class(program_, cls);
+    if (pointer == PointerKind::Const) {
+        error.note("a ConstPointer reads storage that a Pointer in its task can still change, so it stays in that "
+                   "task; give the other task the value it reads instead");
+    } else if (pointer == PointerKind::Unique) {
+        error.note("a UniquePointer is the only owner of its target, so it stays in its task; a join result moves "
+                   "it to the joining task");
+    } else if (pointer == PointerKind::Shared || pointer == PointerKind::Weak || pointer == PointerKind::Soft) {
+        if (const auto* target = pointer_value_type(program_, cls)) {
+            error.note("a " + std::string(pointer_kind_name(pointer)) + " crosses tasks only when its target type is "
+                       "deeply immutable and transferable, and '" + display(*target) + "' is not; share mutable "
+                       "state through a LockedPointer");
         }
+        return;
     }
     if (const auto marked = not_thread_safe_class(cls); marked != no_symbol) {
         error.label(tag_span(symbol(marked), TagId::NotThreadSafe).value_or(symbol(marked).span),
@@ -402,6 +439,63 @@ void TaskAnalysis::explain_class(Diagnostic& error, const IrType& type) const {
         error.note("tasks may share an instance of a monitor: a class whose exported methods are all #Synchronized, "
                    "whose fields are transferable, and whose state only its own methods reach through their "
                    "receiver");
+    }
+}
+
+// For a value that tasks may share but a parallel item may not: the part
+// that keeps it out, named when it is nested in a tuple, an enum payload or a
+// field, then the reason for that part.
+void TaskAnalysis::item_cause(Diagnostic& error, const IrType& type) const {
+    std::set<std::string> seen;
+    auto part = type;
+    for (;;) {
+        if (!seen.insert(display(part)).second) break;
+        std::optional<IrType> inner;
+        const auto blocking = [&](const IrType& candidate) {
+            if (inner || transferable_in(candidate, true)) return;
+            inner = candidate;
+        };
+        if (part.kind == TypeKind::Tuple) {
+            for (const auto& element : part.arguments) blocking(element);
+        } else if (part.kind == TypeKind::Enum && valid(part.symbol)) {
+            if (const auto found = variants_.find(part.symbol); found != variants_.end())
+                for (const auto variant : found->second)
+                    for (const auto& payload : symbol(variant).payload_types) blocking(payload);
+        } else if (part.kind == TypeKind::Object && valid(part.symbol) && !concurrent_handle(part.symbol) &&
+                   pointer_class(program_, part.symbol) == PointerKind::None &&
+                   !has_attribute(symbol(part.symbol), AttributeId::ClassShareable)) {
+            for (const auto field : all_fields(part.symbol)) {
+                if (transferable_in(symbol(field).type, true)) continue;
+                error.label(symbol(field).span, "'" + symbol(part.symbol).name + "' holds a value of type " +
+                                                    display(symbol(field).type) + " here");
+                inner = symbol(field).type;
+                break;
+            }
+        }
+        if (!inner) break;
+        if (part.kind != TypeKind::Object)
+            error.note("a value of type " + display(part) + " holds a value of type " + display(*inner));
+        part = *inner;
+    }
+    item_note(error, part);
+}
+
+// Why a value that tasks may share cannot enter a parallel item, which runs
+// in a heap of its own and receives copies.
+void TaskAnalysis::item_note(Diagnostic& error, const IrType& type) const {
+    const auto cls = type.kind == TypeKind::Object && valid(type.symbol) ? type.symbol : no_symbol;
+    if (cls != no_symbol && pointer_class(program_, cls) != PointerKind::None) {
+        error.note("a managed pointer refers to storage in the run's heap, but a parallel item runs in a heap of its "
+                   "own and receives copies, so a pointer cannot enter one");
+    } else if (cls != no_symbol && concurrent_handle(cls)) {
+        error.note("tasks share a Std.Concurrent handle, but a parallel item runs in a heap of its own and receives "
+                   "copies, so a handle cannot enter one");
+    } else if (cls != no_symbol && has_attribute(symbol(cls), AttributeId::ClassShareable)) {
+        error.note("tasks share an instance of a monitor, but a parallel item runs in a heap of its own and receives "
+                   "copies, so a monitor cannot enter one");
+    } else {
+        error.note("tasks share this value, but a parallel item runs in a heap of its own and receives copies, so it "
+                   "cannot enter one");
     }
 }
 
@@ -706,6 +800,28 @@ void TaskAnalysis::check() const {
         error.note("`neura check --task-safety` reports for every function whether it is task-safe, and why not");
         return error;
     };
+    // A LockedPointer's constructor takes the state as it is, as Guarded's
+    // does, so the state must be transferable; LockedPointer.locked builds
+    // any other state inside the lock. Checked first, so that this is the
+    // error rather than the library's own check of its initializer.
+    for (const auto& body : program_.bodies) {
+        if (trusted_pointer_declaration(program_, body.owner)) continue;
+        each_node(body.instructions, [&](const IrNode& node) {
+            if (node.op != IrOp::Allocate || !valid(node.symbol) ||
+                pointer_class(program_, node.type.symbol) != PointerKind::Locked ||
+                symbol(node.symbol).parameters.size() != 1)
+                return;
+            const auto& state = symbol(symbol(node.symbol).parameters.front()).type;
+            if (transferable(state)) return;
+            auto error = Diagnostic(user_site(body.owner, node.span),
+                                    "a value of type " + display(state) +
+                                    " is not transferable, so it cannot be given to a LockedPointer constructor")
+                .with_code("E0602").label("not transferable");
+            explain_class(error, state);
+            error.help("build the state inside the lock with locked<T>(initializer)");
+            throw error;
+        });
+    }
     for (const auto& body : program_.bodies) {
         each_node(body.instructions, [&](const IrNode& node) {
             if ((node.op == IrOp::TaskScope || (node.op == IrOp::SchedulerCall && node.text != "transfer.check")) &&
@@ -713,23 +829,55 @@ void TaskAnalysis::check() const {
                 first_operation = &node;
                 first_operation_owner = body.owner;
             }
+            if (node.op == IrOp::Allocate && valid(node.symbol) && guarded_class(node.type.symbol) &&
+                !in_guarded_library(body.owner) && !symbol(node.symbol).parameters.empty()) {
+                // Guarded.init takes the state as it is: a caller could keep an
+                // alias to a state that is not transferable and change it
+                // while a task holds the guard. Such a state is built inside
+                // the guard by Guarded.create.
+                const auto& state = symbol(symbol(node.symbol).parameters.front()).type;
+                if (!transferable(state)) {
+                    auto error = Diagnostic(user_site(body.owner, node.span),
+                                            "a value of type " + display(state) +
+                                            " is not transferable, so it cannot be given to a Guarded constructor")
+                        .with_code("E0602").label("not transferable");
+                    explain_class(error, state);
+                    error.help("build the state inside the guard with Guarded.create(initializer)");
+                    throw error;
+                }
+            }
             if (node.op == IrOp::SchedulerCall) {
                 // What a channel carries is given to another task (5.1).
-                const auto require = [&](const IrType& type, const char* role, bool item = false) {
+                const auto require = [&](const IrType& type, const char* role, bool item = false,
+                                         const Span* at = nullptr) {
                     if (transferable_in(type, item)) return;
-                    auto error = Diagnostic(user_site(body.owner, node.span),
+                    auto error = Diagnostic(user_site(body.owner, at ? *at : node.span),
                                             "a value of type " + display(type) + " is not transferable, so it cannot be " +
                                             role).with_code("E0602").label("not transferable");
                     capture_note(error, type);
                     explain_class(error, type);
-                    if (item && transferable(type)) {
-                        error.note("tasks share an instance of a monitor, but a parallel item runs in a heap of its "
-                                   "own and receives copies, so a monitor cannot enter one");
-                    }
+                    if (item && transferable(type)) item_cause(error, type);
                     throw error;
                 };
                 if (node.text == "transfer.check" && node.operands.size() == 1) {
-                    require(node.operands.front().type, "used where a transferable value is required");
+                    const auto& checked = node.operands.front().type;
+                    require(checked, "used where a transferable value is required");
+                    // A function that builds or uses guarded state runs on
+                    // whichever task calls the guard, the root task included,
+                    // so it must be task-safe as a spawned call is: otherwise
+                    // it could keep or reach the state through a global.
+                    if (checked.kind == TypeKind::Object && valid(checked.symbol) && signature_layout(checked.symbol)) {
+                        if (const auto found = derived_.find(checked.symbol); found != derived_.end()) {
+                            for (const auto layout : found->second) {
+                                const auto invoke = invokes_.find(layout);
+                                if (!created_.contains(layout) || invoke == invokes_.end()) continue;
+                                if (const auto reason = unsafe(invoke->second)) {
+                                    throw unsafe_error(user_site(body.owner, node.span),
+                                                       "a function given to a guard is not task-safe", *reason);
+                                }
+                            }
+                        }
+                    }
                 } else if (node.text == "parallel.start" && !node.operands.empty() &&
                            node.operands.front().op == IrOp::Allocate && valid(node.operands.front().symbol)) {
                     // An isolated item: its captures enter another heap, its
@@ -759,7 +907,10 @@ void TaskAnalysis::check() const {
                 } else if (node.text.starts_with("select")) {
                     for (std::size_t i = 0; i + 1 < node.operands.size();) {
                         const bool send = node.operands[i].text == "1";
-                        if (send && i + 2 < node.operands.size()) require(node.operands[i + 2].type, "sent on a channel");
+                        if (send && i + 2 < node.operands.size()) {
+                            // Reported at the value of the arm, not at the select.
+                            require(node.operands[i + 2].type, "sent on a channel", false, &node.operands[i + 2].span);
+                        }
                         i += send ? 3 : 2;
                     }
                 }

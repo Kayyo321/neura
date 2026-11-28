@@ -81,6 +81,8 @@ private:
     std::map<SymbolId, std::vector<SymbolId>> fields_;
     std::map<SymbolId, std::vector<SymbolId>> derived_;
     std::map<SymbolId, std::vector<SymbolId>> variants_;
+    // The $invoke method of each closure layout.
+    std::map<SymbolId, SymbolId> invokes_;
     std::map<SymbolId, std::vector<SymbolId>> destructors_;
     std::map<SymbolId, Reason> unsafe_;
     // Why a function cannot run as an isolated item of a parallel map
@@ -117,12 +119,16 @@ private:
     // A diagnostic for a value that is not transferable: when its class was
     // meant to be shared, why it is not.
     void explain_class(Diagnostic& error, const IrType& type) const;
+    void item_note(Diagnostic& error, const IrType& type) const;
+    void item_cause(Diagnostic& error, const IrType& type) const;
 
     const IrSymbol& symbol(SymbolId id) const { return program_.symbols[id]; }
     bool valid(SymbolId id) const { return id < program_.symbols.size(); }
     bool signature_layout(SymbolId cls) const;
     bool capture_layout(SymbolId cls) const;
     bool concurrent_handle(SymbolId cls) const;
+    bool guarded_class(SymbolId cls) const;
+    bool in_guarded_library(SymbolId owner) const;
     bool fields_transferable(SymbolId cls) const;
     std::vector<SymbolId> all_fields(SymbolId cls) const;
     void callees(const IrNode& node, std::vector<std::pair<SymbolId, Span>>& out) const;

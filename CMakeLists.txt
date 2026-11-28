@@ -1767,6 +1767,10 @@ if(BUILD_TESTING AND NEURA_SDK)
     set_tests_properties(pointer-qualification PROPERTIES TIMEOUT 300)
     add_test(NAME pointer-unused-import COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/pointer/unused-import.py" "$<TARGET_FILE:neura>")
+    # Shared pointer state is changed only before a method's first poll
+    # (docs/lang/Neura0.3.1.md, SharedPointer; docs/IrOptimization.md).
+    add_test(NAME pointer-polls COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/pointer/polls.py" "$<TARGET_FILE:neura>")
     add_test(NAME expressions-nil-elision COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressions/nil-elision.py" "$<TARGET_FILE:neura>"
         ${NEURA_POINTER_NATIVE_TEST})
