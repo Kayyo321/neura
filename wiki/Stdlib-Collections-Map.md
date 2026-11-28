@@ -33,7 +33,7 @@ The loop form depends on the source value.
 | --- | --- | --- |
 | For-each over the built-in list from `ArrayList.items()`, or from any collection's `to_list()` | Yes | The built-in loop compares the list's structural version before each advance and traps with reason 5 on a change. `items()` is live; `to_list()` is a copy. |
 | An index loop over `size()` and `get(index)` | Yes | For lists and deques. No modification check. |
-| The collection's iterator object: `iterator()` returns a class with `has_next() → bool` and `next() → T` | Yes, as one concrete iterator class per collection | `has_next` has no effect and can be repeated. `next` returns the next element and advances, and traps with `no such element` at the end. An iterator is used once. |
+| The collection's iterator object: `iterator()` returns a class with `has_next() → bool` and `next() → T` | Yes, as one concrete iterator class per collection | For a collection's iterator, `has_next` has no effect and can be repeated. For every iterator, a generator's included, `has_next` consumes nothing and repeating it repeats no work ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Lifetime030.md), implemented, proposed). `next` returns the next element and advances, and traps with `no such element` at the end. An iterator is used once. |
 | For-each directly over the collection | Yes | Lowers to the iterator protocol when the source implements `Iterable<T>`. Every public collection, `Sequence`, and `IntRange` implement it; `tests/stdlib/for-each` loops over each one. |
 
 - **Iteration does not allocate per element.** `has_next` and `next` stay two calls. A single `next` returning `Optional<T>` would read well with `match`, but it would allocate an enum value for every element.
@@ -42,6 +42,7 @@ The loop form depends on the source value.
 - **Fail-fast iterator objects.** A wrapper over a single built-in list uses that list's `uint64` structural version. Other mutable collections use a `uint64` modification count and increment it after each structural change. An iterator records its version when created. `has_next` and `next` compare first and trap on a difference. Replacing an element by index or replacing the value for an existing key is not structural.
 - The iteration order of every collection is specified in section 9.
 - `Iterator<T>` and `Iterable<T>` are the interfaces for this protocol. Concrete iterator classes and collections implement these member signatures.
+- A [generator](CoreLanguage#generators) is a function that returns a `Sequence<T>` over a generated `Iterator<T>`: its first `has_next` with nothing buffered runs the body to its next `yield`, and further calls run nothing until `next` takes the buffered value.
 
 ### 9.1 Contracts
 
@@ -138,7 +139,7 @@ Map<K, V> ── MutableMap<K, V>
 
 - Read-only and mutable interfaces are separate. A function that only reads takes the read-only interface, and no member simulates immutability by trapping.
 - Members that need only other members (`is_empty`, `first`, `contains_all`, `for_each`) become default methods written once in the interface.
-- `ImmutableList<T>`, `ImmutableSet<T>`, and `ImmutableMap<K, V>` are classes that copy their contents at construction and implement only the read-only interfaces. Their module functions `of` take a built-in list (for the map, a list of `[K, V]`; a duplicate key traps).
+- `ImmutableList<T>`, `ImmutableSet<T>`, and `ImmutableMap<K, V>` are classes that copy their contents at construction and implement only the read-only interfaces. Their module functions `of` take a built-in list (for the map, a list of `[K, V]`; a duplicate key traps). They hold their contents in a list or a library collection, so they are not marked `#Immutable` and are not transferable.
 - Members that an interface declares, such as `size()` and `is_empty()`, stay methods in every class, because an interface cannot require an [accessor](Types#accessors); `ArrayList.items()` stays a method with them. The immutable classes and `Sequence` are `#Final` and `#NoDiscard`, and every query that returns an `Optional` (`get`, `first_or_none`, `peek`, `floor`, and the like) is `#NoDiscard` ([Tags](Tags)).
 - `Lists.same_elements`, `Sets.same_elements`, and `Maps.same_entries` compare collections of different classes through the read-only interfaces. They also need G3.
 - For-each accepts an `Iterable<T>` through G5.

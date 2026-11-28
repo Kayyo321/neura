@@ -82,9 +82,12 @@ export let Multipart = module (
             return hashing.combine(hash, max_header_fields as uint32);
         };
 
-        /// @brief The limits as text.
+        /// @brief The limits as text. Built by concatenation, not `$"…"`: interpolation goes through
+        /// Console.vformat, whose object arm makes the task-safety check of this #ThreadSafe class reach every
+        /// `to_string` in the program (E0608 once the reflect model is linked).
         export let.override to_string = func -> string =>
-            $"MultipartLimits{{parts={max_parts}, header_bytes={max_header_bytes}, header_fields={max_header_fields}}}";
+            "MultipartLimits{parts=" .. max_parts.to_string() .. ", header_bytes=" .. max_header_bytes.to_string()
+            .. ", header_fields=" .. max_header_fields.to_string() .. "}";
     );
 
     /// @brief One complete part: its header fields and body bytes.

@@ -8,6 +8,7 @@ let aes_block = import:Std.Crypto.Symmetric.AesBlock;
 let aes_gcm = import:Std.Crypto.Symmetric.AesGcm;
 let cbc = import:Std.Crypto.Internal.PkiCbc;
 let constant_time = import:Std.Crypto.Core.ConstantTime;
+let core = import:Std.Encoding.Internal.Deflate;
 let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
 let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
 let ecdsa = import:Std.Crypto.Asymmetric.Ecdsa;
@@ -29,8 +30,14 @@ let words = import:Std.Crypto.Internal.Words;
 ///
 /// A caller supplies a key bound to direct encryption, AES Key Wrap, AES-GCM wrapping, PBES2, RSA-OAEP-256, or ECDH-ES. The protected
 /// header must agree with that key's algorithms. The original compact protected-header segment is authenticated
-/// as received. This module accepts no critical extensions or compression and ignores noncritical metadata
-/// when selecting keys. The CBC-HMAC modes verify the full wire tag before attempting decryption.
+/// as received. This module accepts no critical extensions and ignores noncritical metadata when selecting keys.
+///
+/// Compression (`"zip":"DEF"`, RFC 7516 section 4.1.3) is raw DEFLATE (RFC 1951), applied to the plaintext
+/// before encryption and undone only after the authentication tag has been checked and the content decrypted.
+/// A compact token is sealed compressed when the caller's protected header carries `"zip":"DEF"`. A compact
+/// token or a JWE JSON with it is opened and inflated to at most `MaxDecompressedSize` bytes; in JWE JSON `zip`
+/// must be in the protected header, as section 4.1.3 requires. Any other `zip` value is refused. This module
+/// produces no JWE JSON, compressed or not. The CBC-HMAC modes verify the full wire tag before attempting decryption.
 /// For JSON opening a caller supplies the recipient index and expected external authenticated data.
 /// The tag and key-wrap-integrity comparisons are branch-free in source. The runtime does not guarantee
 /// constant time.
@@ -53,6 +60,11 @@ export let Jwe = module (
     export let EcdhAlgorithm = enum (Es, EsA128Kw, EsA192Kw, EsA256Kw);
 
     const InvalidJwe = "crypto.invalid_jwe";
+
+    /// @brief The largest plaintext a compressed JWE inflates to: 4 MiB, the profile's limit on a serialized JWE
+    /// JSON. A larger one fails with crypto.invalid_jwe before more is produced.
+    .Since("0.3.1")
+    export const MaxDecompressedSize: int = 4194304;
 
     let content_name = func(enc: ContentEncryption) -> string => match (enc) {
         ContentEncryption.A128Gcm => "A128GCM",
@@ -505,7 +517,7 @@ export let Jwe = module (
                 },
                 Result.Err(_) => {},
             }
-            last result = open_content(encryption, cek, fields.iv, fields.ciphertext, fields.tag, fields.aad);
+            last result = open_and_inflate(encryption, cek, fields);
             words.wipe(cek);
             return accepted ? result : auth_error<uint8[list]>();
         };
@@ -665,7 +677,7 @@ export let Jwe = module (
                 words.wipe(agreed);
                 cek = unwrapped?;
             }
-            last result = open_content(encryption, cek, fields.iv, fields.ciphertext, fields.tag, fields.aad);
+            last result = open_and_inflate(encryption, cek, fields);
             words.wipe(cek);
             return result;
         };
@@ -801,8 +813,8 @@ export let Jwe = module (
         if (jose.has(members, "crit")) {
             return jose.fail<Unit>(InvalidJwe, "JWE critical extensions are unsupported");
         }
-        if (jose.has(members, "zip")) {
-            return jose.fail<Unit>(InvalidJwe, "JWE compression is unsupported");
+        if (jose.has(members, "zip") && jose.required_text(members, "zip", InvalidJwe)? != "DEF") {
+            return jose.fail<Unit>(InvalidJwe, "JWE compression other than DEF is unsupported");
         }
         return Result<Unit>.Ok(Unit.Value);
     };
@@ -813,7 +825,13 @@ export let Jwe = module (
     let encode = func(protected: uint8[list], enc: ContentEncryption, cek: uint8[list], encrypted_key: uint8[list],
         iv: uint8[list], plaintext: uint8[list]) -> string {
         last header_part = jose.encode(protected);
-        last sealed = seal_content(enc, cek, iv, plaintext, words.utf8(header_part));
+        // RFC 7516 section 5.1, step 13: compress before encrypting when the header asks for it.
+        last zipped = zip_requested(protected);
+        last content = zipped ? core.compress_raw(plaintext) : plaintext;
+        last sealed = seal_content(enc, cek, iv, content, words.utf8(header_part));
+        if (zipped) {
+            words.wipe(content);
+        }
         last split = sealed.length - tag_length(enc);
         return header_part .. "." .. jose.encode(encrypted_key) .. "." .. jose.encode(iv) .. "."
             .. jose.encode(words.slice(sealed, 0, split)) .. "." .. jose.encode(words.slice(sealed, split, sealed.length));
@@ -975,7 +993,7 @@ export let Jwe = module (
         match (unwrapped) {
             Result.Ok(cek) => {
                 defer words.wipe(cek);
-                return open_content(key.encryption, cek, fields.iv, fields.ciphertext, fields.tag, fields.aad);
+                return open_and_inflate(key.encryption, cek, fields);
             },
             Result.Err(_) => {
                 return auth_error<uint8[list]>();
@@ -1074,7 +1092,35 @@ export let Jwe = module (
         defer words.wipe(kek);
         let cek = unwrap(new aes_block.AesBlock(kek), fields.wrapped)?;
         defer words.wipe(cek);
-        return open_content(key.encryption, cek, fields.iv, fields.ciphertext, fields.tag, fields.aad);
+        return open_and_inflate(key.encryption, cek, fields);
+    };
+
+    /// @brief Whether a protected header asks for compression; validation has already refused any value but DEF.
+    let zip_requested = func(protected: uint8[list]) -> bool => match (jose.parse_object_bytes(protected, InvalidJwe)) {
+        Result.Ok(members) => jose.has(members, "zip"),
+        Result.Err(_) => false,
+    };
+
+    /// @brief Checks the tag and decrypts, then, only when that succeeded and the header has `"zip":"DEF"`,
+    /// inflates the plaintext to at most MaxDecompressedSize bytes (RFC 7516 section 5.2, step 17).
+    let open_and_inflate = func(enc: ContentEncryption, cek: uint8[list], fields: OpenFields) -> Result<uint8[list]> {
+        last opened = open_content(enc, cek, fields.iv, fields.ciphertext, fields.tag, fields.aad)?;
+        if (not jose.has(fields.members, "zip")) {
+            return Result<uint8[list]>.Ok(opened);
+        }
+        last inflated = core.decompress_raw(opened, MaxDecompressedSize);
+        words.wipe(opened);
+        return match (inflated) {
+            Result.Ok(bytes) => Result<uint8[list]>.Ok(bytes),
+            Result.Err(problem) => jose.fail<uint8[list]>(InvalidJwe, is_output_limit(problem)
+                ? "decompressed JWE plaintext exceeds " .. MaxDecompressedSize.to_string() .. " bytes"
+                : "invalid compressed JWE plaintext"),
+        };
+    };
+
+    let is_output_limit = func(problem: error.Error) -> bool => match (problem) {
+        error.Error.Custom(detail) => detail.code() == core.OutputLimitCode,
+        _ => false,
     };
 
     let check_iv = func(enc: ContentEncryption, iv: uint8[list]) {
@@ -1296,7 +1342,7 @@ export let Jwe = module (
 
     let open_direct = func(key: DirectKey, fields: OpenFields) -> Result<uint8[list]> {
         let cek = key.expose();
-        last result = open_content(key.encryption, cek, fields.iv, fields.ciphertext, fields.tag, fields.aad);
+        last result = open_and_inflate(key.encryption, cek, fields);
         words.wipe(cek);
         return result;
     };
@@ -1306,7 +1352,7 @@ export let Jwe = module (
         last unwrapped = unwrap(new aes_block.AesBlock(kek), fields.wrapped);
         words.wipe(kek);
         let cek = unwrapped?;
-        last result = open_content(key.encryption, cek, fields.iv, fields.ciphertext, fields.tag, fields.aad);
+        last result = open_and_inflate(key.encryption, cek, fields);
         words.wipe(cek);
         return result;
     };

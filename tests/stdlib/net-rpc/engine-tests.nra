@@ -119,11 +119,12 @@ let EngineTests = module (
         last request = calls.unary_request(echo_path(), bytes_of("0102"), md,
             optional.Optional<duration.Duration>.Some(duration.of_seconds(1)));
         last wire = calls.encode_request(request, "example.test", "https", "proto");
-        // PROTOCOL-HTTP2.md: pseudo-headers first, then grpc-timeout, content-type, te, custom metadata.
+        // PROTOCOL-HTTP2.md: pseudo-headers first, then grpc-timeout, content-type, te, grpc-accept-encoding,
+        // custom metadata.
         last expected = [":method", ":scheme", ":path", ":authority", "grpc-timeout", "content-type", "te",
-            "authorization"];
-        test.assert_equal<int>(8, wire.headers.length);
-        for (let i = 0; i < 8; i++) {
+            "grpc-accept-encoding", "authorization"];
+        test.assert_equal<int>(9, wire.headers.length);
+        for (let i = 0; i < 9; i++) {
             test.assert_equal_string(expected[i], wire.headers[i][0]);
         }
         test.assert_equal_string("/test.v1.Echo/Say", wire.headers[2][1]);
@@ -171,11 +172,46 @@ let EngineTests = module (
         test.assert_equal<int>(200, answer.http_status);
         test.assert_equal<int>(0, answer.trailers.length);
         test.assert_equal_string("12", test.assert_some<string>(answer.header("grpc-status")));
-        // An unsupported grpc-encoding: UNIMPLEMENTED.
+        // An unsupported grpc-encoding: UNIMPLEMENTED, with grpc-accept-encoding (doc/compression.md).
         last wire = calls.encode_request(calls.unary_request(echo_path(), strings.to_bytes("a"), meta.empty(),
             no_timeout()), "h", "http", "proto");
-        wire.headers.append(["grpc-encoding", "gzip"]);
-        test.assert_equal_string("12", test.assert_some<string>(server.handle(wire).header("grpc-status")));
+        wire.headers.append(["grpc-encoding", "snappy"]);
+        last refused = server.handle(wire);
+        test.assert_equal_string("12", test.assert_some<string>(refused.header("grpc-status")));
+        test.assert_equal_string(calls.AcceptEncoding, test.assert_some<string>(refused.header("grpc-accept-encoding")));
+        // A gzip request is decompressed, and the answer can be compressed too.
+        for (let compression in [framing.Compression.Gzip, framing.Compression.Deflate]) {
+            last packed = calls.encode_request(calls.unary_request(echo_path(), strings.to_bytes("abc"), meta.empty(),
+                no_timeout()), "h", "http", "proto", compression);
+            test.assert_equal_string(framing.compression_name(compression),
+                test.assert_some<string>(packed.header("grpc-encoding")));
+            last answered = server.handle(packed);
+            last decoded = test.assert_ok<calls.RpcResponse>(calls.decode_response(answered, 100));
+            test.assert(decoded.status.is_ok());
+            test.assert_equal_string("ABC", strings.from_bytes_lossy(decoded.messages[0]));
+            last request_back = test.assert_ok<calls.RpcRequest>(calls.decode_request(packed, 100));
+            test.assert_equal_string("abc", strings.from_bytes_lossy(request_back.messages[0]));
+            last reply = calls.encode_response(decoded, "proto", compression);
+            test.assert_equal_string(framing.compression_name(compression), test.assert_some<string>(
+                reply.header("grpc-encoding")));
+            test.assert_equal_string("ABC", strings.from_bytes_lossy(
+                test.assert_ok<calls.RpcResponse>(calls.decode_response(reply, 100)).messages[0]));
+        }
+        // A compressed flag with no grpc-encoding: INTERNAL.
+        last flagged = calls.encode_request(calls.unary_request(echo_path(), strings.to_bytes("a"), meta.empty(),
+            no_timeout()), "h", "http", "proto");
+        flagged.body[0] = 1;
+        test.assert_equal<int>(13, statuses.number(statuses.of_error(
+            test.assert_err<calls.RpcRequest>(calls.decode_request(flagged, 100))).code));
+        // A client answer in an encoding it does not know: INTERNAL (doc/compression.md).
+        last odd_headers: [string, string][list] = new;
+        odd_headers.append(["content-type", "application/grpc"]);
+        odd_headers.append(["grpc-encoding", "snappy"]);
+        last odd_trailers: [string, string][list] = new;
+        odd_trailers.append(["grpc-status", "0"]);
+        test.assert_equal<int>(13, statuses.number(statuses.of_error(test.assert_err<calls.RpcResponse>(
+            calls.decode_response(new calls.WireResponse(200, odd_headers, framing.encode_message(new, true),
+                odd_trailers), 100))).code));
         // A client reading a non-gRPC 503 synthesizes UNAVAILABLE.
         last proxy_error = test.assert_ok<calls.RpcResponse>(calls.decode_response(
             new calls.WireResponse(503, new, new, new), 100));
@@ -193,8 +229,8 @@ let EngineTests = module (
         // A transport failure that is not a status becomes UNAVAILABLE.
         last broken = new grpc.GrpcChannel("h", "http", "proto", services.of<calls.WireRequest, calls.WireResponse>(
             new func(w: calls.WireRequest) -> result.Result<calls.WireResponse> {
-            return result.Result<calls.WireResponse>.Err(errors.custom("test.io", "connection reset"));
-        }), 100);
+                return result.Result<calls.WireResponse>.Err(errors.custom("test.io", "connection reset"));
+            }), 100);
         test.assert_equal<int>(14, code_of(test.assert_err<uint8[list]>(broken.unary(echo_path(), new, meta.empty(),
             no_timeout()))));
         // OK response: status in trailers, message in body.
@@ -268,13 +304,13 @@ let EngineTests = module (
         last seen: string[list] = new;
         last downstream = services.of<calls.RpcRequest, calls.RpcResponse>(new func(r: calls.RpcRequest)
             -> result.Result<calls.RpcResponse> {
-            seen.append(match (r.timeout) {
-                optional.Optional.Some(t) => t.to_millis().to_string(),
-                optional.Optional.None => "none",
+                seen.append(match (r.timeout) {
+                    optional.Optional.Some(t) => t.to_millis().to_string(),
+                    optional.Optional.None => "none",
+                });
+                clock.advance(duration.of_millis(100));
+                return result.Result<calls.RpcResponse>.Ok(calls.unary_response(new));
             });
-            clock.advance(duration.of_millis(100));
-            return result.Result<calls.RpcResponse>.Ok(calls.unary_response(new));
-        });
         last guarded = filters.bind<calls.RpcRequest, calls.RpcResponse, calls.RpcRequest, calls.RpcResponse>(
             new deadlines.DeadlineFilter(clock, deadline), downstream);
         last request = calls.unary_request(echo_path(), new, meta.empty(), no_timeout());

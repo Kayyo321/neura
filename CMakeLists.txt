@@ -2152,6 +2152,15 @@ if(BUILD_TESTING AND NEURA_SDK)
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/backend/stdlib.cmake"
     )
 
+    # Std.Encoding.Internal.Deflate against Python's zlib (tests/backend/deflate.cmake).
+    add_test(NAME backend-encoding-deflate-internal COMMAND ${CMAKE_COMMAND}
+        "-DNEURA=$<TARGET_FILE:neura>"
+        "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+        "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/backend-deflate-tests"
+        "-DPYTHON=${Python3_EXECUTABLE}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/backend/deflate.cmake"
+    )
+
     add_test(NAME backend-install COMMAND ${CMAKE_COMMAND}
         "-DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}"
         "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"

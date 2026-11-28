@@ -37,6 +37,7 @@ The following sections are taken from the [standard library specification](Stdli
   - A file is closed even when the body closed it already, which reports no error. `with_connection` connects without a time limit.
   - A trap in the body ends the run without cleanup; the runner then closes what the run left open.
 - **`Closeable.release<T>(resource: Closeable, outcome: Result<T>) → Result<T>`** is the closing rule on its own: it closes the resource and combines the result with the outcome of the work, as `with_open` does. A program that owns another kind of closeable resource calls it exactly once, after the work, on every ordinary completion.
+- A [`using`](CoreLanguage#using) block applies the same rule to the value a `return` carries out of it, for a close that has already run ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Lifetime030.md), implemented, proposed). The rule is held by `close_outcome` in an internal module, `std/io/internal/close-outcome.nra`, which only a program that writes `using` loads, so that the programs that do not keep their images.
 - Where a wrapper owns a closeable resource, it can use the `Closeable` interface. A wrapper over a bare function value does not own or close the function's receiver.
 - **Frame slots keep storage alive.** A reference in a local stays reachable until the local is overwritten or the function returns ([NVM](NVM#garbage-collection)). The rule for library code: an operation that replaces a large structure (a hash rebuild, a sort buffer, a deque rebalance) does the work in a helper function and returns the new structure, so the old one's last frame reference dies when the helper returns and not when the caller's loop ends.
 
@@ -66,6 +67,8 @@ There is no accessor for the error alone: `match` reads it.
 | `Unit` | A fieldless enum with the single variant `Value`. | Yes |
 | `Cell<T>` | A class with one mutable field `value`, and the module function `of<T>(value)`. It exists so that closures, which capture by value, can share mutable state. | Yes |
 | `IntRange` | An immutable class with the get-only fields `start` (inclusive), `end` (exclusive), and `step` (nonzero). Module functions `of(start, end)` and `stepped(start, end, step)`; a zero step traps. A negative step counts down while the value is greater than `end`. Members `size()`, `is_empty()`, `contains(value)`, `get(index)`, `to_list()`, and `iterator()`; it implements `Iterable<int>`, so `for (let i in range)` visits the values in order. `size` and iteration are computed in `int64` so that no intermediate overflows. | Yes |
+
+The [`Std.Core.Pointer` module](https://github.com/Kayyo321/neura/blob/main/docs/lang/Neura0.3.1.md#stdcorepointer) gives a `Cell<T>` a managed mutable view and a read-only view for deeply immutable values. `ListPointer<T>` provides bounded, mutable views over arrays and lists. The views keep their storage reachable and do not expose addresses.
 
 `Pair`, `Entry`, and `Boxed` do not exist: a pair is the native tuple `[A, B]` (`partition` returns `[ArrayList<T>, ArrayList<T>]`, `divide_and_remainder` returns `[BigInteger, BigInteger]`, `enumerate` yields `[int, T]`, and `zip` yields `[T, U]`), and a map entry is the tuple `[K, V]`. No API on this page takes an `Object`.
 
@@ -129,7 +132,7 @@ The three names are this page's shorthand. A type overlay cannot name a function
 
 Needs P2 for every host operation and T1 for `Path`.
 
-**`Path`** is an immutable class holding normalized text.
+**`Path`** is an `#Immutable` class holding normalized text.
 
 - The separator is `/` on every host. `\` is an ordinary character in `Path`. The Windows file-system host also accepts `\` as a separator.
 - **Normalization at construction.** Repeated separators collapse, `.` components are removed, and a trailing separator is removed except for a root. An empty result is `.`. `..` components are kept because removing them can change where a path with links leads. A relative path starting with a drive designator followed by more components keeps a leading `./`, as in `./C:/x`. For example, `Path.of("C:").join("x")` remains relative.
@@ -156,7 +159,7 @@ Needs P2 for every host operation and T1 for `Path`.
 
 ### 12.1 `Std.Time`
 
-The value types are immutable classes with `compare_to`, `equals`, `hash_code`, and `to_string`. Their arithmetic is checked integer arithmetic and their text is digits and punctuation joined by concatenation. Each `parse` needs T1.
+The value types are `#Immutable` classes with `compare_to`, `equals`, `hash_code`, and `to_string`. Their arithmetic is checked integer arithmetic and their text is digits and punctuation joined by concatenation. Each `parse` needs T1.
 
 **`Duration`** is a signed count of nanoseconds in one `int64` (about ±292 years).
 

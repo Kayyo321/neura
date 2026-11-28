@@ -1,3 +1,5 @@
+let close_status = import:Std.Net.Realtime.Ws.CloseStatus;
+let core = import:Std.Encoding.Internal.Deflate;
 let errors = import:Std.Core.Error;
 let exts = import:Std.Net.Realtime.Ws.Extensions;
 let.promote _ = import:Std.Net.Realtime.Ws.Frame;
@@ -5,15 +7,26 @@ let hashing = import:Std.Core.Hash;
 let.promote _ = import:Std.Core.Optional;
 let.promote _ = import:Std.Core.Result;
 
-/// @brief The permessage-deflate extension (RFC 7692): negotiation, and the message transformation framing.
+/// @brief The permessage-deflate extension (RFC 7692): negotiation and message compression.
 ///
-/// Negotiation is real: `parse_offer` and `parse_response` read the four parameters of section 7.1 and reject
-/// an unknown parameter, a repeated one, or an invalid value (section 7); `negotiate` is the server's choice
-/// among a client's offers; `validate_response` is the client's check of the server's answer (section 5).
-/// Window bits are 8 to 15 written in decimal without leading zeros. The tail handling of section 7.2 (strip
-/// and restore `00 00 ff ff`) is real. DEFLATE itself (RFC 1951) is not in the standard library, so
-/// `DeflateCodec.compress` and `DeflateCodec.decompress` are stubs, and `Std.Net.Realtime.Ws.WebSocket` never
-/// offers the extension. Failures are Custom errors with the code `ws.handshake`.
+/// `parse_offer` and `parse_response` read the four parameters of section 7.1 and reject an unknown parameter,
+/// a repeated one, or an invalid value (section 7); `negotiate` is the server's choice among a client's offers;
+/// `validate_response` is the client's check of the server's answer (section 5). Window bits are 8 to 15 written
+/// in decimal without leading zeros. Negotiation failures are Custom errors with the code `ws.handshake`.
+///
+/// The window bits only limit a compressor: `server_max_window_bits` "limits the LZ77 sliding window size that
+/// the server will use to compress messages" (section 7.1.2.1), `client_max_window_bits` likewise the client's
+/// (section 7.1.2.2), and a decompressor "MAY reduce the size of its LZ77 sliding window" (section 7.2.2). This
+/// end therefore always decompresses with a 15-bit window, whatever was agreed for the peer's direction, and
+/// may agree to any value from 8 to 15 there. That also accepts peers built on zlib, whose deflate uses 9 bits
+/// when asked for 8 (zlib.h, deflateInit2). This end's own compressor honours the agreed value, 8 included.
+///
+/// `DeflateCodec` compresses with `Std.Encoding.Internal.Deflate` (RFC 1951), flushing each message with an
+/// empty stored block and stripping its `00 00 ff ff` tail (section 7.2.1), and decompresses with the tail
+/// restored (section 7.2.2). Each direction keeps its window between messages unless its
+/// `*_no_context_takeover` parameter was agreed. A message that ends with a final block (BFINAL, section
+/// 7.2.1 allows one) is accepted; the next message starts a new DEFLATE stream that may still refer to the kept
+/// window, and bytes after the final block are ignored.
 /// @see [Std.Net.Realtime.Ws.PermessageDeflate](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-Ws-PermessageDeflate)
 .Since("0.3.0")
 export let PermessageDeflate = module (
@@ -223,6 +236,9 @@ export let PermessageDeflate = module (
         return fail<DeflateParams>("the permessage-deflate response matches no offer");
     };
 
+    /// @brief The offer a client sends: permessage-deflate, able to limit its own window when the server asks.
+    export const ClientOffer: string = "permessage-deflate; client_max_window_bits";
+
     /// @brief The compressed payload with the final `00 00 ff ff` removed, as a sender sends it (RFC 7692
     /// section 7.2.1). A payload without that tail is returned unchanged.
     .NoDiscard
@@ -254,37 +270,81 @@ export let PermessageDeflate = module (
     };
 
     /// @brief The per-connection compressor and decompressor for agreed parameters and a role.
+    ///
+    /// This end compresses with its own window bits (`client_max_window_bits` for a client,
+    /// `server_max_window_bits` for a server; 15 when absent) and always decompresses with a 15-bit window (see
+    /// the module description). A direction whose `*_no_context_takeover` was agreed starts each message with an
+    /// empty window.
     .[Final, NotThreadSafe]
     export let DeflateCodec = class (
         /// @brief The agreed parameters.
         export last params: DeflateParams;
         /// @brief The endpoint this codec serves.
         export last role: Role;
+        last deflater: core.Deflater;
+        last inflater: core.Inflater;
+        last fresh_compress: bool;
+        last fresh_decompress: bool;
 
-        /// @brief Stores the agreement and role.
+        /// @brief Stores the agreement and role and prepares both directions.
         export let init = func(agreed: DeflateParams, endpoint: Role) {
             params = agreed;
             role = endpoint;
+            last client = match (endpoint) {
+                Role.Client => true,
+                Role.Server => false,
+            };
+            last own_bits = client ? agreed.client_max_window_bits : agreed.server_max_window_bits;
+            deflater = new core.Deflater(own_bits >= 8 ? own_bits : 15);
+            inflater = new core.Inflater(core.MaxWindowBits);
+            fresh_compress = client ? agreed.client_no_context_takeover : agreed.server_no_context_takeover;
+            fresh_decompress = client ? agreed.server_no_context_takeover : agreed.client_no_context_takeover;
         };
 
-        /// @brief The payload of a compressed message: DEFLATE of the message, tail stripped.
-        /// @stub no DEFLATE (RFC 1951) compressor in the standard library
+        /// @brief The payload of a compressed message: DEFLATE of the message with a sync flush, tail stripped
+        /// (section 7.2.1).
         .NoDiscard
         export let compress = func(message: uint8[list]) -> Result<uint8[list]> {
-            trap_with_message("unsupported: Std.Net.Realtime.Ws.PermessageDeflate.DeflateCodec.compress is not implemented in Neura 0.3.0 (no DEFLATE (RFC 1951) compressor in the standard library)");
+            if (fresh_compress) {
+                deflater.reset();
+            }
+            return Result<uint8[list]>.Ok(strip_tail(deflater.compress(message, false)));
         };
 
-        /// @brief The message of a compressed payload: inflate of the payload with the tail restored.
-        /// @stub no DEFLATE (RFC 1951) decompressor in the standard library
+        /// @brief The message of a compressed payload (section 7.2.2), at most `max_size` bytes. A larger message
+        /// fails like an uncompressed one, with status 1009 and "message exceeds the limit of N bytes";
+        /// malformed data fails with status 1007. After a failure the codec starts over with empty windows.
         .NoDiscard
-        export let decompress = func(payload: uint8[list]) -> Result<uint8[list]> {
-            trap_with_message("unsupported: Std.Net.Realtime.Ws.PermessageDeflate.DeflateCodec.decompress is not implemented in Neura 0.3.0 (no DEFLATE (RFC 1951) decompressor in the standard library)");
+        export let decompress = func(payload: uint8[list], max_size: int) -> Result<uint8[list]> {
+            if (fresh_decompress) {
+                inflater.reset();
+            }
+            match (inflater.inflate(append_tail(payload), max_size)) {
+                Result.Ok(bytes) => {
+                    return Result<uint8[list]>.Ok(bytes);
+                },
+                Result.Err(problem) => {
+                    inflater.reset();
+                    if (is_output_limit(problem)) {
+                        return Result<uint8[list]>.Err(close_status.failure(close_status.MessageTooBig,
+                            "message exceeds the limit of " .. max_size.to_string() .. " bytes"));
+                    }
+                    return Result<uint8[list]>.Err(close_status.failure(close_status.InvalidPayload,
+                        "invalid compressed data: " .. problem.to_string()));
+                },
+            }
         };
 
         /// @brief The agreement and role.
         export let.override to_string = func -> string =>
             "DeflateCodec(" .. params.to_string() .. ", " .. role.to_string() .. ")";
     );
+
+    /// @brief Whether the error is the DEFLATE output limit.
+    let is_output_limit = func(problem: errors.Error) -> bool => match (problem) {
+        errors.Error.Custom(detail) => detail.code() == core.OutputLimitCode,
+        _ => false,
+    };
 
     /// @brief Reads an element as an offer (`offer` true) or a response.
     let read = func(element: exts.Extension, offer: bool) -> Result<DeflateParams> {

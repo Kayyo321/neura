@@ -2,6 +2,7 @@ let.promote _ = import:Std.Time.Clock;
 let close_status = import:Std.Net.Realtime.Ws.CloseStatus;
 let.promote _ = import:Std.Time.Duration;
 let errors = import:Std.Core.Error;
+let exts = import:Std.Net.Realtime.Ws.Extensions;
 let.promote _ = import:Std.Net.FramedTransport;
 let frames = import:Std.Net.Realtime.Ws.Frame;
 let hashing = import:Std.Core.Hash;
@@ -9,6 +10,7 @@ let handshake = import:Std.Net.Realtime.Ws.Handshake;
 let heartbeat = import:Std.Net.Realtime.Ws.Heartbeat;
 let.promote _ = import:Std.Net.Realtime.Ws.Message;
 let.promote _ = import:Std.Core.Optional;
+let permessage = import:Std.Net.Realtime.Ws.PermessageDeflate;
 let.promote _ = import:Std.Random.Random;
 let.promote _ = import:Std.Core.Result;
 let strings = import:Std.Text.Strings;
@@ -32,7 +34,15 @@ let.promote _ = import:Std.Core.Unit;
 /// failure with status 1006, which is never sent. `send` fragments a message into frames of at most
 /// `max_fragment_size` bytes; frames a client sends are masked with fresh keys from the `Random`. `close` sends
 /// a close frame with status 1000, reads until the peer's close frame arrives (discarding data), and closes the
-/// transport. Extensions are never negotiated: RSV bits must be zero.
+/// transport.
+///
+/// The one extension is permessage-deflate (RFC 7692), when `WebSocketOptions.permessage_deflate` is set. A
+/// client offers it with the request's extension offer (`PermessageDeflate.ClientOffer`) and checks the
+/// server's answer with `PermessageDeflate.validate_response`. A server accepts the first acceptable offer
+/// with `PermessageDeflate.negotiate`: it accepts a limit on its own window and asks nothing of the client's.
+/// Once agreed, every message is sent compressed with RSV1 on
+/// its first frame, and received messages with RSV1 are decompressed within `max_message_size`. Without the
+/// extension, RSV bits must be zero, and a response that agrees to any extension fails with status 1010.
 /// @see [Std.Net.Realtime.Ws.WebSocket](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-Ws-WebSocket)
 .Since("0.3.0")
 export let WebSocket = module (
@@ -51,38 +61,43 @@ export let WebSocket = module (
         export last max_message_size: int;
         /// @brief The largest payload of a frame `send` writes.
         export last max_fragment_size: int;
+        /// @brief Whether to negotiate permessage-deflate (RFC 7692).
+        export last permessage_deflate: bool;
 
-        /// @brief Stores the limits. A frame limit below 125 or a fragment size below 1 traps with "invalid
-        /// argument: WebSocketOptions".
-        export let init = func(frame_limit: int, message_limit: int, fragment: int) {
+        /// @brief Stores the limits and whether to negotiate permessage-deflate. A frame limit below 125 or a
+        /// fragment size below 1 traps with "invalid argument: WebSocketOptions".
+        export let init = func(frame_limit: int, message_limit: int, fragment: int, deflate: bool = false) {
             if (frame_limit < 125 || message_limit < 0 || fragment < 1) {
                 trap_with_message("invalid argument: WebSocketOptions");
             }
             max_frame_size = frame_limit;
             max_message_size = message_limit;
             max_fragment_size = fragment;
+            permessage_deflate = deflate;
         };
 
-        /// @brief Equal when the three limits are.
+        /// @brief Equal when the three limits and the compression setting are.
         export let.override equals = func(other: class) -> bool {
             if (other is not that: WebSocketOptions) {
                 return false;
             }
             return max_frame_size == that.max_frame_size && max_message_size == that.max_message_size
-                && max_fragment_size == that.max_fragment_size;
+                && max_fragment_size == that.max_fragment_size && permessage_deflate == that.permessage_deflate;
         };
 
-        /// @brief Combines the three limits, consistent with equals.
-        export let.override hash_code = func -> uint32 => hashing.combine(hashing.combine(
-            max_frame_size as uint32, max_message_size as uint32), max_fragment_size as uint32);
+        /// @brief Combines the three limits and the compression setting, consistent with equals.
+        export let.override hash_code = func -> uint32 => hashing.combine(hashing.combine(hashing.combine(
+            max_frame_size as uint32, max_message_size as uint32), max_fragment_size as uint32),
+            hashing.of_bool(permessage_deflate));
 
-        /// @brief The three limits.
+        /// @brief The three limits, and permessage-deflate when it is on.
         export let.override to_string = func -> string =>
             "WebSocketOptions(frame " .. max_frame_size.to_string() .. ", message " .. max_message_size.to_string()
-            .. ", fragment " .. max_fragment_size.to_string() .. ")";
+            .. ", fragment " .. max_fragment_size.to_string() .. (permessage_deflate ? ", permessage-deflate" : "")
+            .. ")";
     );
 
-    /// @brief 1 MiB frames, 16 MiB messages, 64 KiB fragments.
+    /// @brief 1 MiB frames, 16 MiB messages, 64 KiB fragments, no compression.
     .NoDiscard
     export let default_options = func -> WebSocketOptions => new WebSocketOptions(1048576, 16777216, 65536);
 
@@ -170,7 +185,13 @@ export let WebSocket = module (
         export let pongs: int = 0;
             | get: pongs;
 
-        /// @brief A connection whose handshake is done; `leftover` holds bytes read past the handshake.
+        /// @brief The agreed permessage-deflate parameters, if the extension is in use.
+        export last deflate: Optional<permessage.DeflateParams>;
+        /// @brief The compressor of an agreed permessage-deflate.
+        last codec: Optional<permessage.DeflateCodec>;
+
+        /// @brief A connection whose handshake is done; `leftover` holds bytes read past the handshake, and
+        /// `extension` the agreed permessage-deflate parameters, if any (none in the form without it).
         export let init = func(bytes: Transport<uint8[list], uint8[list]>, endpoint: frames.Role, masks: Random,
             limits: WebSocketOptions, agreed: Optional<string>, leftover: uint8[list]) {
             transport = bytes;
@@ -178,8 +199,25 @@ export let WebSocket = module (
             random = masks;
             options = limits;
             protocol = agreed;
-            decoder = new frames.FrameDecoder(endpoint, limits.max_frame_size, 0);
+            deflate = Optional<permessage.DeflateParams>.None;
+            codec = Optional<permessage.DeflateCodec>.None;
             assembler = new MessageAssembler(limits.max_message_size);
+            decoder = new frames.FrameDecoder(endpoint, limits.max_frame_size, 0);
+            decoder.push(leftover);
+        } or func(bytes: Transport<uint8[list], uint8[list]>, endpoint: frames.Role, masks: Random,
+            limits: WebSocketOptions, agreed: Optional<string>, leftover: uint8[list],
+            extension: Optional<permessage.DeflateParams>) {
+            transport = bytes;
+            role = endpoint;
+            random = masks;
+            options = limits;
+            protocol = agreed;
+            deflate = extension;
+            codec = codec_for(extension, endpoint);
+            assembler = assembler_for(limits, codec);
+            // RSV1 marks a compressed message once permessage-deflate is agreed (RFC 7692 section 6).
+            decoder = new frames.FrameDecoder(endpoint, limits.max_frame_size,
+                is_some<permessage.DeflateParams>(extension) ? 4 : 0);
             decoder.push(leftover);
         };
 
@@ -267,7 +305,12 @@ export let WebSocket = module (
                 return Result<Unit>.Err(errors.Error.Io { kind: errors.IoErrorKind.Closed,
                     message: "the WebSocket is closing", path: "" });
             }
-            for (let frame in fragment(data, options.max_fragment_size)) {
+            last frame_list = match (codec) {
+                Optional.Some(active) => fragment_payload(opcode_of(data), active.compress(bytes_of(data))?,
+                    options.max_fragment_size, true),
+                Optional.None => fragment(data, options.max_fragment_size),
+            };
+            for (let frame in frame_list) {
                 write_frame(frame)?;
             }
             return Result<Unit>.Ok(Unit.Value);
@@ -466,16 +509,46 @@ export let WebSocket = module (
         };
     );
 
+    /// @brief The codec of agreed permessage-deflate parameters, if any.
+    let codec_for = func(extension: Optional<permessage.DeflateParams>, endpoint: frames.Role)
+        -> Optional<permessage.DeflateCodec> => match (extension) {
+        Optional.Some(params) => Optional<permessage.DeflateCodec>.Some(new permessage.DeflateCodec(params, endpoint)),
+        Optional.None => Optional<permessage.DeflateCodec>.None,
+    };
+
+    /// @brief A message assembler for the limits that decompresses with the codec, if any.
+    let assembler_for = func(limits: WebSocketOptions, codec: Optional<permessage.DeflateCodec>) -> MessageAssembler {
+        last assembler = new MessageAssembler(limits.max_message_size);
+        match (codec) {
+            Optional.Some(active) => {
+                assembler.use_deflate(active);
+            },
+            Optional.None => {},
+        }
+        return assembler;
+    };
+
+    /// @brief The first opcode of a message: 1 for text, 2 for binary.
+    let opcode_of = func(message: Message) -> int => match (message) {
+        Message.Text(_) => frames.Text,
+        Message.Binary(_) => frames.Binary,
+    };
+
     /// @brief Wraps a transport whose opening handshake already happened (for instance an HTTP/2 or HTTP/3
-    /// stream opened by extended CONNECT).
+    /// stream opened by extended CONNECT), with the permessage-deflate parameters that handshake agreed, if any.
     .NoDiscard
     export let over_upgraded = func(bytes: Transport<uint8[list], uint8[list]>, role: frames.Role, random: Random,
         options: WebSocketOptions, protocol: Optional<string>) -> WebSocket =>
-            new WebSocket(bytes, role, random, options, protocol, new);
+            new WebSocket(bytes, role, random, options, protocol, new)
+        or func(bytes: Transport<uint8[list], uint8[list]>, role: frames.Role, random: Random,
+            options: WebSocketOptions, protocol: Optional<string>, extension: Optional<permessage.DeflateParams>)
+        -> WebSocket => new WebSocket(bytes, role, random, options, protocol, new, extension);
 
     /// @brief The client opening handshake: writes the request, reads and validates the response
-    /// (`Handshake.validate_server_response`), and returns the open connection. A response that agrees to an
-    /// extension fails with status 1010, since this connection implements none. On failure the transport is
+    /// (`Handshake.validate_server_response`), and returns the open connection. When the options enable
+    /// permessage-deflate and the request offered it, a response that agrees to it is checked with
+    /// `PermessageDeflate.validate_response`; a response that agrees to any other extension, or to
+    /// permessage-deflate when the options do not enable it, fails with status 1010. On failure the transport is
     /// closed.
     .NoDiscard
     export let connect = func(bytes: Transport<uint8[list], uint8[list]>, request: handshake.ClientRequest,
@@ -506,14 +579,19 @@ export let WebSocket = module (
                                 return abandon<WebSocket>(bytes, problem);
                             },
                             Result.Ok(acceptance) => {
+                                let agreed = Optional<permessage.DeflateParams>.None;
                                 if (acceptance.extensions.byte_length > 0) {
-                                    return abandon<WebSocket>(bytes, close_status.failure(
-                                        close_status.MandatoryExtension,
-                                        "the server agreed to extensions this connection does not implement: "
-                                        .. acceptance.extensions));
+                                    match (accepted_deflate(request, acceptance.extensions, options)) {
+                                        Result.Err(problem) => {
+                                            return abandon<WebSocket>(bytes, problem);
+                                        },
+                                        Result.Ok(params) => {
+                                            agreed = Optional<permessage.DeflateParams>.Some(params);
+                                        },
+                                    }
                                 }
                                 return Result<WebSocket>.Ok(new WebSocket(bytes, frames.Role.Client, random, options,
-                                    acceptance.protocol, range(received, end, received.length)));
+                                    acceptance.protocol, range(received, end, received.length), agreed));
                             },
                         }
                     },
@@ -523,8 +601,9 @@ export let WebSocket = module (
     };
 
     /// @brief The server opening handshake: reads and validates the request
-    /// (`Handshake.validate_client_request`), chooses the first offered protocol in `supported`, writes the 101
-    /// response without extensions, and returns the open connection. An invalid request is answered with 400
+    /// (`Handshake.validate_client_request`), chooses the first offered protocol in `supported`, agrees to
+    /// permessage-deflate when the options enable it and the client offered it acceptably, writes the 101
+    /// response, and returns the open connection. An invalid request is answered with 400
     /// (426 and Sec-WebSocket-Version for a wrong version), the transport is closed, and the validation error
     /// is returned.
     .NoDiscard
@@ -554,8 +633,13 @@ export let WebSocket = module (
                             },
                             Result.Ok(offer) => {
                                 last chosen = handshake.choose_protocol(offer.protocols, supported);
+                                last agreed = offered_deflate(offer.extensions, options);
+                                last extension_response = match (agreed) {
+                                    Optional.Some(params) => params.to_string(),
+                                    Optional.None => "",
+                                };
                                 last response = handshake.response_text(101, "Switching Protocols",
-                                    offer.accept_headers(chosen, ""));
+                                    offer.accept_headers(chosen, extension_response));
                                 last sent = bytes.send(strings.to_bytes(response));
                                 match (sent) {
                                     Result.Err(problem) => {
@@ -564,13 +648,42 @@ export let WebSocket = module (
                                     Result.Ok(_) => {},
                                 }
                                 return Result<WebSocket>.Ok(new WebSocket(bytes, frames.Role.Server, random, options,
-                                    chosen, range(received, end, received.length)));
+                                    chosen, range(received, end, received.length), agreed));
                             },
                         }
                     },
                 }
             },
         }
+    };
+
+    /// @brief The permessage-deflate parameters of a server's Sec-WebSocket-Extensions answer: exactly one
+    /// permessage-deflate element, allowed by the request's offer, and enabled in the options. Anything else
+    /// fails with status 1010.
+    let accepted_deflate = func(request: handshake.ClientRequest, answer: string, options: WebSocketOptions)
+        -> Result<permessage.DeflateParams> {
+        last refused = close_status.failure(close_status.MandatoryExtension,
+            "the server agreed to extensions this connection does not implement: " .. answer);
+        if (not options.permessage_deflate) {
+            return Result<permessage.DeflateParams>.Err(refused);
+        }
+        last elements = exts.parse(answer)?;
+        if (elements.length != 1 || elements[0].name != permessage.ExtensionName) {
+            return Result<permessage.DeflateParams>.Err(refused);
+        }
+        return permessage.validate_response(exts.parse(request.extensions)?, elements[0]);
+    };
+
+    /// @brief The permessage-deflate parameters a server agrees to for a client's offers, when the options enable
+    /// it: it accepts a limit on its own window and asks nothing else. A malformed header is treated as no offer.
+    let offered_deflate = func(offers: string, options: WebSocketOptions) -> Optional<permessage.DeflateParams> {
+        if (not options.permessage_deflate || offers.byte_length == 0) {
+            return Optional<permessage.DeflateParams>.None;
+        }
+        return match (exts.parse(offers)) {
+            Result.Ok(elements) => permessage.negotiate(elements, new permessage.ServerConfig(true, false, false, 0)),
+            Result.Err(_) => Optional<permessage.DeflateParams>.None,
+        };
     };
 
     /// @brief Reads until the received bytes hold a whole HTTP head; fails at the end of the stream or past

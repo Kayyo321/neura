@@ -1,4 +1,5 @@
 let close_status = import:Std.Net.Realtime.Ws.CloseStatus;
+let deflate = import:Std.Net.Realtime.Ws.PermessageDeflate;
 let duration = import:Std.Time.Duration;
 let errors = import:Std.Core.Error;
 let fixed_clock = import:Std.Time.FixedClock;
@@ -409,5 +410,116 @@ let ConnectionTests = module (
         test.assert(test.assert_ok<heartbeat.HeartbeatAction>(lonely.check_heartbeat()) == heartbeat.HeartbeatAction.PeerDead);
         test.assert(lonely.state == ws.ReadyState.Closed);
         test.assert(quiet.closed);
+    };
+
+    // A client request offering permessage-deflate, as a server reads it.
+    let deflate_request = func -> string =>
+        "GET /chat HTTP/1.1\r\nHost: server.example.com\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+        + "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n"
+        + "Sec-WebSocket-Extensions: " + deflate.ClientOffer + "\r\n\r\n";
+
+    let deflate_options = func -> ws.WebSocketOptions => new ws.WebSocketOptions(1024, 4096, 4096, true);
+
+    // RFC 7692 section 7.2.3.1 as a client sends it: RSV1, text, masked with 37fa213d, payload f248cdc9c90700.
+    let compressed_hello = func -> uint8[list] => bytes_of("c18737fa213dc5b2ecf4fefd21");
+
+    export let test_server_agrees_to_permessage_deflate = func {
+        last peer = new Scripted();
+        peer.add(strings.to_bytes(deflate_request()));
+        peer.add(compressed_hello());
+        last socket = test.assert_ok<ws.WebSocket>(ws.accept(peer, new, random.seeded(7), deflate_options()));
+        last response = strings.from_bytes_lossy(peer.sent);
+        test.assert(strings.contains(response, "Sec-WebSocket-Extensions: permessage-deflate\r\n"));
+        test.assert(test.assert_some<deflate.DeflateParams>(socket.deflate).equals(
+            new deflate.DeflateParams(false, false, 0, 0)));
+        test.assert_equal_string("Hello", receive_text(socket));
+        // Sending compresses: the frame of section 7.2.3.1, unmasked from a server.
+        last head_length = response.byte_length;
+        test.assert_ok<unit.Unit>(socket.send(messages.Message.Text("Hello")));
+        test.assert_equal_string("c107f248cdc9c90700", hex.encode(slice(peer.sent, head_length, peer.sent.length)));
+    };
+
+    export let test_server_without_the_option_declines_permessage_deflate = func {
+        last peer = new Scripted();
+        peer.add(strings.to_bytes(deflate_request()));
+        peer.add(compressed_hello());
+        last socket = test.assert_ok<ws.WebSocket>(ws.accept(peer, new, random.seeded(7), ws.default_options()));
+        test.assert(not strings.contains(strings.from_bytes_lossy(peer.sent), "Sec-WebSocket-Extensions"));
+        test.assert_none<deflate.DeflateParams>(socket.deflate);
+        // RSV1 without the extension: 1002.
+        test.assert_equal<int>(1002, failure_status(socket));
+    };
+
+    let deflate_server = func(peer: Scripted, max_message: int) -> ws.WebSocket =>
+        ws.over_upgraded(peer, frames.Role.Server, random.seeded(8), new ws.WebSocketOptions(1024, max_message, 4096,
+            true), optional.Optional<string>.None, optional.Optional<deflate.DeflateParams>.Some(
+                new deflate.DeflateParams(false, false, 0, 0)));
+
+    export let test_compressed_message_rules = func {
+        // A compressed message in two fragments: RSV1 only on the first.
+        last split_peer = new Scripted();
+        split_peer.add(client_frame(new frames.Frame(false, true, false, false, frames.Text, bytes_of("f248cd"))));
+        split_peer.add(client_frame(new frames.Frame(true, false, false, false, frames.Continuation,
+            bytes_of("c9c90700"))));
+        test.assert_equal_string("Hello", receive_text(deflate_server(split_peer, 4096)));
+        // RSV1 on a continuation frame: 1002.
+        last continued_peer = new Scripted();
+        continued_peer.add(client_frame(new frames.Frame(false, true, false, false, frames.Text, bytes_of("f248cd"))));
+        continued_peer.add(client_frame(new frames.Frame(true, true, false, false, frames.Continuation,
+            bytes_of("c9c90700"))));
+        test.assert_equal<int>(1002, failure_status(deflate_server(continued_peer, 4096)));
+        // Decompressed past max_message_size: 1009, as for an uncompressed message.
+        last big_peer = new Scripted();
+        big_peer.add(compressed_hello());
+        last big = deflate_server(big_peer, 4);
+        last problem = test.assert_err<optional.Optional<messages.Message>>(big.receive());
+        test.assert_equal<int>(1009, close_status.status_of(problem));
+        // The same error an uncompressed message over the limit gives.
+        test.assert_equal_string(close_status.failure(close_status.MessageTooBig,
+            "message exceeds the limit of 4 bytes").to_string(), problem.to_string());
+        // Malformed compressed data: 1007.
+        last bad_peer = new Scripted();
+        bad_peer.add(client_frame(new frames.Frame(true, true, false, false, frames.Binary, bytes_of("07"))));
+        test.assert_equal<int>(1007, failure_status(deflate_server(bad_peer, 4096)));
+        // An uncompressed message is still accepted.
+        last plain_peer = new Scripted();
+        plain_peer.add(client_frame(text_frame("plain")));
+        test.assert_equal_string("plain", receive_text(deflate_server(plain_peer, 4096)));
+    };
+
+    let deflate_response = func(request_value: handshake.ClientRequest, extension: string) -> uint8[list] {
+        last headers: handshake.Header[list] = new;
+        headers.append(new handshake.Header("Upgrade", "websocket"));
+        headers.append(new handshake.Header("Connection", "Upgrade"));
+        headers.append(new handshake.Header("Sec-WebSocket-Accept", handshake.accept_key(request_value.key)));
+        headers.append(new handshake.Header("Sec-WebSocket-Extensions", extension));
+        return strings.to_bytes(handshake.response_text(101, "Switching Protocols", headers));
+    };
+
+    export let test_client_uses_an_agreed_permessage_deflate = func {
+        last req = handshake.client_request("server.example.com", "/chat", random.seeded(9), new, deflate.ClientOffer);
+        test.assert(strings.contains(req.to_text(), "Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits\r\n"));
+        last peer = new Scripted();
+        last first = deflate_response(req, "permessage-deflate; server_max_window_bits=8; client_max_window_bits=10");
+        for (let b in bytes_of("c107f248cdc9c90700")) {
+            first.append(b);
+        }
+        peer.add(first);
+        last socket = test.assert_ok<ws.WebSocket>(ws.connect(peer, req, random.seeded(10), deflate_options()));
+        last agreed = test.assert_some<deflate.DeflateParams>(socket.deflate);
+        test.assert_equal<int>(8, agreed.server_max_window_bits);
+        test.assert_equal<int>(10, agreed.client_max_window_bits);
+        test.assert_equal_string("Hello", receive_text(socket));
+        // Without the option, the same answer fails with 1010.
+        last refused_peer = new Scripted();
+        refused_peer.add(deflate_response(req, "permessage-deflate"));
+        last refused = test.assert_err<ws.WebSocket>(ws.connect(refused_peer, req, random.seeded(10),
+            ws.default_options()));
+        test.assert_equal<int>(1010, close_status.status_of(refused));
+        test.assert(refused_peer.closed);
+        // An answer the offer does not allow fails.
+        last bad_peer = new Scripted();
+        bad_peer.add(deflate_response(req, "permessage-deflate; client_max_window_bits=10; x=1"));
+        test.assert_err<ws.WebSocket>(ws.connect(bad_peer, req, random.seeded(10), deflate_options()));
     };
 );

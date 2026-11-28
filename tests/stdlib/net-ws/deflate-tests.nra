@@ -1,8 +1,10 @@
 let deflate = import:Std.Net.Realtime.Ws.PermessageDeflate;
 let exts = import:Std.Net.Realtime.Ws.Extensions;
 let frames = import:Std.Net.Realtime.Ws.Frame;
+let close_status = import:Std.Net.Realtime.Ws.CloseStatus;
 let hex = import:Std.Encoding.Hex;
 let optional = import:Std.Core.Optional;
+let strings = import:Std.Text.Strings;
 let test = import:Std.Test;
 
 // Sec-WebSocket-Extensions parsing and permessage-deflate negotiation (RFC 7692).
@@ -147,5 +149,137 @@ let DeflateTests = module (
         // The encoder writes the same bytes.
         test.assert_equal_string("c107f248cdc9c90700", hex.encode(test.assert_ok<uint8[list]>(frames.encode(
             new frames.Frame(true, true, false, false, frames.Text, payload), optional.Optional<uint8[list]>.None))));
+    };
+
+    let bytes = func(text: string) -> uint8[list] => test.assert_ok<uint8[list]>(hex.decode(text));
+
+    let codec = func(server_no_takeover: bool, client_no_takeover: bool, server_bits: int, client_bits: int,
+        role: frames.Role) -> deflate.DeflateCodec =>
+            new deflate.DeflateCodec(new deflate.DeflateParams(server_no_takeover, client_no_takeover, server_bits,
+                client_bits), role);
+
+    let inflated = func(c: deflate.DeflateCodec, payload: string) -> string =>
+        strings.from_bytes_lossy(test.assert_ok<uint8[list]>(c.decompress(bytes(payload), 1000)));
+
+    // RFC 7692 section 7.2.3: the payloads a server sends for "Hello", decoded by a client.
+    export let test_codec_decodes_rfc7692_section_7_2_3 = func {
+        test.assert_equal_string("Hello", inflated(codec(false, false, 0, 0, frames.Role.Client), "f248cdc9c90700"));
+        last shared = codec(false, false, 0, 0, frames.Role.Client);
+        test.assert_equal_string("Hello", inflated(shared, "f248cdc9c90700"));
+        test.assert_equal_string("Hello", inflated(shared, "f200110000"));
+        test.assert_equal_string("Hello", inflated(codec(false, false, 0, 0, frames.Role.Client),
+            "000500faff48656c6c6f00"));
+        test.assert_equal_string("Hello", inflated(codec(false, false, 0, 0, frames.Role.Client), "f348cdc9c9070000"));
+        test.assert_equal_string("Hello", inflated(codec(false, false, 0, 0, frames.Role.Client),
+            "f24805000000ffffcac9c90700"));
+        test.assert_equal_string("", inflated(codec(false, false, 0, 0, frames.Role.Client), "00"));
+        // Section 7.2.3.1 the other way: a client compresses "Hello" to the same payload.
+        test.assert_equal_string("f248cdc9c90700", hex.encode(test.assert_ok<uint8[list]>(
+            codec(false, false, 0, 0, frames.Role.Client).compress(strings.to_bytes("Hello")))));
+    };
+
+    // The four combinations of server_no_context_takeover and client_no_context_takeover: each direction resets
+    // its window per message exactly when its parameter was agreed, and the peer decodes every message.
+    export let test_codec_context_takeover_combinations = func {
+        last text = strings.to_bytes("permessage-deflate keeps the window between messages");
+        for (let server_reset in [false, true]) {
+            for (let client_reset in [false, true]) {
+                last client = codec(server_reset, client_reset, 0, 0, frames.Role.Client);
+                last server = codec(server_reset, client_reset, 0, 0, frames.Role.Server);
+                check_direction(client, server, client_reset, text);
+                check_direction(server, client, server_reset, text);
+            }
+        }
+    };
+
+    // Two copies of `text` from `sender` to `receiver`: the second is as long as the first when the sender
+    // resets, and shorter when it keeps its window; both decode.
+    let check_direction = func(sender: deflate.DeflateCodec, receiver: deflate.DeflateCodec, reset: bool,
+        text: uint8[list]) {
+        last first = test.assert_ok<uint8[list]>(sender.compress(text));
+        last second = test.assert_ok<uint8[list]>(sender.compress(text));
+        if (reset) {
+            test.assert_equal_string(hex.encode(first), hex.encode(second));
+        } else {
+            test.assert(second.length < first.length);
+        }
+        test.assert_equal_string(strings.from_bytes_lossy(text),
+            strings.from_bytes_lossy(test.assert_ok<uint8[list]>(receiver.decompress(first, 1000))));
+        test.assert_equal_string(strings.from_bytes_lossy(text),
+            strings.from_bytes_lossy(test.assert_ok<uint8[list]>(receiver.decompress(second, 1000))));
+    };
+
+    // A receiver whose peer agreed not to take over context starts every message with an empty window, so the
+    // second payload of section 7.2.3.2, which refers to the first message, fails with status 1007.
+    export let test_no_context_takeover_resets_the_receiver = func {
+        last fresh = codec(true, false, 0, 0, frames.Role.Client);
+        test.assert_equal_string("Hello", inflated(fresh, "f248cdc9c90700"));
+        test.assert_equal<int>(close_status.InvalidPayload, close_status.status_of(
+            test.assert_err<uint8[list]>(fresh.decompress(bytes("f200110000"), 1000))));
+        last server = codec(false, true, 0, 0, frames.Role.Server);
+        test.assert_equal_string("Hello", inflated(server, "f248cdc9c90700"));
+        test.assert_err<uint8[list]>(server.decompress(bytes("f200110000"), 1000));
+    };
+
+    // Section 7.2.1 allows a message to end with a final block (BFINAL; section 7.2.3.4). Under context takeover
+    // the next message is a new DEFLATE stream that may still refer to the kept window; without takeover it may
+    // not.
+    export let test_final_block_under_context_takeover = func {
+        last kept = codec(false, false, 0, 0, frames.Role.Client);
+        test.assert_equal_string("Hello", inflated(kept, "f348cdc9c9070000"));
+        test.assert_equal_string("Hello", inflated(kept, "f200110000"));
+        last reset = codec(true, false, 0, 0, frames.Role.Client);
+        test.assert_equal_string("Hello", inflated(reset, "f348cdc9c9070000"));
+        test.assert_err<uint8[list]>(reset.decompress(bytes("f200110000"), 1000));
+    };
+
+    // A peer that agreed to an 8-bit window may compress with 9 bits, as zlib does: Python's zlib with a 10-bit
+    // window made this stream, which refers 300 bytes back. The receiver decodes with a 15-bit window, so it
+    // accepts the stream (RFC 7692 section 7.2.2 lets a decompressor use a window of any size it can).
+    export let test_receiver_window_is_not_the_negotiated_one = func {
+        last payload = bytes("324ee5b47aea7f396ef9f7886f39661209172dc21596891718de7a98b765838029f7c2cde7442fa970285ff18ab01760"
+            + "587f3ee6f1b1ff9baf2e68f4109d6daaf9694a5a4e6de092c29083ec5ea73a4b5f261eabd952c350b222f65b7293fef6"
+            + "bab5013b26397099195ab0ed787a906bee95091e62e9578ebe15bb50a55f2392f5d97a4596ffa102353956a5f0facd4e"
+            + "f7bd5c76c56bb5ae5f119371c43ab7b261fddb6795ab1c5f1a8a71277a3bdfdee95f212bfbeaf1f69561ab949d267fbe"
+            + "2fd1bbfce65fa99ec20b0553d4042e8bbf4c3a187c78de62cb982bac2d13129ce5a7482f66d15df966c91dbef0978bc3"
+            + "d29f32d9b009ffdc706423bb985c4162bddf2697e72b954396f1ecf16dc96c3af08c8dd1cad466cafd298c973f9deb53"
+            + "4f56313a16389bed449540de45ad2eaf5c834fadded339ffbb48d61a931c560000");
+        last expected = "3365093ae54fd35ea7f758f66c361860d1385720a6177031dae16eb4b010350ba1b3ce15d2240823d44a583f1000afcf"
+            + "5ce3c6ffb3d5a08148159b3529f294666c7d51a47154c1074aca8975e961c67cb47c0074a85df663822fb77ead50b892"
+            + "400a36313806b8e5c10a9dd490481667d4c5ed16d07a2f7c146af33ba86a4fc270261e0522577fb342df4a44ba5f2a85"
+            + "afa85c68c43b6d7980afede679aa41e931160b614b43dbb94f781d1deae3b7a956aa234293f3df188da7d9fd1a8c71d0"
+            + "70942610d317e962c153c39ea3395cd405849060431f941ba3042da9eca4dc0e57e9a35667e5023c0613f9b0c4b10716"
+            + "1e70617f4eb244e7a92354a60cbc4d846982c0e606013a353c94df9401d3f2ce8e27632432c6519b06c87a106ed12a8a"
+            + "4a6d30f2854b9709ff44197d3365093ae54fd35ea7f758f66c361860d1385720a6177031dae16eb4b010350ba1b3ce15"
+            + "d2240823d44a583f1000afcf5ce3";
+        last server = codec(false, false, 0, 8, frames.Role.Server);
+        test.assert_equal_string(expected, hex.encode(test.assert_ok<uint8[list]>(server.decompress(payload, 1000))));
+        // A server may ask a client for an 8-bit window, and a client that offered 8 is accepted.
+        last eight = test.assert_some<deflate.DeflateParams>(deflate.negotiate(offers(
+            "permessage-deflate; client_max_window_bits=8"), new deflate.ServerConfig(true, false, false, 8)));
+        test.assert_equal<int>(8, eight.client_max_window_bits);
+        test.assert_ok<deflate.DeflateParams>(deflate.validate_response(offers(deflate.ClientOffer),
+            one("permessage-deflate; server_max_window_bits=8")));
+        // This end honours 8 when it compresses, and its peer decodes the result.
+        last client = codec(false, false, 0, 8, frames.Role.Client);
+        last data = bytes(expected);
+        last packed = test.assert_ok<uint8[list]>(client.compress(data));
+        test.assert_equal_string(expected, hex.encode(test.assert_ok<uint8[list]>(
+            codec(false, false, 0, 8, frames.Role.Server).decompress(packed, 1000))));
+    };
+
+    // The decompressed size is bounded like an uncompressed message (status 1009, the same text); malformed data
+    // fails with status 1007.
+    export let test_codec_limits_and_malformed_data = func {
+        last c = codec(false, false, 0, 0, frames.Role.Client);
+        last problem = test.assert_err<uint8[list]>(c.decompress(bytes("f248cdc9c90700"), 4));
+        test.assert_equal<int>(close_status.MessageTooBig, close_status.status_of(problem));
+        // The same error an uncompressed message over the limit gives.
+        test.assert_equal_string(close_status.failure(close_status.MessageTooBig,
+            "message exceeds the limit of 4 bytes").to_string(), problem.to_string());
+        test.assert_equal_string("Hello", strings.from_bytes_lossy(test.assert_ok<uint8[list]>(
+            codec(false, false, 0, 0, frames.Role.Client).decompress(bytes("f248cdc9c90700"), 5))));
+        test.assert_equal<int>(close_status.InvalidPayload, close_status.status_of(
+            test.assert_err<uint8[list]>(codec(false, false, 0, 0, frames.Role.Client).decompress(bytes("07"), 100))));
     };
 );

@@ -37,9 +37,19 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - Managed-list runs batch `Lists.filled` and byte appends in `StringBuilder`, `Strings.join`, and internal I/O buffers with element-wise step, heap, and version accounting. Images that use them require NVR 1.10. [Managed list runs](docs/runtime/NVM.md#managed-list-runs)
 - Module-level laws check pure claims at compile time with `neura prove`, `check`, and `build`. NeuraIR 1.16 preserves law statements and proofs for separate compilation. [Laws](docs/lang/Laws.md)
 - `Handshake.dtls_peer_certificate_chain` returns the verified peer chain of a DTLS 1.3 transport, including a client certificate verified by a DTLS server.
+- An internal DEFLATE, zlib and gzip implementation, `Std.Encoding.Internal.Deflate`, has bounded output and the reference decoder's checks. It is tested against Python's `zlib` in both directions. Only library modules can import it. [Stdlib 13.1](docs/lang/Stdlib.md#131-stdencoding)
+- `Std.Net.Realtime.Ws` compresses messages with permessage-deflate (RFC 7692). `PermessageDeflate.DeflateCodec` compresses and decompresses. `WebSocket` negotiates the extension when the new `WebSocketOptions.permessage_deflate` is set: a client sends `PermessageDeflate.ClientOffer`, and a server accepts the first acceptable offer. A compressed message is limited by `max_message_size` after decompression, with the same status 1009 failure. Malformed compressed data fails with status 1007, and RSV1 on a continuation frame with 1002.
+- `Std.Net.Rpc` compresses and decompresses messages with `gzip` and `deflate`, where `deflate` is the zlib format as gRPC requires. `Call.encode_request` and `encode_response` take an optional compression. Servers decode `gzip` and `deflate` requests instead of answering UNIMPLEMENTED, and clients decode compressed responses. A decompressed message is bounded by the receive limit, with RESOURCE_EXHAUSTED. Both sides send `grpc-accept-encoding`.
+- `Std.Crypto.Token.Jwe` supports compression in compact tokens, `"zip":"DEF"` (RFC 7516 section 4.1.3, raw DEFLATE):
+  - `seal_with` compresses before encryption when the caller's protected header asks for it.
+  - `open` inflates only after the tag check, to at most the new `Jwe.MaxDecompressedSize` (4 MiB).
+  - `open_json` inflates the same way when `zip` is in the protected header; elsewhere in JWE JSON it is refused.
+  - Other `zip` values are still refused.
 
 ### Changed
 
+- `Std.Net.Rpc.Framing.decompress` and `message_of` take the largest message size as a new last argument. gRPC requests and responses now carry `grpc-accept-encoding`.
+- `PermessageDeflate.DeflateCodec.decompress` takes the largest message size as a second argument. `MessageAssembler` rejects RSV1 on a continuation frame. `WebSocket.connect` accepts a permessage-deflate answer when the options enable it, instead of failing with status 1010.
 - `Std.Text.Strings.join` accepts parts and separators up to the maximum text length and reports when the accumulated byte count exceeds that limit.
 - In a `let` or `const` initializer, bare `law()` starts a law declaration and requires a claim. Parenthesize the callee as `(law)()` to call a zero-argument function named `law`.
 - Empty tag groups (`#[]` and `.[]`) are now rejected with `E0910`.
@@ -76,6 +86,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - Native fetch under an origin list reads an IP literal with a final dot (`http://1.2.3.4.:80`) as that address: it matched the listed numeric origin but was then treated as a name whose global answers were all allowed, instead of allowing exactly the listed address.
 - A DTLS read whose deadline passed while a peer datagram was on its way returns the packets that datagram produced, such as an ACK or the reply to a KeyUpdate, with `TimedOut`, instead of draining and dropping them, so the peer's KeyUpdate still completes.
 - Native fetch bounds the total framing of a chunked response to 64 KiB or eight times the body received so far, whichever is larger, and returns `TooLarge` past it, so one-byte chunks with 16 KiB extensions can no longer cost thousands of times the body in parsing.
+- TLS credential files could not be read under a restricted `--allow-fs` on macOS: the provider opened them with `O_NOFOLLOW | O_NOFOLLOW_ANY`, which macOS 26 rejects with `EINVAL`, so every load returned `InvalidInput`. It now passes `O_NOFOLLOW_ANY` alone on macOS, which refuses a symbolic link in any component of the resolved name, and `O_NOFOLLOW` elsewhere. A link met by that open under prefixes returns `CapabilityDenied`, as on Linux.
 
 ### Known limitations
 

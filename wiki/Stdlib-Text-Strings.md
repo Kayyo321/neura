@@ -116,12 +116,12 @@ The compiler supplies these results for supported value members. Companion funct
 | `int64`, `uint64` | Same value | Low 32 bits exclusive-or high 32 bits | Decimal, as above |
 | Floats | Same bit pattern, except that every NaN equals every NaN. `0.0` and `-0.0` are **not** equal. | The bit pattern with every NaN replaced by the canonical NaN; 16-bit patterns zero-extended, the 64-bit pattern folded like `uint64` | [Section 7.5](Stdlib-Design#75-float-text-conversion) |
 | Fieldless enum | Same variant | The ordinal | The variant name |
+| Payload enum | Same variant and equal payloads in declaration order | Start with ordinal + 1, then multiply by 31 and add each payload hash with wrapping arithmetic | Variant name, then positional values in parentheses or named fields in braces, separated by commas and spaces |
 | `string` | Same bytes | Start with 0; for each byte, 31 times the hash plus the byte, wrapping | The string itself |
 | Tuple | Same element types and each pair of elements equal, in order | Start with 1; for each element, 31 times the hash plus the element's hash, wrapping | `[`, the elements' text separated by `, `, `]` |
 | Array, list | Same kind, same length, and each pair of elements equal in index order | As for a tuple | As for a tuple |
 | Class (default, G3b) | Identity | The identity number times 2,654,435,761, wrapping | The qualified class name, `#`, and the identity number, for example `Acme.Shapes.Circle#3` |
 | Function value | Not comparable | None | None |
-| Payload enum | Not provided | Not provided | Not provided |
 
 Float equality here deliberately differs from `==`: it is an equivalence relation consistent with the hash, which hash tables need, while `==` stays IEEE 754. The multiplier 31 is chosen because multiplying by 31 is a shift and a subtraction.
 
@@ -164,7 +164,7 @@ These are the intended source-module contracts. Compiler support for the operati
 | --- | --- | --- | --- | --- |
 | Integers, floats, `bool`, fieldless enums, `string`, tuples | Built in (G3a) | Companion `compare` functions | No (`Strings.scalars` gives a list) | |
 | Array, list | Built in, structural (G3a) | No | Built-in for-each | |
-| `Optional<T>`, `Result<T>`, `Error`, `JsonValue` | Module functions; payload enums have no built-in equality | No | No | |
+| `Optional<T>`, `Result<T>`, `Error`, `JsonValue` | Built in when each payload supports value members | No | No | |
 | `ArrayList`, `LinkedList` | As lists | No | Yes | `MutableList`; `LinkedList` also `Deque` |
 | `ArrayDeque`, `PriorityQueue` | Identity | No | Yes | `Deque` or `Queue` |
 | `HashSet`, `TreeSet`, `BitSet` | As sets | No | Yes | `MutableSet`; `TreeSet` also `SortedSet` |
@@ -242,7 +242,7 @@ A class holding a compiled regular expression. Needs T1 only: its types are all 
 | `split(input)` | A built-in list of strings, with the rules of `Strings.split`. |
 | `group_count: int`, `pattern: string` | Get-only fields ([accessors](Types#accessors)), set at compilation. |
 
-`RegexMatch` is an immutable class: the get-only fields `start` and `end` (byte offsets), `text()`, `group(index) → Optional<string>`, `group_start(index) → int` (-1 when the group did not participate), and `named_group(name) → Optional<string>`. Group 0 is the whole match.
+`RegexMatch` is an immutable class: the get-only fields `start` and `end` (byte offsets), `text()`, `group(index) → Optional<string>`, `group_start(index) → int` (-1 when the group did not participate), and `named_group(name) → Optional<string>`. Group 0 is the whole match. Its capture positions are kept in a list, so it is not marked `#Immutable` and tasks cannot share it.
 
 ### 9.6 Hash collections
 
@@ -315,6 +315,7 @@ Everything here needs T1 except the `Json` value type itself.
 - **`Hex`:** `encode(bytes) → string` (lowercase); `decode(text) → Result<uint8[list]>` (either case; an odd length or a non-hex character fails with an `Encoding` error). The kernels `neura.encoding.hex_encode` and `hex_decode` compute it (P2a).
 - **`Base64`:** the standard and URL-safe alphabets of RFC 4648. `encode`, `encode_url`, and their `_unpadded` forms; `decode` and `decode_url`. Decoding is strict: padded forms require correct padding, unpadded forms reject padding, whitespace is rejected, and unused trailing bits must be zero. The kernels `neura.encoding.base64_encode` and `base64_decode` compute every form (P2a).
 - **`Csv`** (RFC 4180): `parse(text)` returns a `Result` of a built-in list of built-in lists of strings, and `write(rows) → string`. Fields are separated by commas and records by LF or CRLF. A quoted field may contain commas, line breaks, and doubled quotes. A quote inside an unquoted field, or text after a closing quote, fails with a `Parse` error. A final line break does not add an empty record. The writer quotes a field only when it contains a comma, a quote, a CR, or an LF, and ends each record with LF.
+- **Internal `Deflate`** (`Std.Encoding.Internal.Deflate`, 0.3.1): DEFLATE (RFC 1951), raw and in the zlib (RFC 1950) and gzip (RFC 1952) formats, for the library's own use; programs cannot import it (`E0702`). `Std.Net.Realtime.Ws.PermessageDeflate`, `Std.Net.Rpc.Framing` and `Std.Crypto.Token.Jwe` (`zip`) use it. Every decompressor takes the largest output it may produce and fails with the Custom error `encoding.deflate.output_limit` as soon as more would be needed; malformed data fails with an `Encoding` error at the input offset being read. Decoding applies the checks of zlib's reference decoder `puff.c`. A zlib stream with a preset dictionary is refused, and its header's window size is enforced. Only one gzip member is read, and data after it is refused. `Inflater` and `Deflater` take a window of 8 to 15 bits and keep it between calls for context takeover. The compressor uses hash chains and picks stored, fixed or dynamic Huffman per block. Its output depends only on its input: the zlib header is `78 9C`, and the gzip header has MTIME 0 and OS 255. The test `backend-encoding-deflate-internal` checks it against Python's `zlib` in both directions.
 
 **`Json`** (RFC 8259).
 
