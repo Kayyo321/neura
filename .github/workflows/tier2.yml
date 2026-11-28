@@ -52,6 +52,14 @@ jobs:
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNEURA_TEST_TIMEOUT_SCALE=12 -DNEURA_TEST_FRAME_HOOKS=ON
 
+      # The configured CTest inventory, for the expected-inventory check
+      # (docs/ContinuousIntegration.md, "Test inventories").
+      - name: Save the test inventory
+        continue-on-error: true
+        run: |
+          ctest --test-dir build --show-only=json-v1 > build/ctest-inventory.json
+          python3 -c "import json, sys; print(len(json.load(open(sys.argv[1], encoding='utf-8'))['tests']), 'tests registered')" build/ctest-inventory.json
+
       - name: Build
         run: cmake --build build --parallel "$(nproc)" 2>&1 | tee build/build.log
 
@@ -70,6 +78,7 @@ jobs:
           name: tier2-linux-arm64
           path: |
             build/build.log
+            build/ctest-inventory.json
             build/ctest-junit.xml
             build/Testing/Temporary/LastTest.log
           if-no-files-found: warn
@@ -120,6 +129,14 @@ jobs:
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNEURA_TEST_TIMEOUT_SCALE=12 -DNEURA_TEST_FRAME_HOOKS=ON
 
+      # The configured CTest inventory, for the expected-inventory check
+      # (docs/ContinuousIntegration.md, "Test inventories").
+      - name: Save the test inventory
+        continue-on-error: true
+        run: |
+          ctest --test-dir build --show-only=json-v1 > build/ctest-inventory.json
+          python3 -c "import json, sys; print(len(json.load(open(sys.argv[1], encoding='utf-8'))['tests']), 'tests registered')" build/ctest-inventory.json
+
       - name: Build
         run: cmake --build build --parallel "$(sysctl -n hw.ncpu)" 2>&1 | tee build/build.log
 
@@ -144,6 +161,7 @@ jobs:
           name: tier2-macos-${{ matrix.architecture }}
           path: |
             build/build.log
+            build/ctest-inventory.json
             build/ctest-junit.xml
             build/Testing/Temporary/LastTest.log
           if-no-files-found: warn
@@ -269,6 +287,13 @@ jobs:
         uses: ./.github/actions/windows
       - name: Configure
         run: cmake --preset '${{ matrix.preset }}' -DNEURA_TEST_TIMEOUT_SCALE=12 -DNEURA_TEST_FRAME_HOOKS=ON
+      # The configured CTest inventory, for the expected-inventory check
+      # (docs/ContinuousIntegration.md, "Test inventories").
+      - name: Save the test inventory
+        continue-on-error: true
+        run: |
+          ctest --test-dir build-${{ matrix.preset }} --show-only=json-v1 > build-${{ matrix.preset }}/ctest-inventory.json
+          python -c "import json, sys; print(len(json.load(open(sys.argv[1], encoding='utf-8'))['tests']), 'tests registered')" build-${{ matrix.preset }}/ctest-inventory.json
       - name: Build
         run: cmake --build --preset '${{ matrix.preset }}' --parallel 4 2>&1 | tee build-${{ matrix.preset }}/build.log
       - name: Require an MSVC build without Neura compiler warnings
@@ -299,6 +324,7 @@ jobs:
           name: tier2-${{ matrix.preset }}
           path: |
             build-${{ matrix.preset }}/build.log
+            build-${{ matrix.preset }}/ctest-inventory.json
             build-${{ matrix.preset }}/ctest-junit.xml
             build-${{ matrix.preset }}/Testing/Temporary/LastTest.log
           if-no-files-found: warn

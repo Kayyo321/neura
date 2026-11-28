@@ -112,6 +112,14 @@ jobs:
           "-DNEURA_SERVER_TEST_OPENSSL=$HOME/server-components/openssl/bin/openssl"
           -DNEURA_TEST_TIMEOUT_SCALE=3
 
+      # The configured CTest inventory, for the expected-inventory check
+      # (docs/ContinuousIntegration.md, "Test inventories").
+      - name: Save the test inventory
+        continue-on-error: true
+        run: |
+          ctest --test-dir build --show-only=json-v1 > build/ctest-inventory.json
+          python3 -c "import json, sys; print(len(json.load(open(sys.argv[1], encoding='utf-8'))['tests']), 'tests registered')" build/ctest-inventory.json
+
       - name: Build
         run: cmake --build build --parallel "$(nproc)" 2>&1 | tee build/build.log
 
@@ -152,6 +160,7 @@ jobs:
           name: tier1-test-report
           path: |
             build/build.log
+            build/ctest-inventory.json
             build/ctest-junit.xml
             build/Testing/Temporary/LastTest.log
           if-no-files-found: warn
@@ -290,6 +299,13 @@ jobs:
         run: >
           cmake --preset windows-msvc -DNEURA_TEST_TIMEOUT_SCALE=12 -DNEURA_TEST_FRAME_HOOKS=ON
           "-DNEURA_DESKTOP_ENGINE=$env:NEURA_DESKTOP_ENGINE"
+      # The configured CTest inventory, for the expected-inventory check
+      # (docs/ContinuousIntegration.md, "Test inventories").
+      - name: Save the test inventory
+        continue-on-error: true
+        run: |
+          ctest --test-dir build-windows-msvc --show-only=json-v1 > build-windows-msvc/ctest-inventory.json
+          python -c "import json, sys; print(len(json.load(open(sys.argv[1], encoding='utf-8'))['tests']), 'tests registered')" build-windows-msvc/ctest-inventory.json
       - name: Require the Windows desktop test entries
         if: ${{ steps.desktop.outputs.ready == 'true' }}
         shell: pwsh
@@ -340,6 +356,7 @@ jobs:
           name: tier1-windows
           path: |
             build-windows-msvc/build.log
+            build-windows-msvc/ctest-inventory.json
             build-windows-msvc/ctest-junit.xml
             build-windows-msvc/Testing/Temporary/LastTest.log
           if-no-files-found: warn

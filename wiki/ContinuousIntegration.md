@@ -139,6 +139,10 @@ Every test's CTest time limit is set for a developer machine with the x86-64 JIT
 
 `scripts/check-repository-settings.py` is not part of Tier 1. It compares the repository's GitHub settings with the files in `.github/settings` and needs a signed-in `gh`; see [repository settings](RepositorySettings).
 
+### Test inventories
+
+After Configure, Tier 1's Linux and Windows jobs and Tier 2's Linux arm64, macOS and Windows jobs save the registered tests as `ctest --show-only=json-v1` in `ctest-inventory.json` beside the CTest report and upload it with the job's other evidence. The step cannot stop the job: a failure leaves the file out of the artifact with a warning. The `--minimum` floors of `check-test-report.py` remain the check that a configuration ran enough tests until an expected inventory for each configuration is checked in.
+
 ## Workflow rules
 
 `scripts/check-workflows.py` requires every workflow to:
