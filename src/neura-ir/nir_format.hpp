@@ -35,10 +35,12 @@ inline constexpr std::uint16_t nir_laws_minor = 16;
 inline constexpr std::uint16_t nir_narrowing_minor = 16;
 // NeuraIR 1.17 adds the private Cell-storage operation and view failures.
 inline constexpr std::uint16_t nir_pointer_minor = 17;
+// NeuraIR 1.18 adds the private object-storage operation of shared pointers.
+inline constexpr std::uint16_t nir_object_storage_minor = 18;
 // The highest minor version this code reads and writes. The writer emits the
 // lowest minor version that can represent the program, so a program that
 // uses no newer feature is written as 1.0.
-inline constexpr std::uint16_t nir_minor_version = nir_pointer_minor;
+inline constexpr std::uint16_t nir_minor_version = nir_object_storage_minor;
 
 // The minor version that adds class hooks (docs/design/Hooks030.md): the
 // attributes hook.get, hook.set and hook.of. A module that declares a clause

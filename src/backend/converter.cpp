@@ -3595,6 +3595,10 @@ Operand FunctionCompiler::expression(const IrNode& node) {
         auto cell = expression(node.operands.front());
         return state(nvr::StateOp::RetainCellStorage, 0, {cell}, cell.type, node.span);
     }
+    case IrOp::RetainObjectStorage: {
+        auto target = expression(node.operands.front());
+        return state(nvr::StateOp::RetainObjectStorage, 0, {target}, target.type, node.span);
+    }
     case IrOp::CollectionVersion: {
         auto list = expression(node.operands.front());
         return state(nvr::StateOp::ReadVersion, 0, {list}, c_.scalar(nvr::TypeKind::Unsigned, 64), node.span);

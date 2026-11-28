@@ -245,6 +245,7 @@ public:
             switch (exit.operation) {
             case nvr::StateOp::AllocateObject: operation = "new L" + std::to_string(exit.immediate); break;
             case nvr::StateOp::RetainCellStorage: operation = "retain_cell_storage(" + a(0) + ")"; break;
+            case nvr::StateOp::RetainObjectStorage: operation = "retain_object_storage(" + a(0) + ")"; break;
             case nvr::StateOp::ReadTag: operation = "tag(" + a(0) + ")"; break;
             case nvr::StateOp::ReadField:
                 operation = a(0) + "." + field(exit, args);

@@ -223,7 +223,11 @@ enum class IrOp {
     Reflect = 75,
     // NeuraIR 1.17. Produces an independently owned, private handle to the
     // storage of a live Std.Core.Cell. Its result and operand share a type.
-    RetainCellStorage = 76
+    RetainCellStorage = 76,
+    // NeuraIR 1.18. Produces a private handle to the storage of a live class
+    // instance that a shared pointer owns, so that destroy through another
+    // handle cannot invalidate it. Its result and operand share a type.
+    RetainObjectStorage = 77
 };
 
 // A MakeClosure (or its specialized Allocate) carries the written

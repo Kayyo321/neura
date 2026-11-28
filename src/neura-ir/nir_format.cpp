@@ -48,13 +48,15 @@ static_assert(static_cast<unsigned>(IrOp::Cleanup) == 70 && static_cast<unsigned
               max_op_1_14 == 72);
 constexpr std::uint8_t max_op_expressions = static_cast<std::uint8_t>(IrOp::TypeOf);
 constexpr std::uint8_t max_op_pointer = static_cast<std::uint8_t>(IrOp::RetainCellStorage);
+constexpr std::uint8_t max_op_object_storage = static_cast<std::uint8_t>(IrOp::RetainObjectStorage);
+static_assert(max_op_pointer == 76 && max_op_object_storage == 77);
 static_assert(static_cast<unsigned>(IrOp::ConcatText) == 73 && max_op_expressions == 74);
 // NeuraIR 1.9 stores a node's poll in the top bit of its operation byte.
 constexpr std::uint8_t poll_bit = 0x80;
 constexpr std::uint16_t task_minor = 9;
 // NeuraIR 1.10 adds symbol attributes and deferred initialization.
 constexpr std::uint16_t attribute_minor = 10;
-constexpr std::uint16_t newest_node_minor = nir_pointer_minor;
+constexpr std::uint16_t newest_node_minor = nir_object_storage_minor;
 
 bool valid_non_nil_use(const IrProgram& program, const Span& use, SymbolId id) {
     if (id >= program.symbols.size() || use.file.empty() || !use.line || !use.column || !use.length ||
@@ -164,8 +166,9 @@ std::uint16_t required_minor(const std::vector<IrNode>& nodes) {
     std::uint16_t version = 0;
     for (const auto& node : nodes) {
         const auto op = static_cast<std::uint8_t>(node.op);
+        if (node.op == IrOp::RetainObjectStorage) return nir_object_storage_minor;
         if (node.op == IrOp::RetainCellStorage || (node.op == IrOp::Fail && node.text != "iteration"))
-            return nir_pointer_minor;
+            version = std::max(version, nir_pointer_minor);
         if (node.op == IrOp::ConcatText || node.op == IrOp::TypeOf)
             version = std::max(version, nir_expressions_minor);
         if (node.op == IrOp::ConformanceCall) version = std::max(version, nir_records_minor);
@@ -662,7 +665,7 @@ private:
         // Events are derived on the linked program and never stored.
         if (value.op == IrOp::HookRead || value.op == IrOp::HookAdmit)
             throw NirError("class hook events exist only in an elaborated program and are not written to .nir");
-        if (static_cast<std::uint8_t>(value.op) > max_op_pointer)
+        if (static_cast<std::uint8_t>(value.op) > max_op_object_storage)
             throw NirError("invalid operation tag " + std::to_string(static_cast<unsigned>(value.op)));
         if (value.op == IrOp::Field && value.text == retained_cell_field)
             throw NirError("retained Cell field access is derived after linking");
@@ -705,7 +708,7 @@ public:
         constexpr std::uint8_t operation_limits[]{
             max_op_1_0, max_op_1_1, max_op_1_2, max_op_1_3, max_op_1_4, max_op_1_4, max_op_1_4, max_op_1_7,
             max_op_1_7, max_op_1_9, max_op_1_9, max_op_1_9, max_op_1_12, max_op_records, max_op_1_14,
-            max_op_expressions, max_op_expressions, max_op_pointer};
+            max_op_expressions, max_op_expressions, max_op_pointer, max_op_object_storage};
         static_assert(std::size(operation_limits) == nir_minor_version + 1);
         max_op_ = operation_limits[minor_];
         latches_ = minor_ > 0;

@@ -2982,6 +2982,16 @@ IrNode Lowering::call(const Expr& expr, Context& context, const IrType* expected
         retained.operands.push_back(std::move(cell));
         return retained;
     }
+    if (!expr.operands.empty() && expr.operands.front().kind == ExprKind::Name &&
+        expr.operands.front().text == "retain_object_storage" &&
+        trusted_pointer_declaration(program_, lexical_owner(context))) {
+        if (expr.operands.size() != 2 || !expr.type_arguments.empty() || !expr.labels.empty())
+            throw Diagnostic(expr.span, "retain_object_storage takes one value and no type arguments").with_code("E0407");
+        auto target = value(expr.operands[1], context);
+        auto retained = node(IrOp::RetainObjectStorage, expr.span, target.type);
+        retained.operands.push_back(std::move(target));
+        return retained;
+    }
 
     const auto& callee_expr = expr.operands.front();
     if (callee_expr.kind == ExprKind::OptionalMember) return optional_access(callee_expr, &expr, context);

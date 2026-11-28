@@ -855,7 +855,8 @@ NEURA_TEST(format, storage_regions_need_version_1_7) {
     check_equal(static_cast<unsigned>(nvr::StateOp::ConcatText), 35U, "the concat-text number");
     check_equal(static_cast<unsigned>(nvr::StateOp::AppendRun), 36U, "the append-run number");
     check_equal(static_cast<unsigned>(nvr::StateOp::RetainCellStorage), 37U, "the retain-cell-storage number");
-    check_equal(static_cast<unsigned>(nvr::state_op_count), 38U, "the operation count");
+    check_equal(static_cast<unsigned>(nvr::StateOp::RetainObjectStorage), 38U, "the retain-object-storage number");
+    check_equal(static_cast<unsigned>(nvr::state_op_count), 39U, "the operation count");
     const auto image = region_image(environment);
     check_equal(image.minor_version, std::uint16_t{7}, "the assembly text declares 1.7");
     check(nvr::uses_regions(image), "the image uses regions");

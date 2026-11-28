@@ -127,6 +127,7 @@ std::string_view spelling(IrOp op) {
     case IrOp::TypeOf: return "type_of";
     case IrOp::Reflect: return "reflect";
     case IrOp::RetainCellStorage: return "retain_cell_storage";
+    case IrOp::RetainObjectStorage: return "retain_object_storage";
     }
     return "<invalid>";
 }

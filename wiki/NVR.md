@@ -36,6 +36,10 @@ Minor version 10 adds the managed-list append-run operation 36 ([Managed list ru
 
 Minor version 11 adds the private Cell-storage operation 37 and a trap reason for invalidated collection views. Array returns can forward an existing managed heap allocation without moving it into another activation region. [Managed pointer storage](#managed-pointer-storage-111)
 
+### Version 1.12
+
+Minor version 12 adds the private object-storage operation 38 of shared pointers. [Shared pointer storage](#shared-pointer-storage-112)
+
 - A writer emits the lowest minor version whose features the image uses. A writer that re-encodes a loaded image keeps at least the minor version the image declared.
 - The loader accepts major version 1 with minor versions 0 through 11. A feature newer than the version declared by the image makes the image malformed.
 - An unknown required section or graph profile produces an unsupported-image error. A recognized version can carry unknown optional sections. The loader keeps their bytes so that re-encoding the image reproduces them; execution ignores them. A known section must carry the required flag given in the table below. Executable sections never reference optional sections.
@@ -285,6 +289,7 @@ The state-operation exit provides checked storage primitives. Its immediate is z
 | 35 (1.9) | Concatenate text | Zero | Two or more text references | New text holding the arguments' bytes in order ([Text concatenation](#text-concatenation-19)) |
 | 36 (1.10) | Append run | Run kind, 0 through 4 | List, `int32` index, `int32` exclusive end, element words, and a source in byte runs | `int32` index before the loop increment ([Managed list runs](#managed-list-runs-110)) |
 | 37 (1.11) | Retain Cell storage | Zero | One object reference | An independent handle of the operand type ([Managed pointer storage](#managed-pointer-storage-111)) |
+| 38 (1.12) | Retain object storage | Zero | One object reference | An independent handle of the operand type ([Shared pointer storage](#shared-pointer-storage-112)) |
 
 Text operations address UTF-8 bytes at the VM boundary. Constructing text checks UTF-8 validity before publishing the result. Operation 13 accepts a byte list, which can grow as text is assembled. Language text indexing can have its own rules implemented above these byte operations. Arrays have fixed length after allocation. List removal shifts later elements left. Every list carries a structural version that starts at zero when the list is allocated and grows by one, modulo 2^64, with each successful append or removal; writing an element does not change it. A for-each loop compares versions to detect modification. Reads and writes check indices and types before accessing storage. Allocation and growth check size arithmetic and run limits before committing. Operation 23 checks the requested length against storage and heap limits before allocating. Freeing an object invalidates its handle after language cleanup has completed.
 
@@ -375,6 +380,11 @@ The writer selects 1.10 for an image using `append-run`. The loader and assemble
 
 Trap reason 6 reports an index-out-of-bounds trap with detail `stale ListPointer view`. For managed arrays, a return's move-to-region operation leaves the allocation and its aliases on the managed heap. In 1.11 the `TRNS` transferable layout vector is followed by a counted list of pairs `cell_layout:u32, box_layout:u32`, sorted by unique Cell layout. A missing box uses `0xffffffff`. The pairs certify a private retained storage field in a transferable pointer layout. At runtime the field must be nil or name a retained storage handle. The scheduler checks the values it reaches. In the boxed primitive case it checks the payload and ignores the box's internal borrow-owner field. Since `ConstPointer` became task-local (0.3.1), the compiler writes no pairs. The loader and the scheduler still accept them, so an image written earlier keeps its `ConstPointer` transfers when it runs. Recompiling its source reports E0602 at each one.
 
+
+
+### Shared pointer storage (1.12)
+
+`retain-object-storage` takes one live class instance, the target of a `SharedPointer`, and returns a private storage handle to it, as `retain-cell-storage` does for a Cell: a fresh handle for an original handle, and the same handle for a storage handle. The original handle and the storage handle name the same data. `free-object` on a storage handle traps with `invalid reference handle: pointer-owned storage is released by collection`, so `destroy` through a handle that a shared pointer gave out cannot invalidate its target. The operation traps on a region entry and on a scheduler object, as `retain-cell-storage` does. The writer selects 1.12 for an image that uses it, and the loader and assembler reject it in an image declaring an earlier version.
 
 ### Kernels (1.6)
 

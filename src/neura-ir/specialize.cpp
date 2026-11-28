@@ -800,6 +800,12 @@ private:
                 }
             }
         }
+        // Only a class instance can be destroyed through another handle, so
+        // only it needs a private storage handle; an array or list target
+        // is kept as it is.
+        if (node.op == IrOp::RetainObjectStorage && !result.operands.empty() &&
+            (result.type.kind != TypeKind::Object || is_primitive_reference(result.type)))
+            return std::move(result.operands.front());
         if (node.op == IrOp::Reflect) {
             // What Std.Reflect can hold and proxy is checked on the specialized
             // types (docs/design/Reflect030.md, E1300 and E1301), at the call
@@ -1052,7 +1058,7 @@ void guard_managed_pointers_in_native_packing(IrProgram& program) {
         }
     }
     const auto makes_pointer = [&](const auto& self, const IrNode& node) -> bool {
-        if (node.op == IrOp::RetainCellStorage ||
+        if (node.op == IrOp::RetainCellStorage || node.op == IrOp::RetainObjectStorage ||
             (node.op == IrOp::Allocate && pointer_class(program, node.type.symbol) != PointerKind::None)) return true;
         for (const auto* nodes : {&node.operands, &node.body, &node.alternative}) {
             if (std::ranges::any_of(*nodes, [&](const IrNode& child) { return self(self, child); })) return true;
