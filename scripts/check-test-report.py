@@ -6,7 +6,8 @@ change removes tests from the build. This script reads the JUnit report
 written by `ctest --output-junit` and fails unless:
 
   * every test in the report ran and passed, with none skipped, disabled,
-    or not run; and
+    or not run (a skipped test's first output line that starts with
+    `SKIP:` is printed with it); and
   * the report holds at least `--minimum` tests.
 
 The exit status is 0 when both hold and 1 otherwise, including when the
@@ -40,7 +41,12 @@ def main() -> int:
         name = case.get("name", "<unnamed>")
         status = case.get("status", "<missing>")
         if case.find("skipped") is not None:
-            problems.append(f"{name}: skipped ({case.find('skipped').get('message', 'no reason given')})")
+            # CTest's message for SKIP_RETURN_CODE names only the code; a
+            # test that prints "SKIP: <reason>" gives the reason itself.
+            reason = case.find("skipped").get("message", "no reason given")
+            output = case.findtext("system-out") or ""
+            said = next((line.strip() for line in output.splitlines() if line.startswith("SKIP:")), None)
+            problems.append(f"{name}: skipped ({reason})" + (f": {said}" if said else ""))
         elif case.find("failure") is not None or case.find("error") is not None:
             problems.append(f"{name}: failed")
         elif status != "run":
