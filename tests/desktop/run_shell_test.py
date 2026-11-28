@@ -156,6 +156,10 @@ if __name__ == "__main__":
     parser.add_argument("--node", type=Path, help="path to the Node executable")
     parser.add_argument("--case", action="append", choices=("shell", "child-close", "child-quit", "child-crash", "child-mismatch"))
     args = parser.parse_args()
+    if WINDOWS:
+        from windows_desktop import skip_without_desktop
+        if (status := skip_without_desktop("desktop-shell")) is not None:
+            sys.exit(status)
     failed = 0
     for case in args.case or ["shell"]:
         failed |= run(args.electron, case, args.node)

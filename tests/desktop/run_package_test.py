@@ -428,9 +428,13 @@ def main():
             install = scratch / "Extracted app 資"
             with zipfile.ZipFile(archive) as package:
                 package.extractall(install)
-            launch_windows(install / "fixture" / "fixture.exe", scratch)
             check_refusals(stand_in, directory, scratch, icon, "zip")
             check_test_hooks(stand_in, directory, scratch, icon, "zip")
+            from windows_desktop import skip_without_desktop
+            if (status := skip_without_desktop("desktop-package", "The ZIP, refusal and test-hook checks passed; "
+                                               "the packaged application was not launched.")) is not None:
+                return status
+            launch_windows(install / "fixture" / "fixture.exe", scratch)
             return 0
 
         engine = args.electron.resolve().parent

@@ -2513,6 +2513,12 @@ if(BUILD_TESTING AND NEURA_SDK)
         set_tests_properties(desktop-native-child desktop-shell desktop-app desktop-package PROPERTIES
             RUN_SERIAL TRUE LABELS desktop WORKING_DIRECTORY "${neura_desktop_tests}")
         set_tests_properties(desktop-app desktop-package PROPERTIES TIMEOUT 1200)
+        if(WIN32)
+            # Without an unlocked interactive desktop these drivers run what
+            # needs no window, then report the Electron cases as skipped
+            # (tests/desktop/windows_desktop.py), which the CI report refuses.
+            set_tests_properties(desktop-shell desktop-app desktop-package PROPERTIES SKIP_RETURN_CODE 77)
+        endif()
     else()
         message(STATUS "NEURA_DESKTOP_ENGINE is not set: the desktop tests are not registered "
             "(desktop-native-child, desktop-shell, desktop-app, desktop-package)")

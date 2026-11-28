@@ -229,17 +229,32 @@ jobs:
           python scripts/generate-wiki.py --check
           python scripts/gen-kernels.py --check
           python scripts/build-site.py --check
+      # The desktop tests (docs/apps/Desktop.md) need the locked Electron
+      # engine, Node 22 or later and Pillow. When this step cannot provide
+      # them it leaves the four desktop tests unregistered instead of stopping
+      # the job, so every other test still runs and reports; the last step
+      # then fails the job with the reason. desktop-shell, desktop-app and
+      # desktop-package also need an unlocked interactive desktop: without
+      # one they report their Electron cases as skipped, which "Require every
+      # selected test to have run" refuses.
       - name: Prepare the locked Windows desktop test engine
+        id: desktop
+        continue-on-error: true
         shell: pwsh
         run: |
-          if (-not [Environment]::UserInteractive -or [Diagnostics.Process]::GetCurrentProcess().SessionId -eq 0) {
-            throw 'The Windows desktop suite requires an interactive desktop session.'
+          $session = [Diagnostics.Process]::GetCurrentProcess().SessionId
+          Write-Output "::notice::Windows session $session; user-interactive: $([Environment]::UserInteractive)"
+          function Stop-Unready([string] $reason) {
+            "reason=$reason" >> $env:GITHUB_OUTPUT
+            Write-Output "::warning::The desktop tests are not registered: $reason"
+            exit 0
           }
-          Get-Command node -CommandType Application -ErrorAction Stop
+          if (-not (Get-Command node -CommandType Application -ErrorAction SilentlyContinue)) { Stop-Unready 'Node is not installed.' }
+          Write-Output "Node $(node --version)"
           node -e 'if (typeof Promise.withResolvers !== "function") process.exit(1)'
-          if ($LASTEXITCODE -ne 0) { throw 'The desktop tests require Node 22 or later.' }
+          if ($LASTEXITCODE -ne 0) { Stop-Unready "the desktop tests need Node 22 or later, not $(node --version)." }
           python -m pip install --only-binary=:all: Pillow==12.1.1
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($LASTEXITCODE -ne 0) { Stop-Unready 'Pillow 12.1.1 could not be installed.' }
           @'
           import hashlib
           import os
@@ -268,13 +283,15 @@ jobs:
           with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as environment:
               print(f"NEURA_DESKTOP_ENGINE={engine / 'electron.exe'}", file=environment)
           '@ | python -
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($LASTEXITCODE -ne 0) { Stop-Unready 'the locked Electron archive could not be fetched, verified or unpacked.' }
+          "ready=true" >> $env:GITHUB_OUTPUT
       - name: Configure
         shell: pwsh
         run: >
           cmake --preset windows-msvc -DNEURA_TEST_TIMEOUT_SCALE=12 -DNEURA_TEST_FRAME_HOOKS=ON
           "-DNEURA_DESKTOP_ENGINE=$env:NEURA_DESKTOP_ENGINE"
       - name: Require the Windows desktop test entries
+        if: ${{ steps.desktop.outputs.ready == 'true' }}
         shell: pwsh
         run: |
           $json = ctest --test-dir build-windows-msvc --show-only=json-v1 | Out-String
@@ -327,6 +344,14 @@ jobs:
             build-windows-msvc/Testing/Temporary/LastTest.log
           if-no-files-found: warn
           retention-days: 30
+      - name: Require the desktop tests to have been registered
+        if: ${{ !cancelled() && steps.desktop.outputs.ready != 'true' }}
+        shell: pwsh
+        env:
+          REASON: ${{ steps.desktop.outputs.reason || 'the preparation step failed; see its log.' }}
+        run: |
+          Write-Output "::error::desktop-native-child, desktop-shell, desktop-app and desktop-package did not run: $env:REASON"
+          exit 1
 
   runtime-only-windows:
     name: Runtime-only build (Windows x86-64)

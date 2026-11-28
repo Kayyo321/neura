@@ -163,3 +163,65 @@ def visible_window(pid, title, class_name=None):
 
 def close_window(window):
     checked(user.PostMessageW(window, WM_CLOSE, 0, 0))
+
+
+class UserObjectFlags(ctypes.Structure):
+    _fields_ = [("inherit", wintypes.BOOL), ("reserved", wintypes.BOOL), ("flags", wintypes.DWORD)]
+
+
+kernel.GetCurrentProcessId.restype = wintypes.DWORD
+kernel.ProcessIdToSessionId.argtypes = [wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
+user.GetProcessWindowStation.restype = wintypes.HANDLE
+user.GetUserObjectInformationW.argtypes = [wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD,
+                                           ctypes.POINTER(wintypes.DWORD)]
+user.OpenInputDesktop.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+user.OpenInputDesktop.restype = wintypes.HANDLE
+user.SwitchDesktop.argtypes = [wintypes.HANDLE]
+user.CloseDesktop.argtypes = [wintypes.HANDLE]
+
+UOI_FLAGS = 1
+WSF_VISIBLE = 0x0001
+DESKTOP_SWITCHDESKTOP = 0x0100
+# The exit status for which CTest reports a desktop test as skipped (SKIP_RETURN_CODE).
+SKIP = 77
+
+
+def interactive_desktop_problem():
+    """Why this process cannot open and inspect windows on an unlocked interactive desktop, or None.
+
+    The Electron cases need a session other than session 0, the visible window station WinSta0 (the test
+    .NET's Environment.UserInteractive makes), and an input desktop that accepts input: SwitchDesktop to the
+    current input desktop fails while the workstation is locked or a secure desktop is shown."""
+    session = wintypes.DWORD()
+    if not kernel.ProcessIdToSessionId(kernel.GetCurrentProcessId(), ctypes.byref(session)):
+        return f"the session of this process is unknown ({ctypes.WinError(ctypes.get_last_error())})"
+    if session.value == 0:
+        return "the process runs in session 0, the services session, which has no interactive desktop"
+    flags = UserObjectFlags()
+    station = user.GetProcessWindowStation()
+    if not station or not user.GetUserObjectInformationW(station, UOI_FLAGS, ctypes.byref(flags),
+                                                         ctypes.sizeof(flags), None):
+        return f"the window station of this process is unknown ({ctypes.WinError(ctypes.get_last_error())})"
+    if not flags.flags & WSF_VISIBLE:
+        return f"session {session.value}: the process's window station is not visible (not WinSta0)"
+    desktop = user.OpenInputDesktop(0, False, DESKTOP_SWITCHDESKTOP)
+    if not desktop:
+        return (f"session {session.value}: no input desktop can be opened, as when the workstation is locked or "
+                f"the session is disconnected ({ctypes.WinError(ctypes.get_last_error())})")
+    try:
+        if not user.SwitchDesktop(desktop):
+            return (f"session {session.value}: the input desktop does not accept input, as when the workstation "
+                    f"is locked ({ctypes.WinError(ctypes.get_last_error())})")
+    finally:
+        user.CloseDesktop(desktop)
+    return None
+
+
+def skip_without_desktop(test, done=""):
+    """Print the reason and return SKIP when the Electron cases of `test` cannot run here, else None."""
+    problem = interactive_desktop_problem()
+    if problem is None:
+        return None
+    print(f"SKIP: {test} needs an unlocked interactive Windows desktop for its Electron windows: {problem}."
+          f"{' ' + done if done else ''}", flush=True)
+    return SKIP
