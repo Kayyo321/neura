@@ -212,8 +212,11 @@ if __name__ == "__main__":
     with tempfile.TemporaryDirectory(prefix="Neura child 資-") as build:
         child = build_child(args.neura, build)
         failed = 0 if args.skip_bridge else run_bridge(child, args.node) | check_rejection(args.neura)
-        if WINDOWS and not failed:
-            from windows_desktop import skip_without_desktop
+        if WINDOWS:
+            from windows_desktop import interactive_desktop_problem, skip_without_desktop
+            if failed and (problem := interactive_desktop_problem()) is not None:
+                print(f"The Electron cases did not run either: no unlocked interactive desktop ({problem}).")
+                sys.exit(1)
             if (status := skip_without_desktop("desktop-app", "The Node bridge cases and the rejection check "
                                                "passed; the Electron cases did not run.")) is not None:
                 sys.exit(status)
