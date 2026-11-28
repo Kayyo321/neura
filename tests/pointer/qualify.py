@@ -260,7 +260,7 @@ let invoke_generic = func<T>(value: T) {
         self.assertEqual(built.returncode, 0, built.stderr)
         self.assertTrue(rebuilt.read_bytes() == self.image.read_bytes())
 
-    def reject(self, text, code, message, use, notes=()):
+    def reject(self, text, code, message, use, notes=(), monitor_note=False):
         """Checks one rejection: its code, message, primary line, and notes."""
         self.source.write_text(text, encoding="utf-8")
         result = self.command("check", "--error-format=json", self.source)
@@ -274,7 +274,8 @@ let invoke_generic = func<T>(value: T) {
                          result.stderr)
         for note in notes:
             self.assertTrue(any(note in item for item in diagnostic["notes"]), result.stderr)
-        self.assertFalse(any("monitor" in item for item in diagnostic["notes"]), result.stderr)
+        if not monitor_note:
+            self.assertFalse(any("monitor" in item for item in diagnostic["notes"]), result.stderr)
         return diagnostic
 
     KINDS_HEADER = POINTER + """let parallel = import:Std.Concurrent.Parallel;
@@ -376,8 +377,9 @@ let use = func {
     def test_declared_kinds_keep_the_pointer_boundaries(self):
         kinds = self.SHAREABLE + ("UniquePointer<Mutable>",)
         for kind in kinds:
-            # SharedPointer and WeakPointer have constructors since M2.
-            if not kind.startswith(("SharedPointer", "WeakPointer")):
+            # SharedPointer and WeakPointer have constructors since M2, and
+            # AtomicPointer and LockedPointer since M3.
+            if not kind.startswith(("SharedPointer", "WeakPointer", "AtomicPointer", "LockedPointer")):
                 with self.subTest(constructor=kind):
                     self.reject(self.KINDS_HEADER + f"""
 let use = func {{
@@ -598,6 +600,110 @@ let keep = func(item: Registered) {
         source = (pathlib.Path(__file__).with_name("spec-shared.nra")).read_text(encoding="utf-8")
         self.build(source)
         self.run_modes(0, "1 1\n3\n1\n10\n")
+
+    def test_atomic_and_locked_pointers(self):
+        self.build(pathlib.Path(__file__).with_name("spec-atomic-locked.nra").read_text(encoding="utf-8"))
+        self.assert_counts_agree(self.run_modes(0, "false false true false\n2\ntrue false\n"))
+        self.build(program("""
+        let first: SharedPointer<Config> = new(new Config(false));
+        let slot: AtomicPointer<Config> = new(first);
+        let state = locked<Box>(func -> Box => new Box());
+        state.update(func(box: Box) -> Box {
+            box.count = 4;
+            return box;
+        });
+        console.println("{} {}", state.with<int>(func(box: Box) -> int => box.count), state.to_string());
+        if (args.length != 0) {
+            if (args[0] == "released") {
+                first.release();
+                let other: SharedPointer<Config> = new(new Config(true));
+                other.release();
+                slot.store(other);
+            } else {
+                state.with<int>(new func(box: Box) -> int => state.with<int>(func(inner: Box) -> int => inner.count));
+            }
+        }
+""", """
+#Immutable
+let Config = class (
+    export last debug: bool;
+    export let init = func(enabled: bool) {
+        debug = enabled;
+    };
+);
+let Box = class (
+    export let count: int = 0;
+);
+"""))
+        self.run_modes(0, "4 LockedPointer\n")
+        self.run_modes(134, "4 LockedPointer\n", "invalid state: released SharedPointer", ("released",))
+        self.run_modes(134, "4 LockedPointer\n", "invalid state: guard already held", ("reentry",))
+
+    def test_atomic_and_locked_pointers_cross_tasks(self):
+        self.build(program("""
+        let counter: LockedPointer<int64> = new(0);
+        let first: SharedPointer<Version> = new(new Version(0));
+        let slot: AtomicPointer<Version> = new(first);
+        first.release();
+        scope {
+            spawn bump(counter, 10);
+            spawn bump(counter, 10);
+            spawn publish(slot, 100);
+            spawn publish(slot, 200);
+        }
+        last final = slot.load();
+        console.println("{} {}", counter.read(), final.read().number == 104 || final.read().number == 204);
+""", """
+#Immutable
+let Version = class (
+    export last number: int;
+    export let init = func(value: int) {
+        number = value;
+    };
+);
+
+let bump = func(counter: LockedPointer<int64>, rounds: int) {
+    for (let i: int = 0; i < rounds; i++) {
+        counter.update(func(value: int64) -> int64 => value + 1);
+    }
+};
+
+let publish = func(slot: AtomicPointer<Version>, first: int) {
+    for (let i: int = 0; i < 5; i++) {
+        last next: SharedPointer<Version> = new(new Version(first + i));
+        slot.store(next);
+        next.release();
+    }
+};
+"""))
+        for quantum in ("1", "1024"):
+            self.assert_counts_agree(self.run_modes(0, "20 true\n", limits=("--task-quantum", quantum)))
+
+    def test_locked_pointer_state_stays_under_the_lock(self):
+        declarations = POINTER + """
+let Box = class (
+    export let count: int = 0;
+);
+"""
+        self.accept(declarations + """
+let use = func -> int {
+    let counter: LockedPointer<int> = new(1);
+    let state = locked<Box>(func -> Box => new Box());
+    return counter.read() + state.with<int>(func(box: Box) -> int => box.count);
+};
+""")
+        for name, body, code, message, use in (
+            ("constructor", "let use = func {\n    let state: LockedPointer<Box> = new(new Box());\n};",
+             "E0602", "cannot be given to a LockedPointer constructor", "= new(new Box())"),
+            ("read", "let use = func {\n    let state = locked<Box>(func -> Box => new Box());\n"
+             "    let box = state.read();\n};", "E0580", "a LockedPointer can read only a deeply immutable value",
+             "state.read()"),
+            ("result", "let use = func {\n    let state = locked<Box>(func -> Box => new Box());\n"
+             "    let box = state.with<Box>(func(box: Box) -> Box => box);\n};", "E0602", "is not transferable",
+             "state.with<Box>"),
+        ):
+            with self.subTest(rejected=name):
+                self.reject(declarations + body + "\n", code, message, use, monitor_note=True)
 
     def test_const_pointer_stays_in_its_task(self):
         # A Pointer to the same storage can still change it, so a read view is

@@ -46,7 +46,7 @@ The browser runtime runs an image in a page under Node, headless Chromium and he
 
 | Area | Status |
 | --- | --- |
-| Pointer ownership and shared access | `SharedPointer` and `WeakPointer` are implemented, with explicit owner claims and weak expiry. `UniquePointer`, `SoftPointer`, `AtomicPointer`, and `LockedPointer` are declared with their target and task-transfer rules; their constructors and operations are planned. |
+| Pointer ownership and shared access | `SharedPointer` and `WeakPointer` are implemented, with explicit owner claims and weak expiry, and so are `AtomicPointer` and `LockedPointer`. `UniquePointer` and `SoftPointer` are declared with their target and task-transfer rules; their constructors and operations are planned. |
 | Standard library extensions | Time zones, locale-sensitive sorting and formatting, Unicode normalization, HTTP, UDP, `BigInteger` bitwise operations, and concurrent collections ([specification, section 16](Stdlib-Design#16-not-provided)). Collection facades that re-export every type need generic re-exports. |
 | Concurrency | Tasks in a program that uses `Std.DynamicForeign` or a C import (the compiler rejects the combination); running tasks on several cores (only `Parallel.map` uses more than one); overlapping file I/O; concurrent collections. The limits are listed in [Concurrency, section 16](Concurrency#16-limits). |
 | Cryptography | FN-DSA awaits FIPS 206 and reference vectors. Device and network provider calls require runtime support. The [crypto tier tables and runtime needs](https://github.com/Kayyo321/neura/blob/main/docs/design/Crypto030.md#tiers) identify each supported profile and gap. |

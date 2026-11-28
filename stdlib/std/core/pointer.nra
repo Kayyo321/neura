@@ -1,5 +1,6 @@
 let cell = import:Std.Core.Cell;
 let closeable = import:Std.Io.Closeable;
+let guarded = import:Std.Concurrent.Guarded;
 let optional = import:Std.Core.Optional;
 let.promote _ = import:Std.Core.Result;
 let.promote _ = import:Std.Core.Unit;
@@ -180,9 +181,9 @@ export let Pointer = module (
         Counted,
     );
 
-    // The state that every owner and weak reference of one shared target reaches. Its methods' callers change it
-    // only in straight-line field operations, before their first call or allocation, so no task switch falls
-    // between a read and the write that depends on it (tests/pointer/polls.py checks this).
+    // The state that every owner and weak reference of one shared target reaches. Its callers change it only in
+    // straight-line field operations, so no task switch falls between a read and the write that depends on it
+    // (tests/pointer/polls.py checks this).
     let SharedGroup = class<T> (
         export let slot: Slot<T>;
         export let owners: int64 = 1;
@@ -295,6 +296,15 @@ export let Pointer = module (
             return Result<Unit>.Ok(Unit.Value);
         };
 
+        /// @brief The group of a claim that is still held, for an AtomicPointer of this module. Only this module
+        /// can name its argument.
+        export let group_of = func(claim: Claim) -> SharedGroup<T> {
+            if (released) {
+                trap_with_message("invalid state: released SharedPointer");
+            }
+            return group;
+        };
+
         /// @brief Names the pointer; the target is not shown.
         export let.override to_string = func -> string => "SharedPointer";
     );
@@ -343,21 +353,146 @@ export let Pointer = module (
         };
     );
 
-    /// @brief An atomically replaced reference to a deeply immutable object (section 2.8). It has no public
-    /// constructor until its operations land.
+    /// @brief An atomically replaced reference to a deeply immutable object (section 2.8). The slot holds one
+    /// owner claim of its current target. Every operation changes the slot and the owner counts in straight-line
+    /// field operations after its last call, so no task switch splits it, and the operations on one AtomicPointer
+    /// are totally ordered.
     .[Final, Since("0.3.1")]
     export let AtomicPointer = class<T>:ManagedPointer (
-        let init = func {
+        let slot: SharedGroup<T>;
+
+        /// @brief An AtomicPointer whose slot holds a new owner claim of `initial`'s target.
+        export let init = func(initial: SharedPointer<T>) {
             super.init();
+            last incoming = initial.group_of(Claim.Counted);
+            match (incoming.slot) {
+                Slot.Owned(_) => {},
+                Slot.Expired => {
+                    trap_with_message("invalid state: released SharedPointer");
+                },
+            }
+            incoming.owners = incoming.owners + 1;
+            slot = incoming;
+        };
+
+        /// @brief Returns a new owner claim of the current target.
+        export let load = func -> SharedPointer<T> {
+            last current = slot;
+            current.owners = current.owners + 1;
+            return new SharedPointer<T>(current, Claim.Counted);
+        };
+
+        /// @brief Replaces the target with `value`'s target. The slot's claim of the old target ends.
+        export let store = func(value: SharedPointer<T>) {
+            last incoming = value.group_of(Claim.Counted);
+            match (incoming.slot) {
+                Slot.Owned(_) => {},
+                Slot.Expired => {
+                    trap_with_message("invalid state: released SharedPointer");
+                },
+            }
+            incoming.owners = incoming.owners + 1;
+            last previous = slot;
+            slot = incoming;
+            previous.owners = previous.owners - 1;
+            if (previous.owners == 0) {
+                previous.slot = Slot<T>.Expired;
+            }
+        };
+
+        /// @brief Replaces the target with `value`'s target and returns the slot's claim of the old one.
+        export let swap = func(value: SharedPointer<T>) -> SharedPointer<T> {
+            last incoming = value.group_of(Claim.Counted);
+            match (incoming.slot) {
+                Slot.Owned(_) => {},
+                Slot.Expired => {
+                    trap_with_message("invalid state: released SharedPointer");
+                },
+            }
+            incoming.owners = incoming.owners + 1;
+            last previous = slot;
+            slot = incoming;
+            return new SharedPointer<T>(previous, Claim.Counted);
+        };
+
+        /// @brief Replaces the target with `desired`'s target if the current target is `expected`'s, comparing
+        /// targets by identity, and reports whether it did.
+        .NoDiscard
+        export let compare_exchange = func(expected: SharedPointer<T>, desired: SharedPointer<T>) -> bool {
+            last wanted = expected.group_of(Claim.Counted);
+            last incoming = desired.group_of(Claim.Counted);
+            match (incoming.slot) {
+                Slot.Owned(_) => {},
+                Slot.Expired => {
+                    trap_with_message("invalid state: released SharedPointer");
+                },
+            }
+            last previous = slot;
+            if (previous != wanted) {
+                return false;
+            }
+            incoming.owners = incoming.owners + 1;
+            slot = incoming;
+            previous.owners = previous.owners - 1;
+            if (previous.owners == 0) {
+                previous.slot = Slot<T>.Expired;
+            }
+            return true;
+        };
+
+        /// @brief Names the pointer.
+        export let.override to_string = func -> string => "AtomicPointer";
+    );
+
+    // The value that a LockedPointer's guard owns.
+    let LockedState = class<T> (
+        export let value: T;
+
+        export let init = func(initial: T) {
+            value = initial;
         };
     );
 
-    /// @brief State that tasks reach one at a time (section 2.9). It has no public constructor until its operations
-    /// land.
+    /// @brief State that tasks reach one at a time (section 2.9), through a Std.Concurrent guard: an operation of
+    /// another task waits until the current one returns, first come, first served, and an operation of the same
+    /// LockedPointer inside one traps with `invalid state: guard already held`. A trap ends the run, so the guard
+    /// never needs repair.
     .[Final, Since("0.3.1")]
     export let LockedPointer = class<T>:ManagedPointer (
-        let init = func {
+        last guard: guarded.Guarded<LockedState<T>>;
+
+        /// @brief A LockedPointer of a transferable value (E0602 otherwise; use `locked`).
+        export let init = func(initial: T) {
             super.init();
+            guard = guarded.create<LockedState<T>>(func -> LockedState<T> => new LockedState<T>(initial));
+        } or func(made: guarded.Guarded<LockedState<T>>, claim: Claim) {
+            super.init();
+            guard = made;
         };
+
+        /// @brief Returns the value. T must be deeply immutable (E0580).
+        export let read = func -> T => guard.with<T>(func(state: LockedState<T>) -> T => state.value);
+
+        /// @brief Replaces the value with what `body` returns for it, under the lock.
+        export let update = func(body: func(T) -> T) {
+            guard.with<bool>(func(state: LockedState<T>) -> bool {
+                state.value = body(state.value);
+                return true;
+            });
+        };
+
+        /// @brief Runs `body` with the value under the lock and returns its result, which must be transferable.
+        export let with = func<U>(body: func(T) -> U) -> U =>
+            guard.with<U>(func(state: LockedState<T>) -> U => body(state.value));
+
+        /// @brief Names the pointer; the value is not shown, since reading it needs the lock.
+        export let.override to_string = func -> string => "LockedPointer";
     );
+
+    /// @brief A LockedPointer of the value that `initializer` builds, for a value of any type. The initializer's
+    /// captures are transferable and it is task-safe, so the value is reachable only through the lock.
+    .Since("0.3.1")
+    export let locked = func<T>(initializer: func() -> T) -> LockedPointer<T> =>
+        new LockedPointer<T>(guarded.create<LockedState<T>>(func -> LockedState<T> =>
+            new LockedState<T>(initializer())), Claim.Counted);
 );

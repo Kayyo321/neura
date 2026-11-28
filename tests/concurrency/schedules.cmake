@@ -153,4 +153,18 @@ foreach(build IN ITEMS --no-optimize --optimize)
     endif()
 endforeach()
 
-message(STATUS "concurrency schedules: exploration, reproduction, virtual time, the service fixture, and guarded state passed")
+# LockedPointer and AtomicPointer shared between tasks hold under every
+# schedule explored, in both builds.
+foreach(build IN ITEMS --no-optimize --optimize)
+    if(build STREQUAL "--optimize")
+        neura(pointers test --schedules 50 --task-quantum 1 "${sources}/pointer-tests.nra")
+    else()
+        neura(pointers test --no-optimize --schedules 50 --task-quantum 1 "${sources}/pointer-tests.nra")
+    endif()
+    if(NOT pointers_status STREQUAL "0" OR
+       NOT pointers_stdout MATCHES "^PASS PointerTests.test_locked_updates_are_exact \\[50 schedules\\]\nPASS PointerTests.test_locked_mutable_state_is_exclusive \\[50 schedules\\]\nPASS PointerTests.test_atomic_loads_are_live \\[50 schedules\\]\n")
+        message(FATAL_ERROR "pointers (${build}): status ${pointers_status}\n${pointers_stdout}\n${pointers_stderr}")
+    endif()
+endforeach()
+
+message(STATUS "concurrency schedules: exploration, reproduction, virtual time, the service fixture, guarded state, and pointers passed")

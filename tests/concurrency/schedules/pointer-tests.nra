@@ -1,0 +1,93 @@
+// LockedPointer and AtomicPointer shared between tasks, under schedule
+// exploration in both builds: updates under the lock are exact, and every
+// value an AtomicPointer hands out is a live target.
+let test = import:Std.Test;
+let.promote _ = import:Std.Core.Pointer;
+
+let PointerTests = module (
+    #Immutable
+    let Version = class (
+        export last number: int;
+
+        export let init = func(value: int) {
+            number = value;
+        };
+    );
+
+    let Box = class (
+        export let count: int = 0;
+        export let spins: int = 0;
+    );
+
+    let bump = func(counter: LockedPointer<int64>, rounds: int) {
+        for (let i: int = 0; i < rounds; i++) {
+            counter.update(func(value: int64) -> int64 => value + 1);
+        }
+    };
+
+    let fill = func(state: LockedPointer<Box>, rounds: int) {
+        for (let i: int = 0; i < rounds; i++) {
+            state.with<int>(func(box: Box) -> int {
+                let before = box.count;
+                for (let j: int = 0; j < 3; j++) {
+                    box.spins += 1;
+                }
+                box.count = before + 1;
+                return 0;
+            });
+        }
+    };
+
+    let publish = func(slot: AtomicPointer<Version>, first: int) {
+        for (let i: int = 0; i < 5; i++) {
+            last next: SharedPointer<Version> = new(new Version(first + i));
+            slot.store(next);
+            next.release();
+        }
+    };
+
+    let watch = func(slot: AtomicPointer<Version>) -> bool {
+        let valid = true;
+        for (let i: int = 0; i < 10; i++) {
+            last seen = slot.load();
+            valid = valid && seen.read().number >= 0;
+            seen.release();
+        }
+        return valid;
+    };
+
+    export let test_locked_updates_are_exact = func() -> void {
+        let counter: LockedPointer<int64> = new(0);
+        scope {
+            spawn bump(counter, 10);
+            spawn bump(counter, 10);
+            spawn bump(counter, 10);
+        }
+        test.assert_equal_int64(30, counter.read());
+    };
+
+    export let test_locked_mutable_state_is_exclusive = func() -> void {
+        let state = locked<Box>(func -> Box => new Box());
+        scope {
+            spawn fill(state, 4);
+            spawn fill(state, 4);
+        }
+        test.assert_equal_int32(8, state.with<int>(func(box: Box) -> int => box.count));
+    };
+
+    export let test_atomic_loads_are_live = func() -> void {
+        let first: SharedPointer<Version> = new(new Version(0));
+        let slot: AtomicPointer<Version> = new(first);
+        first.release();
+        let valid = false;
+        scope {
+            spawn publish(slot, 100);
+            spawn publish(slot, 200);
+            last watcher = spawn watch(slot);
+            valid = watcher.join();
+        }
+        last last_seen = slot.load();
+        test.assert(valid);
+        test.assert(last_seen.read().number == 104 || last_seen.read().number == 204);
+    };
+);

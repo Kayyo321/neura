@@ -785,13 +785,16 @@ private:
             const auto& called = symbol(node.symbol);
             const auto pointer = pointer_class(program_, called.owner);
             if ((pointer == PointerKind::Const && called.name == "read") ||
-                (pointer == PointerKind::Mutable && called.name == "as_const")) {
+                (pointer == PointerKind::Mutable && called.name == "as_const") ||
+                (pointer == PointerKind::Locked && called.name == "read")) {
                 const auto& receiver = result.operands.front().type;
                 const auto instance = instance_of_.find(receiver.symbol);
                 if (instance != instance_of_.end() && !instance->second.second.empty()) {
                     const auto& stored = instance->second.second.front();
                     if (const auto problem = mutable_part(program_, stored)) {
-                        auto error = Diagnostic(node.span, "a ConstPointer can read only a deeply immutable value")
+                        auto error = Diagnostic(node.span, pointer == PointerKind::Locked
+                                                               ? "a LockedPointer can read only a deeply immutable value"
+                                                               : "a ConstPointer can read only a deeply immutable value")
                             .with_code("E0580").label("the pointer would expose a mutable " + type_text(stored));
                         if (problem->span) error.label(*problem->span, problem->text);
                         if (context.copying && !context.origin.span.file.empty() &&

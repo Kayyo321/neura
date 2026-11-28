@@ -800,6 +800,28 @@ void TaskAnalysis::check() const {
         error.note("`neura check --task-safety` reports for every function whether it is task-safe, and why not");
         return error;
     };
+    // A LockedPointer's constructor takes the state as it is, as Guarded's
+    // does, so the state must be transferable; LockedPointer.locked builds
+    // any other state inside the lock. Checked first, so that this is the
+    // error rather than the library's own check of its initializer.
+    for (const auto& body : program_.bodies) {
+        if (trusted_pointer_declaration(program_, body.owner)) continue;
+        each_node(body.instructions, [&](const IrNode& node) {
+            if (node.op != IrOp::Allocate || !valid(node.symbol) ||
+                pointer_class(program_, node.type.symbol) != PointerKind::Locked ||
+                symbol(node.symbol).parameters.size() != 1)
+                return;
+            const auto& state = symbol(symbol(node.symbol).parameters.front()).type;
+            if (transferable(state)) return;
+            auto error = Diagnostic(user_site(body.owner, node.span),
+                                    "a value of type " + display(state) +
+                                    " is not transferable, so it cannot be given to a LockedPointer constructor")
+                .with_code("E0602").label("not transferable");
+            explain_class(error, state);
+            error.help("build the state inside the lock with locked<T>(initializer)");
+            throw error;
+        });
+    }
     for (const auto& body : program_.bodies) {
         each_node(body.instructions, [&](const IrNode& node) {
             if ((node.op == IrOp::TaskScope || (node.op == IrOp::SchedulerCall && node.text != "transfer.check")) &&

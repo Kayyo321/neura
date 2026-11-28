@@ -265,7 +265,7 @@ They do not replace the runtime's memory manager.
 
 The declarations and usage examples in this document describe the proposed API using Neura syntax.
 
-Version 0.3.1 implements `Pointer<T>`, `ConstPointer<T>`, `ListPointer<T>`, `SharedPointer<T>`, and `WeakPointer<T>`. It declares the other four types with the target types each accepts and its task-transfer rules, below. They have no public constructor yet, and the milestone that adds each one's constructor and operations is listed there. Ownership transfer, restricted borrowing, weak and soft reachability, and atomic reference updates require additional compiler or runtime support.
+Version 0.3.1 implements `Pointer<T>`, `ConstPointer<T>`, `ListPointer<T>`, `SharedPointer<T>`, `WeakPointer<T>`, `AtomicPointer<T>`, and `LockedPointer<T>`. It declares the other two types with the target types each accepts and its task-transfer rules, below. They have no public constructor yet, and the milestone that adds each one's constructor and operations is listed there. Ownership transfer, restricted borrowing, weak and soft reachability, and atomic reference updates require additional compiler or runtime support.
 
 They must not be implemented as ordinary wrappers if doing so would weaken their stated guarantees.
 
@@ -504,8 +504,8 @@ Static use of a managed pointer at the `Std.DynamicForeign` boundary is an error
 | `UniquePointer<T>` | A class or interface (E0418 otherwise) | Stays in its task (`#NotThreadSafe`); a join result moves it | Milestones M5 and M6 |
 | `SharedPointer<T>`, `WeakPointer<T>` | A class, interface, array, or list (E0418 otherwise) | Shared when `T` is deeply immutable and transferable; otherwise stays in its task (E0602) | Implemented (sections 2.5 and 2.6) |
 | `SoftPointer<T>` | A class, interface, array, or list (E0418 otherwise) | Shared when `T` is deeply immutable and transferable; otherwise stays in its task (E0602) | Milestone M4 |
-| `AtomicPointer<T>` | An `#Immutable` class (E0418 for any other type, E0580 for a mutable class) | Shared | Milestone M3 |
-| `LockedPointer<T>` | Any type | Shared | Milestone M3 |
+| `AtomicPointer<T>` | An `#Immutable` class (E0418 for any other type, E0580 for a mutable class) | Shared | Implemented (section 2.8) |
+| `LockedPointer<T>` | Any type | Shared | Implemented (section 2.9) |
 
 None of them is a parallel item (E0602) or a `const` global that a parallel worker reads (E0601): a parallel item runs in a heap of its own and would receive a copy. Each is a managed pointer at the native boundary, in casts, and for `destroy`, like the three implemented types.
 
@@ -897,6 +897,8 @@ More relaxed memory-ordering options are outside the initial proposal.
 
 An optimization must not introduce observable data races or invalid reference states.
 
+**0.3.1 decision.** An `AtomicPointer` is made from a `SharedPointer`, `new(initial)`, and its slot holds one owner claim of its current target (section 2.5). `load()` and the result of `swap()` are owner claims, which the caller releases like any other. `store()` and a successful `compare_exchange()` end the slot's claim of the previous target, which may expire it. `compare_exchange()` compares targets, not claims: two claims of the same target are the same reference. Passing a released claim traps with `invalid state: released SharedPointer`. Each operation changes the slot and the owner counts in straight-line field operations after its last call, so no task switch falls between a read and the write that depends on it (`tests/pointer/polls.py`), and the operations on one AtomicPointer are totally ordered ([Concurrency](Concurrency.md#54-memory-model)).
+
 ### Safety guarantees
 
 - No torn reference reads or writes.
@@ -964,6 +966,13 @@ For mutable reference-valued `T`, `read()` cannot simply return the protected ob
 The compiler and runtime must prevent protected mutable state from escaping through callback return values, captures, or stored aliases.
 
 This is particularly important when `T` is a mutable class.
+
+**0.3.1 decision.** `LockedPointer<T>` keeps its value in a `Std.Concurrent.Guarded`, so its operations behave as `Guarded.with` does ([Concurrency](Concurrency.md#8-shared-state)):
+
+- `new(value)` takes only a transferable `T` (E0602), because the caller could keep an alias to any other value. `locked<T>(initializer)` builds a value of any type inside the lock; its captures must be transferable and it must be task-safe (E0601).
+- `read()` returns the value and needs a deeply immutable `T` (E0580). `update(callback: func(T) -> T)` replaces the value. `with<U>(callback: func(T) -> U)` returns the callback's result, which must be transferable (E0602).
+- A callback's captures must be transferable and it must be task-safe, so it cannot store the value anywhere that outlives the lock, and its result cannot refer to the value unless that value is transferable.
+- An operation of another task waits until the current one returns, first come, first served. An operation of the same LockedPointer inside a callback traps with `invalid state: guard already held`. A cycle of waits across tasks is a deadlock. A trap ends the run, so the lock is never left in an invalid state.
 
 ### Safety guarantees
 

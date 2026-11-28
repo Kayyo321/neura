@@ -409,7 +409,8 @@ private:
                     continue;
                 const auto pointer = pointer_class(program_, scope);
                 if ((pointer == PointerKind::Const && item.name == "read") ||
-                    (pointer == PointerKind::Mutable && item.name == "as_const")) {
+                    (pointer == PointerKind::Mutable && item.name == "as_const") ||
+                    (pointer == PointerKind::Locked && item.name == "read")) {
                     const auto* value = pointer_value_type(program_, scope);
                     if (!value || mutable_part(program_, *value)) continue;
                 }

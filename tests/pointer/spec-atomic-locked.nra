@@ -1,0 +1,72 @@
+// The AtomicPointer and LockedPointer examples of docs/lang/Neura0.3.1.md
+// (sections 2.8, 2.9, and 4), as written there, with their results printed.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let.promote _ = import:Std.Core.Pointer;
+
+#Immutable
+let Config = class (
+    export last debug: bool;
+
+    export let init = func(enabled: bool) {
+        debug = enabled;
+    };
+);
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        // Section 2.8
+        {
+            let cfg_a: SharedPointer<Config> = new(new Config(false));
+            let cfg_b: SharedPointer<Config> = new(new Config(true));
+
+            let atomic: AtomicPointer<Config> = new(cfg_a);
+
+            let original = atomic.load();
+
+            let previous = atomic.swap(cfg_b);
+
+            let restored = atomic.compare_exchange(cfg_b, cfg_a);
+
+            let current = atomic.load();
+
+            let debug = current.read().debug;
+            console.println("{} {} {} {}", original.read().debug, previous.read().debug, restored, debug);
+        }
+        // Section 2.9
+        {
+            let counter: LockedPointer<int64> = new(0);
+
+            counter.update(
+                func(value: int64) -> int64 => value + 1
+            );
+
+            counter.update(
+                func(value: int64) -> int64 => value + 1
+            );
+
+            let result = counter.read(); // 2
+            console.println("{}", result);
+        }
+        // Section 4
+        {
+            let cfg_a: SharedPointer<Config> =
+                new(new Config(false));
+
+            let cfg_b: SharedPointer<Config> =
+                new(new Config(true));
+
+            let atomic: AtomicPointer<Config> = new(cfg_a);
+
+            let previous = atomic.swap(cfg_b);
+
+            let restored = atomic.compare_exchange(cfg_b, cfg_a);
+
+            let current = atomic.load();
+
+            let debug = current.read().debug;
+            console.println("{} {}", restored, debug);
+        }
+        return program.ExitCode.Ok;
+    };
+);
