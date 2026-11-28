@@ -332,12 +332,20 @@ class Qualification:
 
     def check_native(self) -> None:
         source = self.args.examples / "hello-world" / "hello-world.nra"
-        result = self.run(self.home, ["neura", "build", "--native", source, "-o", "hello.exe"], cwd=self.hello)
-        reason = "Windows has no native launcher in 0.3.0"
-        if result.returncode != 0 and reason in result.stderr and not (self.hello / "hello.exe").exists():
-            self.skip(7, "native executable", f"{reason}; verified that build --native refuses it")
-        else:
-            self.report(7, "native executable", f"build --native did not refuse as expected: {tail(result.stdout + result.stderr)}")
+        output = self.hello / "hello.exe"
+        build = self.run(self.home, ["neura", "build", "--native", source, "-o", output], cwd=self.hello)
+        if build.returncode != 0 or not output.is_file():
+            self.report(7, "native executable", f"build --native did not produce {output.name}: {tail(build.stdout + build.stderr)}")
+            return
+        with tempfile.TemporaryDirectory(prefix="standalone-", dir=self.hello) as directory:
+            deployed = Path(directory) / output.name
+            shutil.copy2(output, deployed)
+            result = self.run(self.home, [deployed], cwd=deployed.parent,
+                              extra={"PATH": f"{self.system_root}\\System32;{self.system_root}"})
+        reason = None
+        if result.returncode != 0 or result.stdout != "Hello, World!\n" or result.stderr:
+            reason = f"standalone launch: {tail(result.stdout + result.stderr)}"
+        self.report(7, "native executable", reason)
 
     def check_update_check(self) -> None:
         # The release directory: the two archives and the metadata that
